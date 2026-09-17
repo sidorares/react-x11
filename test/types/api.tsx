@@ -257,6 +257,17 @@ const s = createStyles({
   },
   // issue #117: the focus ring is paint, so it is legal in a state block and
   // animatable; hit slop is neither paint nor layout
+  // issue #587: opacity is paint — legal in a state block, and it loops
+  fade: {
+    opacity: 0.5,
+    transition: { opacity: 150 },
+    ':hover': { opacity: 1 },
+  },
+  halo: {
+    animation: {
+      opacity: { from: 1, to: 0.5, duration: 800, alternate: true },
+    },
+  },
   ring: {
     outlineOffset: 2,
     transition: { outlineWidth: 80 },

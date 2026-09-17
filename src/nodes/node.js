@@ -154,6 +154,9 @@ export class Node {
     // subtree's hit reach, invalidated through _clearHitBounds()
     this._paintOrderCache = null;
     this._hitBoundsCache = null;
+    // the surface an `opacity` below 1 draws this subtree through, kept from
+    // one frame to the next while it fits (`NodePaint._paintGroup`)
+    this._groupSurface = null;
     // a `$token` the theme does not define, held for `commitMount` to throw
     // on this node's own fiber — see `_tokenProblem`. Strict mode only.
     // `null` is "commitMount is still to come", `false` is "it has been and
@@ -509,6 +512,7 @@ export class Node {
    * freed by the caller via freeRecursive on the subtree top. */
   destroySubtree() {
     this.destroyed = true;
+    if (this._groupSurface) this._releaseGroupSurface();
     // a loop outlives nothing: the window drops it from the set that keeps
     // its frame clock alive, and stops watching visibility with the last one
     this.root?._forgetLoopNode(this);

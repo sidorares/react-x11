@@ -480,7 +480,19 @@ export function propBoxProps(node, app, scale, parentOrigin, order) {
     backgroundColor: colour(style.backgroundColor),
     borderWidth: border / scale,
     borderColor: colour(style.borderColor),
+    opacity: layerOpacity(style),
   };
+}
+
+/**
+ * `opacity` as a layer's own. On the layer presenter a node's children are
+ * its sublayers, so this fades the subtree with it; the bitmap paths draw
+ * the group themselves and never promote a faded box.
+ */
+export function layerOpacity(style) {
+  const value = style?.opacity;
+  if (typeof value !== 'number' || Number.isNaN(value)) return 1;
+  return Math.min(1, Math.max(0, value));
 }
 
 // --- animations the render server runs ---------------------------------------
@@ -1112,6 +1124,7 @@ export class CocoaLayerPresenter {
       ],
       zPosition: order,
       hidden: Boolean(node.hidden),
+      opacity: layerOpacity(node.style),
       // the layer covers the ink bounds; clipping (if any) belongs to the
       // CONTENT box, which a raster self cannot express — scrolling
       // containers that also raster keep clipping via a child guard below

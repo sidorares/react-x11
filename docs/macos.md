@@ -39,8 +39,8 @@ case on the default path.
 **Not built**, and honestly the interesting remainder: an `NSAccessibility`
 bridge over the a11y model (on Cocoa `createRoot()` leaves the AT-SPI bridge
 off and puts nothing in its place), IME through `NSTextInputClient`, a
-`'cocoa'` backend for `react-x11/test`, `opacity`/`transform` as style
-properties, and the `Primary` chord token. §"Open questions" is still live,
+`'cocoa'` backend for `react-x11/test`, `transform` as a style property,
+and the `Primary` chord token. §"Open questions" is still live,
 and the name question (§Public API #8) was answered by inaction: the package
 is still `react-x11`.
 

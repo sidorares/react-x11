@@ -3,6 +3,7 @@
 // window, background first.
 
 import { isPlaced } from '../layouts.js';
+import { Surface } from '../ntk.js';
 import { isPaintedColor } from './boxpaint.js';
 import { DAMAGE_SLOP } from './damage.js';
 import { DRAWN_KINDS } from './kinds.js';
@@ -97,6 +98,122 @@ export class NodePaint {
 
   paint(ctx) {
     if (this.hidden) return;
+    const opacity = this.style.opacity;
+    // A retained presenter replaying this node's own paint into a layer puts
+    // the opacity on the layer instead (src/cocoa/presenter.js), and a group
+    // drawn here as well would fade it twice.
+    if (opacity !== undefined && opacity < 1 && !this._ownPaintOnly) {
+      // Nothing to see, so nothing to draw — NaN included. The node is still
+      // laid out and still hit, as CSS's `opacity: 0` is.
+      if (!(opacity > 0)) return;
+      this._paintGroup(ctx, opacity);
+      return;
+    }
+    // back to opaque: the surface a fade drew through is not needed any more
+    if (this._groupSurface) this._releaseGroupSurface();
+    this._paintNode(ctx);
+  }
+
+  /**
+   * `opacity` below 1: this node and everything under it drawn **once**, into
+   * a surface, and composited at that alpha — so it fades as a group. An icon
+   * over its own card does not show the card through the icon, a border does
+   * not double up where it meets a background, and text keeps the colour it
+   * had. That is CSS's `opacity`, and the reason it is not a `globalAlpha` on
+   * each draw.
+   *
+   * The surface is the subtree's paint bounds inside the window — stable
+   * across frames, so a fade reuses it — and only this pass's damage is drawn
+   * into it. Where the backend makes no surfaces (the headless mock) the
+   * subtree is drawn with the alpha on each draw instead: the same pixels
+   * wherever nothing inside it overlaps.
+   */
+  _paintGroup(ctx, opacity) {
+    const rect = this._groupRect();
+    if (!rect) return;
+    const surface = this._groupSurfaceFor(rect.width, rect.height);
+    const alpha = ctx.globalAlpha ?? 1;
+    if (!surface) {
+      ctx.globalAlpha = alpha * opacity;
+      try {
+        this._paintNode(ctx);
+      } finally {
+        ctx.globalAlpha = alpha;
+      }
+      return;
+    }
+    surface.render((sctx) => {
+      sctx.clearRect(0, 0, rect.width, rect.height);
+      sctx.translate(-rect.x, -rect.y);
+      const damage = this.root?._paintDamage;
+      if (damage) {
+        sctx.beginPath();
+        sctx.rect(damage.x, damage.y, damage.width, damage.height);
+        sctx.clip();
+      }
+      this._paintNode(sctx);
+    });
+    ctx.globalAlpha = alpha * opacity;
+    try {
+      ctx.drawImage(surface, rect.x, rect.y);
+    } finally {
+      ctx.globalAlpha = alpha;
+    }
+  }
+
+  /** Where a group's surface goes: the subtree's paint bounds, on whole
+   *  pixels, cut to the window — a faded pane scrolled far off the top has
+   *  nothing of its own down there to keep. Null when none of it is on the
+   *  window at all. */
+  _groupRect() {
+    const b = this._subtreeBounds();
+    const win = this.root?.abs;
+    let x0 = Math.floor(b.x);
+    let y0 = Math.floor(b.y);
+    let x1 = Math.ceil(b.x + b.width);
+    let y1 = Math.ceil(b.y + b.height);
+    if (win) {
+      x0 = Math.max(x0, 0);
+      y0 = Math.max(y0, 0);
+      x1 = Math.min(x1, Math.ceil(win.width));
+      y1 = Math.min(y1, Math.ceil(win.height));
+    }
+    if (x1 <= x0 || y1 <= y0) return null;
+    return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+  }
+
+  /** The group surface at this size, kept from the last frame when it fits —
+   *  a fade asks for the same one every frame. Null where the backend has
+   *  none to give. */
+  _groupSurfaceFor(width, height) {
+    const kept = this._groupSurface;
+    if (kept && kept.width === width && kept.height === height) return kept;
+    if (kept) this._releaseGroupSurface();
+    const app = this.app;
+    if (!app?.display?.Render && typeof app?.createSurface !== 'function') {
+      return null;
+    }
+    try {
+      this._groupSurface = new Surface(app, { width, height });
+    } catch {
+      // no pixmap to be had: the fallback draws with the alpha instead
+      this._groupSurface = null;
+    }
+    return this._groupSurface;
+  }
+
+  _releaseGroupSurface() {
+    const surface = this._groupSurface;
+    this._groupSurface = null;
+    try {
+      surface?.destroy();
+    } catch {
+      // gone with its connection
+    }
+  }
+
+  /** Everything this node draws, and its children: `paint` minus the group. */
+  _paintNode(ctx) {
     // Outside the box and under everything, which is the whole of what makes
     // a shadow different from a colour: it is drawn before this node's own
     // background so a translucent background does not sit on top of it, and

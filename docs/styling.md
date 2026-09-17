@@ -162,7 +162,7 @@ See [drag-and-drop.md](drag-and-drop.md).
 **State blocks may only set paint properties** (`backgroundColor`,
 `borderColor` and the per-side `borderTopColor`/…, `borderRadius`, `zIndex`,
 `outlineWidth`, `outlineColor`,
-`outlineOffset`, `color`) — enforced at declaration
+`outlineOffset`, `opacity`, `color`) — enforced at declaration
 time by `createStyles`. A `:hover` that could set `padding` would reflow the
 tree on pointer move: jitter, and the end of the "hover is a repaint" property
 that makes this worth having. Anything that changes layout or what renders
@@ -424,6 +424,42 @@ spread and the blur's tail — and the frame that _removes_ one claims where
 it was. That is the renderer's business, not the application's, but it is
 the reason a shadow is not free the way a colour is: prefer one shadow on
 the card to one on every row inside it.
+
+## Opacity
+
+`opacity` fades a node **and everything in it, as one**, the way CSS's does:
+
+```jsx
+<box style={{ opacity: enabled ? 1 : 0.5, transition: { opacity: 150 } }}>
+  <svg viewBox="0 0 16 16">…</svg>
+  <text>Reminders</text>
+</box>
+```
+
+That is the difference from a colour's own alpha. `rgba(…, .5)` on a card's
+background fades the background; it cannot fade the card, because every part
+of it — the border, the icon, the caption — is drawn over the others, and at
+half alpha each one shows what is under it: the card through the icon. With
+`opacity` the subtree is drawn once, into an offscreen surface the size of
+what it paints, and the surface is composited at the alpha.
+
+It is a **paint** property: legal in a state block, and it transitions and
+loops like the others — a halo that pulses, a section that fades in:
+
+```jsx
+animation: { opacity: { from: 1, to: 0.5, duration: 800, alternate: true } }
+```
+
+What it costs is that surface: one per faded node, the size of its paint
+bounds inside the window, kept from one frame to the next while the node stays
+faded and released when it is opaque again. `0` draws nothing and costs
+nothing — and the node is still laid out and still hit, as in CSS. A value
+outside 0 to 1 is clamped; one that is not a number throws in development.
+
+On the Cocoa backend a faded box is drawn into the window's bitmap like this
+rather than lifted onto a layer of its own (docs/macos.md): a box and its
+content on separate layers would fade one over the other, which is the thing
+`opacity` exists not to do.
 
 ## Measuring text to its letters
 
