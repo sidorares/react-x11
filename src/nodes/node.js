@@ -34,7 +34,7 @@ import { NO_DAMAGE } from './damage.js';
 import { NodeHitTest } from './hittest.js';
 import { installMethods } from './install.js';
 import { NodeInvalidate } from './invalidate.js';
-import { CUSTOM_SELF_DAMAGED } from './kinds.js';
+import { CUSTOM_SELF_DAMAGED, THEME_SCOPE } from './kinds.js';
 import { NodeLayout } from './layout.js';
 import { NodeLayoutHost } from './layouthost.js';
 import { NodePaint } from './paint.js';
@@ -327,9 +327,19 @@ export class Node {
       return;
     }
     if (child.isWindow) {
+      // A `<ThemeProvider>` inside a window is drawn as a box, which the
+      // developer never wrote — so the message names what they did write.
+      // Directly inside a window it passes a nested window on
+      // (nodes/scope.js, `ThemeBoxNode`); this is one further down.
       throw new Error(
-        `react-x11: <window> cannot be nested inside <${this.kind}>; ` +
-          'windows may only appear at the root or inside another <window>.',
+        this._reactFiber?.type === THEME_SCOPE
+          ? 'react-x11: a <window> under this <ThemeProvider> cannot be ' +
+              'nested — the provider is inside a <box>, where it is a box ' +
+              'itself, and a window nests only in a window. Put the ' +
+              'provider directly inside the outer <window>, or inside the ' +
+              'nested one.'
+          : `react-x11: <window> cannot be nested inside <${this.kind}>; ` +
+              'windows may only appear at the root or inside another <window>.',
       );
     }
     // A registered element that declared childrenAllowed: false says so

@@ -24,6 +24,13 @@ import {
 } from './nodes/window/window.js';
 import { PopupNode } from './nodes/window/popup.js';
 import { BoxNode } from './nodes/box.js';
+import { THEME_SCOPE } from './nodes/kinds.js';
+import {
+  ThemeBoxNode,
+  ThemeScopeNode,
+  attachTopLevel,
+  detachTopLevel,
+} from './nodes/scope.js';
 import { TextNode, TextChunkNode, setTextStripBelow } from './nodes/text.js';
 import { ImageNode } from './nodes/image.js';
 import { CanvasNode } from './nodes/canvas.js';
@@ -60,7 +67,11 @@ import { watchAppearance } from './appearance.js';
 import { setDesktopIntegration } from './desktopintegration.js';
 import { ForeignNode } from './foreignnodes.js';
 import { GlAreaNode } from './glnodes.js';
-import { createRegisteredNode, registeredElements } from './registry.js';
+import {
+  createRegisteredNode,
+  elementDefinition,
+  registeredElements,
+} from './registry.js';
 import { SvgNode, SvgChildNode } from './svgnodes.js';
 import { loadLayout } from './yoga.js';
 
@@ -96,6 +107,36 @@ export const HOST_TYPES = [
   'glarea',
   'foreign',
 ];
+
+// The host context of the root's own children. `atRoot` is what lets
+// `createInstance` see that an element has no window above it — there is no
+// other moment to know it: a node is built bottom-up, before it has a parent
+// to ask, and appended to the container only in the commit.
+const ROOT_CONTEXT = Object.freeze({
+  isInsideText: false,
+  isInsideSvg: false,
+  atRoot: true,
+  inWindow: false,
+});
+
+// What the root of the tree can hold: the elements that are windows of their
+// own, and the provider's node, which holds more of them. Everything else
+// draws into a window, so it has to be inside one.
+const ROOT_TYPES = new Set(['window', 'popup', THEME_SCOPE]);
+
+/**
+ * A drawn element with no window above it. Without this it reached
+ * `appendChildToContainer` and failed there as `child.realize is not a
+ * function` — or, under a `<ThemeProvider>`, as a `<window>` nested in a
+ * `<box>` the app never wrote (#584).
+ */
+function notAtRoot(type) {
+  return new Error(
+    `react-x11: <${type}> must be inside a <window> — it is at the root of ` +
+      'the tree, which holds only <window> and <popup> elements. Render it ' +
+      `inside one: <window><${type} …/></window>.`,
+  );
+}
 
 const HostConfig = {
   supportsMutation: true,
@@ -135,10 +176,7 @@ const HostConfig = {
   scheduleMicrotask: queueMicrotask,
 
   getRootHostContext() {
-    return {
-      isInsideText: false,
-      isInsideSvg: false,
-    };
+    return ROOT_CONTEXT;
   },
 
   getChildHostContext(parentHostContext, type) {
@@ -150,6 +188,12 @@ const HostConfig = {
       isInsideText: parentHostContext.isInsideText || type === 'text',
       // <svg> children are declarative SVG elements, not react-x11 nodes
       isInsideSvg: parentHostContext.isInsideSvg || type === 'svg',
+      // Still at the root under a `<ThemeProvider>` written there, which
+      // draws nothing; under anything else, inside a window.
+      atRoot: parentHostContext.atRoot && type === THEME_SCOPE,
+      // Directly inside a window, where a provider can hand a nested window
+      // on to it.
+      inWindow: type === 'window' || type === 'popup',
     };
   },
 
@@ -195,6 +239,17 @@ const HostConfig = {
           '<text> spans and strings are.',
       );
     }
+    // Asked here, in the render phase, rather than when the node reaches the
+    // container: an error boundary above can catch it, and nothing has been
+    // built yet. A name nobody knows gets the unknown-element error below,
+    // which lists what there is.
+    if (
+      hostContext.atRoot &&
+      !ROOT_TYPES.has(type) &&
+      (HOST_TYPES.includes(type) || elementDefinition(type))
+    ) {
+      throw notAtRoot(type);
+    }
     let node;
     switch (type) {
       case 'window':
@@ -215,6 +270,18 @@ const HostConfig = {
         break;
       case 'box':
         node = new BoxNode(props, rootContainer);
+        break;
+      case THEME_SCOPE:
+        // `<ThemeProvider>`'s node (nodes/kinds.js). Above the windows it
+        // draws nothing and hands its palette to the windows under it; inside
+        // a window it is the box that fills its parent it has always been, so
+        // `style` means what it says and a `$token` beneath resolves — and
+        // directly inside one, a box that passes nested windows on to it.
+        node = hostContext.atRoot
+          ? new ThemeScopeNode(props, rootContainer)
+          : hostContext.inWindow
+            ? new ThemeBoxNode(props, rootContainer)
+            : new BoxNode(props, rootContainer);
         break;
       case 'textinput':
         node = new TextInputNode(props, rootContainer);
@@ -278,6 +345,13 @@ const HostConfig = {
   },
 
   createTextInstance(text, rootContainer, hostContext) {
+    if (hostContext.atRoot) {
+      throw new Error(
+        `react-x11: raw text ${JSON.stringify(text)} must be inside a ` +
+          '<window>, in a <text> element — it is at the root of the tree, ' +
+          'which holds only <window> and <popup> elements.',
+      );
+    }
     if (!hostContext.isInsideText && !hostContext.isInsideSvg) {
       throw new Error(
         `react-x11: raw text ${JSON.stringify(text)} must be wrapped in a ` +
@@ -338,19 +412,11 @@ const HostConfig = {
     parentInstance.insertBefore(child, null);
   },
 
+  // The root holds windows, popups and theme scopes (`createInstance` turned
+  // everything else away), and nodes/scope.js is what knows how to put each
+  // of them there — a scope's windows can arrive after the scope did.
   appendChildToContainer(container, child) {
-    if (!child.window) {
-      // Top-level window: realize the whole subtree top-down against the
-      // screen root.
-      child.realize(null);
-    }
-    // React's getPublicRootInstance answers from the root fiber's first
-    // child, and only when that child is a host component. `render()` wraps
-    // the tree in a context provider, which is not one, so it would answer
-    // null — the container keeps the list instead. Same answer as before:
-    // the first top-level node the tree put here.
-    (container._rootChildren ??= []).push(child);
-    a11yHooks.rootMounted?.(child);
+    attachTopLevel(container, child);
   },
 
   insertBefore(parentInstance, child, beforeChild) {
@@ -358,7 +424,7 @@ const HostConfig = {
   },
 
   insertInContainerBefore(container, child) {
-    HostConfig.appendChildToContainer(container, child);
+    attachTopLevel(container, child);
   },
 
   removeChild(parentInstance, child) {
@@ -366,11 +432,8 @@ const HostConfig = {
   },
 
   removeChildFromContainer(container, child) {
-    const roots = container._rootChildren;
-    const at = roots ? roots.indexOf(child) : -1;
-    if (at !== -1) roots.splice(at, 1);
     // before the destroy, while the subtree is still walkable
-    a11yHooks.rootUnmounted?.(child);
+    detachTopLevel(container, child);
     child.destroySubtree();
   },
 

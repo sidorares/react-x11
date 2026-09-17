@@ -40,11 +40,9 @@ async function showBuiltin(app, theme, props) {
   const root = await createRoot({ app });
   try {
     return await new Promise((resolve) => {
-      // `<FileDialog>` renders a `<window>`, and a window may only be a root
-      // child or nested in another window — so the palette travels as a prop
-      // and the dialog installs the provider *inside* its own window. Wrapping
-      // it here in `<ThemeProvider>` would put a `<box>` between the root and
-      // the window, which throws.
+      // The dialog is on a root of its own, which no provider in the app's
+      // tree reaches — so the palette the caller resolved travels as a prop,
+      // and the dialog puts it on its window and in a provider inside it.
       root.render(
         React.createElement(FileDialog, { ...props, theme, onDone: resolve }),
       );

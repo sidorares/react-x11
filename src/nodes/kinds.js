@@ -29,3 +29,15 @@ export const CUSTOM_SEMANTIC_NAMES = new Map();
  * arrangement as above, for the other declaration a scene-drawing element
  * makes (issue #301). */
 export const CUSTOM_SELF_DAMAGED = new Map();
+
+/**
+ * The element `<ThemeProvider>` renders to carry its palette into the node
+ * tree. Not one of `HOST_TYPES` and not documented as an element: the
+ * provider is the API. What node it becomes depends on where it is written
+ * (`createInstance`): inside a window it is a `<box>` that fills its parent —
+ * directly inside one, a `ThemeBoxNode` that also hands nested windows on to
+ * it — and at the root of the tree, above the windows, where nothing drawn
+ * may be, a `ThemeScopeNode` that draws nothing and hands the palette to the
+ * windows under it (nodes/scope.js).
+ */
+export const THEME_SCOPE = 'themescope';

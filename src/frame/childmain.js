@@ -53,10 +53,7 @@ const h = React.createElement;
 /** Recreate the bridged providers around the pane's window, outermost
  * first — the parent's own nesting order, which the env Map records and
  * structured clone preserves. A key the pane never registered wraps
- * nothing: no module in this process reads it. Providers registered
- * `innermost` (the theme) wrap directly around the window, inside the
- * rest — see registerFrameProvider (src/frame/env.js) for why the
- * adjacency matters. */
+ * nothing: no module in this process reads it. */
 function wrapEnv(env, inner) {
   const wrap = (tree, [key, value]) => {
     const registered = registeredFrameContext(key);
@@ -69,16 +66,8 @@ function wrapEnv(env, inner) {
           tree,
         );
   };
-  const entries = [...env];
-  const isInnermost = ([key]) =>
-    registeredFrameContext(key)?.innermost === true;
   let tree = inner;
-  for (const entry of entries.filter(isInnermost).reverse()) {
-    tree = wrap(tree, entry);
-  }
-  for (const entry of entries.filter((e) => !isInnermost(e)).reverse()) {
-    tree = wrap(tree, entry);
-  }
+  for (const entry of [...env].reverse()) tree = wrap(tree, entry);
   return tree;
 }
 
@@ -118,13 +107,12 @@ function Bridge({ Component, store, rect, invoke, onReady }) {
   }, [onReady]);
 
   // The bridged providers wrap the *window*, not the pane component — the
-  // same position they held in the host. ThemeProvider plants the palette
-  // on a window it finds among its children (theme.js, `planted`), and the
-  // window is where it has to land: the window's own background follows the
-  // palette, and it is the top of the node tree every `$token` beneath
-  // resolves through. Mounted inside the window, the palette reached a box
-  // and the window kept resolving against the pane process's own desktop —
-  // a dark-desktop pane in a light-themed app, wrong in both directions.
+  // same position they held in the host. The theme has to reach the window
+  // itself: the window's own background follows the palette, and it is the
+  // top of the node tree every `$token` beneath resolves through. Mounted
+  // inside the window, the palette reached a box and the window kept
+  // resolving against the pane process's own desktop — a dark-desktop pane
+  // in a light-themed app, wrong in both directions.
   return wrapEnv(
     snapshot.env,
     h(

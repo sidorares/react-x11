@@ -1135,9 +1135,10 @@ test('a nested ThemeProvider merges over the outer one, as a nested theme prop d
   await x11Root.unmount();
 });
 
-test('a ThemeProvider above a <window> plants the palette on the window', async () => {
-  // a <window> may not sit inside a box, so the provider cannot wrap one —
-  // it puts the prop on the window instead of coming between them
+test('a ThemeProvider above a <window> hands the palette to the window', async () => {
+  // a <window> may not sit inside a box, so above the windows the provider's
+  // node is one that draws nothing — the window stays a top-level window,
+  // and takes its palette from it (test/theme-provider-root.test.js)
   const app = createMockApp();
   const x11Root = await createRoot({ app });
   x11Root.render(
@@ -1154,7 +1155,8 @@ test('a ThemeProvider above a <window> plants the palette on the window', async 
   await tick();
 
   const win = nodeOf(app);
-  assert.strictEqual(win.kind, 'window', 'no box came between them');
+  assert.strictEqual(win.kind, 'window');
+  assert.strictEqual(win.parent, null, 'no box came between them');
   assert.strictEqual(win.children[0].style.backgroundColor, '#abcdef');
 
   await x11Root.unmount();
