@@ -98,6 +98,7 @@ import {
   systemBus,
   useApp,
   anchorScreenRect,
+  createSettings,
   useClipboard,
   useSupports,
   useDesktopSettings,
@@ -381,6 +382,24 @@ createStyles({ bad: { fontFeatureSettings: { tnum: 'on' } } });
 
 // @ts-expect-error — spacing moves glyphs, so it may not go in a state block
 createStyles({ bad: { ':hover': { letterSpacing: 1 } } });
+
+// issue #592: what the app remembers between launches, typed by its defaults
+const settings = createSettings({
+  appId: 'com.example.hush',
+  defaults: { volume: 0.5, dark: false, noiseType: 'brown' },
+});
+function VolumeSetting() {
+  const [volume, setVolume] = settings.use('volume');
+  setVolume(volume + 0.1);
+  setVolume((previous) => previous / 2);
+  const [custom] = settings.use('lastTab', 'general');
+  const tab: string = custom;
+  settings.set('dark', true);
+  void settings.flush();
+  return null;
+}
+// @ts-expect-error — the volume is a number, as its default says
+settings.set('volume', 'loud');
 
 // @ts-expect-error — 'rtol' is not a direction
 createStyles({ bad: { direction: 'rtol' } });
