@@ -1241,12 +1241,18 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     re-render of a component drawing through `<canvas>`, which is what a
     `Checkbox` tick and a `Select` chevron are, otherwise repainted the window.
   - **An animation must claim a region per frame, including its last.** A
-    transition is a repaint every frame for its duration. Nodes that _finish_
-    on a tick need claiming too, and the claim has to be decided _before_
-    ticking, because a finished tick clears `_anim` and with it any way to tell
-    a layout animation from a paint-only one. See `damageForAnimation`: an
-    out-of-flow node animating a layout property is bounded by its parent,
-    which contains both where it was and where it is going.
+    transition is a repaint every frame for its duration, and a node that
+    _finishes_ on a tick needs claiming too. The claim is the node before its
+    tick, which is where it was; for a layout property, in flow or out of it,
+    the layout pass the tick asks for claims where the node went and whatever
+    it pushed (#603). That makes the layout diff the bound on every layout
+    animation, so anything a move changes outside the rects the diff reports
+    is a trail on every frame of it. Three were found, and each is claimed
+    now: a moved node's `boxShadow` (`_assignAbs` grows by it, as by the
+    ring), a scroll pane's thumbs when its content extent changes
+    (`_claimThumbs`), and the pane's children when the clamp pulls its offset
+    back, which claims the viewport. `test/dirty-rect.test.js` holds each
+    against a full repaint.
 
 - **`position: 'sticky'`, and every registered position, is placed after
   layout, not by it** (`WindowNode._placeNodes`, `src/layouts.js`). Yoga

@@ -59,6 +59,17 @@ function replayHeld({ base, steps }, max) {
 // walked per node per hit test.
 const EMPTY_SCROLLBARS = Object.freeze([]);
 
+/** Do two answers from `_scrollbar` paint the same thumb? Neither painting
+ *  one counts. */
+const sameThumb = (a, b) =>
+  a === b ||
+  (a !== undefined &&
+    b !== undefined &&
+    a.x === b.x &&
+    a.y === b.y &&
+    a.width === b.width &&
+    a.height === b.height);
+
 /**
  * Scrolling, as a style rather than as a species of node.
  *
@@ -177,6 +188,9 @@ export const Scrollable = (Base) =>
         this._childOrigin != null &&
         !this._scrollMeasureDirty &&
         !this.yoga.hasNewLayout();
+      // The thumbs as they stand, for a bounded frame to hold the measure
+      // below against (`_claimThumbs`)
+      const thumbsWere = !clean && layoutDiff.sink ? this._scrollbars() : null;
       if (!clean) {
         const size = this.measureScrollContent();
         if (!Number.isFinite(size?.width) || !Number.isFinite(size?.height)) {
@@ -208,8 +222,13 @@ export const Scrollable = (Base) =>
       // once and scrollIntoView waits for the pass.
       this._resolveScrollTo();
       this._resolveScrollIntoView();
+      const askedX = this.scrollX;
+      const askedY = this.scrollY;
       this.scrollY = clampScroll(this.scrollY, this._maxScroll('y'));
       this.scrollX = clampScroll(this.scrollX, this._maxScroll('x'));
+      // Of those three moves the clamp's is the one no call claimed when it
+      // was asked for — the diff below claims it
+      const clamped = this.scrollX !== askedX || this.scrollY !== askedY;
       this._reportViewport();
       this._reportScrollTo(from);
       // `scrollX` is how far the content has moved **from its start**, which
@@ -271,14 +290,22 @@ export const Scrollable = (Base) =>
             }
           };
           layoutDiff.shift = { x: ox - wasOrigin.x, y: oy - wasOrigin.y };
-        } else if (shifted) {
-          layoutDiff.sink = null;
         } else {
           const vp = insetRect(this.abs, -DAMAGE_SLOP);
-          layoutDiff.sink = (rect) => {
-            const clipped = intersectRects(rect, vp);
-            if (clipped) outer(clipped);
-          };
+          if (shifted) {
+            layoutDiff.sink = null;
+            // …which holds for a scroll's shift and not for the clamp's: the
+            // content shrank, or the viewport grew, under the offset — a row
+            // collapsing at the end of a list scrolled to its end — and
+            // nothing claimed the viewport every child just moved in.
+            if (clamped) outer(vp);
+          } else {
+            layoutDiff.sink = (rect) => {
+              const clipped = intersectRects(rect, vp);
+              if (clipped) outer(clipped);
+            };
+          }
+          this._claimThumbs(thumbsWere, outer);
         }
       }
       try {
@@ -816,6 +843,26 @@ export const Scrollable = (Base) =>
     _scrollbars() {
       if (!this.isScroller()) return EMPTY_SCROLLBARS;
       return [this._scrollbar('y'), this._scrollbar('x')].filter(Boolean);
+    }
+
+    /**
+     * A bounded layout pass's claim for the thumbs it changed, where each
+     * was and where it is. The pane paints them, not a node with a rect of
+     * its own, so content growing or shrinking under a pane that stays put
+     * slides a thumb or resizes it and the layout diff sees nothing move.
+     * `was` is `_scrollbars()` from before the pass measured the content.
+     */
+    _claimThumbs(was, sink) {
+      const now = this._scrollbars();
+      for (const axis of ['y', 'x']) {
+        const before = was.find((bar) => bar.axis === axis);
+        const after = now.find((bar) => bar.axis === axis);
+        if (sameThumb(before, after)) continue;
+        // a pixel of slop for the rounded corners' antialiasing, as the
+        // blit's own thumb repair takes
+        if (before) sink(insetRect(before, -1));
+        if (after) sink(insetRect(after, -1));
+      }
     }
 
     /**

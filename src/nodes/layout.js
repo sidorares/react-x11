@@ -284,7 +284,11 @@ export class NodeLayout {
     // cached unions all the way up with it
     this._clearHitBounds();
     if (layoutDiff.sink) {
-      const grow = this._outlineExtent() + DAMAGE_SLOP;
+      // the reach `_ownPaintBounds` names, ring and shadow alike: a card
+      // pushed down by a row above it leaves its old shadow on the surface
+      // unless the claim for where it was covers that shadow too
+      const grow =
+        Math.max(this._outlineExtent(), this._shadowExtent()) + DAMAGE_SLOP;
       const shift = layoutDiff.shift;
       const had = old.width > 0 && old.height > 0;
       if (shift) {

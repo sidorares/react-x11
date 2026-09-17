@@ -1259,7 +1259,8 @@ one lands. Nothing polls, and there is no per-widget
 Transitions may animate layout properties, unlike state blocks. That is not
 an inconsistency: a pointer move must never reflow the tree, but an author
 who writes `transition: { left: 200 }` has asked for animated layout and
-pays a layout pass per frame for it. `Switch` is the worked example — the
+pays a layout pass per frame for it, and a repaint of whatever that pass
+moves rather than of the window. `Switch` is the worked example — the
 thumb is absolutely positioned and slides on `left`, because
 `justifyContent` would flip between the ends with nothing in between.
 

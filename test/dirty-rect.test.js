@@ -23,6 +23,8 @@ import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
 import { createRoot } from '../src/index.js';
+import { setAnimationClock } from '../src/nodes/animation.js';
+import { FULL_DAMAGE } from '../src/nodes/damage.js';
 
 const require = createRequire(import.meta.url);
 const fontDir = join(
@@ -1229,4 +1231,224 @@ test('the DevTools highlight claims its rects, not the window', async () => {
   } finally {
     await app.close();
   }
+});
+
+// --- layout animations ------------------------------------------------------
+//
+// A loop on a layout property claims its node where it stands and leaves the
+// rest to the layout pass, which claims the old and new rect of everything it
+// moves (#603). Every frame here is held against a full repaint at the same
+// clock, not only the last: a frame that leaves a trail is repaired by any
+// later frame whose claim happens to cover it, so a test of the pixels a loop
+// ends on passes against the very bug it is for.
+
+const h = React.createElement;
+const BLUE = '#0984e3';
+const RED = '#e17055';
+
+/**
+ * Mount `children` on an animation clock that moves only when told to, then
+ * step `count` frames 37ms apart — off any loop's period — and after each
+ * one repaint the whole window at the same clock and compare. `ready` runs
+ * once the mount has painted, `each` after every frame, while the tree is
+ * still mounted. Answers the rects each frame painted, null for the whole
+ * window, and the pixels each left different.
+ */
+async function loopFramesBothWays(children, { ready, each, count = 12 } = {}) {
+  let clock = 1000;
+  setAnimationClock(() => clock);
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const probe = React.createRef();
+    await mount(
+      x11Root,
+      h(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+        h('box', { ref: probe, style: { flexGrow: 1, padding: 6, gap: 4 } }, [
+          children,
+        ]),
+      ),
+    );
+    const root = probe.current.root;
+    const ctx = (root._ctx ??= root.window.getContext('2d'));
+    root.flush();
+    if (ready) {
+      ready();
+      root.flush();
+    }
+    await settled(app);
+    const frames = [];
+    for (let i = 0; i < count; i++) {
+      clock += 37;
+      root.flush();
+      // now, not after an await: the harness keeps flushing during them
+      const rects = root._lastDamageRects;
+      each?.();
+      await settled(app);
+      const partial = await readPixels(ctx, W, H);
+      root._damage = FULL_DAMAGE;
+      root.needsPaint = true;
+      root.flush();
+      await settled(app);
+      const full = await readPixels(ctx, W, H);
+      frames.push({ rects, diff: differences(partial, full) });
+    }
+    return frames;
+  } finally {
+    x11Root.unmount();
+    setAnimationClock(() => Date.now());
+    await app.close();
+  }
+}
+
+/** Every frame bounded and pixel-exact, or a message naming the first that
+ *  was not. */
+function assertBoundedAndExact(frames) {
+  frames.forEach(({ rects, diff }, i) => {
+    assert.ok(rects, `frame ${i} repainted the whole window`);
+    assert.equal(
+      diff,
+      0,
+      `frame ${i}: ${diff} pixels differ from a full repaint`,
+    );
+  });
+}
+
+const looping = (from, to) => ({
+  height: from,
+  animation: { height: { from, to, duration: 222, alternate: true } },
+});
+
+/** Three 12px bars along the bottom of a row, the middle one looping. */
+const barRow = (rowStyle) =>
+  h(
+    'box',
+    {
+      key: 'row',
+      style: {
+        flexDirection: 'row',
+        gap: 4,
+        alignItems: 'flex-end',
+        ...rowStyle,
+      },
+    },
+    h('box', { style: { width: 12, height: 10, backgroundColor: BLUE } }),
+    h('box', {
+      style: { width: 12, backgroundColor: BLUE, ...looping(10, 36) },
+    }),
+    h('box', { style: { width: 12, height: 10, backgroundColor: BLUE } }),
+  );
+
+test('a layout loop in flow repaints what it moved, not the window', async () => {
+  // A row of fixed height: the bar grows inside it and nothing else moves,
+  // so every frame is the bar where it was and where it is.
+  const fixed = await loopFramesBothWays(barRow({ height: 40 }));
+  assertBoundedAndExact(fixed);
+  for (const [i, { rects }] of fixed.entries()) {
+    for (const r of rects) {
+      assert.ok(
+        r.y >= 6 - SLOP && r.y + r.height <= 6 + 40 + SLOP,
+        `frame ${i} claimed ${JSON.stringify(r)}, outside the 40px row`,
+      );
+    }
+  }
+
+  // A row that grows with the bar and pushes a box down: the layout pass
+  // claims the row and the box where they were and where they went.
+  const pushing = await loopFramesBothWays([
+    barRow(),
+    h('box', {
+      key: 'below',
+      style: { width: 60, height: 10, backgroundColor: RED },
+    }),
+  ]);
+  assertBoundedAndExact(pushing);
+  for (const [i, { rects }] of pushing.entries()) {
+    for (const r of rects) {
+      // the tallest row, the gap and the box under it: 6 + 36 + 4 + 10
+      assert.ok(
+        r.y + r.height <= 56 + SLOP,
+        `frame ${i} claimed ${JSON.stringify(r)}, below everything that moves`,
+      );
+    }
+  }
+});
+
+test('a box a layout loop pushes repaints its shadow where it was', async () => {
+  // The layout diff grew a moved rect by the focus ring only, so the frame
+  // repainted the card at both ends and left its old shadow on the surface.
+  // A commit that moved the card did the same.
+  const frames = await loopFramesBothWays([
+    barRow(),
+    h('box', {
+      key: 'card',
+      style: {
+        width: 60,
+        height: 10,
+        backgroundColor: RED,
+        boxShadow: '0 4px 8px rgba(0, 0, 0, .6)',
+      },
+    }),
+  ]);
+  assertBoundedAndExact(frames);
+});
+
+/** An 80x60 pane over a blue row, a green one and a red one, the one at
+ *  `index` looping. */
+const pane = (ref, index, loop) =>
+  h(
+    'box',
+    {
+      key: 'pane',
+      ref,
+      style: {
+        width: 80,
+        height: 60,
+        overflow: 'scroll',
+        backgroundColor: '#dfe6e9',
+      },
+    },
+    [
+      { height: 30, backgroundColor: BLUE },
+      { height: 12, backgroundColor: '#00b894' },
+      { height: 12, backgroundColor: RED },
+    ].map((style, i) =>
+      h('box', {
+        key: i,
+        style: { flexShrink: 0, ...style, ...(i === index && loop) },
+      }),
+    ),
+  );
+
+test('content a layout loop grows under a pane repaints the thumb', async () => {
+  // The pane stays put, so the layout diff reports the row and what it
+  // pushed, clipped to the viewport — and never the thumb, which the pane
+  // paints, and which the new extent grew, shrank and slid.
+  const ref = React.createRef();
+  let thumbs = 0;
+  const frames = await loopFramesBothWays(pane(ref, 1, looping(10, 90)), {
+    each: () => {
+      if (ref.current._scrollbar('y')) thumbs++;
+    },
+  });
+  assertBoundedAndExact(frames);
+  assert.ok(thumbs >= 4, `the content outgrew the pane in ${thumbs} frames`);
+});
+
+test('content a layout loop shrinks under a scrolled pane repaints what the clamp moved', async () => {
+  // Scrolled to its end, the pane's last row shrinks, and the clamp pulls
+  // the offset back by as much: every row above it moves down the viewport.
+  // The walk under a moved origin runs with the diff off, trusting a
+  // scroll's own claim on the viewport, and nothing claimed it for this —
+  // the shrinking row's claim is only the rect it had, below all of them.
+  const ref = React.createRef();
+  const offsets = new Set();
+  const frames = await loopFramesBothWays(pane(ref, 2, looping(90, 20)), {
+    ready: () => ref.current.scrollTo({ y: 1000 }),
+    each: () => offsets.add(ref.current.scrollY),
+  });
+  assertBoundedAndExact(frames);
+  assert.ok(offsets.size >= 4, `the clamp moved the offset: ${[...offsets]}`);
 });

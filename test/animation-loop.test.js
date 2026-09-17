@@ -119,20 +119,30 @@ test('the layout follows the loop, so a percentage travel needs no measuring', a
   });
 });
 
-test('a loop claims the bar it moves, not the window', async () => {
+test('a loop claims the block it moves, not the window', async () => {
   await withClock(
-    h(ProgressBar, { indeterminate: true, style: { width: 200 } }),
+    h(
+      'box',
+      { style: { padding: 40, paddingLeft: 100 } },
+      h(ProgressBar, { indeterminate: true, style: { width: 200 } }),
+    ),
     ({ window, frame }) => {
-      window._damage = null;
+      const block = window.children[0].children[0].children[0];
+      assert.strictEqual(block.abs.x, 20, 'at -40%, just off the track');
       frame(100);
-      // The track, because the block is out of flow and clipped to it — and
-      // never the 400x200 window, which is the whole reason this is a
-      // renderer feature rather than a setInterval in a component. 202x10 is
-      // a 200x8 bar with the one pixel of slack every claim carries.
+      window.flush();
+      assert.strictEqual(block.abs.x, 45, 'a crossing is 1100ms of 280px');
+      // Where the block was, claimed before the tick, and where the layout
+      // pass put it — each 82x10, the 80x8 block with the one pixel of slack
+      // every claim carries, 19..101 and 44..126 merged into one — and never
+      // the 400x200 window, which is the whole reason this is a renderer
+      // feature rather than a setInterval in a component. Not the 200px
+      // track either, which used to stand in for where the block was going
+      // before the layout pass was trusted to claim that (#603).
       assert.deepStrictEqual(
-        window._damage,
-        [{ x: -1, y: -1, width: 202, height: 10 }],
-        'the frame repaints the bar, not the window',
+        window._lastDamageRects,
+        [{ x: 19, y: 39, width: 107, height: 10 }],
+        'the frame repaints the block, not the window',
       );
     },
   );
