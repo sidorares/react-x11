@@ -44,14 +44,12 @@ export class CocoaWindow {
     this._presentedAt = -Infinity;
 
     const s = this.scale;
-    // Snapped to whole POINTS: AppKit rounds window sizes to the point
-    // grid, so an odd device-pixel request comes back one short in the
-    // resize echo, the echo re-requests, and the backing surface churns —
-    // each swap an uninitialized canvas only the next damage rect repaints.
-    const snap = (v, fallback) =>
-      Math.max(1, Math.round(Math.max(1, Math.round(v ?? fallback)) / s) * s);
-    this.width = snap(attributes.width, 640);
-    this.height = snap(attributes.height, 480);
+    const born = this.snapSize(
+      attributes.width ?? 640,
+      attributes.height ?? 480,
+    );
+    this.width = born.width;
+    this.height = born.height;
     this.title = attributes.title ?? '';
     this._popup = attributes.overrideRedirect === true;
 
@@ -241,10 +239,32 @@ export class CocoaWindow {
     this._refreshFrameInterval();
   }
 
+  /**
+   * The size this window really takes for a request of `width` x `height`
+   * device pixels — **whole POINTS**, because that is the grid AppKit puts a
+   * window on. An odd device-pixel request at scale 2 comes back one short
+   * in the resize echo, which churns the backing surface — each swap an
+   * uninitialized canvas only the next damage rect repaints — and which the
+   * renderer reads as somebody else having set the size, ending an
+   * `'auto'` window's authority over its own for good (#586). So the
+   * renderer asks this what it is going to get and records that instead
+   * (`WindowNode._snapSize`).
+   *
+   * **Up**, not to the nearest: a window a device pixel taller than its
+   * content shows all of it, and one a device pixel shorter clips it.
+   */
+  snapSize(width, height) {
+    const s = this.scale;
+    const up = (v) =>
+      Math.max(1, Math.ceil(Math.max(1, Math.round(v)) / s) * s);
+    return { width: up(width), height: up(height) };
+  }
+
   resize(width, height) {
     const s = this.scale;
-    this.width = Math.max(1, Math.round(Math.round(width) / s) * s);
-    this.height = Math.max(1, Math.round(Math.round(height) / s) * s);
+    const size = this.snapSize(width, height);
+    this.width = size.width;
+    this.height = size.height;
     this._native.setWindowFrame(
       this._h,
       null,

@@ -289,10 +289,16 @@ is _not_ modelled, so a window that reaches the cap is a titlebar taller than
 the work area and the WM will trim it.
 
 **Afterwards, auto keeps up with the content until something else sets the
-size.** Add a row and the window grows; the moment the user drags an edge, or
-a window manager answers with a size of its own, the window is theirs and
-stops re-fitting. Setting `width` to a number is the app doing the same
-thing, and setting it back to `'auto'` hands it back.
+size.** Add a row and the window grows, take it away and the window shrinks
+back; the moment the user drags an edge, or a window manager answers with a
+size of its own, the window is theirs and stops re-fitting. Setting `width` to
+a number is the app doing the same thing, and setting it back to `'auto'`
+hands it back.
+
+On the Cocoa backend a window is a whole number of **points**, so content
+100.5 points tall makes a window 101 points tall — rounded up, so nothing is
+cut — and that is still the window's own size rather than one somebody else
+chose: it goes on following its content.
 
 ### A floor the content decides
 

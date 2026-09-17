@@ -398,6 +398,18 @@ export class WindowSize {
       return { width: props.width, height: props.height, hints };
     }
 
+    // **The floors on hand are the last frame's content.** A node whose
+    // content shrank still carries the minimum the old content needed — the
+    // automatic minimum size this window wrote into yoga — and a natural-size
+    // pass would read it back as content the tree cannot give up, so an
+    // `'auto'` window could only ever grow (#586). The stale ones come off
+    // first, which is exactly what `_applyContentFloors` does ahead of its
+    // own measurement: a node whose extent is stale gets the minimum its
+    // style asks for, and a node whose extent still stands keeps the floor it
+    // earned. The pass after this one measures and writes them again.
+    this._writeFloors('width');
+    this._writeFloors('height');
+
     const dir = this._rootDirection;
     const measure = () => {
       this._sweepLayoutHosts();
@@ -525,9 +537,14 @@ export class WindowSize {
     );
     if (!tracking && !bounded) return;
     const asked = this._requestedSize;
-    const next = this._measure();
-    this._sendSizeHints(props, next.hints);
+    const measured = this._measure();
+    this._sendSizeHints(props, measured.hints);
     if (!tracking) return;
+    // The size the backend will really give, compared against the last one
+    // for the same reason it is recorded: two natural sizes a third of a
+    // point apart are one window size, and asking again every frame for a
+    // size that cannot change is a configure per frame.
+    const next = this._snapSize(measured);
     if (asked && next.width === asked.width && next.height === asked.height) {
       return;
     }
@@ -551,6 +568,27 @@ export class WindowSize {
     // From `next` rather than from the window, which is still the size the
     // server last confirmed.
     this._followAnchor({ width: next.width, height: next.height });
+  }
+
+  /**
+   * The size the backend will really take for one this window asks for.
+   *
+   * A window is not always free to be exactly the size its content wants:
+   * Cocoa puts one on the **point** grid, so a natural height of 201 device
+   * pixels at scale 2 is a window 202 tall. Every record of
+   * `_requestedSize` goes through here, because that record is what the
+   * resize echo is compared against — and an echo that does not match it
+   * reads as the user or the window manager taking the size over, which
+   * ends an `'auto'` window's tracking for good (#586). A backend that
+   * takes any size, X11's, answers with the size it was handed.
+   */
+  _snapSize(size) {
+    return (
+      this.window?.snapSize?.(size.width, size.height) ?? {
+        width: size.width,
+        height: size.height,
+      }
+    );
   }
 
   /** One layout pass at the window's size, with the content floors it
