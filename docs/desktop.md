@@ -351,6 +351,23 @@ it is `false` on the first frame and `true` a tick later if a host is there —
 render the fallback first and upgrade, never the other way round. It follows
 the host for the life of the item, so a panel that exits flips it back.
 
+**`settled` says whether `available` is an answer yet.** For a feature inside
+a window the order above is all an app needs. For an app whose whole UI is its
+tray item, the fallback _is_ a window, and rendering it first flashes a window
+up and away on every start on a desktop that has a tray. So wait for the
+answer instead:
+
+```jsx
+const tray = useTray({ icon: 'waveform', onClick: open });
+if (!tray.settled) return null; // a bus round trip, not a timeout
+if (!tray.available) return <window title="Hush">{controls}</window>;
+return popover;
+```
+
+It is `true` on the first frame on macOS, where the status item is made there
+and then, and for `useTray(null)`; on the freedesktop tray it turns `true` once
+the host has taken or refused the item, and stays so.
+
 `features` is the same vocabulary [feature discovery](#feature-discovery)
 uses, for the rung that answered. Read it instead of testing the platform:
 
@@ -388,11 +405,16 @@ if (notifications.available) return <BannerThenOpenApp />;
 return <InAppToastOnly />;
 ```
 
-`{ available, backend, features }`. `backend` names the **mechanism** —
+`{ available, backend, features, settled }`. `backend` names the **mechanism** —
 `'dbus'`, `'cocoa'`, `'statusnotifier'`, `'launcherentry'`, `'notify-send'`,
 `'osascript'` — and never the platform, so that a second Linux mechanism does
 not need a second name for Linux. Branch on `features`; `backend` is for logs
 and bug reports.
+
+`settled` is `false` until the first probe answers and `true` from then on, so
+an app can hold its fallback back rather than flash it; it is `true` on the
+first frame for the answers that need nothing asked, the tray and the Dock tile
+on macOS.
 
 Capability names are `'notifications'`, `'tray'` and `'launcher'`.
 `desktopCapability(name)` is the imperative twin for code with no component.

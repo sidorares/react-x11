@@ -176,8 +176,8 @@ async function probeNotifications({ app } = {}) {
 // tray
 // ---------------------------------------------------------------------------
 
-async function probeTray({ app } = {}) {
-  const target = app ?? soleApp();
+/** The tray on an app that has one of its own, which needs nothing asked. */
+function trayNow(target) {
   if (typeof target?.createStatusItem === 'function') {
     return frozen('cocoa', {
       menu: true,
@@ -194,6 +194,12 @@ async function probeTray({ app } = {}) {
       scroll: false,
     });
   }
+  return null;
+}
+
+async function probeTray({ app } = {}) {
+  const now = trayNow(app ?? soleApp());
+  if (now) return now;
 
   const ref = await sessionBus();
   if (!ref) return NONE;
@@ -226,8 +232,8 @@ async function probeTray({ app } = {}) {
 // launcher
 // ---------------------------------------------------------------------------
 
-async function probeLauncher({ app } = {}) {
-  const target = app ?? soleApp();
+/** The Dock tile on an app that has one, which needs nothing asked. */
+function launcherNow(target) {
   if (typeof target?.setDockBadge === 'function') {
     return frozen('cocoa', {
       badge: true,
@@ -239,6 +245,12 @@ async function probeLauncher({ app } = {}) {
       needsDesktopFile: false,
     });
   }
+  return null;
+}
+
+async function probeLauncher({ app } = {}) {
+  const now = launcherNow(app ?? soleApp());
+  if (now) return now;
 
   // The Linux rung needs two things that are not the bus: an app id to
   // attribute the entry to, and a `.desktop` file of that name for the
@@ -322,3 +334,16 @@ export async function desktopCapability(name, options = {}) {
 /** The "nothing here" answer, exported so a caller can compare against it and
  *  so the hook has something stable to return on the first frame. */
 export const NO_CAPABILITY = NONE;
+
+/**
+ * The answer for a capability where it is known without asking anything —
+ * the Cocoa app's own tray and Dock tile — or null where finding out takes a
+ * round trip. What lets `useDesktopCapability` be settled on its first frame
+ * where the answer never needed waiting for.
+ */
+export function capabilityNow(name, { app } = {}) {
+  const target = app ?? soleApp();
+  if (name === 'tray') return trayNow(target);
+  if (name === 'launcher') return launcherNow(target);
+  return null;
+}

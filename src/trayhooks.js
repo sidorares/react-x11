@@ -90,6 +90,8 @@ export function useTray(options) {
   const itemRef = useRef(null);
   const [rect] = useState(null);
   const [remote, setRemote] = useState(false);
+  // whether the freedesktop registration has answered, either way
+  const [answered, setAnswered] = useState(false);
   const [error, setError] = useState(null);
   // The feature vocabulary for whichever rung answered. Probed once per
   // backend rather than per render — it describes the mechanism, not the
@@ -185,12 +187,15 @@ export function useTray(options) {
     sniRef.current = item;
     previous.current = { ...live.current };
     void item.start().then((ok) => {
-      if (!cancelled) setRemote(ok);
+      if (cancelled) return;
+      setRemote(ok);
+      setAnswered(true);
     });
     return () => {
       cancelled = true;
       sniRef.current = null;
       setRemote(false);
+      setAnswered(false);
       setError(null);
       void item.stop();
     };
@@ -220,6 +225,12 @@ export function useTray(options) {
   const backend = native ? 'cocoa' : remote ? caps.backend : null;
   return {
     available: native || remote,
+    // Whether `available` is an answer yet: at once on the Cocoa rung and for
+    // no item at all, and on the freedesktop one once the host has taken or
+    // refused the registration — so an app whose whole UI is its tray can
+    // render nothing until then, rather than a fallback window that flashes
+    // up and away on every start.
+    settled: native || !options || answered,
     backend,
     features: native || remote ? caps.features : NO_CAPABILITY.features,
     error,

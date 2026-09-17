@@ -22,15 +22,26 @@
 
 import { useEffect, useState } from 'react';
 
+import { useAppOrNull } from './appcontext.js';
 import { sessionBus } from './bus.js';
-import { NO_CAPABILITY, desktopCapability } from './capabilities.js';
+import {
+  NO_CAPABILITY,
+  capabilityNow,
+  desktopCapability,
+} from './capabilities.js';
+
+/** No answer yet: nothing available, and not settled. */
+const PENDING = Object.freeze({ ...NO_CAPABILITY, settled: false });
+
+/** A probe's answer, as the hook hands it out. */
+const settledState = (result) => Object.freeze({ ...result, settled: true });
 
 /** Value equality over the two levels a capability result has. */
 function same(a, b) {
   if (a === b) return true;
   if (!a || !b) return false;
   if (a.available !== b.available || a.backend !== b.backend) return false;
-  if (a.reason !== b.reason) return false;
+  if (a.reason !== b.reason || a.settled !== b.settled) return false;
   const ka = Object.keys(a.features);
   const kb = Object.keys(b.features);
   if (ka.length !== kb.length) return false;
@@ -59,7 +70,18 @@ function same(a, b) {
  * Capability names: `'notifications'`, `'tray'`, `'launcher'`.
  */
 export function useDesktopCapability(name) {
-  const [state, setState] = useState(NO_CAPABILITY);
+  // The app this component is rendered into, when there is one: a process
+  // with several connections has several answers, and the one that matters
+  // here is this tree's.
+  const app = useAppOrNull() ?? undefined;
+  // Settled from the first frame where the answer needed no asking — the
+  // Cocoa app's tray and Dock tile — and pending everywhere else until the
+  // first probe answers, so an app can hold back its fallback instead of
+  // flashing it.
+  const [state, setState] = useState(() => {
+    const now = capabilityNow(name, { app });
+    return now ? settledState(now) : PENDING;
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -68,11 +90,12 @@ export function useDesktopCapability(name) {
     let onChanged = null;
 
     const probe = () => {
-      desktopCapability(name)
+      desktopCapability(name, { app })
         .then((next) => {
           if (cancelled) return;
           // Replaced only when it differs by value: see the header.
-          setState((prev) => (same(prev, next) ? prev : next));
+          const settled = settledState(next);
+          setState((prev) => (same(prev, settled) ? prev : settled));
         })
         .catch(() => {});
     };
@@ -131,7 +154,7 @@ export function useDesktopCapability(name) {
         await ref?.release();
       })();
     };
-  }, [name]);
+  }, [name, app]);
 
   return state;
 }
