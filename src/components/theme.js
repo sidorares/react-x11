@@ -10,6 +10,7 @@
 import React, { useContext, useMemo, useState } from 'react';
 import { useAppearanceWhen } from '../appearancehooks.js';
 import { EnvValue, registerFrameProvider } from '../frame/env.js';
+import { THEME_SCOPE } from '../nodes/kinds.js';
 import {
   DarkTheme,
   DefaultTheme,
@@ -30,8 +31,9 @@ export { DarkTheme, DefaultTheme, resolveTheme };
 // has to merge again.
 const ThemeContext = React.createContext(null);
 
-// The provider's box fills its parent, which is what an app-level provider
-// wants; `style` is there for the ones that wrap a single control.
+// Inside a window the provider's box fills its parent, which is what an
+// app-level provider wants; `style` is there for the ones that wrap a single
+// control. Above the windows there is nothing to fill, and neither applies.
 const FILL = Object.freeze({ flexGrow: 1 });
 
 /**
@@ -46,6 +48,25 @@ const FILL = Object.freeze({ flexGrow: 1 });
  * merged palette goes on the context *and* onto a real node in the tree.
  * Skip the second and `<ThemeProvider value={dark}>` over
  * `<box style={{ color: '$text' }}>` silently paints nothing (#119).
+ *
+ * ## Where it goes
+ *
+ * **Above the windows, or inside one.** At the root it draws nothing and the
+ * windows under it take the palette — whatever shape they arrive in: a
+ * component that renders one, a window that is closed for now, several at
+ * once (#584).
+ *
+ * ```jsx
+ * root.render(
+ *   <ThemeProvider colorScheme={dark ? 'dark' : 'light'}>
+ *     <App />
+ *   </ThemeProvider>,
+ * );
+ * ```
+ *
+ * Inside a window it is a box that fills its parent, with `style` for the
+ * rest. A window nested under it is handed on to the window the provider is
+ * directly inside, with the palette, since a window nests only in a window.
  *
  * ## What "already in force" means
  *
@@ -134,7 +155,13 @@ export function ThemeProvider({
     h(
       EnvValue,
       { k: THEME_ENV_KEY, value: theme },
-      planted(children, theme, boxStyle),
+      // The node the palette is planted on (nodes/kinds.js). Written the same
+      // wherever the provider is: the renderer knows whether that is inside a
+      // window, where it is a box, or above the windows, where it is a node
+      // that draws nothing — which a provider could never tell from its
+      // children, since a component, a closed window and a fragment all look
+      // alike from here (#584).
+      h(THEME_SCOPE, { theme, style: boxStyle }, children),
     ),
   );
 }
@@ -149,32 +176,9 @@ export const THEME_ENV_KEY = 'react-x11:theme';
 // the complete merged palette, so it wins every token; a pane's own inner
 // ThemeProvider still overrides below it, which is the opt-out a pane that
 // wants its own look already has.
-registerFrameProvider(
-  THEME_ENV_KEY,
-  (value, children) => h(ThemeProvider, { value }, children),
-  // directly around the pane's window: `planted` puts the palette on a
-  // window among its direct children, and the window is where it must land
-  { innermost: true },
+registerFrameProvider(THEME_ENV_KEY, (value, children) =>
+  h(ThemeProvider, { value }, children),
 );
-
-/**
- * The node that carries the palette into the tree. Normally a box — but a
- * `<window>` may only be a root child or nested in another window, never
- * inside a box, so a provider above one plants the prop on the windows
- * themselves instead of coming between them. An explicit `theme` on a child
- * still wins, since that is what it means everywhere else.
- */
-function planted(children, theme, style) {
-  const kids = React.Children.toArray(children);
-  if (kids.some((k) => React.isValidElement(k) && k.type === 'window')) {
-    return kids.map((k) =>
-      React.isValidElement(k)
-        ? React.cloneElement(k, { theme: k.props.theme ?? theme })
-        : k,
-    );
-  }
-  return h('box', { theme, style }, children);
-}
 
 /**
  * The palette in force here — already merged over any outer provider, and the

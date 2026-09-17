@@ -190,10 +190,20 @@ export class NodeCascade {
    * A detached node has no ancestors yet and so cannot see a provider two
    * levels up; it still resolves, against the base, and `_themeChanged()` on
    * attach re-resolves it against the real one.
+   *
+   * A window can take its palette from somewhere other than its parent: a
+   * `<ThemeProvider>` above it at the root, which is not its parent because a
+   * top-level window has none, or one directly inside the window it is
+   * nested in, which passed it on to that window. Either is `_scope`, and it
+   * comes first (nodes/scope.js).
    */
   get theme() {
     if (this._theme !== undefined) return this._theme;
-    const inherited = this.parent ? this.parent.theme : baseTheme();
+    const inherited = this._scope
+      ? this._scope.theme
+      : this.parent
+        ? this.parent.theme
+        : baseTheme();
     const own = this.props.theme;
     this._theme = own ? { ...inherited, ...own } : inherited;
     return this._theme;

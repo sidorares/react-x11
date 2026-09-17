@@ -153,6 +153,11 @@ export class WindowNode extends Scrollable(Node) {
     // one flag everything reads (`_mapNow`, painting, a11y, anchoring).
     this._reactHidden = false;
     this.hidden = Boolean(props.hidden);
+    // A `<ThemeProvider>` written above this window at the root: where the
+    // window's palette comes from, and a third writer of `hidden`, since
+    // React hides the provider's node rather than the window under it
+    // (nodes/scope.js). Null for a nested window, whose parent is the answer.
+    this._scope = null;
     // whether this is the tree's own top-level window rather than a nested
     // one or a popup — decided by realize(), read when it maps
     this._topLevel = false;
@@ -747,7 +752,7 @@ export class WindowNode extends Scrollable(Node) {
       // The flag `realize()`'s map will read — set directly, since there is
       // nothing on screen yet for the notification half of `_applyHidden`
       // to be about.
-      this.hidden = this._reactHidden || Boolean(newProps.hidden);
+      this.hidden = this._hiddenByReact() || Boolean(newProps.hidden);
       return;
     }
 
@@ -887,14 +892,25 @@ export class WindowNode extends Scrollable(Node) {
   }
 
   /**
-   * Re-derive `this.hidden` from its two writers — the reconciler's flag and
-   * the `hidden` prop — and make the window agree. Either saying "hidden"
-   * wins, so a `<Suspense>` revealing its content does not map a window the
-   * app is holding off screen, and clearing the prop does not map one React
-   * still hides.
+   * Whether React is hiding this window: its own flag, or one on the theme
+   * scope it is written under — a `<Suspense>` around a `<ThemeProvider>` at
+   * the root hides the provider's node, the topmost host instance there.
+   * Kept apart from the window's own flag so an inner boundary that still
+   * hides the window is not overruled when an outer one reveals the scope.
+   */
+  _hiddenByReact() {
+    return this._reactHidden || (this._scope?._hiddenByReact() ?? false);
+  }
+
+  /**
+   * Re-derive `this.hidden` from its writers — React, through
+   * `_hiddenByReact`, and the `hidden` prop — and make the window agree.
+   * Either saying "hidden" wins, so a `<Suspense>` revealing its content does
+   * not map a window the app is holding off screen, and clearing the prop
+   * does not map one React still hides.
    */
   _applyHidden() {
-    const hidden = this._reactHidden || Boolean(this.props.hidden);
+    const hidden = this._hiddenByReact() || Boolean(this.props.hidden);
     if (hidden === this.hidden) return;
     this.hidden = hidden;
     // An unmapped window draws nothing, so a loop inside one is frames

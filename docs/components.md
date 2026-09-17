@@ -252,11 +252,29 @@ The named tokens keep their types, anything else is `unknown` and narrows.
 What a provider _accepts_ stays closed (`Partial<Theme>`), because a typo in a
 palette has nowhere else to be caught.
 
-The palette reaches the tree on a `<box>` the provider renders, styled
-`{ flexGrow: 1 }` so an app-level provider fills its parent; pass `style` to
-change that (`style={{ flexGrow: 0 }}` around a single control). A `<window>`
-may not sit inside a box, so a provider above one plants the prop on the
-window itself and renders no box.
+Where the palette reaches the tree depends on where the provider is written.
+
+**Above the windows**, at the root of the tree, it draws nothing, and every
+window under it takes the palette — its background and the type every
+unstyled `<text>` falls back to as well as the `$token`s inside. Whatever
+shape the windows arrive in: a component that renders one, a window that is
+closed for now, several at once, a provider nested in another.
+
+```jsx
+root.render(
+  <ThemeProvider value={brand} colorScheme={settings.theme}>
+    <App />
+  </ThemeProvider>,
+);
+```
+
+**Inside a window** it is a `<box>`, styled `{ flexGrow: 1 }` so an app-level
+provider fills its parent; pass `style` to change that
+(`style={{ flexGrow: 0 }}` around a single control). A window nests only in a
+window, so a nested `<window>` under a provider written directly inside a
+window is handed on to that window, and takes the palette with it. Further
+down — a provider inside a `<box>` — there is no window to hand it to, and the
+error says to move the provider.
 
 Widgets plant the merged palette on their own root node too, so a `$token`
 in a style you pass one resolves even with no provider anywhere.

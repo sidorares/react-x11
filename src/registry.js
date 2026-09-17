@@ -28,6 +28,7 @@ import {
   DRAWN_KINDS,
   CUSTOM_SEMANTIC_NAMES,
   CUSTOM_SELF_DAMAGED,
+  THEME_SCOPE,
 } from './nodes/kinds.js';
 import { Node } from './nodes/node.js';
 import { markLayoutsHotReloadSession } from './layouts.js';
@@ -35,7 +36,7 @@ import { markLayoutsHotReloadSession } from './layouts.js';
 /** kind -> definition. Insertion-ordered, which is the order errors list. */
 const registry = new Map();
 
-const RESERVED = new Set(['textchunk', 'svgchild']);
+const RESERVED = new Set(['textchunk', 'svgchild', THEME_SCOPE]);
 
 // The re-registration policy for hot reload (issue #318). Module-scope
 // registration is the pattern the docs recommend and tree-shaking forces on

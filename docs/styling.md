@@ -816,9 +816,14 @@ shipped and its body copy in whatever the machine calls sans-serif, which is
 both wrong and slow: resolving a generic family costs an `fc-match` per weight
 on the first paint (~110ms each here).
 
-Two ways to say it, and the second is usually the one you want:
+Three ways to say it. For a whole app the first says it once, for the widgets
+and every window; the last is the one for a subtree:
 
 ```jsx
+<ThemeProvider value={palette}>     {/* above the windows: they take it */}
+  <App />
+</ThemeProvider>
+
 <window theme={palette}>            {/* the floor, for everything inside */}
 
 <box style={{ fontFamily: '$fontFamily', color: '$text' }}>
