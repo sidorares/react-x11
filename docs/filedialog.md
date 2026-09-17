@@ -100,6 +100,11 @@ renderer does know — the top-level windows this connection is rendering:
   a dialog is opening.
 - several with nothing to separate them: the most recently opened, plus a
   development warning naming `parentWindow` as the way to be exact.
+- **none at all: the root-level `<popup>` that took the keyboard.** A menu-bar
+  app is a tray item and the popover a click on it opens, and nothing else
+  ([elements.md](elements.md#a-popover-under-a-tray-item)) — so the popup is
+  the top of that tree, and answering nothing left every hook that reads this
+  one with no owner to belong to.
 
 So `parentWindow` survives as the **override for multi-window apps**, and takes
 a `<window>` ref, an XID, or anything `windowIdOf()` accepts:

@@ -19,6 +19,7 @@ import {
   ContextMenu,
   useAccelerator,
 } from '../src/index.js';
+import { resetAcceleratorWarningForTests } from '../src/acceleratorhooks.js';
 import {
   acceleratedItem,
   matchesChord,
@@ -756,6 +757,94 @@ test('an unmounted useAccelerator is unbound', async () => {
   press(app, KEYCODE.k, MOD.Control);
   await settle();
   assert.equal(fired.length, 1);
+
+  await root.unmount();
+});
+
+test("a shortcut in a tray app's popover fires (#616)", async () => {
+  // A menu-bar app has no `<window>` at all: the whole UI is the popover a
+  // tray click opens, and `grabKeyboard` is what brings the keys to it. The
+  // binding used to hang off `useTopLevelWindow()`, which left popups out,
+  // find no event manager, and register nothing — silently, so the chord
+  // was drawn and documented and simply never fired.
+  //
+  // Two bindings, because this is the pair docs/elements.md shows in the
+  // tray-popover section: Space plays, Escape closes.
+  const fired = [];
+  function Controls() {
+    useAccelerator([['space']], () => fired.push('toggle'));
+    useAccelerator([['Escape']], () => fired.push('close'));
+    return h('box', { style: { flexGrow: 1 } });
+  }
+  const app = createMockApp();
+  Object.assign(app.X.keycode2keysyms, US);
+  const root = await createRoot({ app });
+  root.render(
+    h(
+      'popup',
+      { x: 10, y: 10, width: 200, height: 120, grab: true, grabKeyboard: true },
+      h(Controls),
+    ),
+  );
+  await settle();
+
+  press(app, 65 /* space */, 0);
+  press(app, 9 /* Escape */, 0);
+  await settle();
+  assert.deepEqual(fired, ['toggle', 'close']);
+
+  await root.unmount();
+});
+
+test('…and through the in-process X server, with no window anywhere', async () => {
+  // The same tree against node-x11's own server: a real keymap, real
+  // keycodes, ntk's decode, and a `<popup>` that is genuinely
+  // override-redirect rather than a mock that says so.
+  const fired = [];
+  function Controls() {
+    useAccelerator([['space']], () => fired.push('toggle'));
+    return h('box', { style: { flexGrow: 1 } });
+  }
+  const { unmount } = await renderX11(
+    h(
+      'popup',
+      { x: 10, y: 10, width: 200, height: 120, grabKeyboard: true },
+      h(Controls),
+    ),
+    { wrap: false },
+  );
+  await act(() => fireEvent.key(XK_SPACE));
+  assert.deepEqual(fired, ['toggle']);
+  await unmount();
+});
+
+test('a binding with nothing to hang off says so, once', async () => {
+  // The other half of #616: an anchor that resolves to nothing binds
+  // nothing, and the effect runs once, so it never comes back. Development
+  // says which knob fixes it rather than leaving a dead chord.
+  resetAcceleratorWarningForTests();
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  const app = createMockApp();
+  Object.assign(app.X.keycode2keysyms, US);
+  let root;
+  try {
+    function Shortcuts() {
+      useAccelerator([['Control', 'K']], () => {});
+      useAccelerator([['Control', 'R']], () => {});
+      return null;
+    }
+    root = await createRoot({ app });
+    // No window and no popup: nothing in the tree owns a keyboard.
+    root.render(h(Shortcuts));
+    await settle();
+  } finally {
+    console.warn = original;
+  }
+  assert.equal(warnings.length, 1, 'once per process, not once per binding');
+  assert.match(warnings[0], /scope/);
+  assert.match(warnings[0], /never fire/);
 
   await root.unmount();
 });

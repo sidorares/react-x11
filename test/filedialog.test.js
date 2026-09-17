@@ -713,6 +713,71 @@ describe('the owner window', () => {
     assert.equal(windowIdOf(owner), view.windowNode.window.id);
   });
 
+  test('…unless the tree has no window at all', async () => {
+    // A menu-bar app is a tray item and the popover it opens, and nothing
+    // else: `<popup grabKeyboard>` at the root and no `<window>` anywhere.
+    // Answering null there left everything that reads this hook for its
+    // owner — `useAccelerator` first — belonging to nothing (issue #616).
+    let owner;
+    function Probe() {
+      owner = useTopLevelWindow();
+      return React.createElement('text', null, 'hi');
+    }
+    const view = await renderX11(
+      React.createElement(
+        'popup',
+        { width: 200, height: 120, x: 40, y: 20, grabKeyboard: true },
+        React.createElement(Probe),
+      ),
+      { wrap: false, fonts: FONTS },
+    );
+    await settle();
+    assert.equal(windowIdOf(owner), view.windowNode.window.id);
+  });
+
+  test('the popup that took the keyboard is the one, among several', async () => {
+    let owner;
+    function Probe() {
+      owner = useTopLevelWindow();
+      return React.createElement('text', null, 'hi');
+    }
+    // A tooltip is up as well as the popover — both root-level popups, and
+    // only one of them is where the keys are going. The popover is mounted
+    // *first*, so "the most recently opened" would answer the tooltip.
+    const popover = React.createRef();
+    const tooltip = React.createRef();
+    await renderX11(
+      React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(
+          'popup',
+          {
+            ref: popover,
+            width: 200,
+            height: 120,
+            x: 40,
+            y: 20,
+            grabKeyboard: true,
+          },
+          React.createElement(Probe),
+        ),
+        React.createElement('popup', {
+          ref: tooltip,
+          width: 80,
+          height: 24,
+          x: 10,
+          y: 10,
+          windowType: 'tooltip',
+        }),
+      ),
+      { wrap: false, fonts: FONTS },
+    );
+    await settle();
+    assert.notEqual(windowIdOf(popover), windowIdOf(tooltip));
+    assert.equal(windowIdOf(owner), windowIdOf(popover));
+  });
+
   test('the dialog is parented with no ref and no options at all', async () => {
     let open;
     function Probe() {

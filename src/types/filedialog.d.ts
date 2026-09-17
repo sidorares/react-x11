@@ -162,7 +162,9 @@ export interface FileDialogs {
  *
  * Exact when the tree has one top-level window, which is nearly every app.
  * With several it prefers the focused one and warns in development when it
- * has to guess — see docs/filedialog.md.
+ * has to guess; with none — a menu-bar app, which is a tray item and a
+ * popover — it answers the root-level `<popup>` that took the keyboard. See
+ * docs/filedialog.md.
  */
 export declare function useTopLevelWindow(): {
   readonly current: NtkWindow | DrawnNode | null;

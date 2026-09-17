@@ -105,7 +105,53 @@ export function topLevelWindows(app) {
   );
 }
 
+/**
+ * The root-level `<popup>`s this connection is currently rendering — the
+ * half `topLevelWindows()` leaves out, in the order they were added.
+ *
+ * Only interesting when there are no top-level windows at all: a menu-bar
+ * app whose whole UI is a popover a tray click opens has no `<window>` for
+ * anything to belong to, and the popup *is* the top of that tree
+ * (`useTopLevelWindow`). With a window in the tree these stay out of it, for
+ * the reason they are out of `topLevelWindows()` — override-redirect is
+ * never what a dialog should be transient for.
+ */
+function rootLevelPopups(app) {
+  if (!app) return [];
+  return (app._rootChildren ?? []).filter(
+    (node) => node?.isWindow && node.isPopup && node.window?.id,
+  );
+}
+
 let warnedAboutAmbiguity = false;
+
+/**
+ * One of several candidates, on the inference `useTopLevelWindow` documents:
+ * one is exact, uniquely focused wins, and anything else is the most
+ * recently opened plus a development warning that says so.
+ */
+function pickOwner(candidates, what) {
+  if (candidates.length <= 1) return candidates[0] ?? null;
+
+  const focused = candidates.filter((w) => w.events?.windowFocused);
+  if (focused.length === 1) return focused[0];
+
+  // Nothing separates them. `windowFocused` also defaults to true on an
+  // ntk too old to report focus changes, so "all of them" is the same
+  // answer as "none of them" and both land here.
+  if (process.env.NODE_ENV !== 'production' && !warnedAboutAmbiguity) {
+    warnedAboutAmbiguity = true;
+    console.warn(
+      `react-x11: this tree has ${candidates.length} ${what}, none of them ` +
+        'uniquely focused, so the owner window is a guess (the most ' +
+        'recently opened). Pass the window explicitly to be exact:\n' +
+        '  const win = useRef(null);\n' +
+        '  const { openFile } = useFileDialog({ parentWindow: win });\n' +
+        '  return <window ref={win}>…</window>;',
+    );
+  }
+  return candidates[candidates.length - 1];
+}
 
 /**
  * The window a component belongs to, resolved when it is read.
@@ -134,6 +180,13 @@ let warnedAboutAmbiguity = false;
  * - several with nothing to separate them: the most recently opened, and a
  *   development warning naming `parentWindow` as the way to be exact. A
  *   guess that says it is guessing beats a guess that does not.
+ * - **no top-level window at all: the root-level `<popup>` that has the
+ *   keyboard.** A menu-bar app is a tray item and a popover, and nothing
+ *   else — there is no `<window>` for a shortcut, a file dialog or the
+ *   global menu to belong to, and answering `null` made every one of them
+ *   quietly do nothing (issue #616). A `grabKeyboard` popup is where the
+ *   keys are by construction, so it is preferred over one that is merely
+ *   up; among equals the same focus/most-recent inference applies.
  *
  * Returns a **ref-like object** rather than a number: the window is not
  * realized on the first render, so a value read then would be `null` on the
@@ -146,27 +199,16 @@ export function useTopLevelWindow() {
     () => ({
       get current() {
         const windows = topLevelWindows(app);
-        if (windows.length <= 1) return windows[0] ?? null;
+        if (windows.length) return pickOwner(windows, 'top-level windows');
 
-        const focused = windows.filter((w) => w.events?.windowFocused);
-        if (focused.length === 1) return focused[0];
-
-        // Nothing separates them. `windowFocused` also defaults to true on an
-        // ntk too old to report focus changes, so "all of them" is the same
-        // answer as "none of them" and both land here.
-        if (process.env.NODE_ENV !== 'production' && !warnedAboutAmbiguity) {
-          warnedAboutAmbiguity = true;
-          console.warn(
-            `react-x11: this tree has ${windows.length} top-level windows and ` +
-              'none of them is uniquely focused, so the owner window is a ' +
-              'guess (the most recently opened). Pass the window explicitly ' +
-              'to be exact:\n' +
-              '  const win = useRef(null);\n' +
-              '  const { openFile } = useFileDialog({ parentWindow: win });\n' +
-              '  return <window ref={win}>…</window>;',
-          );
-        }
-        return windows[windows.length - 1];
+        // A popup-only tree — the tray popover. Not reached while the app
+        // has a window, so nothing that already worked changes shape.
+        const popups = rootLevelPopups(app);
+        const keyboard = popups.filter((node) => node.props?.grabKeyboard);
+        return pickOwner(
+          keyboard.length ? keyboard : popups,
+          'root-level popups and no window at all',
+        );
       },
     }),
     [app],
