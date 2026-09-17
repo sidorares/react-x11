@@ -181,11 +181,16 @@ export function relaunch(entry, native) {
   // the package's own would be a second one the bundler never emits. The
   // worker sets itself up when it imports react-x11 (`bootstrapWorker`,
   // src/bootstrap.js), recognising the shared state in its workerData.
-  // execArgv carries a loader like `--import tsx`, which is what lets the
-  // worker load a .jsx entry at all.
+  //
+  // No `execArgv`: a Worker given none inherits the node flags the process
+  // started with, and among them a loader like `--import tsx`, which is what
+  // lets the worker load a .jsx entry at all. Handed `process.execArgv`
+  // instead, it refuses the whole list over one V8 or process-wide flag —
+  // `--expose-gc`, `--max-old-space-size`, `--title` — which the worker
+  // would have had anyway, since those hold for every thread: it gets `gc`
+  // either way (measured, Node 20–26; Bun treats the two the same).
   new Worker(entry, {
     argv: process.argv.slice(2),
-    execArgv: process.execArgv,
     env: SHARE_ENV,
     workerData: { reactX11State: state.buffer },
   });
