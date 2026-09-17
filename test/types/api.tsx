@@ -173,6 +173,11 @@ const s = createStyles({
   cell: { textWrap: 'nowrap', textOverflow: 'ellipsis' },
   // and the clamp, which is a count rather than a keyword
   blurb: { maxLines: 3, textOverflow: 'ellipsis' },
+  // issue #588: a readout that holds its width, and spaced caps
+  readout: { fontVariantNumeric: 'tabular-nums', letterSpacing: -0.9 },
+  figures: { fontVariantNumeric: 'lining-nums tabular-nums slashed-zero' },
+  caps: { letterSpacing: 1.26, fontFeatureSettings: { liga: false, salt: 2 } },
+  tags: { fontFeatureSettings: ['tnum', 'ss01'] },
   card: {
     borderRadius: 8,
     borderWidth: 1,
@@ -364,6 +369,18 @@ createStyles({
     animation: { left: { to: 1, duration: 9, delay: '1s' } },
   },
 });
+
+// @ts-expect-error — the keyword is 'tabular-nums'
+createStyles({ bad: { fontVariantNumeric: 'tabular' } });
+
+// @ts-expect-error — letter spacing is a number of pixels, not a CSS length
+createStyles({ bad: { letterSpacing: '2px' } });
+
+// @ts-expect-error — a feature's value is on, off or an alternate
+createStyles({ bad: { fontFeatureSettings: { tnum: 'on' } } });
+
+// @ts-expect-error — spacing moves glyphs, so it may not go in a state block
+createStyles({ bad: { ':hover': { letterSpacing: 1 } } });
 
 // @ts-expect-error — 'rtol' is not a direction
 createStyles({ bad: { direction: 'rtol' } });

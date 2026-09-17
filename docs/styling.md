@@ -617,7 +617,7 @@ content.
 
 ## Inheritance: the ink, the face and the size
 
-Seven properties travel down the tree, and they are the ones CSS calls
+Ten properties travel down the tree, and they are the ones CSS calls
 inherited:
 
 | property                |                                            |
@@ -629,6 +629,9 @@ inherited:
 | `fontStyle`             |                                            |
 | `fontVariationSettings` | a variable font's remaining axes           |
 | `textRendering`         | how glyph origins are rounded at draw time |
+| `letterSpacing`         | the space after every character            |
+| `fontVariantNumeric`    | which figures: tabular, oldstyle…          |
+| `fontFeatureSettings`   | any other OpenType feature, by tag         |
 
 So a block of quiet type is a `<box>` and not a decision repeated at every
 label inside it:

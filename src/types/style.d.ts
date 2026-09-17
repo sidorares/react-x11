@@ -335,6 +335,34 @@ export type TextOverflow = 'clip' | 'ellipsis';
 export type TextRendering =
   'auto' | 'optimizeSpeed' | 'optimizeLegibility' | 'geometricPrecision';
 
+/** One `fontVariantNumeric` keyword, and the OpenType feature it turns on. */
+export type NumericVariant =
+  | 'lining-nums' // lnum
+  | 'oldstyle-nums' // onum
+  | 'proportional-nums' // pnum
+  | 'tabular-nums' // tnum
+  | 'diagonal-fractions' // frac
+  | 'stacked-fractions' // afrc
+  | 'ordinal' // ordn
+  | 'slashed-zero'; // zero
+
+/**
+ * CSS's `font-variant-numeric`: `'normal'`, or keywords separated by spaces,
+ * at most one of each pair that contradicts — lining or oldstyle,
+ * proportional or tabular, diagonal or stacked fractions. Typed as a first
+ * keyword and whatever follows; the rest is checked when the style is.
+ */
+export type FontVariantNumeric =
+  'normal' | NumericVariant | `${NumericVariant} ${string}`;
+
+/**
+ * CSS's `font-feature-settings`, by OpenType tag: the tags to turn on,
+ * `['tnum', 'ss01']`, or tag → on or off, or the alternate a feature picks,
+ * `{ liga: false, salt: 2 }`.
+ */
+export type FontFeatureSettings =
+  readonly string[] | Readonly<Record<string, boolean | number>>;
+
 /** Text properties. All affect measurement except `color`. */
 export interface TextStyle {
   color?: Color;
@@ -354,6 +382,19 @@ export interface TextStyle {
    *  at any size. `'auto'` (default) lets size decide. Changing it repaints
    *  without reflowing: it cannot move anything. */
   textRendering?: TextRendering;
+  /** CSS's `letter-spacing`, in pixels: added after every character, the
+   *  last on a line included, and negative to tighten. Spaced text drops the
+   *  optional ligatures (`liga`, `clig`, `dlig`, `hlig`) unless
+   *  `fontFeatureSettings` names them. Inherits. */
+  letterSpacing?: number;
+  /** Which figures: `'tabular-nums'` gives every digit one width, so a
+   *  number that changes holds its width while it does. The friendly names
+   *  for features `fontFeatureSettings` can also set by tag, and it wins
+   *  where the two meet. Inherits, apart from `fontFeatureSettings`. */
+  fontVariantNumeric?: FontVariantNumeric;
+  /** Any OpenType feature, by tag. A feature the face does not have is
+   *  ignored. Compared by value, so an object literal is fine. Inherits. */
+  fontFeatureSettings?: FontFeatureSettings;
   textAlign?: TextAlign;
   lineHeight?: number;
   /** CSS's `text-wrap`. `'nowrap'` measures the text at unbounded width, so

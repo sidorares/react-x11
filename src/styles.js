@@ -281,7 +281,104 @@ export const TEXT_LAYOUT_PROPS = new Set([
   // fits on a line, so it is a measurement input like the rest of this set.
   'textOverflow',
   'maxLines',
+  // CSS's letter-spacing, in px: added after every character, the last on a
+  // line included, which is how both text engines add it (#588)
+  'letterSpacing',
+  // Figures and the rest of the OpenType features. `fontVariantNumeric` is
+  // CSS's keywords for the numeric ones — `tabular-nums` for a readout that
+  // holds its width while it changes — and `fontFeatureSettings` names any
+  // feature by tag, winning over the keyword where the two meet, as in CSS
+  'fontVariantNumeric',
+  'fontFeatureSettings',
 ]);
+
+/**
+ * `fontVariantNumeric` keywords → the OpenType feature each one turns on, and
+ * the group it belongs to. CSS allows several keywords at once but one from
+ * each group, since the two in a group contradict each other: `'tabular-nums
+ * slashed-zero'` is a value, `'lining-nums oldstyle-nums'` is not.
+ */
+const NUMERIC_VARIANTS = {
+  'lining-nums': ['lnum', 'figures'],
+  'oldstyle-nums': ['onum', 'figures'],
+  'proportional-nums': ['pnum', 'spacing'],
+  'tabular-nums': ['tnum', 'spacing'],
+  'diagonal-fractions': ['frac', 'fractions'],
+  'stacked-fractions': ['afrc', 'fractions'],
+  ordinal: ['ordn', 'ordinal'],
+  'slashed-zero': ['zero', 'slashed-zero'],
+};
+
+/** The feature tags a `fontVariantNumeric` value turns on, or null when the
+ *  value is not one CSS would accept. `'normal'` turns none on. */
+function numericVariantTags(value) {
+  if (typeof value !== 'string') return null;
+  const words = value.trim().split(/\s+/);
+  if (words.length === 1 && words[0] === 'normal') return [];
+  const tags = [];
+  const groups = new Set();
+  for (const word of words) {
+    const [tag, group] = NUMERIC_VARIANTS[word] ?? [];
+    if (!tag || groups.has(group)) return null;
+    groups.add(group);
+    tags.push(tag);
+  }
+  return tags;
+}
+
+/** An OpenType feature tag: four printable ASCII characters. */
+const FEATURE_TAG = /^[\x20-\x7e]{4}$/;
+
+/** Whether `value` is a `fontFeatureSettings`: an array of tags to turn on,
+ *  or an object of tag → on or off, or the number of the alternate a feature
+ *  picks. */
+function isFeatureSettings(value) {
+  if (Array.isArray(value)) {
+    return value.every(
+      (tag) => typeof tag === 'string' && FEATURE_TAG.test(tag),
+    );
+  }
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value).every(
+    ([tag, v]) =>
+      FEATURE_TAG.test(tag) &&
+      (typeof v === 'boolean' || (Number.isInteger(v) && v >= 0)),
+  );
+}
+
+// the resolved `features` for one (variant, settings) pair, kept so that the
+// same pair is the same object every time: a cascade compares two resolved
+// styles with `!==` (`resolvedTextDelta`), and a fresh object per node would
+// read as a change and re-measure text that did not move
+const resolvedFeatures = new Map();
+
+/**
+ * What the text engines are handed: every feature the two properties set, as
+ * tag → value (1 on, 0 off, or the alternate), `fontFeatureSettings` over
+ * the keywords. `undefined` when neither says anything, which is nearly
+ * every node.
+ */
+export function featuresOf(variantNumeric, featureSettings) {
+  if (variantNumeric === undefined && featureSettings === undefined) {
+    return undefined;
+  }
+  const key = `${variantNumeric ?? ''}\u0000${JSON.stringify(featureSettings ?? null)}`;
+  if (resolvedFeatures.has(key)) return resolvedFeatures.get(key);
+  const features = {};
+  for (const tag of numericVariantTags(variantNumeric) ?? []) features[tag] = 1;
+  if (Array.isArray(featureSettings)) {
+    for (const tag of featureSettings) features[tag] = 1;
+  } else if (featureSettings) {
+    for (const [tag, value] of Object.entries(featureSettings)) {
+      features[tag] = value === true ? 1 : value === false ? 0 : value;
+    }
+  }
+  const out =
+    Object.keys(features).length > 0 ? Object.freeze(features) : undefined;
+  if (resolvedFeatures.size > 256) resolvedFeatures.clear();
+  resolvedFeatures.set(key, out);
+  return out;
+}
 
 /**
  * Text style props that change how the text is **drawn** and provably not
@@ -304,7 +401,8 @@ export const TEXT_PAINT_PROPS = new Set(['textRendering']);
  * dims the labels under it the way it would in CSS.
  *
  * This is CSS's inherited set narrowed to what a *descendant* can act on: the
- * face, the size, the ink and the glyph rounding. `textAlign`, `lineHeight`,
+ * face, the size, the ink, the glyph rounding, the spacing between letters
+ * and the OpenType features. `textAlign`, `lineHeight`,
  * `textWrap`, `textOverflow`, `maxLines` and `textBoxTrim` stay out even
  * though CSS inherits the first two — here they are read by the node that
  * owns the **box** the text flows in, and a box is not something a descendant
@@ -319,6 +417,9 @@ export const INHERITED_TEXT_PROPS = new Set([
   'fontVariationSettings',
   'textRendering',
   'color',
+  'letterSpacing',
+  'fontVariantNumeric',
+  'fontFeatureSettings',
 ]);
 
 /**
@@ -346,7 +447,7 @@ export function localTextStyleChanged(style, before) {
 export function inheritedTextChanged(style, before) {
   if (style === before) return false;
   for (const key of INHERITED_TEXT_PROPS) {
-    if (key === 'fontVariationSettings') {
+    if (key === 'fontVariationSettings' || key === 'fontFeatureSettings') {
       if (!axesEqual(style[key], before[key])) return true;
     } else if (style[key] !== before[key]) return true;
   }
@@ -376,7 +477,9 @@ export function resolvedTextDelta(a, b) {
     a.size !== b.size ||
     a.weight !== b.weight ||
     a.style !== b.style ||
-    !axesEqual(a.variations, b.variations)
+    !axesEqual(a.variations, b.variations) ||
+    a.letterSpacing !== b.letterSpacing ||
+    a.features !== b.features
   ) {
     return TEXT_REMEASURE;
   }
@@ -752,6 +855,46 @@ const GRID_VALUES = new Set([...GRID_CONTAINER_PROPS, ...GRID_ITEM_PROPS]);
  * grammar is concerned), so this checks the shape and never the colours.
  */
 function validateValue(key, value, where) {
+  if (key === 'letterSpacing') {
+    if (
+      value != null &&
+      !(typeof value === 'number' && Number.isFinite(value)) &&
+      !isToken(value)
+    ) {
+      throw new Error(
+        `react-x11: invalid letterSpacing ${JSON.stringify(value)} in ${where} ` +
+          '(expected a number of pixels, like letterSpacing: 1.5, or a $token)',
+      );
+    }
+    return;
+  }
+  if (key === 'fontVariantNumeric') {
+    if (
+      value != null &&
+      numericVariantTags(value) === null &&
+      !isToken(value)
+    ) {
+      throw new Error(
+        `react-x11: invalid fontVariantNumeric ${JSON.stringify(value)} in ` +
+          `${where} (expected 'normal', or keywords from ` +
+          `${Object.keys(NUMERIC_VARIANTS).join(', ')} with at most one of ` +
+          'lining/oldstyle, proportional/tabular and diagonal/stacked, like ' +
+          "'tabular-nums' or 'tabular-nums slashed-zero')",
+      );
+    }
+    return;
+  }
+  if (key === 'fontFeatureSettings') {
+    if (value != null && !isFeatureSettings(value) && !isToken(value)) {
+      throw new Error(
+        `react-x11: invalid fontFeatureSettings ${JSON.stringify(value)} in ` +
+          `${where} (expected four-letter OpenType tags — an array of tags to ` +
+          "turn on, ['tnum'], or an object of tag to on/off or an alternate, " +
+          '{ tnum: true, liga: false, salt: 2 })',
+      );
+    }
+    return;
+  }
   if (key === 'opacity') {
     // unset, the way a conditional writes it: `opacity: dim ? 0.5 : undefined`
     if (value == null) return;
@@ -986,6 +1129,9 @@ const NOT_ANIMATABLE = new Set([
   'fontFamily',
   'fontWeight',
   'fontStyle',
+  // a keyword and a bag of tags: there is no halfway figure
+  'fontVariantNumeric',
+  'fontFeatureSettings',
   'textAlign',
   // nothing is drawn from it, so there is no frame in which a halfway value
   // would be visible — and it may be an object, which does not lerp
@@ -1712,6 +1858,7 @@ export const SCALED_LENGTH_PROPS = [
   'outlineWidth',
   'outlineOffset',
   'fontSize',
+  'letterSpacing',
 ];
 
 const SCALED_LENGTHS = new Set(SCALED_LENGTH_PROPS);
@@ -1876,6 +2023,9 @@ export function paintPropsChanged(props, oldProps = {}) {
 
 /** Resolved text style (TextLayout base style) from props + inherited. */
 export function textStyleFrom(props, inherited) {
+  const variantNumeric = props.fontVariantNumeric ?? inherited.variantNumeric;
+  const featureSettings =
+    props.fontFeatureSettings ?? inherited.featureSettings;
   return {
     family: props.fontFamily ?? inherited.family,
     size: props.fontSize ?? inherited.size,
@@ -1886,6 +2036,14 @@ export function textStyleFrom(props, inherited) {
     variations: props.fontVariationSettings ?? inherited.variations,
     textRendering: props.textRendering ?? inherited.textRendering,
     color: props.color ?? inherited.color,
+    letterSpacing: props.letterSpacing ?? inherited.letterSpacing,
+    // Inherited apart, as CSS inherits the two properties apart — a child's
+    // `fontVariantNumeric` replaces the keyword above it and leaves an
+    // inherited `fontFeatureSettings` alone — and resolved together into what
+    // the engines read.
+    variantNumeric,
+    featureSettings,
+    features: featuresOf(variantNumeric, featureSettings),
   };
 }
 
@@ -1907,6 +2065,10 @@ export const DEFAULT_TEXT_STYLE = {
   variations: undefined,
   textRendering: undefined,
   color: 'black',
+  letterSpacing: undefined,
+  variantNumeric: undefined,
+  featureSettings: undefined,
+  features: undefined,
 };
 
 /**

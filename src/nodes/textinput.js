@@ -302,7 +302,7 @@ export class TextInputNode extends Node {
     const text = this._displayValue();
     const s = this.resolvedTextStyle();
     const direction = this.direction;
-    const key = `${text}|${s.family}|${s.size}|${s.weight}|${s.style}|${direction}`;
+    const key = `${text}|${s.family}|${s.size}|${s.weight}|${s.style}|${direction}|${s.letterSpacing}|${JSON.stringify(s.features ?? null)}`;
     if (this._valueLayoutKey !== key) {
       this._valueLayoutKey = key;
       this._valueLayoutCache = fonts.layout(text, s, { direction });

@@ -178,8 +178,10 @@ export function measureLabel(node, text, style) {
   // `{ opsz: 17 }` on its window — the text cut of a variable face, wider
   // than the display cut most files default to — draws every row in it and
   // used to measure none, and the popup came out narrow enough to wrap its
-  // own labels. An explicit `style` still wins, since a caller that names a
-  // face is measuring something it is about to draw in that face.
+  // own labels. `letterSpacing` and the OpenType features move advances the
+  // same way (a device length and a tag bag, as they cascade). An explicit
+  // `style` still wins, since a caller that names a face is measuring
+  // something it is about to draw in that face.
   const inherited = node?.inheritedTextStyle;
   const layout = fonts.layout(String(text), {
     family: style?.family ?? inherited?.family ?? 'sans-serif',
@@ -187,6 +189,8 @@ export function measureLabel(node, text, style) {
     weight: style?.weight ?? inherited?.weight ?? 'normal',
     style: style?.style ?? inherited?.style,
     variations: style?.variations ?? inherited?.variations,
+    letterSpacing: inherited?.letterSpacing,
+    features: inherited?.features,
   });
   return { width: layout.width / s, height: layout.height / s };
 }

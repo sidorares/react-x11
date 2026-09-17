@@ -616,6 +616,12 @@ implements it over CoreText:
 - **Shaping/wrapping/bidi/truncation**: `CTFramesetter` over an
   attributed string built from the same span list (spans map to
   attribute ranges — the nested-`<text>` model transfers directly).
+  OpenType features are a property of the font, so a span with
+  `fontVariantNumeric` or `fontFeatureSettings` is set in a font with them
+  applied (`fontApplyFeatures`, one per face and feature set), and
+  `letterSpacing` is the span's `kCTKernAttributeName`, with the optional
+  ligatures turned off as ntk turns them off (issue #588). A bridge older
+  than the verb draws the face unchanged and says so once in development.
 - **Metrics for yoga**: the same framesetter answers `measureContent`,
   so measure and render cannot disagree. Whole-pixel answers, per the
   yoga content-floor rules. **A width offer of zero is the min-content

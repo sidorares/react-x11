@@ -322,7 +322,12 @@ export class NodeCascade {
       const size = (inherited.size * to) / from;
       const cached = this._textScaled;
       if (cached?.from !== inherited || cached.style.size !== size) {
-        this._textScaled = { from: inherited, style: { ...inherited, size } };
+        const style = { ...inherited, size };
+        // the other length that travels, re-expressed the same way
+        if (inherited.letterSpacing) {
+          style.letterSpacing = (inherited.letterSpacing * to) / from;
+        }
+        this._textScaled = { from: inherited, style };
       }
       return this._textScaled.style;
     }

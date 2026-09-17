@@ -338,6 +338,8 @@ export class TextNode extends Node {
           variations: style.variations,
           textRendering: style.textRendering,
           color: style.color,
+          letterSpacing: style.letterSpacing,
+          features: style.features,
         });
       } else if (child.kind === 'text') {
         child.collectSpans(out);
