@@ -609,6 +609,43 @@ The full threat model, including what react-x11 does and does not defend
 against, is [docs/security.md](docs/security.md). To report something,
 [SECURITY.md](SECURITY.md).
 
+## Similar projects
+
+- [GPUIX](https://github.com/remorses/gpuix) — React for
+  [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui), Zed's
+  GPU UI framework. Each commit crosses a napi-rs addon as one batch of
+  mutations to a retained Rust tree, which GPUI lays out with Taffy's flexbox
+  and paints through Metal, DirectX or Vulkan, on macOS, Windows and Linux.
+- [react-native-gpui](https://github.com/natew/react-native-gpui) — React
+  Native's component API (`View`, `Text`, `Pressable`, `TextInput`,
+  `FlatList`) on GPUI as well, hosted the other way round: a Rust binary
+  embeds the system's JavaScriptCore and runs the bundled app, and commits
+  reach GPUI in memory. macOS on Apple silicon only, for now.
+- [GTKX](https://github.com/gtkx-org/gtkx) — React for GNOME: every GObject
+  is a JSX element, so the tree is the platform's own GTK4 and Adwaita
+  widgets. The TypeScript bindings are generated from GObject-Introspection
+  and call into GTK through a Rust core on Node.js. Linux-only by design.
+- React Native for [Windows](https://github.com/microsoft/react-native-windows)
+  and [macOS](https://github.com/microsoft/react-native-macos) — Microsoft's
+  desktop platforms for React Native. On Windows the new architecture's
+  renderer targets Composition from the start, in Windows App SDK apps by
+  default, with XAML islands for advanced controls; on macOS a fork of React
+  Native maps its UIKit views onto AppKit. [docs/windows.md](docs/windows.md)
+  cites its threading as prior art: JS on a thread of its own, and every
+  mount posted to the UI thread that alone touches the visuals.
+- [React Native Skia](https://github.com/Shopify/react-native-skia) — 2D
+  graphics for React Native, with a React renderer of its own: the
+  components inside a `<Canvas>` become a Skia display list, cheap to
+  animate with Reanimated. On iOS, Android, macOS and tvOS, in the browser
+  through CanvasKit, and headless on Node. Its experimental Graphite builds
+  render through Dawn and can share a GPU device with React Native WebGPU.
+- [React Native WebGPU](https://github.com/wcandillon/react-native-webgpu) —
+  not a renderer but a GPU surface for React Native: the WebGPU API
+  (`navigator.gpu` and a `<Canvas>` view) on iOS, Android, macOS and
+  visionOS, implemented over Dawn, Chrome's WebGPU implementation. It runs
+  three.js's WebGPU renderer and React Three Fiber. The nearest thing in
+  react-x11 is [`<glarea>`](#3d), which speaks GL instead.
+
 ## See also
 
 - [awesome-react-renderer](https://github.com/chentsulin/awesome-react-renderer)
