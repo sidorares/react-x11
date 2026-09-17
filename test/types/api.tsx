@@ -97,6 +97,7 @@ import {
   sessionBus,
   systemBus,
   useApp,
+  anchorScreenRect,
   useClipboard,
   useSupports,
   useDesktopSettings,
@@ -756,6 +757,26 @@ const _badAt = <popup anchor={{ to: null, at: { left: 1, top: 2 } }} />;
 
 // @ts-expect-error — the anchor has to name what it hangs off
 const _noTarget = <popup anchor={{ placement: 'bottom' }} />;
+
+// issue #590: a popover under a tray item — a rect on the screen, which a
+// tray click reports, and the keyboard for an app with no window of its own
+const _popover = (
+  <popup
+    anchor={{
+      rect: { x: 1380, y: 0, width: 30, height: 22 },
+      placement: 'bottom',
+      align: 'center',
+    }}
+    grab
+    grabKeyboard
+    onBlur={() => {}}
+  />
+);
+const _atPoint = <popup anchor={{ rect: { x: 400, y: 300 } }} />;
+const _placed = anchorScreenRect(null, { x: 1, y: 2 }, { scale: 2 });
+
+// @ts-expect-error — a node or a rect on the screen, not both
+const _both = <popup anchor={{ to: null, rect: { x: 0, y: 0 } }} />;
 
 // issue #130: transientFor takes a ref to a window, a ref to a drawn node, a
 // raw XID or 'root'; a <popup> can opt out of override-redirect to become a

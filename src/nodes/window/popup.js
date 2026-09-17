@@ -30,15 +30,25 @@ export class PopupNode extends WindowNode {
    * from realize looked equivalent until `hidden` existed, and would have
    * left a revealed menu holding no grab: open forever behind the first
    * outside click, with nothing saying why.
+   *
+   * `grabKeyboard` is the keyboard's half, taken and dropped with the map
+   * the same way: keys come to this popup while it is up, whatever holds
+   * the focus — what a popover a tray click opened needs, since a menu-bar
+   * app has no window of its own for the keys to reach. On Cocoa it is a
+   * property of the window rather than a grab, and was decided when the
+   * window was made (src/cocoa/window.js); on Wayland a grabbing popup has
+   * the keyboard already.
    */
   _mapNow() {
     if (!super._mapNow()) return false;
     if (this.props.grab) this.window.grabPointer?.({}, () => {});
+    if (this.props.grabKeyboard) this.window.grabKeyboard?.({}, () => {});
     return true;
   }
 
   destroySubtree() {
     if (this.props.grab) this.window?.ungrabPointer?.();
+    if (this.props.grabKeyboard) this.window?.ungrabKeyboard?.();
     super.destroySubtree();
   }
 

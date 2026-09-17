@@ -1,7 +1,7 @@
 // A window anchored to a rect in another (#255, #280): where it goes, and
 // following the anchor as it moves.
 
-import { anchorOffscreen, anchorRect } from '../../anchor.js';
+import { anchorOffscreen, anchorRect, anchorScreenRect } from '../../anchor.js';
 
 /** Anchoring, installed onto `WindowNode.prototype` by window.js. */
 export class WindowAnchoring {
@@ -32,18 +32,33 @@ export class WindowAnchoring {
    *  anchor to yet — a ref whose node has not been laid out. */
   _anchorPlacement(size) {
     const anchor = this.props.anchor;
-    const node = this._anchorTarget(anchor?.to);
-    if (!node) return null;
+    if (!anchor) return null;
     // `anchorRect` is public API and speaks logical pixels on both sides;
     // this caller's `size` came from `_measure` (device) and its result is
     // headed for CreateWindow (device), so both convert here.
     const s = this.scale;
-    const rect = anchorRect(node, {
-      ...anchor,
-      alignTo: this._anchorTarget(anchor.alignTo) ?? undefined,
-      width: size.width / s,
-      height: size.height / s,
-    });
+    let rect;
+    if (anchor.rect) {
+      // A rect on the screen with no node behind it — the tray item a click
+      // reported. The popup's own scale and direction stand in for the
+      // node's.
+      rect = anchorScreenRect(this.app, anchor.rect, {
+        ...anchor,
+        scale: s,
+        direction: anchor.direction ?? this.direction,
+        width: size.width / s,
+        height: size.height / s,
+      });
+    } else {
+      const node = this._anchorTarget(anchor.to);
+      if (!node) return null;
+      rect = anchorRect(node, {
+        ...anchor,
+        alignTo: this._anchorTarget(anchor.alignTo) ?? undefined,
+        width: size.width / s,
+        height: size.height / s,
+      });
+    }
     if (!rect || s === 1) return rect;
     return {
       ...rect,
@@ -76,13 +91,7 @@ export class WindowAnchoring {
    */
   _followAnchor(size = this._requestedSize) {
     if (this.destroyed || !this.window || !this.props.anchor) return;
-    const node = this._anchorTarget(this.props.anchor.to);
-    // A ref that has not attached yet counts as gone, and for the same
-    // reason: there is nowhere for the popup to be. Refs attach in the
-    // commit phase a popup realizes in, so one written *above* its own
-    // trigger in the JSX gets a frame of this — and waiting it out is
-    // better than a frame in the corner of the screen.
-    const lost = !node || anchorOffscreen(node, this.props.anchor.at);
+    const lost = this._anchorGone();
     if (lost !== Boolean(this._anchorLost)) {
       this._anchorLost = lost;
       // The grab goes with it and comes back with it. X releases a pointer
@@ -93,6 +102,7 @@ export class WindowAnchoring {
       // keeps it beside the map on every route back to the screen.
       if (lost) {
         if (this.props.grab) this.window.ungrabPointer?.();
+        if (this.props.grabKeyboard) this.window.ungrabKeyboard?.();
         this.window.unmap?.();
       } else {
         this._mapNow();
@@ -111,13 +121,30 @@ export class WindowAnchoring {
   }
 
   /**
+   * Whether there is nothing for this window to point at: the anchor's node
+   * has scrolled out of view, or is a ref that has not attached yet — which
+   * counts as gone for the same reason, since there is nowhere for the popup
+   * to be. Refs attach in the commit phase a popup realizes in, so one
+   * written *above* its own trigger in the JSX gets a frame of this, and
+   * waiting it out is better than a frame in the corner of the screen. A
+   * rect on the screen is never gone.
+   */
+  _anchorGone() {
+    const anchor = this.props.anchor;
+    if (anchor.rect) return false;
+    const node = this._anchorTarget(anchor.to);
+    return !node || anchorOffscreen(node, anchor.at);
+  }
+
+  /**
    * Subscribe to whatever can move the anchor. On the **owner's** window,
    * not on this one: what moves is the trigger, and this window's own
-   * layout passes say nothing about where it sits on screen.
+   * layout passes say nothing about where it sits on screen. A rect on the
+   * screen moves only when the app hands a new one, which is a commit.
    */
   _watchAnchor() {
     this._unwatchAnchor();
-    if (!this.props.anchor) return;
+    if (!this.props.anchor || this.props.anchor.rect) return;
     // The anchor's own window where the ref has attached, and the window
     // this popup was *written into* otherwise — which is the same one in
     // every case that matters, and is what makes an unattached ref a

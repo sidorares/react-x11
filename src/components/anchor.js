@@ -11,6 +11,7 @@ export {
   anchorArea,
   anchorOffscreen,
   anchorRect,
+  anchorScreenRect,
   centerRect,
   screenRect,
   subRect,

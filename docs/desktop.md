@@ -300,7 +300,8 @@ An icon in the system tray for as long as the component is mounted. With
 `menu` a click opens it — the same `items` vocabulary as `MenuBar` and the
 Dock menu, so the three menus an app puts on the desktop are one authoring
 model. Without one, `onClick` gets the button and, where the backend knows
-it, the item's screen rect. `title` shows text beside the icon or alone;
+it, the item's screen rect — which is what a popover under the item anchors
+to ([elements.md](elements.md#a-popover-under-a-tray-item)). `title` shows text beside the icon or alone;
 `visible`, `tooltip`, `attention` and the rest follow their values while
 mounted, and the item is removed on unmount. `null` means no item.
 

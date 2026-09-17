@@ -11,7 +11,6 @@ import { forgetTopLevel, hasDropProps } from '../../dnd.js';
 import { clearPendingFrame } from '../../frames.js';
 import { FramePacer } from '../../pacing.js';
 import { endWindowState } from '../../windowstate.js';
-import { anchorOffscreen } from '../../anchor.js';
 import { topLevelWindows } from '../../windowid.js';
 import { WindowAnimation } from '../animation.js';
 import { WindowCascade } from '../cascade.js';
@@ -433,8 +432,7 @@ export class WindowNode extends Scrollable(Node) {
     // and vanish.
     if (this.props.anchor) {
       this._watchAnchor();
-      const node = this._anchorTarget(this.props.anchor.to);
-      this._anchorLost = !node || anchorOffscreen(node, this.props.anchor.at);
+      this._anchorLost = this._anchorGone();
     }
     // Queued rather than mapped, when there is a commit to queue behind:
     // React hides a subtree only once it has inserted it (beginWindowMaps).

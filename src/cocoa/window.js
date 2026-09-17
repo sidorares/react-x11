@@ -52,18 +52,27 @@ export class CocoaWindow {
     this.height = born.height;
     this.title = attributes.title ?? '';
     this._popup = attributes.overrideRedirect === true;
+    // A popup that takes the keyboard (`<popup grabKeyboard>`): AppKit's
+    // popup panel can never become key, so this one is a borderless window
+    // that can, at the popup level, and it activates the app when it shows
+    // — how NSPopover's own window behaves. It is decided here because the
+    // kind of window is: a later change of the prop does not remake it.
+    this._keyPopup = this._popup && attributes.grabKeyboard === true;
 
     const options = {
       width: this.width / s,
       height: this.height / s,
       title: this.title,
-      kind: this._popup
-        ? 'popup'
-        : attributes.decorations === false
-          ? 'borderless'
-          : 'normal',
+      kind: this._keyPopup
+        ? 'borderless'
+        : this._popup
+          ? 'popup'
+          : attributes.decorations === false
+            ? 'borderless'
+            : 'normal',
       resizable: attributes.resizable !== false,
     };
+    if (this._keyPopup) options.level = 'popup';
     if (typeof attributes.x === 'number' && typeof attributes.y === 'number') {
       options.x = attributes.x / s;
       options.y = attributes.y / s;
@@ -294,9 +303,10 @@ export class CocoaWindow {
     // so a window that was hidden behind one, unmapped and mapped again
     // does not wait on an event that may already have been delivered.
     this._occluded = false;
-    // A popup must not take the keyboard from its owner; a toplevel's first
-    // map is the app coming up and takes it.
-    this._native.showWindow(this._h, !this._popup);
+    // A popup must not take the keyboard from its owner, unless taking it
+    // is what it is for; a toplevel's first map is the app coming up and
+    // takes it.
+    this._native.showWindow(this._h, !this._popup || this._keyPopup);
     this._refreshOrigin();
     this._refreshFrameInterval();
   }

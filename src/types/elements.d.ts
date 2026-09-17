@@ -12,7 +12,7 @@ import type {
   ScrollableNode,
   TextInputNode,
 } from './nodes.js';
-import type { AnchorOptions } from './components.js';
+import type { AnchorOptions, ScreenAnchorRect } from './components.js';
 import type {
   ChangeEvent,
   SelectionChangeEvent,
@@ -581,6 +581,16 @@ export interface PopupProps extends WindowProps {
    */
   grab?: boolean;
   /**
+   * Take the keyboard while the popup is up: its keys come to it whatever
+   * holds the focus, which is what a popover a tray click opened needs — a
+   * menu-bar app has no window of its own for keys to arrive at. A keyboard
+   * grab on X, taken and dropped with the map like `grab`. On macOS a window
+   * AppKit can make key, shown activating the app, as `NSPopover`'s own
+   * window is — decided when the popup is created, so it does not change on
+   * a mounted one. A grabbing popup on Wayland has the keyboard already.
+   */
+  grabKeyboard?: boolean;
+  /**
    * `true` (the default) keeps the window manager out entirely, which is
    * what makes a menu a menu — no frame, no repositioning, no taskbar entry.
    *
@@ -597,7 +607,9 @@ export interface PopupProps extends WindowProps {
   /**
    * Hang this popup off a node — `anchorRect`'s options plus the node to
    * measure, and the popup works out its own position from them, ignoring
-   * `x`/`y`.
+   * `x`/`y`. Or off a rect on the screen with no node behind it, `rect`
+   * instead of `to`: the item a tray click reports, placed against with the
+   * same flip and clamp.
    *
    * What this does that computing a rect in the application cannot: a popup
    * with an `'auto'` size only knows how big it is *inside* `realize()`,
@@ -622,12 +634,26 @@ export interface PopupProps extends WindowProps {
  *  that renders them) or the node itself. */
 export type AnchorTarget = DrawnNode | RefObject<DrawnNode | null> | null;
 
-export interface PopupAnchor extends Omit<AnchorOptions, 'alignTo'> {
+/** Where a popup hangs: a node, or a rect on the screen. */
+export type PopupAnchor = NodeAnchor | ScreenAnchor;
+
+export interface NodeAnchor extends Omit<AnchorOptions, 'alignTo'> {
   /** The node this popup hangs off. */
   to: AnchorTarget;
   /** Takes the alignment axis from another node — see
    *  {@link AnchorOptions.alignTo}. */
   alignTo?: AnchorTarget;
+  rect?: never;
+}
+
+export interface ScreenAnchor extends Omit<AnchorOptions, 'alignTo' | 'at'> {
+  /**
+   * A rect on the screen, in logical pixels — what `useTray`'s `onClick`
+   * reports where the platform knows the item's frame. `{x, y}` alone is a
+   * point. Nothing moves it but a new one, and it is never out of view.
+   */
+  rect: ScreenAnchorRect;
+  to?: never;
 }
 
 // --- drawn elements --------------------------------------------------------
