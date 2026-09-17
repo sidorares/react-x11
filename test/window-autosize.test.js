@@ -334,6 +334,41 @@ test('a size query is answered against the size the window ends up', async () =>
   await root.unmount();
 });
 
+test('one axis changing reaches a window that is resized whole', async () => {
+  // Cocoa's window has no ntk `setState` to send one axis with — it takes a
+  // whole size through `resize()` or nothing — and neither does the mock.
+  // A change to the numeric axis of a half-`'auto'` window was recorded and
+  // never sent: `_refit()` found the record already matching and returned
+  // (#585). Both halves, since the rule is per axis.
+  const app = createMockApp();
+  const root = await createRoot({ app });
+  const resizes = (wnd) => wnd.calls.filter(([name]) => name === 'resize');
+
+  root.render(h('window', { height: 100 }, box({ width: 200, height: 50 })));
+  await tick();
+  const tall = app.windows[0];
+  assert.deepStrictEqual([tall.width, tall.height], [200, 100]);
+  root.render(h('window', { height: 150 }, box({ width: 200, height: 50 })));
+  await tick();
+  assert.deepStrictEqual(
+    resizes(tall),
+    [['resize', 200, 150]],
+    'the auto width goes as it is',
+  );
+  assert.deepStrictEqual([tall.width, tall.height], [200, 150]);
+  root.render(null);
+
+  root.render(h('window', { width: 200 }, box({ width: 100, height: 50 })));
+  await tick();
+  const wide = app.windows[1];
+  assert.deepStrictEqual([wide.width, wide.height], [200, 50]);
+  root.render(h('window', { width: 300 }, box({ width: 100, height: 50 })));
+  await tick();
+  assert.deepStrictEqual(resizes(wide), [['resize', 300, 50]]);
+  assert.deepStrictEqual([wide.width, wide.height], [300, 50]);
+  await root.unmount();
+});
+
 test('an app changing one axis does not lock the other', async () => {
   // A one-axis configure comes back as a ConfigureNotify covering *both*, so
   // the record of what was asked for has to cover both too — otherwise the

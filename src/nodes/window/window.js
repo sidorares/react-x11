@@ -153,10 +153,11 @@ export class WindowNode extends Scrollable(Node) {
     // one flag everything reads (`_mapNow`, painting, a11y, anchoring).
     this._reactHidden = false;
     this.hidden = Boolean(props.hidden);
-    // A `<ThemeProvider>` written above this window at the root: where the
-    // window's palette comes from, and a third writer of `hidden`, since
-    // React hides the provider's node rather than the window under it
-    // (nodes/scope.js). Null for a nested window, whose parent is the answer.
+    // A `<ThemeProvider>` this window takes its palette from other than its
+    // parent — one written above it at the root, or one directly inside the
+    // window it is nested in, which handed it on — and a third writer of
+    // `hidden`, since React hides the provider's node rather than the window
+    // under it (nodes/scope.js). Null everywhere else.
     this._scope = null;
     // whether this is the tree's own top-level window rather than a nested
     // one or a popup — decided by realize(), read when it maps
@@ -826,8 +827,15 @@ export class WindowNode extends Scrollable(Node) {
           height: isAutoSize(geo.height) ? undefined : geo.height,
         });
       } else {
-        if (sizeChanged && !isAutoSize(geo.width) && !isAutoSize(geo.height)) {
-          wnd.resize?.(geo.width, geo.height);
+        // A window with no `setState` — Cocoa's — is resized whole or not at
+        // all, so an axis handed back to `'auto'` goes as the size recorded
+        // for it above: the one the window has, which this change leaves
+        // alone. Skipping the call for one `'auto'` axis dropped the other
+        // axis's change on the floor: `_refit()` then found the record
+        // already matching and sent nothing either (#585). With both axes
+        // `'auto'` there is no size to send, and `_refit()` works one out.
+        if (sizeChanged && !(isAutoSize(geo.width) && isAutoSize(geo.height))) {
+          wnd.resize?.(this._requestedSize.width, this._requestedSize.height);
         }
         if (movedByProps) {
           wnd.move?.(geo.x, geo.y);
