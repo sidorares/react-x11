@@ -4,6 +4,7 @@
 
 import React, { useRef, useState } from 'react';
 import { useAppOrNull } from '../appcontext.js';
+import { flattenStyle } from '../styles.js';
 import { Bezel, bezelNatural, useNativeControls } from './native.js';
 import { useTheme } from './theme.js';
 import { changeEvent } from './change.js';
@@ -21,7 +22,10 @@ import {
 const h = React.createElement;
 
 const SLIDER_THUMB = 16;
-const SLIDER_SLOP = (24 - SLIDER_THUMB) / 2;
+
+/** A length a slot's style gave, when it is a number of pixels. */
+const lengthIn = (style, key) =>
+  typeof style[key] === 'number' ? style[key] : undefined;
 
 /**
  * <Slider value min max step onChange disabled …boxProps> — draggable
@@ -34,6 +38,15 @@ const SLIDER_SLOP = (24 - SLIDER_THUMB) / 2;
  *
  * Keyboard: arrows step, Home/End jump to the ends, PageUp/PageDown move
  * by ten steps.
+ *
+ * `thumbStyle`, `trackStyle` and `fillStyle` are style slots over the three
+ * drawn parts (#593), each merged over the part's own default, so a designed
+ * slider — a flat accent thumb with a shadow and no ring on a hairline track —
+ * is the widget restyled rather than rebuilt from boxes. The thumb's `width`
+ * and `height` are read back: the pointer's travel is the track less one
+ * thumb, and the control is as tall as the taller of thumb and track. Any
+ * slot also chooses the drawn slider over the platform's own, whose pixels
+ * no style reaches.
  */
 export function Slider({
   value = 0,
@@ -46,11 +59,22 @@ export function Slider({
   height = 4,
   native,
   style,
+  thumbStyle,
+  trackStyle,
+  fillStyle,
   ...boxProps
 }) {
   const theme = useTheme();
   const app = useAppOrNull();
-  const nativeControls = useNativeControls(native);
+  const styled = Boolean(thumbStyle || trackStyle || fillStyle);
+  const nativeControls = useNativeControls(styled ? false : native);
+  // the sizes the drawing and the pointer math have to agree on
+  const thumb = flattenStyle(thumbStyle);
+  const thumbWidth = lengthIn(thumb, 'width') ?? SLIDER_THUMB;
+  const thumbHeight = lengthIn(thumb, 'height') ?? thumbWidth;
+  const trackHeight = lengthIn(flattenStyle(trackStyle), 'height') ?? height;
+  const controlHeight = Math.max(thumbHeight, trackHeight);
+  const slop = Math.max(0, (24 - controlHeight) / 2);
   const [focused, setFocused] = useState(false);
   const [dragging, setDragging] = useState(false);
   const trackRef = useRef(null);
@@ -88,11 +112,11 @@ export function Slider({
     if (!rect?.width) return value;
     // the thumb is centred on the value, so the usable travel is the track
     // minus one thumb width — otherwise min/max are unreachable at the ends
-    const travel = Math.max(1, rect.width - SLIDER_THUMB);
+    const travel = Math.max(1, rect.width - thumbWidth);
     const x =
       node.direction === 'rtl'
-        ? rect.x + rect.width - ev.x - SLIDER_THUMB / 2
-        : ev.x - rect.x - SLIDER_THUMB / 2;
+        ? rect.x + rect.width - ev.x - thumbWidth / 2
+        : ev.x - rect.x - thumbWidth / 2;
     return quantize(min + (Math.min(travel, Math.max(0, x)) / travel) * span);
   };
 
@@ -226,7 +250,7 @@ export function Slider({
       style: [
         disabled || { cursor: 'pointer' },
         {
-          height: SLIDER_THUMB,
+          height: controlHeight,
           minWidth: 0,
           justifyContent: 'center',
           // the control is as tall as its thumb and the track inside it sets
@@ -234,7 +258,7 @@ export function Slider({
           // WCAG 2.2 SC 2.5.8's 24 on the axis that is short, without moving
           // a pixel of the drawing — a taller slider would misalign every row
           // it sits in.
-          hitSlop: { top: SLIDER_SLOP, bottom: SLIDER_SLOP },
+          hitSlop: { top: slop, bottom: slop },
         },
         style,
       ],
@@ -243,14 +267,16 @@ export function Slider({
     h(
       'box',
       {
-        style: {
-          height: height,
-          borderRadius: height / 2,
-          backgroundColor: theme.track,
-          flexDirection: 'row',
-          alignItems: 'center',
-          pointerEvents: 'none',
-        },
+        style: [
+          {
+            height: height,
+            borderRadius: height / 2,
+            backgroundColor: theme.track,
+          },
+          trackStyle,
+          // the parts of the track the fill and the pointer depend on
+          { flexDirection: 'row', alignItems: 'center', pointerEvents: 'none' },
+        ],
       },
       // flex ratios, not a percentage width: a percentage child resolves
       // against the space available while the track is still being
@@ -258,14 +284,15 @@ export function Slider({
       // at value = max the control grew, which moved the handle, which
       // changed the value, and a drag turned into an oscillation
       h('box', {
-        style: {
-          flexGrow: fraction,
-          flexShrink: 0,
-          flexBasis: 0,
-          height: height,
-          borderRadius: height / 2,
-          backgroundColor: disabled ? theme.textMuted : theme.accent,
-        },
+        style: [
+          {
+            height: trackHeight,
+            borderRadius: trackHeight / 2,
+            backgroundColor: disabled ? theme.textMuted : theme.accent,
+          },
+          fillStyle,
+          { flexGrow: fraction, flexShrink: 0, flexBasis: 0 },
+        ],
       }),
       h('box', {
         style: { flexGrow: 1 - fraction, flexShrink: 0, flexBasis: 0 },
@@ -276,22 +303,28 @@ export function Slider({
     // mirror on their own — a `row` runs the other way under `direction:
     // 'rtl'` — and these are what keep the thumb on top of the join.
     h('box', {
-      style: {
-        position: 'absolute',
-        start: `${fraction * 100}%`,
-        marginStart: -SLIDER_THUMB * fraction,
-        width: SLIDER_THUMB,
-        height: SLIDER_THUMB,
-        borderRadius: SLIDER_THUMB / 2,
-        borderWidth: 1,
-        borderColor: disabled
-          ? theme.border
-          : focused || dragging
-            ? theme.accentHover
-            : theme.border,
-        backgroundColor: disabled ? theme.surfaceHover : theme.surface,
-        pointerEvents: 'none',
-      },
+      style: [
+        {
+          width: thumbWidth,
+          height: thumbHeight,
+          borderRadius: Math.min(thumbWidth, thumbHeight) / 2,
+          borderWidth: 1,
+          borderColor: disabled
+            ? theme.border
+            : focused || dragging
+              ? theme.accentHover
+              : theme.border,
+          backgroundColor: disabled ? theme.surfaceHover : theme.surface,
+        },
+        thumbStyle,
+        // where it is: the value's place on the travel the math uses
+        {
+          position: 'absolute',
+          start: `${fraction * 100}%`,
+          marginStart: -thumbWidth * fraction,
+          pointerEvents: 'none',
+        },
+      ],
     }),
   );
 }
