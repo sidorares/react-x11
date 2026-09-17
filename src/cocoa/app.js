@@ -40,6 +40,7 @@ import { CocoaFilePanels } from './filepanels.js';
 import { CocoaFontManager } from './fonts.js';
 import { releaseImageUpload } from './context2d.js';
 import { CocoaSurface } from './surface.js';
+import { CocoaSymbols } from './symbols.js';
 import { CocoaWindow } from './window.js';
 import { decodeKey, modifierMask } from './keymap.js';
 import { loadNative } from './native.js';
@@ -200,6 +201,8 @@ export class CocoaApp {
     // real bridge on the machine — the manager's default loads it only when
     // it is built standalone
     this.fonts = new CocoaFontManager(native);
+    // `<image src={{ symbol }}>`'s names are SF Symbols here (src/symbols.js)
+    this.symbols = new CocoaSymbols(native);
 
     // Native open/save panels (src/cocoa/filepanels.js). Present exactly
     // when the bridge has them (>= 0.5), and its presence is what puts the

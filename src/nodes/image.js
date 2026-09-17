@@ -11,6 +11,7 @@ import {
   isDirectImageSource,
   isPathImageSource,
   isRawImageSource,
+  isSymbolImageSource,
   releaseImageSource,
   toLoadablePath,
   validateImageProps,
@@ -20,6 +21,7 @@ import {
 // is a *load-time* SyntaxError, which would take the renderer down rather
 // than the one feature that needs it.
 import * as ntk from 'ntk';
+import { symbolWeight, symbolsFor, warnOnce } from '../symbols.js';
 import { intrinsicSize } from './layout.js';
 import { Node } from './node.js';
 import { DEV } from './util.js';
@@ -42,6 +44,8 @@ export class ImageNode extends Node {
     this._ownedImage = null;
     /** PictureSource/DrawableSource, when the source is server-side */
     this._serverSource = null;
+    /** `{ symbol, … }`, when the source is a name the platform draws */
+    this._symbol = null;
     // Resolution waits for the first layout/paint: the constructor runs in
     // the render phase, which React may discard, and resolving here would
     // start file reads and take cache holds nothing would ever release.
@@ -67,6 +71,25 @@ export class ImageNode extends Node {
   measureContent(constraints) {
     this._ensureSource();
     const s = this.scale;
+    if (this._symbol) {
+      const name = this._symbol.symbol;
+      const size = symbolsFor(this.app).size(name, this._symbolOptions());
+      // A name this desktop does not have takes no room and draws nothing,
+      // which is right for an app that runs on both and wrong for a typo —
+      // development tells the two apart for it.
+      if (!size) {
+        warnOnce(
+          `react-x11: <image src={{ symbol: ${JSON.stringify(name)} }}> is ` +
+            'not a symbol this desktop has, so it takes no room and draws ' +
+            'nothing. SF Symbols are the names on macOS, and the icon ' +
+            "theme's names, like 'audio-volume-high', elsewhere.",
+        );
+      }
+      return intrinsicSize(
+        { width: (size?.width ?? 0) * s, height: (size?.height ?? 0) * s },
+        constraints,
+      );
+    }
     return intrinsicSize(
       {
         width: (this.image?.width ?? 0) * s,
@@ -96,6 +119,12 @@ export class ImageNode extends Node {
       return;
     }
     if (src == null) return;
+    if (isSymbolImageSource(src)) {
+      // nothing to load: the platform draws the name at paint, which is also
+      // when the text colour it is drawn in is known
+      this._symbol = src;
+      return;
+    }
     if (isDirectImageSource(src)) {
       // the caller's object — its upload cache is the dedupe, and it is
       // never destroyed here
@@ -223,7 +252,27 @@ export class ImageNode extends Node {
       this._serverSource.destroy?.();
       this._serverSource = null;
     }
+    this._symbol = null;
     this.image = null;
+  }
+
+  /**
+   * How a symbol is drawn beside the text around it: at that text's size and
+   * weight unless the source says otherwise — what SF Symbols are designed
+   * for, and what lets a toolbar of them follow a theme's `fontSize` — in its
+   * colour, which is `currentColor` for an `<svg>` too. Sizes are logical.
+   */
+  _symbolOptions() {
+    const text = this.resolvedTextStyle();
+    const src = this._symbol;
+    return {
+      pointSize: text.size / this.scale,
+      weight: symbolWeight(src.weight ?? text.weight),
+      scale: src.scale,
+      variableValue: src.variableValue,
+      displayScale: this.scale,
+      color: text.color,
+    };
   }
 
   applyProps(newProps, oldProps) {
@@ -234,12 +283,16 @@ export class ImageNode extends Node {
     super.applyProps(newProps, oldProps);
     if (!sourceChanged) return;
     const prev = this.image;
+    const wasSymbol = this._symbol;
     this._releaseSource();
     this._sourceDirty = false;
     this._resolveSource();
     // paintChanged already claimed this node's box through super; only a
-    // new intrinsic size needs more than that
+    // new intrinsic size needs more than that — and a symbol's size is the
+    // platform's to say, so any change to one is measured again
     if (
+      wasSymbol ||
+      this._symbol ||
       (prev?.width ?? 0) !== (this.image?.width ?? 0) ||
       (prev?.height ?? 0) !== (this.image?.height ?? 0)
     ) {
@@ -254,6 +307,15 @@ export class ImageNode extends Node {
 
   paintContent(ctx) {
     this._ensureSource();
+    if (this._symbol) {
+      symbolsFor(this.app).draw(
+        ctx,
+        this._symbol.symbol,
+        this.contentBox(),
+        this._symbolOptions(),
+      );
+      return;
+    }
     if (!this.image) return;
     const content = this.contentBox();
     ctx.drawImage(

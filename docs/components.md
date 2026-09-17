@@ -335,7 +335,11 @@ a widget set that starts shipping them has taken on a design system.
 That is also the answer to "why is X missing": if X names a thing rather
 than an action the control affords, it is not going to be here. Bringing
 your own set is expected and supported — a `<svg>` or a `<canvas>` goes
-anywhere an `<Icon>` does, and `ContextMenu`'s `icon` takes either.
+anywhere an `<Icon>` does, and `ContextMenu`'s `icon` takes either. The
+platform's own set is there too:
+[`<image src={{ symbol }}>`](elements.md#src-symbol---the-platforms-own-icons)
+draws an SF Symbol on macOS and an icon from the desktop's icon theme
+elsewhere, in the text colour.
 
 The **drawings are not themable** for the same reason: the geometry is the
 widget set's vocabulary, and an application that wants a different chevron

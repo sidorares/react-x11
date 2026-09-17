@@ -1046,6 +1046,29 @@ export class CocoaContext2D {
     this._dirty();
   }
 
+  /**
+   * An SF Symbol by name, fitted into the rect and centred, in the fill
+   * colour — `ctxDrawSymbol`, `@windowkit/appkit` 0.12.0. Answers false,
+   * drawing nothing, for a name the system does not know and on a bridge
+   * without the verb. `options` are the bridge's: `pointSize`, `weight`,
+   * `scale`, `variableValue`.
+   */
+  drawSymbol(name, x, y, width, height, options) {
+    if (typeof this._native.ctxDrawSymbol !== 'function') return false;
+    this._applyFill();
+    const drawn = this._native.ctxDrawSymbol(
+      this._s(),
+      name,
+      x,
+      y,
+      width,
+      height,
+      options,
+    );
+    if (drawn) this._dirty();
+    return drawn === true;
+  }
+
   drawImage(image, ...args) {
     const src = this._sourceHandle(image);
     if (!src) return;

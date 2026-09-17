@@ -1755,7 +1755,7 @@ window behind it rather than swallowing it.
 
 | prop       |                                                                                        |
 | ---------- | -------------------------------------------------------------------------------------- |
-| `src`      | client-side pixels, in any of the four forms below                                     |
+| `src`      | client-side pixels, in any of the four forms below, or a symbol by name                |
 | `picture`  | `{ id, width, height }` — an existing server-side Picture, composited as-is            |
 | `drawable` | `{ id, width, height, depth? }` — an existing Pixmap/Window, composited as-is          |
 | `cacheKey` | the source's identity, when `src` is re-derived per render                             |
@@ -1806,6 +1806,50 @@ composited, scaled, from there — so the cost is the same one upload. The
 element frees it with an `Image` it decoded; for an `Image` of yours it is
 freed when the `Image` is garbage-collected, since ntk's `destroy()` frees
 only its X copies.
+
+### `src={{ symbol }}` — the platform's own icons
+
+```jsx
+<box style={{ flexDirection: 'row', gap: 6, color: theme.textMuted }}>
+  <image src={{ symbol: 'speaker.wave.3.fill', variableValue: volume }} />
+  <text>Volume</text>
+</box>
+```
+
+A name instead of pixels: the icon the platform draws for it, in the **text
+colour** — the colour a `<text>` beside it would be drawn in, which is what
+`currentColor` is to an `<svg>`. The names are the ones `useTray`'s `icon`
+and a menu item's `iconName` take:
+
+| backend       | names                                                                                                            |
+| ------------- | ---------------------------------------------------------------------------------------------------------------- |
+| macOS         | SF Symbols, like `speaker.wave.3.fill`, through `@windowkit/appkit`                                              |
+| X11 / Wayland | the user's freedesktop icon theme — the settings daemon's, else Adwaita, then hicolor — like `audio-volume-high` |
+
+A symbol is **sized like the text around it**. An SF Symbol takes the
+`fontSize` and `fontWeight` it inherits as its point size and weight, the
+way the symbols are designed to sit in a line of text; an icon theme is asked
+for the size that text calls for — 16 beside 14px text — and its icons are
+square. Style the element a `width` and `height` of its own and the symbol is
+fitted into that box, centred. The source can say otherwise:
+
+| key             |                                                                                |
+| --------------- | ------------------------------------------------------------------------------ |
+| `symbol`        | the name                                                                       |
+| `weight`        | what `fontWeight` takes; defaults to the text's. SF Symbols only               |
+| `scale`         | `'small'`, `'medium'` (default) or `'large'`, beside the text. SF Symbols only |
+| `variableValue` | 0 to 1, how much of a variable symbol shows. SF Symbols, macOS 13 and later    |
+
+On Linux a `-symbolic` icon is preferred where the theme has one, and it is
+the one that takes the text colour — the monochrome set GTK tints the same
+way. An icon the theme only has in its own colours is shown as it is. The
+lookup is the Icon Theme Specification's, read when the first symbol is
+drawn.
+
+**A name this desktop does not have takes no room and draws nothing**, and
+says so once in development. An app that runs on both systems picks its
+names by platform, as it does for the tray: the two icon sets do not share
+their names.
 
 ### `cacheKey` — when the buffer is new but the picture is not
 
