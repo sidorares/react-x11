@@ -1530,11 +1530,10 @@ the editor does.
 The same placement against a rect on the **screen**: the item a tray click
 reports, or where the pointer was. `rect` and the answer are logical screen
 pixels, `{x, y}` alone is a point, and the popup is kept on the monitor the
-rect is on. With no node to ask, `options.scale` is the display's (default
-
-1. and `options.direction` decides what `'start'` and `'end'` mean. A
-   `<popup>` does this itself with
-   [`anchor={{ rect }}`](elements.md#a-popover-under-a-tray-item).
+rect is on. With no node to ask, `options.scale` is the display's — it
+defaults to 1 — and `options.direction` decides what `'start'` and `'end'`
+mean. A `<popup>` does this itself with
+[`anchor={{ rect }}`](elements.md#a-popover-under-a-tray-item).
 
 **A popup that has to measure itself first anchors from the other side.**
 Rows sized to their labels, a menu as wide as its widest item: the size is
