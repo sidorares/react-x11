@@ -154,6 +154,25 @@ function insideGlArea(node) {
   return false;
 }
 
+const faded = (style) => style?.opacity !== undefined && !(style.opacity >= 1);
+
+/**
+ * A box whose `opacity` is below 1, now or on its way there, is a group the
+ * bitmap composites (`NodePaint._paintGroup`) — the box and everything in it
+ * drawn once and faded as one. On a layer of its own the box and its content
+ * would be separate layers under the one opacity, fading one over the other,
+ * and an opacity the frame clock is still animating would never reach the
+ * layer at all.
+ */
+function fadesAsGroup(node) {
+  return (
+    faded(node.style) ||
+    faded(node._targetStyle) ||
+    Boolean(node._anim?.has('opacity')) ||
+    Boolean(node._loops?.some((loop) => loop.prop === 'opacity'))
+  );
+}
+
 /**
  * Can this node be a property box on a layer at all — the static half of
  * the answer, the same whatever the scene around it does: a plain box by
@@ -163,6 +182,7 @@ function insideGlArea(node) {
 function promotableNode(node) {
   if (node.destroyed || !plainBox(node)) return false;
   if (insideGlArea(node)) return false;
+  if (fadesAsGroup(node)) return false;
   if (!stylePaintsPlain(node, node._targetStyle ?? node.style)) return false;
   if (node.isScroller?.()) return false;
   return !paintsOutline(node);

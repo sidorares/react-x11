@@ -247,6 +247,12 @@ const PAINT_PROPS = new Set([
   'outlineWidth',
   'outlineColor',
   'outlineOffset',
+  // How opaque the node is **with everything in it**: the subtree is drawn
+  // once and composited at this alpha (`NodePaint._paintGroup`), so a card, its
+  // border, its icon and its text fade as one — the thing a colour's own
+  // alpha cannot do for more than one flat fill (#587). A number from 0 to 1,
+  // which transitions and loops like any other.
+  'opacity',
 ]);
 
 // Text style props. All affect measurement except color.
@@ -746,6 +752,24 @@ const GRID_VALUES = new Set([...GRID_CONTAINER_PROPS, ...GRID_ITEM_PROPS]);
  * grammar is concerned), so this checks the shape and never the colours.
  */
 function validateValue(key, value, where) {
+  if (key === 'opacity') {
+    // unset, the way a conditional writes it: `opacity: dim ? 0.5 : undefined`
+    if (value == null) return;
+    // A string that is not a token is the one mistake worth stopping for:
+    // `'50%'` or `'0.5'` would otherwise compare as not-below-1 and paint
+    // the node fully opaque, silently. A number outside 0..1 is clamped
+    // where it is painted, as CSS clamps it.
+    if (
+      !(typeof value === 'number' && !Number.isNaN(value)) &&
+      !isToken(value)
+    ) {
+      throw new Error(
+        `react-x11: invalid opacity ${JSON.stringify(value)} in ${where} ` +
+          '(expected a number from 0 to 1 — opacity: 0.5 is half — or a $token)',
+      );
+    }
+    return;
+  }
   const grid = GRID_VALUES.has(key);
   if (!grid && key !== 'backgroundImage' && key !== 'boxShadow') return;
   try {

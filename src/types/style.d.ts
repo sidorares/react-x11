@@ -305,6 +305,14 @@ export interface PaintStyle {
   outlineColor?: Color;
   /** The gap between the border box and the ring. Default 1. */
   outlineOffset?: number;
+  /**
+   * How opaque the node is **with everything inside it**, from 0 to 1: the
+   * subtree is drawn once and composited at this alpha, so a card, its
+   * border, its icon and its text fade as one. A paint property — legal in a
+   * state block, and it transitions and loops. `0` draws nothing and is
+   * still hit; values outside 0..1 are clamped.
+   */
+  opacity?: number;
 }
 
 /**

@@ -118,6 +118,10 @@ content. `flex: 'auto'` grows and shrinks from the content's own size, and
   surrounds. A focusable node draws one on `:focus-visible` without being
   asked; `outlineWidth: 0` opts out
   ([styling.md](styling.md#the-focus-ring))
+- `opacity` — how opaque the node is **with everything inside it**, from 0
+  to 1: the subtree is drawn once and composited at that alpha, so a card, its
+  icon and its text fade as one. `0` draws nothing and is still hit
+  ([styling.md](styling.md#opacity))
 - `transition` — `120`, or `{ backgroundColor: 120, left: 200 }`: how long a
   change to that property takes ([styling.md](styling.md#transitions))
 - any value may be a **theme token**: `'$panel'` resolves against the nearest
