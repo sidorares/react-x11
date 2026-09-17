@@ -205,6 +205,11 @@ const s = createStyles({
     start: '-40%',
     animation: { start: { to: '100%', duration: 1100 } },
   },
+  // issue #589: a phase — the loop's own time starts early, or late
+  staggered: {
+    opacity: 0.3,
+    animation: { opacity: { to: 1, duration: 500, delay: -160 } },
+  },
   // held against the nearest scroll pane's edges by its insets
   sectionHeader: { position: 'sticky', top: 0 },
   stickyColumn: { position: 'sticky', start: 0, bottom: '10%' },
@@ -351,6 +356,13 @@ createStyles({ bad: { ':focus-visible': { hitSlop: 4 } } });
 
 // @ts-expect-error — a side width is layout, so it may not go in a state block
 createStyles({ bad: { ':hover': { borderLeftWidth: 3 } } });
+
+createStyles({
+  bad: {
+    // @ts-expect-error — a loop's delay is a number of ms, not a CSS time
+    animation: { left: { to: 1, duration: 9, delay: '1s' } },
+  },
+});
 
 // @ts-expect-error — 'rtol' is not a direction
 createStyles({ bad: { direction: 'rtol' } });

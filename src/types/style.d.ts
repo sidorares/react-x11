@@ -444,6 +444,14 @@ export interface AnimationSpec {
   easing?: Easing;
   /** Turn around at each end instead of wrapping back to `from`. */
   alternate?: boolean;
+  /**
+   * When the loop's own time starts, in ms — CSS's `animation-delay`. A
+   * positive delay holds `from` that long before the first crossing; a
+   * negative one starts the loop that far in. Default `0`. What staggers
+   * loops of one duration: three dots at `0`, `-150` and `-300` never move
+   * together.
+   */
+  delay?: number;
 }
 
 /**
