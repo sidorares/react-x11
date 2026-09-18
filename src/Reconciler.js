@@ -641,11 +641,18 @@ const isNtkApp = (v) =>
  */
 function resolveBackend(options) {
   const asked = options.backend ?? process.env.REACT_X11_BACKEND ?? 'auto';
-  if (asked === 'x11' || asked === 'cocoa' || asked === 'wayland') return asked;
+  if (
+    asked === 'x11' ||
+    asked === 'cocoa' ||
+    asked === 'wayland' ||
+    asked === 'win32'
+  ) {
+    return asked;
+  }
   if (asked !== 'auto') {
     throw new Error(
       `react-x11: unknown backend ${JSON.stringify(asked)} — expected ` +
-        "'x11', 'cocoa', 'wayland' or 'auto'.",
+        "'x11', 'cocoa', 'wayland', 'win32' or 'auto'.",
     );
   }
   // Naming an X endpoint is choosing X11: a `display` or a `stream` (the
@@ -655,7 +662,13 @@ function resolveBackend(options) {
   if (options.display !== undefined || options.stream !== undefined) {
     return 'x11';
   }
-  return process.platform === 'darwin' ? 'cocoa' : 'x11';
+  if (process.platform === 'darwin') return 'cocoa';
+  // Windows has no X server to fall back to in the ordinary case, so 'auto'
+  // reaches for the native backend the way it does on a mac — and falls back
+  // to X11 below if the bridge is not installed, which is what keeps a Cygwin
+  // or WSLg setup with DISPLAY set working.
+  if (process.platform === 'win32') return 'win32';
+  return 'x11';
 }
 
 // What a root that opens its own connection forwards to ntk. `stream` is
@@ -780,6 +793,8 @@ export async function createRoot(options = {}) {
     );
   const cocoaAsked =
     rest.backend === 'cocoa' || process.env.REACT_X11_BACKEND === 'cocoa';
+  const win32Asked =
+    rest.backend === 'win32' || process.env.REACT_X11_BACKEND === 'win32';
   const connecting = !owned
     ? Promise.resolve(borrowed)
     : backend === 'wayland'
@@ -791,25 +806,44 @@ export async function createRoot(options = {}) {
         import('./wayland/app.js').then(({ createWaylandApp }) =>
           createWaylandApp(rest),
         )
-      : backend === 'cocoa'
-        ? import('./cocoa/app.js')
-            .then(({ createCocoaApp }) => createCocoaApp(rest))
+      : backend === 'win32'
+        ? import('./win32/app.js')
+            .then(({ createWin32App }) => createWin32App(rest))
             .catch((err) => {
-              // Asked for by name, the bridge is required and its absence is
-              // the error (it says how to install). Reached by 'auto', a mac
-              // without it falls back to X11 so an XQuartz setup keeps
-              // working — said once, because a silent fallback would look
-              // like the native backend being broken rather than absent.
-              if (cocoaAsked) throw err;
+              // Same bargain as cocoa's below: asked for by name the bridge is
+              // required and its absence is the error, reached by 'auto' a
+              // machine without it falls back to X11 so a WSLg or Cygwin setup
+              // with DISPLAY set keeps working — said once, because a silent
+              // fallback reads as the native backend being broken rather than
+              // absent.
+              if (win32Asked) throw err;
               if (process.env.NODE_ENV !== 'production') {
                 console.warn(
-                  'react-x11: no @windowkit/appkit bridge — falling back to the ' +
+                  'react-x11: no @windowkit/win32 bridge — falling back to the ' +
                     `X11 backend. (${err.message.split('\n')[0]})`,
                 );
               }
               return connectX11();
             })
-        : connectX11();
+        : backend === 'cocoa'
+          ? import('./cocoa/app.js')
+              .then(({ createCocoaApp }) => createCocoaApp(rest))
+              .catch((err) => {
+                // Asked for by name, the bridge is required and its absence is
+                // the error (it says how to install). Reached by 'auto', a mac
+                // without it falls back to X11 so an XQuartz setup keeps
+                // working — said once, because a silent fallback would look
+                // like the native backend being broken rather than absent.
+                if (cocoaAsked) throw err;
+                if (process.env.NODE_ENV !== 'production') {
+                  console.warn(
+                    'react-x11: no @windowkit/appkit bridge — falling back to the ' +
+                      `X11 backend. (${err.message.split('\n')[0]})`,
+                  );
+                }
+                return connectX11();
+              })
+          : connectX11();
   const layout = loadLayout();
   const integrations = loadIntegrations(); // null when there is nothing to install
   const [app] = await Promise.all([connecting, layout, integrations]);

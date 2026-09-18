@@ -1,0 +1,290 @@
+// An ntk-window-shaped object over an HWND — the contract WindowNode realizes
+// against (src/testing/mock-app.js is the reference shape; this file is that
+// shape with DirectComposition behind it).
+//
+// Units: everything crossing this object's boundary is device pixels, like an
+// X window. The window is per-monitor-v2 on the bridge's UI thread, so the
+// HWND's own client area is already in device pixels and there is no divide.
+//
+// The frame is taken through `presentFrame` rather than through `getContext` +
+// `present`, and that is the one structural difference from the Cocoa window.
+// A DirectComposition surface is not a persistent bitmap that gets flipped: it
+// hands back a drawing context per `BeginDraw`, valid until `EndDraw`, and
+// every pixel inside the rect is repainted while every pixel outside it is
+// kept. So the frame has to be *driven* from the damage list rather than
+// painted into a surface that was already there — which `presentFrame` is
+// exactly the hook for, and which makes one BeginDraw per damage rect fall out
+// for free.
+import { BackendContext2D } from '../backend/context2d.js';
+
+export class Win32Window {
+  constructor(app, attributes = {}) {
+    this.app = app;
+    this._native = app._native;
+    this.attributes = attributes;
+
+    this.width = Math.max(1, Math.round(attributes.width ?? 800));
+    this.height = Math.max(1, Math.round(attributes.height ?? 600));
+    this.x = attributes.x ?? 0;
+    this.y = attributes.y ?? 0;
+    this.title = attributes.title ?? '';
+    this.mapped = false;
+    this.destroyed = false;
+    this.parent = null;
+    this.cursor = null;
+
+    // The handle the verb table draws through, non-zero only inside a
+    // BeginDraw/EndDraw pair, and the generation that tells BackendContext2D
+    // its sticky state has to be pushed into a fresh one.
+    this._surface = 0;
+    this._gen = 0;
+    this._ctx = null;
+
+    this._handlers = {};
+    this._ready = false;
+    this._composed = false;
+    this._pendingFrames = [];
+    this._dirty = false;
+
+    this.id = this._native.createWindow({
+      title: this.title,
+      width: this.width,
+      height: this.height,
+    });
+    app._register(this);
+  }
+
+  // --- events --------------------------------------------------------------
+
+  on(name, fn) {
+    (this._handlers[name] ??= []).push(fn);
+  }
+
+  emit(name, ev) {
+    for (const fn of this._handlers[name] ?? []) fn(ev);
+  }
+
+  /**
+   * The bridge says the HWND exists. Composition is set up here and not at
+   * construction because there is no HWND to target until now — the command
+   * queue is one way and a window is created asynchronously.
+   *
+   * Then `draw`, which is the frame clock's "the backing store is invalid,
+   * repaint everything" and is what the window node listens to. It is not
+   * optional: the tree mounts, lays out and paints in the same turn the window
+   * is asked for, so the first frames land before there is anything to paint
+   * into and are dropped. Without this the window stays whatever
+   * WS_EX_NOREDIRECTIONBITMAP shows when nothing was ever committed, which is
+   * black, and nothing else would ever ask again.
+   */
+  _onReady() {
+    this._ready = true;
+    if (!this._composed) {
+      this._native.compose(this.id);
+      this._composed = true;
+    }
+    if (this.mapped) this._native.show(this.id, true);
+    this.emit('draw', {});
+  }
+
+  // --- geometry ------------------------------------------------------------
+
+  map() {
+    this.mapped = true;
+    if (this._ready) this._native.show(this.id, true);
+  }
+
+  unmap() {
+    this.mapped = false;
+    if (this._ready) this._native.show(this.id, false);
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this._native.destroyWindow?.(this.id);
+    this.app._unregister(this);
+  }
+
+  resize(width, height) {
+    this.width = Math.max(1, Math.round(width));
+    this.height = Math.max(1, Math.round(height));
+    this._native.resizeWindow?.(this.id, this.width, this.height);
+    if (this._composed) this._native.resize(this.id, this.width, this.height);
+  }
+
+  move(x, y) {
+    this.x = x;
+    this.y = y;
+    this._native.moveWindow?.(this.id, x, y);
+  }
+
+  setTitle(title) {
+    this.title = title;
+    this._native.setTitle?.(this.id, String(title ?? ''));
+  }
+
+  /** The size limits Windows asks for synchronously in WM_GETMINMAXINFO, so
+   * they are pushed ahead rather than answered on demand — docs/windows.md
+   * "What Windows asks synchronously, and JS can know in advance". */
+  setSizeHints(hints = {}) {
+    this._native.setSizeHints?.(this.id, hints);
+  }
+
+  // Window identity on Windows is the AppUserModelID, which decides taskbar
+  // grouping and what pinning pins. Not bound yet; the X11 names are accepted
+  // and dropped rather than throwing, because every one of these is optional
+  // decoration and an app that sets them should not fail to open a window.
+  setClass() {}
+  setWindowType() {}
+  setActions() {}
+  setTransientFor() {}
+  setAlwaysOnTop() {}
+  setProperty() {
+    return Promise.resolve(this);
+  }
+  deleteProperty() {
+    return Promise.resolve(this);
+  }
+
+  setWmState() {
+    // Resolves false: nothing was applied, which is the honest answer and the
+    // one `useWindowState()` reads. A latched true here would tell an app its
+    // request landed.
+    return Promise.resolve(false);
+  }
+
+  getWmStates() {
+    return Promise.resolve([]);
+  }
+
+  setCursor(name) {
+    this.cursor = name;
+    this._native.setCursor?.(this.id, name);
+  }
+
+  // No cross-application pointer grab exists on Windows: SetCapture holds only
+  // while a button is down. `<popup grab>` dismissal watches activation
+  // instead (docs/windows.md §"Windowing semantics"), which is not built yet —
+  // so these accept and do nothing rather than pretending to have grabbed.
+  grabPointer(options, cb) {
+    cb?.(null, 0);
+  }
+  ungrabPointer() {}
+  grabKeyboard(options, cb) {
+    cb?.(null, 0);
+  }
+  ungrabKeyboard() {}
+
+  selectXI2() {
+    return Promise.resolve(false);
+  }
+
+  // --- painting ------------------------------------------------------------
+
+  getContext() {
+    this._ctx ??= new BackendContext2D(
+      this._native,
+      () => this._surface,
+      () => this._gen,
+    );
+    return this._ctx;
+  }
+
+  /**
+   * The frame. One `BeginDraw` per damage rect, which is the X11 damage model
+   * verbatim — every pixel inside the rect is repainted, every pixel outside
+   * it is kept by DirectComposition — and one `Commit` for the lot, which is
+   * the atomic frame the node model relies on.
+   *
+   * The generation is bumped per rect because each BeginDraw hands back a
+   * *different* Direct2D context with none of the previous one's state: the
+   * context wrapper reads the bump and pushes its sticky state back in.
+   */
+  presentFrame(node, damage) {
+    if (!this._composed || this.destroyed) return;
+    const ctx = this.getContext();
+    const rects = damage ?? [null];
+    let painted = false;
+    for (const rect of rects) {
+      const r = rect ?? { x: 0, y: 0, width: this.width, height: this.height };
+      const w = Math.min(this.width - Math.max(0, r.x), Math.ceil(r.width));
+      const h = Math.min(this.height - Math.max(0, r.y), Math.ceil(r.height));
+      if (!(w > 0 && h > 0)) continue;
+      const handle = this._native.beginDraw(
+        this.id,
+        Math.max(0, Math.floor(r.x)),
+        Math.max(0, Math.floor(r.y)),
+        w,
+        h,
+      );
+      if (!handle) continue;
+      this._surface = handle;
+      this._gen++;
+      try {
+        node._paintRegion(ctx, rect, this.width, this.height);
+        painted = true;
+      } finally {
+        this._surface = 0;
+        this._native.endDraw(this.id);
+      }
+    }
+    if (painted) this._native.commit();
+  }
+
+  /**
+   * The scroll-blit fast path: `IDCompositionSurface::Scroll`, which moves the
+   * surviving band inside the surface on the GPU. The exposed strip is
+   * repainted by the frame's own damage, exactly as on X11.
+   */
+  scrollRegion(rect, dx, dy) {
+    if (!this._composed || this.destroyed) return false;
+    return this._native.scrollRegion(
+      this.id,
+      Math.round(rect.x),
+      Math.round(rect.y),
+      Math.round(rect.width),
+      Math.round(rect.height),
+      Math.round(dx),
+      Math.round(dy),
+    );
+  }
+
+  /** DirectComposition does not hold a frame back the way an X server's fence
+   * or a WindowServer's buffer does: Commit is asynchronous and the surface
+   * retains its own pixels. So there is never a frame in flight to wait for. */
+  frameInFlight() {
+    return false;
+  }
+
+  requestAnimationFrame(cb) {
+    return this.app._requestFrame(cb, this);
+  }
+
+  present() {
+    // Nothing to flip: presentFrame committed. Kept because the frame loop
+    // calls it on every window it paced.
+  }
+
+  /** A DirectComposition surface is write-only, so a window's pixels are not
+   * readable the way an IOSurface's or an X drawable's are. docs/windows.md
+   * answers this with PrintWindow once the commit has completed; not bound
+   * yet, and it says so rather than answering with something wrong. */
+  snapshot() {
+    return Promise.reject(
+      new Error(
+        'react-x11: the win32 backend cannot snapshot a window yet — a ' +
+          'DirectComposition surface cannot be read back, and the PrintWindow ' +
+          'path is not built. Draw into an offscreen surface and read that.',
+      ),
+    );
+  }
+
+  /** How many damage rects a frame may carry before it collapses to their
+   * box. Each is a BeginDraw with a fixed cost, so the right number is a fact
+   * about DirectComposition rather than a choice — 16 is Cocoa's, kept until
+   * it is measured here. */
+  get damageRectCap() {
+    return 16;
+  }
+}
