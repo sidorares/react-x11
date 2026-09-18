@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.16.1](https://github.com/sidorares/react-x11/compare/v2.16.0...v2.16.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* **accelerators:** a shortcut in a tray popover binds to the popup that has the keyboard ([#619](https://github.com/sidorares/react-x11/issues/619)) ([7a5dc8d](https://github.com/sidorares/react-x11/commit/7a5dc8dcc4109696f63d78178d752eac065e953c)), closes [#616](https://github.com/sidorares/react-x11/issues/616)
+* **anchor:** a tray popover opens on the display its item is on — the monitor came from one corner ([#624](https://github.com/sidorares/react-x11/issues/624)) ([26b1bb5](https://github.com/sidorares/react-x11/commit/26b1bb515f40ad97b93b33c96f189a034f1f410a))
+* **cocoa:** the screen layout is re-read after startup, and the primary screen comes through ([#626](https://github.com/sidorares/react-x11/issues/626)) ([4e63c93](https://github.com/sidorares/react-x11/commit/4e63c93e462a6458a4cb7fc40753671642cb57f0))
+* **keysyms:** charOf spells the legacy keysym blocks, so a non-Latin layout types at all ([#622](https://github.com/sidorares/react-x11/issues/622)) ([b00dd6f](https://github.com/sidorares/react-x11/commit/b00dd6fb77fdd8b1cf805ea5598748842e82f9b2)), closes [#574](https://github.com/sidorares/react-x11/issues/574)
+* **wayland:** AltGr reaches level 3 again — `useModMapMods` says which of a key's symbols may name a virtual modifier ([#623](https://github.com/sidorares/react-x11/issues/623)) ([d26e8e6](https://github.com/sidorares/react-x11/commit/d26e8e6fec633a85ac54a1aecf9e2652f6fc4102)), closes [#576](https://github.com/sidorares/react-x11/issues/576)
+* **wayland:** Caps Lock case-maps the keysym it chose, instead of looking for an uppercase sibling level ([#625](https://github.com/sidorares/react-x11/issues/625)) ([cec884e](https://github.com/sidorares/react-x11/commit/cec884e545ca165ff7ef8fa3082650964cedc5f5)), closes [#577](https://github.com/sidorares/react-x11/issues/577)
+* **wayland:** the keypad takes its level from NumLock, not Shift — `implicitType` had no KEYPAD rung ([#621](https://github.com/sidorares/react-x11/issues/621)) ([837f55c](https://github.com/sidorares/react-x11/commit/837f55c4700c244709ed8a2a3c0734ae219ab2fa)), closes [#575](https://github.com/sidorares/react-x11/issues/575)
+
 ## [2.16.0](https://github.com/sidorares/react-x11/compare/v2.15.3...v2.16.0) (2026-09-17)
 
 
