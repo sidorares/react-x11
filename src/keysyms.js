@@ -36,21 +36,35 @@ export function keysymOf(char) {
   return 0x01000000 + code;
 }
 
-/** keysym -> code point for the legacy blocks, expanded once, on first use. */
+/**
+ * The legacy blocks, expanded once on first use — keysym -> code point, and
+ * the way back. The reverse direction is what keeps a case map inside the
+ * block it started in: `keysymToUpper(Cyrillic_shorti)` is `Cyrillic_SHORTI`
+ * and not the Unicode-form spelling of the same letter, which is the answer
+ * a keymap's own keysyms can be compared against.
+ */
 let legacyChars;
-function legacyChar(keysym) {
-  if (!legacyChars) {
-    legacyChars = new Map();
-    for (const line of KEYSYM_CHAR_RUNS)
-      for (const run of line.split(' ')) {
-        const [keysyms, cp] = run.split(':');
-        const [first, span] = keysyms.split('+');
-        const from = parseInt(first, 16);
-        const to = parseInt(cp, 16);
-        for (let i = 0; i <= (span ? +span : 0); i++)
-          legacyChars.set(from + i, to + i);
+let legacyKeysyms;
+function expandLegacy() {
+  if (legacyChars) return;
+  legacyChars = new Map();
+  legacyKeysyms = new Map();
+  for (const line of KEYSYM_CHAR_RUNS)
+    for (const run of line.split(' ')) {
+      const [keysyms, cp] = run.split(':');
+      const [first, span] = keysyms.split('+');
+      const from = parseInt(first, 16);
+      const to = parseInt(cp, 16);
+      for (let i = 0; i <= (span ? +span : 0); i++) {
+        legacyChars.set(from + i, to + i);
+        // The eleven code points two blocks both spell — box drawing, a few
+        // set operators, `.` — keep the first, so the answer is stable.
+        if (!legacyKeysyms.has(to + i)) legacyKeysyms.set(to + i, from + i);
       }
-  }
+    }
+}
+function legacyChar(keysym) {
+  expandLegacy();
   return legacyChars.get(keysym);
 }
 
@@ -74,6 +88,45 @@ export function charOf(keysym) {
   }
   const cp = legacyChar(keysym);
   return cp === undefined ? '' : String.fromCodePoint(cp);
+}
+
+/**
+ * The uppercase of a keysym, staying in the block it came from — `й`
+ * (`0x6ca`) uppercases to `Й` (`0x6ea`) and not to the Unicode-form spelling
+ * of the same letter. A keysym with no case comes back unchanged.
+ *
+ * This is how Caps Lock capitalises. It is not a lookup of an uppercase
+ * sibling level on the same key: French AZERTY's `é` key is `[é, 2, ~, ˘]`,
+ * where level 2 is a digit, and German's AltGr `ſ` has no sibling at all —
+ * there is no key anywhere with `ſ` and `S` next to each other.
+ *
+ * `'ß'.toUpperCase()` is **`'SS'`**, two characters, and a keyboard has one
+ * key's worth of character to answer with, so the first code point is what
+ * comes back: `S`. libxkbcommon's narrower table says `ẞ` (U+1E9E) there, and
+ * the same goes for `ΐ` and `ΰ`, which it leaves alone. Those three are the
+ * whole of the disagreement, and `S` is the more useful of the two answers
+ * for a key that is about to insert a character.
+ */
+export function keysymToUpper(keysym) {
+  const ch = charOf(keysym);
+  if (!ch) return keysym;
+  const upper = ch.toUpperCase();
+  if (upper === ch) return keysym;
+  const cp = upper.codePointAt(0);
+  if (cp === ch.codePointAt(0)) return keysym;
+  expandLegacy();
+  // Answer in the spelling the keysym was written in. A keymap that uses the
+  // legacy blocks gets a legacy keysym back — `й` is `Й` (`0x6ea`), not the
+  // Unicode-form spelling of the same letter — and so does Latin-1, where
+  // AltGr's `µ` uppercases to `Greek_MU`. A keysym already written in the
+  // Unicode form keeps it, because that is the block *it* chose. The two
+  // spell the same character either way; what differs is whether the answer
+  // can be compared against the keysyms the keymap itself carries.
+  if (keysym < 0x01000000) {
+    const legacy = legacyKeysyms.get(cp);
+    if (legacy !== undefined) return legacy;
+  }
+  return keysymOf(String.fromCodePoint(cp));
 }
 
 // --- editing and navigation ------------------------------------------------

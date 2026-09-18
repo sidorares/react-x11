@@ -19,6 +19,18 @@ export function keysymOf(char: string): number;
 export function charOf(keysym: number): string;
 
 /**
+ * The uppercase of a keysym, answered in the spelling the keysym was written
+ * in: `й` (`0x6ca`) uppercases to `Й` (`0x6ea`) and not to the Unicode-form
+ * spelling of the same letter. A keysym with no case comes back unchanged.
+ * This is how Caps Lock capitalises.
+ *
+ * `'ß'.toUpperCase()` is `'SS'` — two characters, where a key has one to give
+ * — so the first code point is what comes back: `S`. Same for `ﬁ` and the
+ * polytonic Greek letters whose uppercase is a sequence.
+ */
+export function keysymToUpper(keysym: number): number;
+
+/**
  * The letter of a Ctrl chord, independent of Shift — the keysym for its
  * lowercase form, so `keysymOf('z')` matches both Ctrl+Z and Ctrl+Shift+Z.
  * Null when the event carries neither a keysym nor a codepoint.
