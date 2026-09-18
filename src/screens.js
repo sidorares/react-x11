@@ -187,30 +187,6 @@ class ScreenSession {
   }
 }
 
-/** The monitor a point is on, or the largest one when it is on none (a
- *  window whose owner the WM has not placed yet, or coordinates from a
- *  screen layout that has since changed). */
-function monitorAt(monitors, point) {
-  if (!monitors?.length) return null;
-  if (point) {
-    for (const m of monitors) {
-      if (
-        point.x >= m.x &&
-        point.x < m.x + m.width &&
-        point.y >= m.y &&
-        point.y < m.y + m.height
-      ) {
-        return m;
-      }
-    }
-  }
-  let best = monitors[0];
-  for (const m of monitors) {
-    if (m.width * m.height > best.width * best.height) best = m;
-  }
-  return best;
-}
-
 /** The overlap of two rects, or `null` where they do not touch. */
 function intersect(a, b) {
   const x0 = Math.max(a.x, b.x);
@@ -219,6 +195,82 @@ function intersect(a, b) {
   const y1 = Math.min(a.y + a.height, b.y + b.height);
   if (x1 <= x0 || y1 <= y0) return null;
   return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+}
+
+/** How far apart two rects are, squared: zero where they meet, and the gap
+ *  between their nearest edges otherwise. Squared because nothing compares
+ *  it against a length — only against another of these. */
+function gapSquared(a, b) {
+  const dx = Math.max(a.x - (b.x + b.width), b.x - (a.x + a.width), 0);
+  const dy = Math.max(a.y - (b.y + b.height), b.y - (a.y + a.height), 0);
+  return dx * dx + dy * dy;
+}
+
+/** The biggest monitor there is — the stand-in for "the one you look at",
+ *  for a question with no position in it at all. */
+function largestMonitor(monitors) {
+  let best = monitors[0];
+  for (const m of monitors) {
+    if (m.width * m.height > best.width * best.height) best = m;
+  }
+  return best;
+}
+
+/**
+ * The monitor `near` is on. `near` is a rect in screen coordinates, and a
+ * point is the 1x1 rect at it — the same containment a point used to get,
+ * since a 1x1 rect overlaps exactly the monitor that contains its corner.
+ *
+ * **The one it overlaps most**, because one corner of a rect does not say
+ * which monitor the rect is on. A menu-bar item's frame starts a few points
+ * *above* the top of its own display, and on a desk where another display
+ * reaches down past that edge, the corner alone is inside the *other*
+ * monitor — or inside none — and the popup opens there (#618). Every rect
+ * that has a size knows better than its corner does.
+ *
+ * **The nearest one**, by the gap between the rects, when it overlaps none.
+ * A rect that is off every monitor is nearly always just outside one of
+ * them — that same menu-bar furniture, a pointer at the very edge, a window
+ * the WM has not placed yet — and the nearest monitor is the only answer
+ * that has anything to do with where it was. The largest was the old answer
+ * and it can be anywhere on the desk.
+ *
+ * With no position at all (`near` null — an auto-sized window with no owner
+ * to open beside), the largest monitor, which is all there is to go on.
+ */
+function monitorAt(monitors, near) {
+  if (!monitors?.length) return null;
+  if (!near) return largestMonitor(monitors);
+  // A degenerate rect counts as its own thinnest real version, the way
+  // `anchorOffscreen` reads a caret: a point is 1x1, and so is a rect whose
+  // size nobody filled in.
+  const rect = {
+    x: near.x,
+    y: near.y,
+    width: near.width > 1 ? near.width : 1,
+    height: near.height > 1 ? near.height : 1,
+  };
+  let best = null;
+  let most = 0;
+  for (const m of monitors) {
+    const over = intersect(m, rect);
+    const area = over ? over.width * over.height : 0;
+    if (area > most) {
+      best = m;
+      most = area;
+    }
+  }
+  if (best) return best;
+  let nearest = monitors[0];
+  let least = Infinity;
+  for (const m of monitors) {
+    const gap = gapSquared(m, rect);
+    if (gap < least) {
+      nearest = m;
+      least = gap;
+    }
+  }
+  return nearest;
 }
 
 /**
@@ -262,9 +314,10 @@ function usable(monitor, work) {
 
 /**
  * The rect an auto-sized window may grow into, or `null` where there is
- * nothing to ask. `near` is a screen-coordinate point the window will open
- * next to — a `transientFor` owner's origin, in practice — and picks the
- * monitor when there are several.
+ * nothing to ask. `near` is a screen-coordinate **rect** the window will
+ * open against — a `transientFor` owner's origin, the node a popup hangs
+ * off, the tray item a click reported — and picks the monitor when there
+ * are several (`monitorAt`); `{x, y}` alone is a point.
  */
 export function availableArea(app, near = null) {
   const session = sessions.get(app);

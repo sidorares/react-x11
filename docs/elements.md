@@ -1036,6 +1036,13 @@ function MenuBarApp() {
 protocol has no item rect. Nothing moves the rect but a new one, and it is
 never out of view.
 
+**The monitor comes from the whole rect**, not from a corner of it. A
+menu-bar item's frame starts a few points _above_ the top of the display it
+is on, so its top-left corner is outside that display — and on a desk where
+a taller neighbour reaches down past that edge, inside a different one. The
+monitor the rect overlaps most is the one it is on; a rect that overlaps
+none takes the nearest.
+
 **`grabKeyboard` is the other half.** A menu-bar app has no window of its
 own, so the keys a popup's content would normally get through its owner
 window arrive nowhere. With it the popup takes the keyboard while it is up:
