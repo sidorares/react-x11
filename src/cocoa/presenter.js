@@ -30,7 +30,7 @@ import { Node } from '../nodes/node.js';
 import { addDamageRect, damageToPaint } from '../nodes/damage.js';
 import { intersectRects } from '../nodes/rects.js';
 import { EASING_CONTROL_POINTS, TRANSITION_CONTROL_POINTS } from '../styles.js';
-import { CocoaContext2D } from './context2d.js';
+import { BackendContext2D } from '../backend/context2d.js';
 
 export const RASTER_PAD = 2; // antialiasing/italic overhang outside the ink bounds
 
@@ -431,7 +431,7 @@ export class RasterState {
       this.height = height;
       this.gen++;
       if (!this.ctx) {
-        this.ctx = new CocoaContext2D(
+        this.ctx = new BackendContext2D(
           presenter.native,
           () => this.surface,
           () => this.gen,

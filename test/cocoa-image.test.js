@@ -15,7 +15,7 @@ import { PNG } from 'pngjs';
 import * as ntk from 'ntk';
 
 import { CocoaApp } from '../src/cocoa/app.js';
-import { CocoaContext2D, releaseImageUpload } from '../src/cocoa/context2d.js';
+import { BackendContext2D, releaseImageUpload } from '../src/backend/context2d.js';
 import { loadNative } from '../src/cocoa/native.js';
 import { CocoaSurface } from '../src/cocoa/surface.js';
 import { setCompositingForTests } from '../src/compositing.js';
@@ -115,7 +115,7 @@ function fakeBridge() {
 /** A context over a fresh surface of the bridge, as a window's is. */
 function contextOver(native, width = 64, height = 32) {
   const target = native.createSurface(width, height, 1);
-  const ctx = new CocoaContext2D(
+  const ctx = new BackendContext2D(
     native,
     () => target,
     () => 1,

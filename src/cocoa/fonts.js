@@ -846,7 +846,7 @@ export class CocoaFontManager {
   }
 
   /**
-   * The CTFont a glyph run draws with (`CocoaContext2D.drawGlyphs`): a face
+   * The CTFont a glyph run draws with (`BackendContext2D.drawGlyphs`): a face
    * of this engine's at the run's size, or an ntk `Font` — `openFont()`'s —
    * resolved to CoreText from the same bytes, so the glyph ids it shaped
    * with hold. Null for anything else, and the run is skipped.

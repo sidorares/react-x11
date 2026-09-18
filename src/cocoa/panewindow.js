@@ -14,7 +14,7 @@
 // via emit. Geometry and input arrive as channel messages (the host owns
 // layout and hit-testing — this is CPU offloading, not isolation), and the
 // only outbound traffic is pane-present.
-import { CocoaContext2D } from './context2d.js';
+import { BackendContext2D } from '../backend/context2d.js';
 
 let nextPaneId = 1;
 
@@ -183,7 +183,7 @@ export class CocoaPaneWindow {
 
   getContext() {
     if (!this._ctx) {
-      this._ctx = new CocoaContext2D(
+      this._ctx = new BackendContext2D(
         this._native,
         () => this._ensureSurface(),
         () => {

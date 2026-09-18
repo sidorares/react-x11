@@ -12,7 +12,7 @@
 import assert from 'node:assert';
 import { describe, test } from 'node:test';
 
-import { CocoaContext2D } from '../src/cocoa/context2d.js';
+import { BackendContext2D } from '../src/backend/context2d.js';
 import { loadNative } from '../src/cocoa/native.js';
 
 /** a bridge that records the path and paint calls, and no-ops the rest */
@@ -43,7 +43,7 @@ function fakeNative() {
 function context() {
   const native = fakeNative();
   const surface = { fake: true };
-  const ctx = new CocoaContext2D(
+  const ctx = new BackendContext2D(
     native,
     () => surface,
     () => 1,
@@ -303,7 +303,7 @@ test('beginPath forgets the record — a small path after a big one is one strok
 test('a replaced surface drops the record with the path it was built on', () => {
   const native = fakeNative();
   let gen = 1;
-  const ctx = new CocoaContext2D(
+  const ctx = new BackendContext2D(
     native,
     () => ({ fake: true }),
     () => gen,
@@ -372,7 +372,7 @@ describe(
 
     const paint = (data, chunking) => {
       const surface = bridge.createSurface(W, H, 1);
-      const ctx = new CocoaContext2D(
+      const ctx = new BackendContext2D(
         bridge,
         () => surface,
         () => 1,

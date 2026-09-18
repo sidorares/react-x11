@@ -10,7 +10,7 @@ import React from 'react';
 import * as ntk from 'ntk';
 
 import { CocoaApp } from '../src/cocoa/app.js';
-import { CocoaContext2D } from '../src/cocoa/context2d.js';
+import { BackendContext2D } from '../src/backend/context2d.js';
 import { loadNative } from '../src/cocoa/native.js';
 import { CocoaSurface } from '../src/cocoa/surface.js';
 import { Surface } from '../src/ntk.js';
@@ -152,7 +152,7 @@ test("getContext answers one context over the bitmap's one graphics state, with 
   const app = appOver(fakeNative());
   const surface = new CocoaSurface(app, { width: 8, height: 8 });
   const ctx = surface.getContext('2d');
-  assert.ok(ctx instanceof CocoaContext2D);
+  assert.ok(ctx instanceof BackendContext2D);
   assert.strictEqual(ctx._fonts, app.fonts);
   assert.strictEqual(surface.getContext('2d'), ctx, 'the same one every time');
   assert.strictEqual(surface.getContext(), ctx, "'2d' is the default");
@@ -356,7 +356,7 @@ test('picture() says where the composite is instead', () => {
 test('a restore with nothing saved does nothing, as on canvas', () => {
   const native = fakeNative();
   const handle = native.createSurface(4, 4, 1);
-  const ctx = new CocoaContext2D(
+  const ctx = new BackendContext2D(
     native,
     () => handle,
     () => 1,

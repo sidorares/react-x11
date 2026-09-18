@@ -14,7 +14,7 @@
 import assert from 'node:assert';
 import { describe, test } from 'node:test';
 
-import { CocoaContext2D } from '../src/cocoa/context2d.js';
+import { BackendContext2D } from '../src/backend/context2d.js';
 import { CocoaFace, CocoaFontManager } from '../src/cocoa/fonts.js';
 import { loadNative } from '../src/cocoa/native.js';
 
@@ -198,7 +198,7 @@ function fakeNative() {
 
 function context(native) {
   const surface = { fake: true };
-  const ctx = new CocoaContext2D(
+  const ctx = new BackendContext2D(
     native,
     () => surface,
     () => 1,
@@ -496,7 +496,7 @@ describe(
 
     const paint = (fonts, width, height, draw) => {
       const surface = bridge.createSurface(width, height, 1);
-      const ctx = new CocoaContext2D(
+      const ctx = new BackendContext2D(
         bridge,
         () => surface,
         () => 1,
@@ -666,7 +666,7 @@ describe(
       };
       const stem = (op) => {
         const surface = bridge.createSurface(32, 32, 1);
-        const ctx = new CocoaContext2D(
+        const ctx = new BackendContext2D(
           bridge,
           () => surface,
           () => 1,

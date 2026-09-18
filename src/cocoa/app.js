@@ -38,7 +38,7 @@ import { CocoaPaneWindow } from './panewindow.js';
 import { CocoaColorSampler } from './screencolor.js';
 import { CocoaFilePanels } from './filepanels.js';
 import { CocoaFontManager } from './fonts.js';
-import { releaseImageUpload } from './context2d.js';
+import { releaseImageUpload } from '../backend/context2d.js';
 import { CocoaSurface } from './surface.js';
 import { CocoaSymbols } from './symbols.js';
 import { CocoaWindow } from './window.js';
