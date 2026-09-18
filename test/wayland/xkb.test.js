@@ -35,6 +35,9 @@ xkb_keycodes "(unnamed)" {
 	<AC01>               = 38;
 	<CAPS>               = 66;
 	<LFSH>               = 50;
+	<NMLK>               = 77;
+	<KP7>                = 79;
+	<KPDL>               = 91;
 	<LVL3>               = 92;
 	<RALT>               = 108;
 	alias <LatQ> = <AD01>;
@@ -69,6 +72,26 @@ xkb_types "(unnamed)" {
 		level_name[2]= "Shift";
 		level_name[3]= "Alt Base";
 		level_name[4]= "Shift Alt";
+	};
+	type "KEYPAD" {
+		modifiers= Shift+NumLock;
+		map[NumLock]= 2;
+		level_name[1]= "Base";
+		level_name[2]= "Number";
+	};
+	type "FOUR_LEVEL_KEYPAD" {
+		modifiers= Shift+NumLock+LevelThree;
+		map[Shift]= 2;
+		map[NumLock]= 2;
+		map[Shift+NumLock]= 1;
+		map[LevelThree]= 3;
+		map[Shift+LevelThree]= 4;
+		map[NumLock+LevelThree]= 4;
+		map[Shift+NumLock+LevelThree]= 3;
+		level_name[1]= "Base";
+		level_name[2]= "Shift/Numlock";
+		level_name[3]= "AltGr";
+		level_name[4]= "Shift AltGr";
 	};
 	type "FOUR_LEVEL_ALPHABETIC" {
 		modifiers= Shift+Lock+LevelThree;
@@ -121,10 +144,14 @@ xkb_symbols "(unnamed)" {
 	key <AC01>               {	[               a,               A ] };
 	key <CAPS>               {	[       Caps_Lock ] };
 	key <LFSH>               {	[         Shift_L ] };
+	key <NMLK>               {	[        Num_Lock ] };
+	key <KP7>                {	[         KP_Home,            KP_7 ] };
+	key <KPDL>               {	[       KP_Delete,      KP_Decimal,       KP_Delete,      KP_Decimal ] };
 	key <LVL3>               {	[ ISO_Level3_Shift ] };
 	key <RALT>               {	[ ISO_Level3_Shift ] };
 	modifier_map Shift { <LFSH> };
 	modifier_map Lock { <CAPS> };
+	modifier_map Mod2 { <NMLK> };
 	modifier_map Mod5 { <LVL3>, <RALT> };
 };
 
@@ -157,7 +184,7 @@ test('keycodes, aliases and the X core table', () => {
   assert.deepEqual(km.keycode2keysyms[24], [0x71, 0x51, 0x6ca, 0x6ea]);
   assert.deepEqual(km.keycode2keysyms[10].slice(0, 2), [0x31, 0x21]);
   assert.equal(km.keysym2keycode.get(0x71), 24);
-  assert.equal(km.keys.size, 9);
+  assert.equal(km.keys.size, 12);
 });
 
 test('virtual modifiers resolve through interpret + modifier_map', () => {
@@ -166,6 +193,68 @@ test('virtual modifiers resolve through interpret + modifier_map', () => {
   assert.equal(km.vmods.get('LevelThree'), REAL_MODS.Mod5);
   assert.equal(km.modmap.get(92), REAL_MODS.Mod5);
   assert.equal(km.modmap.get(66), REAL_MODS.Lock);
+  // NumLock is bound by nothing here, which is the common case — a keymap
+  // carries no `interpret Num_Lock`, so the assumption in VMOD_FALLBACK is
+  // what the KEYPAD type's `map[NumLock]` resolves through.
+  assert.equal(km.vmods.get('NumLock'), REAL_MODS.Mod2);
+});
+
+test('the implicit type of a keypad key is KEYPAD, not TWO_LEVEL', () => {
+  const km = XkbKeymap.parse(KEYMAP);
+  // `[KP_Home, KP_7]` is not a case pair, so the ladder used to fall past
+  // ALPHABETIC straight to TWO_LEVEL — whose `map[Shift]= 2` puts the digit
+  // on Shift and leaves NumLock with nothing to do. That inverts the keypad:
+  // the digit keys move the cursor and Shift is what types a number.
+  const kp7 = km.names.get('KP7');
+  assert.equal(km.keys.get(kp7).groups[0].type.name, 'KEYPAD');
+  assert.equal(
+    km.decode(kp7, REAL_MODS.Mod2, 0).keysym,
+    0xffb7,
+    'NumLock: KP_7',
+  );
+  assert.equal(km.decode(kp7, 0, 0).keysym, 0xff95, 'NumLock off: KP_Home');
+  assert.equal(
+    km.decode(kp7, REAL_MODS.Shift, 0).keysym,
+    0xff95,
+    'Shift is not what makes a digit',
+  );
+  assert.equal(
+    km.decode(kp7, REAL_MODS.Shift | REAL_MODS.Mod2, 0).keysym,
+    0xff95,
+    'and it takes one away: KEYPAD maps Shift+NumLock to level 1',
+  );
+
+  // The same rung four levels up, which is where a layout that puts its own
+  // symbols on the keypad lands (`kpdl`, `hu`, `bg`).
+  const kpdl = km.names.get('KPDL');
+  assert.equal(km.keys.get(kpdl).groups[0].type.name, 'FOUR_LEVEL_KEYPAD');
+  assert.equal(km.decode(kpdl, REAL_MODS.Mod2, 0).keysym, 0xffae, 'KP_Decimal');
+  assert.equal(km.decode(kpdl, 0, 0).keysym, 0xff9f, 'KP_Delete');
+});
+
+test('a NoSymbol level is a level, not an absence', () => {
+  // `key <ALT> { [ NoSymbol, Alt_L ] };` — a real keymap writes the extra
+  // modifier keys this way. Counting the non-zero entries made it ONE_LEVEL,
+  // and the one level it had was NoSymbol, so the key decoded to nothing in
+  // every modifier state. Only *trailing* NoSymbols are trimmed.
+  const km = XkbKeymap.parse(LIBXKBCOMMON);
+  const alt = km.names.get('ALT');
+  assert.equal(km.keys.get(alt).groups[0].type.name, 'TWO_LEVEL');
+  assert.equal(km.decode(alt, 0, 0), undefined, 'level 1 still types nothing');
+  assert.equal(km.decode(alt, REAL_MODS.Shift, 0).keysym, 0xffe9, 'Alt_L');
+  assert.equal(
+    km.decode(km.names.get('META'), REAL_MODS.Shift, 0).keysym,
+    0xffe7,
+    'Meta_L, the same shape',
+  );
+  assert.equal(
+    km.decode(km.names.get('SUPR'), REAL_MODS.Shift, 0).keysym,
+    0xffeb,
+  );
+  assert.equal(
+    km.decode(km.names.get('HYPR'), REAL_MODS.Shift, 0).keysym,
+    0xffed,
+  );
 });
 
 test('decode: levels by type, shift, caps and AltGr', () => {
@@ -324,6 +413,29 @@ test('libxkbcommon: an explicit type subscripts a single-group key too', () => {
     0xffaf,
     'the keypad divide, same shape',
   );
+});
+
+test("libxkbcommon: the keypad is NumLock's, not Shift's", () => {
+  const km = XkbKeymap.parse(LIBXKBCOMMON);
+  // libxkbcommon writes the keypad bare — `key <KP7> { [ 0xff95, 0xffb7 ] };`
+  // — so every keypad key on every layout takes the implicit type, and the
+  // implicit type is the whole behaviour of the keypad.
+  const kp7 = km.names.get('KP7');
+  assert.equal(km.keys.get(kp7).groups[0].type.name, 'KEYPAD');
+  assert.equal(
+    km.decode(kp7, REAL_MODS.Mod2, 0).keysym,
+    0xffb7,
+    'NumLock: KP_7',
+  );
+  assert.equal(km.decode(kp7, 0, 0).keysym, 0xff95, 'NumLock off: KP_Home');
+  assert.equal(
+    km.decode(kp7, REAL_MODS.Shift, 0).keysym,
+    0xff95,
+    'Shift: KP_Home',
+  );
+  // Mod2 is what the compositor reports for NumLock, and the keymap agrees
+  // through `modifier_map Mod2 { <NMLK> }`.
+  assert.equal(km.modmap.get(km.names.get('NMLK')), REAL_MODS.Mod2);
 });
 
 test('libxkbcommon: the bare one-line form still reads', () => {
