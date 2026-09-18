@@ -79,8 +79,7 @@ root.render(<App />);
     const device = authored * scale;
     // `size`, not `fontSize`: a span speaks ntk's vocabulary, and asking with
     // the CSS name here would measure the default and report it as the answer.
-    const at = (size) =>
-      app.fonts.layout([{ text: 'Hxy', size }], { size });
+    const at = (size) => app.fonts.layout([{ text: 'Hxy', size }], { size });
     console.log(
       `text       : authored ${authored} -> device ${device} ` +
         `=> layout ${Math.round(at(device).height)}px tall ` +

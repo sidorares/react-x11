@@ -246,6 +246,14 @@ export class Win32FontManager {
     const lines = (raw.lines ?? []).map((line) => ({
       ...line,
       descent: Math.max(0, line.height - line.baseline),
+      // `rangeBands` walks a line's runs to build a selection highlight, and
+      // reads each one's direction off a nested `run` object — ntk's shape.
+      // A line with no runs is not an empty line here, it is a crash:
+      // `line.runs is not iterable`.
+      runs: (line.runs ?? []).map((run) => ({
+        ...run,
+        run: { direction: run.rtl ? 'rtl' : 'ltr' },
+      })),
     }));
     return new Win32TextLayout(this, handle, text, { ...raw, lines });
   }

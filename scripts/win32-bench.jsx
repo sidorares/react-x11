@@ -111,7 +111,9 @@ await settle();
 
 const windowArea = wnd.width * wnd.height;
 console.log(`grid    : ${ROWS}x${COLS} = ${ROWS * COLS} cells`);
-console.log(`window  : ${wnd.width}x${wnd.height} device px, scale ${app.scale}`);
+console.log(
+  `window  : ${wnd.width}x${wnd.height} device px, scale ${app.scale}`,
+);
 
 // --- the first frame, which is the whole window ------------------------------
 console.log('\nmount   :', summarise(frames));
@@ -123,7 +125,8 @@ for (let i = 0; i < 30; i++) {
   await settle();
 }
 const cells = summarise(frames);
-const painted = frames.reduce((s, f) => s + f.area, 0) / Math.max(1, frames.length);
+const painted =
+  frames.reduce((s, f) => s + f.area, 0) / Math.max(1, frames.length);
 console.log('one cell:', cells);
 console.log(
   `        : ${Math.round(painted)} px repainted per frame, ` +
