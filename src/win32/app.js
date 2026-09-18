@@ -194,6 +194,30 @@ class Win32App {
       case 'mousemove':
         wnd.emit('mousemove', { x: event.a, y: event.b });
         break;
+      case 'mouseout':
+        wnd.emit('mouseout', {});
+        break;
+      case 'wheel': {
+        const deltaX = event.c;
+        const deltaY = event.d;
+        wnd.emit('wheel', {
+          name: 'wheel',
+          x: event.a,
+          y: event.b,
+          rootx: event.a,
+          rooty: event.b,
+          buttons: 0,
+          deltaX,
+          deltaY,
+          deltaMode: 'line',
+          // A precision touchpad sends fractions of a notch by default and an
+          // addon cannot opt out of them, so a fraction is exactly the signal
+          // that this came from one.
+          smooth: !Number.isInteger(deltaX) || !Number.isInteger(deltaY),
+          source: 'wheel',
+        });
+        break;
+      }
       case 'mousedown':
         wnd.emit('mousedown', { x: event.a, y: event.b, keycode: 1 });
         break;
