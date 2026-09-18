@@ -1052,6 +1052,25 @@ clicking any other app takes the key window away — and on X on `onDismiss`,
 the press outside the pointer grab reports. Written with both, it closes the
 same way on either.
 
+**Shortcuts in the popover work, with nothing passed.** A binding belongs to
+the tree's top-level `<window>`, and in an app that has none it belongs to
+the root-level `<popup>` that took the keyboard — this one, which is where
+the keys are arriving anyway:
+
+```jsx
+function Controls({ onClose, onToggle }) {
+  useAccelerator([['space']], onToggle);
+  useAccelerator([['Escape']], onClose);
+  return <box style={{ padding: 12, gap: 8 }}>…</box>;
+}
+```
+
+The same goes for everything else that resolves an owner window on its own:
+`useFileDialog`'s parent, the global menu, `useWindowState`. A binding written
+where there is neither a window nor a popup under it — above the `if (!open)`
+in the app above, say — hangs off nothing and never fires; development says so
+once, and [`scope`](events.md#accelerators) anchors one at a node you name.
+
 ### A managed `<popup>` is a dialog
 
 `overrideRedirect` defaults to `true` and is what makes a menu a menu.

@@ -345,6 +345,15 @@ window does not answer it, and `enabled: false` unbinds one without unmounting
 anything. `accelerators={false}` on a `MenuBar` or `ContextMenu` turns the
 whole of this off for an application that already has a dispatcher.
 
+**An app with no `<window>` at all** — a menu-bar app, whose whole UI is the
+popover a tray click opens — binds against the root-level `<popup>` that took
+the keyboard instead
+([elements.md](elements.md#a-popover-under-a-tray-item)). There is nothing
+else for a shortcut to belong to, and it is the window the keys are arriving
+on. A binding that lands on nothing at all — no window and no popup either —
+warns once in development and names `scope`, rather than leaving a chord that
+is drawn, announced and dead.
+
 ## The wheel {#wheel}
 
 `ev.deltaX` / `ev.deltaY` are **pixels**, positive down and right, and one

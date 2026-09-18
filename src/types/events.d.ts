@@ -541,6 +541,11 @@ export interface AcceleratorOptions {
  * matched against the Latin keysym so a layout switch does not turn it off,
  * and behind whatever a focused element consumed with `preventDefault()`.
  * See docs/events.md.
+ *
+ * With no `scope` the binding belongs to the tree's top-level `<window>`, or,
+ * in an app that has none, to the root-level `<popup>` holding the keyboard —
+ * a tray popover. One that can reach neither binds nothing and says so once
+ * in development.
  */
 export function useAccelerator(
   shortcut: MenuShortcut,
