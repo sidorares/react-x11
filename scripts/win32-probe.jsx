@@ -70,6 +70,25 @@ root.render(<App />);
   );
   console.log('eyedropper :', app.screenColorAt(0, 0));
 
+  // The capability seams each ladder looks for. Absent is a real answer — it
+  // is how a feature reports that this backend has no rung for it — so what
+  // matters is that the ones that *are* built are found by name.
+  const seams = [
+    'createStatusItem',
+    'filePanels',
+    'setDockBadge',
+    'setTaskbarProgress',
+    'requestAttention',
+    'nativeBezels',
+    'systemAppearance',
+    'screenColorAt',
+    'chooseGLConfig',
+  ];
+  console.log(
+    'seams      :',
+    seams.map((s) => `${s}=${app[s] == null ? 'no' : 'yes'}`).join(' '),
+  );
+
   // What a length written by an app becomes by the time it reaches the text
   // engine. `fontSize` is in SCALED_LENGTH_PROPS, so a 16 authored in a style
   // should arrive here as 16 * scale device pixels — and the glyphs should be

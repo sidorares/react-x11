@@ -16,6 +16,7 @@ import { setScreensForTests } from '../screens.js';
 import { createBezels } from './bezels.js';
 import { Win32FontManager } from './fonts.js';
 import { loadNative } from './native.js';
+import { installTaskbar, Win32FilePanels, Win32StatusItem } from './shell.js';
 import { Win32Window } from './window.js';
 
 // Until the compositor clock is bound (docs/windows.md §"The frame clock":
@@ -35,6 +36,14 @@ class Win32App {
     this._closed = false;
     this._atoms = new Map();
     this._appearanceListeners = new Set();
+    /** Tray icons by the bridge's handle, so an event can find its item. */
+    this._statusItems = new Map();
+    /** The native open/save panels. Its *presence* is what puts the top rung
+     * on src/filedialog.js's ladder for this app. */
+    this.filePanels =
+      typeof native.fileDialog === 'function'
+        ? new Win32FilePanels(this)
+        : null;
     /** The system's own control bezels, when they would look right — see
      * `_syncBezels`. Read by `useNativeControls()` as a capability. */
     this.nativeBezels = null;
@@ -180,6 +189,12 @@ class Win32App {
     return this._native.pointerPosition();
   }
 
+  /** A tray icon. `useTray()` finds this by name, not by platform — the rule
+   * AGENTS.md sets for every ladder. */
+  createStatusItem(options) {
+    return new Win32StatusItem(this, options);
+  }
+
   /** Installed only where the system's own bezels would actually look right —
    * see src/win32/bezels.js, which measures rather than assumes. */
   _syncBezels(colorScheme) {
@@ -269,6 +284,29 @@ class Win32App {
    * it closes — so a handler's setState commits on the event that caused it.
    */
   _route(event) {
+    // The shell's events are not a window's: a tray icon, a file dialog and a
+    // hotkey each carry an id of their own, and looking one up in the window
+    // map would drop it.
+    switch (event.type) {
+      case 'tray-click':
+        this._statusItems.get(event.id)?._emit('click', event);
+        return;
+      case 'tray-action':
+        this._statusItems.get(event.id)?._activate(event.text ?? '');
+        return;
+      case 'tray-ready':
+      case 'tray-failed':
+        return;
+      case 'file-dialog':
+        this.filePanels?._answer(event.id, event.a === 1, event.text ?? '');
+        return;
+      case 'hotkey':
+      case 'hotkey-registered':
+        return;
+      default:
+        break;
+    }
+
     const wnd = this._windows.get(event.id);
     if (!wnd) return;
     switch (event.type) {
@@ -361,6 +399,7 @@ export async function createWin32App(options = {}) {
   // Before the first window, so a control's very first frame is drawn with the
   // bezels it will keep rather than swapping to them a frame later.
   app._syncBezels(app.systemAppearance()?.colorScheme);
+  installTaskbar(app);
 
   // The ladder is otherwise climbed only when something asks — and its Windows
   // rung needs an app to ask, which nothing but this has. Started here and not
