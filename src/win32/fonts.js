@@ -17,6 +17,25 @@
 // happens at this boundary and nowhere else.
 import { cssColorStraight } from 'ntk';
 
+// REACT_X11_WIN32_DEBUG=1 reports the size each paragraph is shaped at, which
+// is how to tell a scale that never reached the text engine from one that did.
+const DEBUG = process.env.REACT_X11_WIN32_DEBUG === '1';
+
+// A span's vocabulary is **ntk's TextLayout's, not CSS's**: `family`, `size`,
+// `weight`, `style` — not `fontFamily`, `fontSize` and the rest. That is what
+// `collectSpans` and `resolvedTextStyle` in nodes/text.js produce, and what
+// the CoreText engine reads.
+//
+// Getting it wrong is silent and looks like something else entirely: every
+// paragraph falls through to this default, so the whole app renders at one
+// size whatever it asked for, and on a 150% display it reads as "the scale
+// never reached the text engine" when the scale was never the problem. 14 is
+// the same floor the Cocoa engine uses.
+const DEFAULT_SIZE = 14;
+function sizeOf(value) {
+  return typeof value === 'number' && value > 0 ? value : DEFAULT_SIZE;
+}
+
 // DirectWrite takes a numeric weight; CSS lets a style say the word.
 function weightOf(value) {
   if (typeof value === 'number') return value;
@@ -189,10 +208,10 @@ export class Win32FontManager {
       ranges.push({
         start,
         length: piece.length,
-        family: familyOf(this._native, span.fontFamily ?? base.fontFamily),
-        size: span.fontSize ?? base.fontSize ?? 12,
-        weight: weightOf(span.fontWeight ?? base.fontWeight ?? 400),
-        italic: (span.fontStyle ?? base.fontStyle) === 'italic',
+        family: familyOf(this._native, span.family ?? base.family),
+        size: sizeOf(span.size ?? base.size),
+        weight: weightOf(span.weight ?? base.weight ?? 400),
+        italic: (span.style ?? base.style) === 'italic',
         ...(ink ? ink : {}),
       });
     }
@@ -200,10 +219,10 @@ export class Win32FontManager {
     const handle = this._native.layoutCreate(
       text,
       {
-        family: familyOf(this._native, base.fontFamily),
-        size: base.fontSize ?? 12,
-        weight: weightOf(base.fontWeight ?? 400),
-        italic: base.fontStyle === 'italic',
+        family: familyOf(this._native, base.family),
+        size: sizeOf(base.size),
+        weight: weightOf(base.weight ?? 400),
+        italic: base.style === 'italic',
         maxWidth: options.maxWidth,
         align: options.align,
         lineHeight: options.lineHeight,
@@ -212,6 +231,13 @@ export class Win32FontManager {
       },
       ranges,
     );
+
+    if (DEBUG) {
+      console.error(
+        `[win32] layout "${text.slice(0, 24)}" base.size=${base.size} ` +
+          `spans=${ranges.map((r) => r.size).join(',')}`,
+      );
+    }
 
     const raw = this._native.layoutMetrics(handle);
     // `descent` is what halfLeading() in nodes/text.js subtracts to recreate

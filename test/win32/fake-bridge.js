@@ -36,14 +36,23 @@ export function createFakeBridge() {
       record('stop');
     },
     listScreens() {
-      return [{ x: 0, y: 0, width: 1920, height: 1080, scale: 1, primary: true }];
+      return [
+        { x: 0, y: 0, width: 1920, height: 1080, scale: 1, primary: true },
+      ];
     },
 
     // --- windows -----------------------------------------------------------
 
     createWindow({ title, width, height }) {
       const id = bridge.windows.size + 1;
-      bridge.windows.set(id, { id, title, width, height, shown: false, composed: false });
+      bridge.windows.set(id, {
+        id,
+        title,
+        width,
+        height,
+        shown: false,
+        composed: false,
+      });
       record('createWindow', id, width, height);
       return id;
     },
@@ -126,7 +135,10 @@ export function createFakeBridge() {
     },
     surfaceSize(handle) {
       const surface = bridge.open.get(handle);
-      return { width: surface?.width ?? surface?.w ?? 0, height: surface?.height ?? surface?.h ?? 0 };
+      return {
+        width: surface?.width ?? surface?.w ?? 0,
+        height: surface?.height ?? surface?.h ?? 0,
+      };
     },
 
     // --- text --------------------------------------------------------------
@@ -187,14 +199,40 @@ export function createFakeBridge() {
   // surface it was aimed at — which is what makes "did this frame draw into
   // the rect it opened" an assertion rather than an inspection.
   const verbs = [
-    'ctxSave', 'ctxRestore', 'ctxTranslate', 'ctxScale', 'ctxRotate',
-    'ctxTransform', 'ctxSetFillColor', 'ctxSetStrokeColor', 'ctxSetLineWidth',
-    'ctxSetLineCap', 'ctxSetLineJoin', 'ctxSetGlobalAlpha', 'ctxSetLineDash',
-    'ctxSetShadow', 'ctxBeginPath', 'ctxMoveTo', 'ctxLineTo', 'ctxRect',
-    'ctxRoundRect', 'ctxArc', 'ctxEllipse', 'ctxCurveTo', 'ctxQuadTo',
-    'ctxClosePath', 'ctxFill', 'ctxStroke', 'ctxClip', 'ctxFillRect',
-    'ctxFillRects', 'ctxStrokeRect', 'ctxClearRect', 'ctxFillLinearGradient',
-    'ctxDrawSurface', 'ctxPutImageData',
+    'ctxSave',
+    'ctxRestore',
+    'ctxTranslate',
+    'ctxScale',
+    'ctxRotate',
+    'ctxTransform',
+    'ctxSetFillColor',
+    'ctxSetStrokeColor',
+    'ctxSetLineWidth',
+    'ctxSetLineCap',
+    'ctxSetLineJoin',
+    'ctxSetGlobalAlpha',
+    'ctxSetLineDash',
+    'ctxSetShadow',
+    'ctxBeginPath',
+    'ctxMoveTo',
+    'ctxLineTo',
+    'ctxRect',
+    'ctxRoundRect',
+    'ctxArc',
+    'ctxEllipse',
+    'ctxCurveTo',
+    'ctxQuadTo',
+    'ctxClosePath',
+    'ctxFill',
+    'ctxStroke',
+    'ctxClip',
+    'ctxFillRect',
+    'ctxFillRects',
+    'ctxStrokeRect',
+    'ctxClearRect',
+    'ctxFillLinearGradient',
+    'ctxDrawSurface',
+    'ctxPutImageData',
   ];
   for (const verb of verbs) {
     bridge[verb] = (surface, ...args) => {

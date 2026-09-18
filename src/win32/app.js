@@ -8,10 +8,12 @@
 // bridge runs every HWND and every modal loop on a thread of its own and
 // reaches this side through a threadsafe function, which wakes Node's loop at
 // once. What is left here is routing.
+import { systemAppearance } from '../appearance.js';
 import { setCompositingForTests } from '../compositing.js';
 import { setScaleForTests } from '../scale.js';
 import { setScreensForTests } from '../screens.js';
 
+import { createBezels } from './bezels.js';
 import { Win32FontManager } from './fonts.js';
 import { loadNative } from './native.js';
 import { Win32Window } from './window.js';
@@ -32,6 +34,10 @@ class Win32App {
     this._frameTimer = null;
     this._closed = false;
     this._atoms = new Map();
+    this._appearanceListeners = new Set();
+    /** The system's own control bezels, when they would look right — see
+     * `_syncBezels`. Read by `useNativeControls()` as a capability. */
+    this.nativeBezels = null;
 
     this.fonts = new Win32FontManager(native);
 
@@ -69,32 +75,120 @@ class Win32App {
       },
     };
 
-    // The clipboard is OLE's and is not bound yet (docs/windows.md §"The
-    // desktop around the app"). It answers the ntk shape and refuses honestly:
-    // a read finds no owner, which is the same thing an empty clipboard says,
-    // and a write reports that it did not happen rather than resolving.
+    // ntk's clipboard shape over the Windows clipboard. Opened with no owner
+    // window, which keeps it off the UI thread; what that gives up is delayed
+    // rendering, so a write here is eager rather than lazy. X's other everyday
+    // selection, PRIMARY, has no Windows equivalent at all — every name but
+    // CLIPBOARD is a selection nobody on this desktop can paste from, and is
+    // answered as empty rather than pretended at.
+    const isClipboard = (selection) => !selection || selection === 'CLIPBOARD';
     this.clipboard = {
-      write() {
-        return Promise.reject(
-          new Error(
-            'react-x11: the win32 backend has no clipboard yet — it is OLE ' +
-              'delayed rendering, and is not built.',
-          ),
-        );
+      write: (data, { selection = 'CLIPBOARD' } = {}) => {
+        if (!isClipboard(selection)) return Promise.resolve();
+        const text =
+          typeof data === 'string'
+            ? data
+            : (data?.['text/plain'] ?? data?.UTF8_STRING ?? data?.STRING);
+        if (typeof text !== 'string') {
+          return Promise.reject(
+            new Error(
+              'react-x11: the win32 clipboard writes text only for now — ' +
+                'images and file lists need the OLE data object, which is not ' +
+                'built. Pass a string, or a map with a text/plain entry.',
+            ),
+          );
+        }
+        return native.clipboardWriteText(text)
+          ? Promise.resolve()
+          : Promise.reject(
+              new Error(
+                'react-x11: the clipboard refused the write — another program ' +
+                  'held it open. Retrying usually succeeds.',
+              ),
+            );
       },
-      clear() {
+      clear: (selection = 'CLIPBOARD') => {
+        if (isClipboard(selection)) native.clipboardWriteText('');
         return Promise.resolve();
       },
-      targets() {
-        return Promise.resolve([]);
+      targets: ({ selection = 'CLIPBOARD' } = {}) =>
+        Promise.resolve(
+          isClipboard(selection) ? native.clipboardFormats() : [],
+        ),
+      read: ({ selection = 'CLIPBOARD', target } = {}) => {
+        if (!isClipboard(selection)) {
+          return Promise.reject(
+            new Error(
+              `clipboard: nothing to paste — ${selection} has no owner`,
+            ),
+          );
+        }
+        const text = native.clipboardReadText();
+        if (text === null) {
+          return Promise.reject(new Error('clipboard: nothing to paste'));
+        }
+        if (target === undefined) return Promise.resolve(text);
+        if (
+          target === 'text/plain' ||
+          target === 'UTF8_STRING' ||
+          target === 'STRING'
+        ) {
+          return Promise.resolve(Buffer.from(text, 'utf8'));
+        }
+        return Promise.reject(
+          new Error(`clipboard: owner cannot convert to ${target}`),
+        );
       },
-      read() {
-        return Promise.reject(new Error('clipboard: nothing to paste'));
-      },
-      watch() {
-        return Promise.resolve(() => {});
+      // No owner window means no AddClipboardFormatListener, so a change is
+      // noticed by the sequence number rather than announced. Polled slowly
+      // and unref'd: this must never be the reason a process stays alive.
+      watch: (selection, handler) => {
+        if (!isClipboard(selection)) return Promise.resolve(() => {});
+        let last = native.clipboardSequence();
+        const timer = setInterval(() => {
+          const now = native.clipboardSequence();
+          if (now === last) return;
+          last = now;
+          handler({ selection: 'CLIPBOARD', owner: 1, reason: 'new-owner' });
+        }, 400);
+        timer.unref?.();
+        return Promise.resolve(() => clearInterval(timer));
       },
     };
+  }
+
+  // --- the desktop ----------------------------------------------------------
+
+  /** Light or dark, the accent, contrast and reduced motion, as one answer —
+   * the rung `src/appearance.js` asks for by capability. */
+  systemAppearance() {
+    return this._native.systemAppearance();
+  }
+
+  onAppearanceChange(fn) {
+    this._appearanceListeners.add(fn);
+    return () => this._appearanceListeners.delete(fn);
+  }
+
+  /** A pixel off the screen, for `useEyedropper()`. Windows asks no permission
+   * and draws no capture border, so the loupe is the renderer's to draw. */
+  screenColorAt(x, y) {
+    return this._native.screenColorAt(Math.round(x), Math.round(y));
+  }
+
+  pointerPosition() {
+    return this._native.pointerPosition();
+  }
+
+  /** Installed only where the system's own bezels would actually look right —
+   * see src/win32/bezels.js, which measures rather than assumes. */
+  _syncBezels(colorScheme) {
+    const wanted = colorScheme !== 'dark';
+    if (wanted === Boolean(this.nativeBezels)) return;
+    this.nativeBezels?.clear?.();
+    this.nativeBezels = wanted
+      ? createBezels(this._native, { colorScheme, scale: this.scale })
+      : null;
   }
 
   // --- the renderer's app surface -------------------------------------------
@@ -179,7 +273,10 @@ class Win32App {
     if (!wnd) return;
     switch (event.type) {
       case 'window-ready':
-        wnd._onReady();
+        wnd._onReady(event.a, event.b);
+        break;
+      case 'move':
+        wnd._noteOrigin(event.a, event.b);
         break;
       case 'resize': {
         const width = Math.max(1, Math.round(event.a));
@@ -230,6 +327,20 @@ class Win32App {
       case 'close':
         wnd.emit('close', {});
         break;
+      case 'appearance': {
+        // Re-read whole, and the cached bezels go with it: every one of them
+        // was drawn in the appearance that just stopped being true.
+        const next = this.systemAppearance();
+        this._syncBezels(next?.colorScheme);
+        for (const fn of [...this._appearanceListeners]) {
+          try {
+            fn(next);
+          } catch (err) {
+            if (process.env.NODE_ENV !== 'production') console.error(err);
+          }
+        }
+        break;
+      }
       case 'dpichanged':
         // The renderer cannot re-scale a live window yet (docs/windows.md
         // §Layout, open question 8), so this is recorded and not acted on.
@@ -246,6 +357,18 @@ export async function createWin32App(options = {}) {
   const app = new Win32App(native, options);
 
   native.start((event) => app._route(event));
+
+  // Before the first window, so a control's very first frame is drawn with the
+  // bezels it will keep rather than swapping to them a frame later.
+  app._syncBezels(app.systemAppearance()?.colorScheme);
+
+  // The ladder is otherwise climbed only when something asks — and its Windows
+  // rung needs an app to ask, which nothing but this has. Started here and not
+  // awaited: the first frame is drawn from the answer this machine gave last
+  // time and the live one lands behind it, which is the direction
+  // AGENTS.md asks appearance to settle in. A failure is the ladder's own to
+  // report; there is nothing useful to do with it here.
+  void systemAppearance({ app }).catch(() => {});
 
   setScaleForTests(app, app.scale, 'win32');
   setScreensForTests(app, {

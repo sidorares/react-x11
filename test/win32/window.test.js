@@ -86,7 +86,11 @@ describe('win32 window: the frame', () => {
       [0, 0, 20, 10],
       [100, 50, 30, 20],
     ]);
-    assert.equal(bridge.committed, 1, 'a frame is one commit, whatever its rects');
+    assert.equal(
+      bridge.committed,
+      1,
+      'a frame is one commit, whatever its rects',
+    );
     assert.equal(node.painted.length, 2);
   });
 
@@ -133,7 +137,11 @@ describe('win32 window: the frame', () => {
   it('shows only once the HWND exists, and remembers it was asked', () => {
     const { bridge, wnd } = setup();
     wnd.map();
-    assert.equal(bridge.windows.get(wnd.id).shown, false, 'shown a window with no HWND');
+    assert.equal(
+      bridge.windows.get(wnd.id).shown,
+      false,
+      'shown a window with no HWND',
+    );
     wnd._onReady();
     assert.equal(bridge.windows.get(wnd.id).shown, true);
   });

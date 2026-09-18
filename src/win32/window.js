@@ -53,10 +53,26 @@ export class Win32Window {
     this._owesFullPaint = false;
     this._dirty = false;
 
+    // `overrideRedirect` is how a `<popup>` says what it is — a menu, a
+    // select's list, a tooltip. On X11 it means "the window manager does not
+    // manage this"; here it means WS_POPUP: no frame, no taskbar button, and
+    // no stealing activation from the window it belongs to.
+    this.popup = attributes.overrideRedirect === true;
+
     this.id = this._native.createWindow({
       title: this.title,
       width: this.width,
       height: this.height,
+      // A popup is placed by anchor.js against the monitor's work area, and
+      // that placement *is* the contract — a menu created at the default
+      // position is a menu in the wrong place.
+      x: attributes.x,
+      y: attributes.y,
+      popup: this.popup,
+      // A shaped window needs a surface with an alpha channel, or the pixels
+      // outside its shape composite as a dark fringe — which on a rounded
+      // popup is a dark edge along every corner.
+      transparent: attributes.transparent === true,
     });
     app._register(this);
   }
@@ -84,8 +100,9 @@ export class Win32Window {
    * WS_EX_NOREDIRECTIONBITMAP shows when nothing was ever committed, which is
    * black, and nothing else would ever ask again.
    */
-  _onReady() {
+  _onReady(originX, originY) {
     this._ready = true;
+    if (Number.isFinite(originX)) this._noteOrigin(originX, originY);
     if (!this._composed) {
       this._native.compose(this.id);
       this._composed = true;
@@ -95,6 +112,19 @@ export class Win32Window {
   }
 
   // --- geometry ------------------------------------------------------------
+
+  /**
+   * Where the client area is on the virtual screen. `anchor.js` reads
+   * `_screenOrigin` to turn a node's rect into the screen rect a `<popup>` is
+   * placed against, and falls back to `x`/`y` — so a window that never reports
+   * its position anchors every menu as though it were at the screen's origin,
+   * which puts a select's list a whole window-offset away from the select.
+   */
+  _noteOrigin(x, y) {
+    this.x = x;
+    this.y = y;
+    this._screenOrigin = { x, y };
+  }
 
   map() {
     this.mapped = true;

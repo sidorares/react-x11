@@ -16,11 +16,11 @@ describe('win32 fonts: spans', () => {
     const fonts = new Win32FontManager(bridge);
     fonts.layout(
       [
-        { text: 'Hello, ', fontSize: 24 },
-        { text: 'X11', fontSize: 24, color: '#ff0000' },
-        { text: '!', fontSize: 24 },
+        { text: 'Hello, ', size: 24 },
+        { text: 'X11', size: 24, color: '#ff0000' },
+        { text: '!', size: 24 },
       ],
-      { fontSize: 24 },
+      { size: 24 },
     );
 
     const [, text, , spans] = bridge.calls.find((c) => c[0] === 'layoutCreate');
@@ -40,9 +40,36 @@ describe('win32 fonts: spans', () => {
     assert.equal(spans[1].g, 0);
   });
 
+  it("speaks the span vocabulary, which is ntk's and not CSS's", () => {
+    // `collectSpans` and `resolvedTextStyle` in nodes/text.js produce
+    // `family`/`size`/`weight`/`style`, not `fontFamily`/`fontSize`/… Reading
+    // the CSS names instead is silent: every paragraph falls through to the
+    // default size, so the whole app renders at one size whatever it asked
+    // for — and on a scaled display that reads as the scale never having
+    // reached the text engine, which is a different bug entirely.
+    const bridge = createFakeBridge();
+    new Win32FontManager(bridge).layout(
+      [{ text: 'big', size: 36, weight: 700 }],
+      { size: 36, weight: 700 },
+    );
+    const [, , options, spans] = bridge.calls.find(
+      (c) => c[0] === 'layoutCreate',
+    );
+    assert.equal(spans[0].size, 36, 'the span size never reached the bridge');
+    assert.equal(options.size, 36, 'the base size never reached the bridge');
+    assert.equal(spans[0].weight, 700);
+  });
+
+  it('falls back to 14 only when no size was given at all', () => {
+    const bridge = createFakeBridge();
+    new Win32FontManager(bridge).layout([{ text: 'x' }], {});
+    const [, , options] = bridge.calls.find((c) => c[0] === 'layoutCreate');
+    assert.equal(options.size, 14);
+  });
+
   it('takes a bare string as one span', () => {
     const bridge = createFakeBridge();
-    new Win32FontManager(bridge).layout('plain', { fontSize: 12 });
+    new Win32FontManager(bridge).layout('plain', { size: 12 });
     const [, text] = bridge.calls.find((c) => c[0] === 'layoutCreate');
     assert.equal(text, 'plain');
   });
@@ -62,7 +89,7 @@ describe('win32 fonts: spans', () => {
 describe('win32 fonts: families', () => {
   it('passes a generic family through for the bridge to resolve', () => {
     const bridge = createFakeBridge();
-    new Win32FontManager(bridge).layout('x', { fontFamily: 'sans-serif' });
+    new Win32FontManager(bridge).layout('x', { family: 'sans-serif' });
     const [, , options] = bridge.calls.find((c) => c[0] === 'layoutCreate');
     assert.equal(options.family, 'sans-serif');
   });
@@ -70,7 +97,7 @@ describe('win32 fonts: families', () => {
   it('takes the first family in a stack that this machine actually has', () => {
     const bridge = createFakeBridge(); // knows Segoe UI and Consolas only
     new Win32FontManager(bridge).layout('x', {
-      fontFamily: '"Not Installed", Consolas, sans-serif',
+      family: '"Not Installed", Consolas, sans-serif',
     });
     const [, , options] = bridge.calls.find((c) => c[0] === 'layoutCreate');
     assert.equal(options.family, 'Consolas');
@@ -78,14 +105,14 @@ describe('win32 fonts: families', () => {
 
   it('falls back to sans-serif when a stack names nothing installed', () => {
     const bridge = createFakeBridge();
-    new Win32FontManager(bridge).layout('x', { fontFamily: 'Nope, Also Nope' });
+    new Win32FontManager(bridge).layout('x', { family: 'Nope, Also Nope' });
     const [, , options] = bridge.calls.find((c) => c[0] === 'layoutCreate');
     assert.equal(options.family, 'sans-serif');
   });
 
   it('turns a named weight into a number, which is what DirectWrite takes', () => {
     const bridge = createFakeBridge();
-    new Win32FontManager(bridge).layout('x', { fontWeight: 'bold' });
+    new Win32FontManager(bridge).layout('x', { weight: 'bold' });
     const [, , options] = bridge.calls.find((c) => c[0] === 'layoutCreate');
     assert.equal(options.weight, 700);
   });
@@ -110,7 +137,11 @@ describe('win32 fonts: the layout it answers', () => {
   it('draws through the context, not the native, so one wrapper serves both bridges', () => {
     const layout = manager().layout('hi', {});
     const seen = [];
-    layout.draw({ _drawLayout: (l, x, y) => seen.push([l === layout, x, y]) }, 4, 6);
+    layout.draw(
+      { _drawLayout: (l, x, y) => seen.push([l === layout, x, y]) },
+      4,
+      6,
+    );
     assert.deepEqual(seen, [[true, 4, 6]]);
   });
 });

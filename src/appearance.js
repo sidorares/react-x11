@@ -955,6 +955,38 @@ async function macosRung() {
   return runWatcher();
 }
 
+// --------------------------------------------------------------------------
+// Rung 4: Windows
+// --------------------------------------------------------------------------
+
+/**
+ * The backend answers this one rather than this file reaching for a bridge:
+ * the values live behind a native addon that exists only on Windows, and
+ * asking the app for them is the capability test every other ladder here
+ * makes (AGENTS.md, "Find the mechanism, not the platform").
+ *
+ * All four values come from one source — the Personalize key for light or
+ * dark, DWM for the accent, and the two accessibility flags from
+ * `SystemParametersInfo` — so this rung owns every field, which is the rule
+ * the ladder is ordered for.
+ *
+ * Live rather than polled: Windows broadcasts `WM_SETTINGCHANGE`,
+ * `WM_THEMECHANGED` and `WM_DWMCOLORIZATIONCOLORCHANGED` to every top-level
+ * window, and the bridge's UI thread has one.
+ */
+async function windowsRung(app) {
+  if (typeof app?.systemAppearance !== 'function') return false;
+  const values = app.systemAppearance();
+  if (!values) return false;
+  publish(values, 'windows');
+  app.onAppearanceChange?.(() => {
+    if (owner !== 'windows') return;
+    const next = app.systemAppearance();
+    if (next) publish(next, 'windows');
+  });
+  return true;
+}
+
 // Killed rather than left behind: `unref()` keeps it from holding *this*
 // process open, and nothing keeps it from outliving it.
 process.on('exit', () => {
@@ -975,6 +1007,10 @@ async function runLadder(app) {
     // an XQuartz display never reaches this at all, which is correct — it
     // cannot read that Mac's defaults.
     ['macos', macosRung],
+    // Before XSETTINGS for the same reason macOS is: where the process is
+    // Windows, the desktop's own preference is the one the user set, and an
+    // XSETTINGS daemon there would be something they installed by hand.
+    ['windows', () => windowsRung(app)],
     ['xsettings', () => xsettingsRung(app)],
   ]) {
     let answered = false;

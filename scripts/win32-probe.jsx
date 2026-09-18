@@ -9,6 +9,7 @@
 //   node --import tsx scripts/win32-probe.jsx
 import React from 'react';
 
+import { systemAppearance } from '../src/appearance.js';
 import { createRoot } from '../src/index.js';
 
 let clicks = 0;
@@ -51,6 +52,42 @@ function App() {
 
 const root = await createRoot({ backend: 'win32' });
 root.render(<App />);
+
+{
+  const app = root.app ?? root._app;
+  const resolved = await systemAppearance();
+  console.log('appearance :', {
+    source: resolved.source,
+    colorScheme: resolved.colorScheme,
+    accent: resolved.accent,
+    contrast: resolved.contrast,
+    reducedMotion: resolved.reducedMotion,
+  });
+  console.log('bezels     :', app.nativeBezels ? 'native' : 'drawn');
+  console.log(
+    'screens    :',
+    app._screens.map((s) => `${s.width}x${s.height}@${s.scale}`).join(', '),
+  );
+  console.log('eyedropper :', app.screenColorAt(0, 0));
+
+  // What a length written by an app becomes by the time it reaches the text
+  // engine. `fontSize` is in SCALED_LENGTH_PROPS, so a 16 authored in a style
+  // should arrive here as 16 * scale device pixels — and the glyphs should be
+  // that tall on the surface, because the surface is device pixels too.
+  const scale = app.scale;
+  for (const authored of [12, 16, 24]) {
+    const device = authored * scale;
+    // `size`, not `fontSize`: a span speaks ntk's vocabulary, and asking with
+    // the CSS name here would measure the default and report it as the answer.
+    const at = (size) =>
+      app.fonts.layout([{ text: 'Hxy', size }], { size });
+    console.log(
+      `text       : authored ${authored} -> device ${device} ` +
+        `=> layout ${Math.round(at(device).height)}px tall ` +
+        `(unscaled would be ${Math.round(at(authored).height)}px)`,
+    );
+  }
+}
 
 // Let the window come up and paint, then aim at the middle of the box: the
 // padding is 20 and the box is 160x60, so (100, 50) is inside it.
