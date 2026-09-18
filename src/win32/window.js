@@ -17,6 +17,12 @@
 // for free.
 import { BackendContext2D } from '../backend/context2d.js';
 
+// REACT_X11_WIN32_DEBUG=1 reports every frame and what it drew into. A window
+// that stays blank on this backend has a short list of causes — no frame
+// asked for, a BeginDraw refused, a damage rect outside the surface — and they
+// are indistinguishable from the outside, because none of them throws.
+const DEBUG = process.env.REACT_X11_WIN32_DEBUG === '1';
+
 export class Win32Window {
   constructor(app, attributes = {}) {
     this.app = app;
@@ -44,6 +50,7 @@ export class Win32Window {
     this._ready = false;
     this._composed = false;
     this._pendingFrames = [];
+    this._owesFullPaint = false;
     this._dirty = false;
 
     this.id = this._native.createWindow({
@@ -110,7 +117,10 @@ export class Win32Window {
     this.width = Math.max(1, Math.round(width));
     this.height = Math.max(1, Math.round(height));
     this._native.resizeWindow?.(this.id, this.width, this.height);
-    if (this._composed) this._native.resize(this.id, this.width, this.height);
+    // Unconditionally, not only once composed: an auto-sized window is
+    // measured and resized before its HWND exists, and the surface compose()
+    // makes later is made at whatever size the bridge last recorded.
+    this._native.resize(this.id, this.width, this.height);
   }
 
   move(x, y) {
@@ -202,8 +212,29 @@ export class Win32Window {
    * context wrapper reads the bump and pushes its sticky state back in.
    */
   presentFrame(node, damage) {
-    if (!this._composed || this.destroyed) return;
+    if (DEBUG) {
+      console.error(
+        `[win32] presentFrame window=${this.id} composed=${this._composed} ` +
+          `size=${this.width}x${this.height} rects=${damage ? damage.length : 'full'}` +
+          (this._owesFullPaint ? ' (owes full)' : ''),
+      );
+    }
+    if (this.destroyed) return;
+    if (!this._composed) {
+      // Nothing to paint into yet. The frame is not merely skipped: what it
+      // would have covered is remembered, because the damage it carried is
+      // gone once this returns and the next frame's bound is whatever has been
+      // claimed since — which, on a tree with an animation in it, is a handful
+      // of small rects. That is exactly how this window came up transparent
+      // with a perfectly healthy-looking frame log.
+      this._owesFullPaint = true;
+      return;
+    }
     const ctx = this.getContext();
+    if (this._owesFullPaint) {
+      this._owesFullPaint = false;
+      damage = null;
+    }
     const rects = damage ?? [null];
     let painted = false;
     for (const rect of rects) {
@@ -218,6 +249,12 @@ export class Win32Window {
         w,
         h,
       );
+      if (DEBUG) {
+        console.error(
+          `[win32]   rect ${Math.floor(r.x)},${Math.floor(r.y)} ${w}x${h} ` +
+            `-> surface ${handle}`,
+        );
+      }
       if (!handle) continue;
       this._surface = handle;
       this._gen++;
