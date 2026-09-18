@@ -148,7 +148,20 @@ export function deviceAnchorArea(node) {
   if (!app) return null;
   const at = screenRect(node);
   const s = node.scale ?? 1;
-  return availableArea(app, at ? { x: at.x * s, y: at.y * s } : null);
+  // The whole rect, not its corner: a window straddling two monitors has
+  // nodes on each, and the monitor a node is on is the one it covers most of
+  // (`monitorAt`, src/screens.js).
+  return availableArea(
+    app,
+    at
+      ? {
+          x: at.x * s,
+          y: at.y * s,
+          width: at.width * s,
+          height: at.height * s,
+        }
+      : null,
+  );
 }
 
 /**
@@ -248,7 +261,12 @@ export function anchorScreenRect(app, rect, options = {}) {
     width: (rect.width ?? 0) * s,
     height: (rect.height ?? 0) * s,
   };
-  const area = app ? availableArea(app, { x: anchor.x, y: anchor.y }) : null;
+  // The monitor is picked from the whole rect rather than its top-left
+  // corner, because a tray item's frame is not inside its own display: a
+  // menu-bar button reports a rect that starts a few points above the top
+  // edge, and the corner alone lands on whichever display happens to reach
+  // up past it — a different one, on a desk with a taller head (#618).
+  const area = app ? availableArea(app, anchor) : null;
   return placeAgainst(anchor, anchor, area, s, options);
 }
 

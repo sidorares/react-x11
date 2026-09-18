@@ -1564,7 +1564,9 @@ the editor does.
 The same placement against a rect on the **screen**: the item a tray click
 reports, or where the pointer was. `rect` and the answer are logical screen
 pixels, `{x, y}` alone is a point, and the popup is kept on the monitor the
-rect is on. With no node to ask, `options.scale` is the display's — it
+rect is on — the one the **whole rect** overlaps most, and the nearest where
+it overlaps none, because a tray item's frame starts just outside its own
+display. With no node to ask, `options.scale` is the display's — it
 defaults to 1 — and `options.direction` decides what `'start'` and `'end'`
 mean. A `<popup>` does this itself with
 [`anchor={{ rect }}`](elements.md#a-popover-under-a-tray-item).

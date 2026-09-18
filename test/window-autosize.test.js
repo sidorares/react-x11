@@ -139,6 +139,44 @@ test('with several monitors, a dialog is sized against its owner’s', async () 
   await root.unmount();
 });
 
+test('an owner off every monitor is sized against the nearest one', async () => {
+  // The fallback half of #618: a point that is on no monitor — a window
+  // dragged a little above the top of its display, one the WM has not placed
+  // yet — used to reach for the *largest* monitor, which can be anywhere on
+  // the desk. It is nearly always just outside one of them, so the nearest
+  // is the honest answer and the only one with anything to do with where the
+  // owner was.
+  const app = createMockApp();
+  setScreensForTests(app, {
+    monitors: [
+      { x: 0, y: 0, width: 1920, height: 1080 },
+      { x: 1920, y: 0, width: 800, height: 600 },
+    ],
+  });
+  const root = await createRoot({ app });
+  const owner = { current: null };
+  root.render(
+    h(
+      'window',
+      { ref: owner, width: 300, height: 200 },
+      h('popup', {
+        transientFor: owner,
+        overrideRedirect: false,
+        children: box({ width: 4000, height: 4000 }),
+      }),
+    ),
+  );
+  await tick();
+  // 20px above the top of the small right-hand monitor, and 80 to the right
+  // of the big one's edge as well: the nearest is the small one
+  app.windows[0]._screenOrigin = { x: 2000, y: -20 };
+  const dialog = app.windows[1];
+  dialog._reactX11Node._refit();
+  assert.strictEqual(dialog.width, 800, 'the monitor it is just outside of');
+  assert.strictEqual(dialog.height, 600);
+  await root.unmount();
+});
+
 test('with no screen to ask, nothing is capped', async () => {
   const { wnd, root } = await mount(
     h('window', null, box({ width: 4000, height: 40 })),

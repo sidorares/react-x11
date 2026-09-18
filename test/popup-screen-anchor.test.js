@@ -95,6 +95,72 @@ test('it keeps to the monitor the rect is on, not the biggest one', () => {
   assert.equal(at.x, 1920);
 });
 
+test('the monitor comes from the whole rect, not the corner above it', () => {
+  // #618. A menu-bar item's frame starts a few *points above* the top of the
+  // display it is on — `convertRectToScreen:` reports 33x30 at y = −1443 on a
+  // display whose top edge is −1440 — so the rect's top-left corner is on no
+  // monitor at all, and on this desk the externals reach down to y = 0 and so
+  // contain points just above the built-in's top edge. Picking the monitor
+  // from that corner opened the popover on a display the user was not
+  // looking at. Three 2x displays, the traced arrangement, device pixels
+  // here and logical points in the clicks below.
+  const app = screens(
+    { x: 0, y: 0, width: 3456, height: 2234 }, // built-in, 1728x1117 points
+    { x: -3246, y: -2880, width: 5120, height: 2880 }, // left external
+    { x: 1874, y: -2880, width: 5120, height: 2880 }, // right external
+  );
+  const click = (x, y) =>
+    anchorScreenRect(
+      app,
+      { x, y, width: 33, height: 30 },
+      { ...POPOVER, align: 'center', offset: 6, scale: 2 },
+    );
+  /** Which display a placed popover is on, in the points the clicks are in. */
+  const display = ({ x, y }) =>
+    y >= 0 ? 'built-in' : x < 937 ? 'left external' : 'right external';
+
+  // the item on the left external: right by luck before, since the largest
+  // monitor the fallback reached for happened to be this one
+  assert.equal(display(click(435, -1443)), 'left external');
+  // the item on the right external: the corner is off every monitor, and the
+  // fallback put the popover on the *left* one, clamped to its right edge
+  assert.deepEqual(click(2995, -1443), {
+    x: 2871.5,
+    y: -1407,
+    width: 280,
+    height: 400,
+    placement: 'bottom',
+  });
+  // and the item on the built-in, whose corner at y = −3 is inside the right
+  // external — a monitor that contains it and is still the wrong one
+  assert.deepEqual(click(1500, -3), {
+    x: 1376.5,
+    y: 33,
+    width: 280,
+    height: 400,
+    placement: 'bottom',
+  });
+});
+
+test('a rect off every monitor takes the nearest, not the biggest', () => {
+  // The other half of #618: a rect that is on no monitor is nearly always
+  // just outside one of them — menu-bar furniture, a pointer at the very
+  // edge — and the largest display can be anywhere on the desk.
+  const app = screens(
+    { x: 0, y: 0, width: 800, height: 600 },
+    { x: 2000, y: 0, width: 3840, height: 2160 },
+  );
+  const at = anchorScreenRect(
+    app,
+    { x: 300, y: -60, width: 30, height: 20 },
+    { ...POPOVER, offset: 6 },
+  );
+  // 40px above the small display and 1670 to the left of the big one: the
+  // popover belongs on the small one, pulled down to its top edge. Against
+  // the largest it was pushed out to x = 2000, the big display's left edge.
+  assert.deepEqual([at.x, at.y], [300, 0]);
+});
+
 test('logical in and out, against a monitor in device pixels', () => {
   // the monitor is device pixels, as the server reports it; the rect and the
   // answer are logical, like a popup's x and y
