@@ -1,16 +1,31 @@
 # A native Windows backend
 
-**Status: research PRD.** No code. Written 2026-09-11 against react-x11
-2.11.0 (`13ffb34`) and `@windowkit/appkit` 0.9 — and, unlike
-[wayland.md](wayland.md) and [macos.md](macos.md), written **on a Mac**:
-nothing below has been run on Windows yet. The line counts are measurements
-from that date. Every claim about Windows comes from Microsoft's
-documentation or from shipping source code — Chromium, Firefox, Electron,
-Flutter, winit, Qt, SDL — and the sources are listed in §References. Where
-the sources left a question open it is marked unverified rather than
-guessed, and the claims the design leans on hardest are gathered in
-§"What to probe first", the checklist for the first session on a Windows
-machine.
+**Status: phases 0–2 are built, on hardware.** Written 2026-09-11 as a
+research PRD against react-x11 2.11.0 (`13ffb34`) — on a Mac, with nothing
+run on Windows — and first built against 2.16.1 on 2026-09-18, on Windows 11
+build 26200 with a GTX 1080 Ti. What that first session settled:
+
+- **The threading model holds.** A `setInterval` kept its cadence through a
+  twelve-second run with a live window: 46 ticks against ~48 due. §"Threads
+  and the event loop" shape 3 is the design, and it is no longer a claim.
+- **The surface model holds.** `BeginDraw` per damage rect, `Commit` per
+  frame, over a virtual surface, with `src/backend/context2d.js` driving the
+  Direct2D verb table unchanged — macos.md's split paying for itself.
+- **DirectWrite answers the engine contract**, `DetermineMinWidth` included.
+- `examples/simple.jsx`, `widgets.jsx`, `tasks.jsx`, `form/` and
+  `dashboard.jsx` render, and synthetic input reaches React handlers.
+
+Still open, and the reason this is not phase 3: the desktop services
+(clipboard, drag and drop, dialogs, tray, notifications), IME, live
+per-window scale, the compositor frame clock, `<popup>`, and a headless
+suite under `test/win32/` against a fake bridge. §"The plan" tracks it.
+
+The line counts below are measurements from 2026-09-11. Every claim about
+Windows not marked as measured comes from Microsoft's documentation or from
+shipping source code — Chromium, Firefox, Electron, Flutter, winit, Qt, SDL
+— and the sources are listed in §References. Where the sources left a
+question open it is marked unverified rather than guessed, and the claims
+the design leans on hardest are gathered in §"What to probe first".
 
 It started from an architecture brief for "a modern Win32 toolkit
 backend": Win32 windows, Direct3D 11 with a flip-model swapchain under
@@ -24,10 +39,10 @@ cross-checked" goes through it point by point.
 
 ## What this is, and is not
 
-This is the plan for the **third backend family**, and the step that makes
-react-x11 cross-platform rather than a Linux-and-Mac project: X11 and Cocoa
-ship, Wayland is researched ([wayland.md](wayland.md)), and this is
-Windows. Like both of those it is **a backend beside the others, not a
+This is the plan for the **fourth backend family**, and the step that makes
+react-x11 cross-platform rather than a Linux-and-Mac project: X11, Cocoa and
+Wayland ship — Wayland landed in #548 three days after this document was
+written, which is what made `src/backend/` due — and this is Windows. Like both of those it is **a backend beside the others, not a
 migration**. X11 stays the remote answer ([remote.md](remote.md)) and the
 window-manager story; the Cocoa path is untouched; nothing below changes
 how either works — except to lift the pieces of `src/cocoa/` that were
@@ -1072,30 +1087,31 @@ focused text field because UIA says it is one.
 
 Each phase has an exit that makes the next one safe to start.
 
-- **Phase 0 — the spike (days).** A minimal addon, before anything in this
-  repository changes, proving the three risky mechanisms: the UI thread
-  inside stock `node.exe` and `bun.exe`, with events through a threadsafe
-  function and the input-to-JS latency measured; a DirectComposition
-  surface driven from the JS thread — `BeginDraw` per rect, `Scroll`,
-  `Commit` — while the UI thread sits in a live-resize loop, with the
-  bounded resize handshake and the background plate; and `WM_NCHITTEST`
-  from pushed regions, the Snap Layouts flyout included. _Exit: during a
-  live resize a JS-driven relayout tracks the drag, and a JS timer keeps
-  animating while a `TrackPopupMenuEx` menu is open and while a
-  `DoDragDrop` is in flight._
-- **Phase 1 — the shared floor.** Move the context wrapper, `surface.js`,
-  the frame queue and the promotion policy out of `src/cocoa/` into
-  `src/backend/` (macos.md §"The split", step 4), with the Cocoa backend
-  byte-identical — its fake-bridge tests and `bench:presenters -- --check`
-  pin it. _Exit: Cocoa unchanged; the verb table written down as the bridge
-  contract._
-- **Phase 2 — the surface backend.** `src/win32/` — app, window, context,
-  text engine — over `@windowkit/win32` 0.1: windows, the event channel,
-  the Direct2D verb table, DirectWrite; `createRoot({ backend: 'win32' })`,
-  and `'auto'` choosing it on Windows when the bridge is installed.
-  _Exit: `examples:widgets`, `tasks` and `form` fully interactive on
-  Windows; the fake-bridge suite green on every OS; bench-twin baselines
-  recorded._
+- **Phase 0 — the spike (days). Done, 2026-09-18.** A minimal addon proving
+  the risky mechanisms: the UI thread inside stock `node.exe` — and
+  `bun.exe`, which loads the addon and runs the event path — with events
+  through a threadsafe function; a DirectComposition surface driven from the
+  JS thread, `BeginDraw` per rect and `Commit`. _Measured: a JS timer kept
+  its cadence, 46 ticks against ~48 due over twelve seconds._ **Not yet
+  probed**: the bounded resize handshake, the background plate,
+  `WM_NCHITTEST` from pushed regions, and the cadence specifically through
+  `TrackPopupMenuEx` and `DoDragDrop`, which are what the claim rests on
+  hardest and which need a menu and a drag to exist first.
+- **Phase 1 — the shared floor. Done.** `src/backend/context2d.js`, moved
+  out of `src/cocoa/` with the class renamed and Cocoa behaviourally
+  unchanged — 303 passing before and after. `surface.js`, the frame queue
+  and the promotion policy have **not** moved: the context was what a second
+  native backend actually needed, and moving the rest before anything
+  consumes it would be renaming for its own sake.
+- **Phase 2 — the surface backend. Done for rendering and the mouse.**
+  `src/win32/` — app, window, fonts — over `@windowkit/win32`, with
+  `createRoot({ backend: 'win32' })` and `'auto'` choosing it on Windows.
+  `simple`, `widgets`, `tasks`, `form` and `dashboard` render; a synthetic
+  click reaches a React handler (`scripts/win32-probe.jsx`). **Outstanding
+  against the original exit criteria**: the fake-bridge suite under
+  `test/win32/`, which every other backend has and this one does not; the
+  bench twin and its baselines; the keyboard beyond raw key-downs; and
+  `<popup>`, so anything with a menu is untested.
 - **Phase 3 — input, scale and the desktop.** IMM32 composition; the
   clipboard and drag and drop over OLE; live per-window scale (§Layout),
   monitors, appearance and window state; file dialogs, notifications, the

@@ -5,7 +5,7 @@ Guidance for AI agents (and new contributors) working on react-x11.
 ## What this project is
 
 A custom React renderer for desktop applications, with react-like
-ergonomics over **two backends**:
+ergonomics over **four backends**:
 
 - **X11** — [ntk](https://github.com/sidorares/ntk) /
   [node-x11](https://github.com/sidorares/node-x11), pure JavaScript
@@ -18,6 +18,25 @@ ergonomics over **two backends**:
   on darwin**, so `npm test`, the benches and the examples all behave
   differently there than they did before it existed — check which backend
   you are measuring. `docs/macos.md` is the design record.
+- **Wayland** — `src/wayland/`, the wire protocol in pure JavaScript with a
+  GLES rasterizer of its own (wayland.md's Tier D). **Opt-in only**, never
+  through `'auto'`: X11 stays the default on Linux because the remote case
+  is the flagship reason this project exists and Wayland has no network
+  transparency.
+- **win32** — `src/win32/`, over the `@windowkit/win32` bridge (an
+  `optionalDependency`, prebuilt). HWNDs on a UI thread of the bridge's own,
+  a DirectComposition surface per window, Direct2D drawing and DirectWrite
+  text. **The default on win32**, falling back to X11 when the bridge is
+  absent so a WSLg or Cygwin setup with `DISPLAY` keeps working.
+  `docs/windows.md` is the design record. Young: the examples render and
+  respond to the mouse, and the desktop services are not built.
+
+The 2d drawing dialect lives in **`src/backend/context2d.js`** and is shared
+by the two native bridges: the class takes its `native` as a constructor
+argument and calls nothing else, so one wrapper drives CoreGraphics verbs and
+Direct2D verbs alike. Wayland is deliberately not in that family — its
+context is a rasterizer that _draws_ the dialect rather than forwarding it,
+which is a different layer and not a duplicate.
 
 `createRoot()` resolves the backend (`src/Reconciler.js`, `resolveBackend`);
 everything above the node tree is shared, and a backend difference belongs
