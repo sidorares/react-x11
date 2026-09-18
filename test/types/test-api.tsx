@@ -139,6 +139,7 @@ async function suite() {
   // keysyms
   const _k: number = keysymOf('é');
   const _c: string = charOf(0xe9);
+  const _cyrillic: string = charOf(0x6ca);
 
   // the server is null on the mock backend, so it has to be narrowed
   if (server) server.injectPointerMove(1, 1);
