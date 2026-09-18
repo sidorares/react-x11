@@ -1392,6 +1392,7 @@ test('each monitor carries its own usable rect, in the app’s one scale', () =>
         width: 1440,
         height: 900,
         scale: 2,
+        fps: 120,
         visible: { x: 0, y: 25, width: 1440, height: 875 },
         primary: true,
       },
@@ -1401,6 +1402,7 @@ test('each monitor carries its own usable rect, in the app’s one scale', () =>
         width: 2560,
         height: 1440,
         scale: 1,
+        fps: 60,
         visible: { x: 1440, y: 0, width: 2560, height: 1440 },
       },
     ],
@@ -1414,6 +1416,10 @@ test('each monitor carries its own usable rect, in the app’s one scale', () =>
       width: 2880,
       height: 1800,
       visible: { x: 0, y: 50, width: 2880, height: 1750 },
+      // the menu bar's screen, and the panel's own rate: both are in
+      // `listScreens` and both used to be dropped here (#617)
+      primary: true,
+      refreshRate: 120,
     },
     // the external head converts with the APP's scale, not its own 1: a
     // window on it reports `points * 2` like every other window, so a rect
@@ -1425,6 +1431,8 @@ test('each monitor carries its own usable rect, in the app’s one scale', () =>
       width: 5120,
       height: 2880,
       visible: { x: 2880, y: 0, width: 5120, height: 2880 },
+      primary: false,
+      refreshRate: 60,
     },
   ]);
   // one rect for the desktop is still published for `useScreens().workArea`,
@@ -1440,7 +1448,9 @@ test('each monitor carries its own usable rect, in the app’s one scale', () =>
 test('a screen the bridge reports no visible rect for carries none', () => {
   const layout = screenLayout([{ x: 0, y: 0, width: 800, height: 600 }], 1);
   assert.deepStrictEqual(layout.monitors, [
-    { x: 0, y: 0, width: 800, height: 600 },
+    // …and one the bridge reports no rate for carries none either, rather
+    // than the 0 that `useScreens()` would print as "0 Hz"
+    { x: 0, y: 0, width: 800, height: 600, primary: true, refreshRate: null },
   ]);
   assert.strictEqual(layout.workArea, null);
 });

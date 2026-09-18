@@ -22,7 +22,7 @@ import { deliverActivate, deliverOpen } from '../application.js';
 import { flushPendingFrames } from '../frames.js';
 import { flushSyncWork } from '../priority.js';
 import { setCompositingForTests } from '../compositing.js';
-import { setScreensForTests } from '../screens.js';
+import { setScreenPolling, setScreensForTests } from '../screens.js';
 import { setScaleForTests } from '../scale.js';
 import { BezelStore } from './bezels.js';
 import { CocoaGLArea, cocoaGLConfig, resolveCocoaGLRuntime } from './glarea.js';
@@ -70,6 +70,23 @@ const FRAME_SLACK_MS = 1;
 // to 100, docs/windows.md §"Resize"). `createRoot({ cocoa: { resizeWait } })`
 // sets it; 0 is no handshake at all.
 const RESIZE_WAIT_MS = 50;
+// How often the screen layout is re-read while something is watching it, in
+// ms. There is no event to wait for — the bridge keeps its `NSScreen` copy
+// current on macOS's notification and emits nothing (#617) — so
+// `useScreens()`'s promise to re-render when a monitor is plugged in is
+// kept by asking. 500 is half a second behind a replug, which is under the
+// time it takes to look at the screen, against one `listScreens()` read a
+// second (a lock and a few doubles on a worker, an `NSScreen.screens` walk
+// on the main thread). Only while a component is subscribed:
+// `createRoot({ cocoa: { screenPoll } })` sets it, 0 turns it off, and
+// nothing polls in an app that never calls `useScreens()`.
+const SCREEN_POLL_MS = 500;
+// The floor under a re-read driven by something that is *not* a clock: a
+// window reporting where it is, which a drag reports every frame and a
+// display change reports once. A second is far too long to matter to a
+// person and short enough that a rearrangement is noticed by the time they
+// have finished moving the window (`_recheckScreens`).
+const SCREEN_RECHECK_MS = 1000;
 
 export class CocoaApp {
   constructor(native, options = {}) {
@@ -157,6 +174,26 @@ export class CocoaApp {
     const screens = native.listScreens();
     this.scale = screens[0]?.scale ?? 1;
     this._screens = screens;
+    // …and how the layout stays current, because nothing pushes it: the
+    // bridge republishes its copy on macOS's own notification but emits no
+    // event, so this side asks — before a placement reads the layout, when
+    // a window reports a move, and on a clock while `useScreens()` has a
+    // subscriber (`refreshScreens`, #617). `_screensAt` is when the last
+    // read happened, which is what throttles the ones that are not clocks.
+    this._screensAt = performance.now();
+    this._screenTimer = null;
+    const screenPoll = options.cocoa?.screenPoll ?? SCREEN_POLL_MS;
+    if (!(screenPoll >= 0) || !Number.isFinite(screenPoll)) {
+      throw new TypeError(
+        'react-x11: cocoa.screenPoll is a number of milliseconds, 0 for ' +
+          `none — got ${screenPoll}.`,
+      );
+    }
+    this._screenPoll = screenPoll;
+    setScreenPolling(this, {
+      revalidate: () => this.refreshScreens(),
+      watched: (on) => this._pollScreens(on),
+    });
 
     // The name the Dock, ⌘-Tab and the menu bar print. An unbundled
     // process is registered with LaunchServices under its executable —
@@ -502,6 +539,102 @@ export class CocoaApp {
 
   _registerWindow(wnd) {
     this._windows.set(wnd._key, wnd);
+  }
+
+  /**
+   * Re-read the screen layout and publish it if the desk has changed — the
+   * answer to a monitor plugged in, unplugged, rearranged, woken or made
+   * primary (#617). Returns whether anything moved.
+   *
+   * **`listScreens()` is always current; this side's copy was not.** The
+   * bridge republishes its `NSScreen` snapshot on
+   * `NSApplicationDidChangeScreenParametersNotification` and answers a
+   * pump-mode call from AppKit live — what was read once and kept forever
+   * is `_screens`, taken in the constructor. So the whole fix is to ask
+   * again, and the read is cheap enough to ask on demand: before a
+   * placement clamps a popup to a monitor (`availableArea` through
+   * `setScreenPolling`), when a window reports a move (`_recheckScreens`),
+   * and on a clock while `useScreens()` is mounted (`_pollScreens`).
+   *
+   * Public, and the seam for an app that knows before any of those do —
+   * `app.refreshScreens()` publishes whatever the OS says right now.
+   *
+   * **The app's scale is not re-derived.** Every rect this backend speaks
+   * in is points × `app.scale`, fixed at startup, and a window's origin,
+   * an event's coordinates and a surface's pixels all already exist in
+   * that space; moving it under them is a different and much larger change
+   * than re-reading a layout. The layout is converted at the scale the rest
+   * of the app uses, which is what keeps `monitorAt()` answering with the
+   * head a window is actually on (see `screenLayout`).
+   */
+  refreshScreens() {
+    if (this._closed) return false;
+    this._screensAt = performance.now();
+    let screens = null;
+    try {
+      screens = this._native.listScreens?.();
+    } catch {
+      // a bridge going away, or a fake with nothing to say
+      return false;
+    }
+    // An empty answer is "could not tell", never "no displays": a Mac with
+    // the lid shut and no panel attached still has the desk it had, and
+    // publishing nothing would take every monitor out from under
+    // `availableArea` and size the next window against the void.
+    if (!screens?.length) return false;
+    if (sameScreens(screens, this._screens)) return false;
+    this._screens = screens;
+    setScreensForTests(this, screenLayout(screens, this.scale));
+    // A monitor's refresh rate can change under a window that never moved —
+    // a mode switch, a panel woken at 60Hz — and a window's clock is read
+    // from this list rather than kept by the display (`frameIntervalFor`).
+    for (const wnd of this._windows.values()) {
+      if (!wnd.destroyed) wnd._refreshFrameInterval?.();
+    }
+    return true;
+  }
+
+  /**
+   * The layout, re-read at most once every `SCREEN_RECHECK_MS`.
+   *
+   * For the signals that mean "something about the desk may have moved"
+   * rather than "it did": a window reporting its position, which a drag
+   * reports every frame and a display change reports once. Plugging a
+   * monitor in moves the windows that were on it, so this is the one place
+   * the OS does tell us something — it just does not say what.
+   */
+  _recheckScreens() {
+    if (performance.now() - this._screensAt < SCREEN_RECHECK_MS) return false;
+    return this.refreshScreens();
+  }
+
+  /**
+   * The layout on a clock, while something is subscribed to it.
+   *
+   * `useScreens()` says it re-renders when a monitor is plugged in or
+   * unplugged and when the arrangement changes. On X11 that is a RandR
+   * event; here there is nothing to wait for, so while a component is
+   * watching, this asks every `cocoa.screenPoll` ms — on an unref'd timer,
+   * which never holds the process open and never wakes an app that is
+   * waiting on nothing else. An app that never calls `useScreens()` pays
+   * nothing at all: the paths where a stale layout is visible ask for
+   * themselves.
+   *
+   * Started and stopped by the session as the first subscriber arrives and
+   * the last one leaves (`setScreenPolling`), so a hook that unmounts takes
+   * the clock with it.
+   */
+  _pollScreens(on) {
+    if (this._screenTimer) {
+      clearInterval(this._screenTimer);
+      this._screenTimer = null;
+    }
+    if (!on || this._closed || !(this._screenPoll > 0)) return;
+    this._screenTimer = setInterval(
+      () => this.refreshScreens(),
+      this._screenPoll,
+    );
+    this._screenTimer.unref?.();
   }
 
   /**
@@ -1140,6 +1273,10 @@ export class CocoaApp {
   _routeGeometry(ev) {
     const wnd = this._window(ev);
     if (!wnd || wnd.destroyed) return;
+    // Before the window re-paces itself against the screen list below: a
+    // display plugged in or removed moves the windows that were on it, and
+    // this is the only thing the bridge says about it (`_recheckScreens`).
+    this._recheckScreens();
     wnd._nativeResized(ev);
     wnd.emit('resize', {
       width: wnd.width,
@@ -1375,6 +1512,7 @@ export class CocoaApp {
     this._pump = null;
     if (this._frameTimer) clearTimeout(this._frameTimer);
     this._frameTimer = null;
+    this._pollScreens(false);
     this._cocoaGL?.destroy();
     this._cocoaGL = null;
     this._unsubscribe?.();
@@ -1413,6 +1551,12 @@ export class CocoaApp {
  * *width* as a bound to every other head: a second display wider than the
  * built-in had its right edge pulled in by the difference, and every
  * anchored popup that reached past it was clamped back (issue #453).
+ *
+ * **Everything the bridge says about a screen comes through**, not only its
+ * rects. `primary` and the panel's refresh rate were dropped here, so
+ * `useScreens().primary` read null on macOS — every entry `primary: false`
+ * — and `refreshRate` null beside a `frameIntervalFor` that was pacing
+ * windows on that very number (#617).
  */
 export function screenLayout(screens, scale) {
   const rect = (r) => ({
@@ -1423,14 +1567,64 @@ export function screenLayout(screens, scale) {
   });
   const primary = screens?.[0];
   return {
-    monitors: (screens ?? []).map((screen) => ({
+    monitors: (screens ?? []).map((screen, i) => ({
       ...rect(screen),
       ...(screen.visible ? { visible: rect(screen.visible) } : null),
+      // `NSScreen.screens[0]` **is** the primary — the screen with the menu
+      // bar, which is where macOS puts a window that names no position —
+      // and the bridge flags it as well; the index is the same fact for a
+      // bridge that does not.
+      primary: screen.primary ?? i === 0,
+      // `NSScreen.maximumFramesPerSecond`, as `fps`. 0 is the OS declining
+      // to say (before macOS 12), which is `useScreens()`'s null.
+      refreshRate: screen.fps > 0 ? screen.fps : null,
     })),
     // Still published for `useScreens().workArea`, which is one rect for
     // the desktop by definition; the primary's is the closest macOS has.
     workArea: primary?.visible ? rect(primary.visible) : null,
   };
+}
+
+/**
+ * Whether two `listScreens()` answers describe the same desk.
+ *
+ * Every field the layout is built from, in the order they arrived — which
+ * is `NSScreen.screens`, so the order is the arrangement and the primary,
+ * and a change in it is a change. `fps` counts because a window's frame
+ * clock is read from it, and `scale` because a screen that switched mode
+ * is not the screen it was even at the same size.
+ *
+ * Pure, and exported for that reason: it decides whether a re-read
+ * re-renders every `useScreens()` subscriber, and a poll that publishes an
+ * unchanged layout twice a second is a render loop rather than a fix.
+ */
+export function sameScreens(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.x !== y.x ||
+      x.y !== y.y ||
+      x.width !== y.width ||
+      x.height !== y.height ||
+      x.scale !== y.scale ||
+      x.fps !== y.fps ||
+      x.primary !== y.primary ||
+      !sameRect(x.visible, y.visible)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Two `visible` rects, either of which a bridge may not have reported. */
+function sameRect(a, b) {
+  if (!a || !b) return !a === !b;
+  return (
+    a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
+  );
 }
 
 /**

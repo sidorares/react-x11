@@ -8,7 +8,7 @@
 // src/cocoa/promotion.js and the layer presenter both assert against.
 import React from 'react';
 
-import { CocoaApp } from '../../src/cocoa/app.js';
+import { CocoaApp, screenLayout } from '../../src/cocoa/app.js';
 import { setCompositingForTests } from '../../src/compositing.js';
 import { createRoot } from '../../src/index.js';
 import { setScaleForTests } from '../../src/scale.js';
@@ -52,6 +52,13 @@ export function fakeCocoaBridge({ screens } = {}) {
           primary: true,
         },
       ],
+    /** The desk changed under the app: what `listScreens()` answers from
+     *  now on. A monitor plugged in, unplugged or rearranged is exactly
+     *  this and nothing else — the real bridge republishes its copy on
+     *  macOS's notification and emits no event for it (#617). */
+    setScreens: (next) => {
+      screens = next;
+    },
     initApp() {},
     setBackendEventCallback(cb) {
       backendCb = cb;
@@ -282,10 +289,10 @@ export async function cleanupCocoa() {
 export function fakeCocoaApp(cocoa = {}, { native = fakeCocoaBridge() } = {}) {
   const app = new CocoaApp(native, { cocoa });
   setScaleForTests(app, 2, 'cocoa');
-  setScreensForTests(app, {
-    monitors: [{ x: 0, y: 0, width: 2880, height: 1800 }],
-    workArea: { x: 0, y: 0, width: 2880, height: 1750 },
-  });
+  // The layout the way `createCocoaApp` seeds it: the bridge's own
+  // `listScreens()` through `screenLayout`, so a test sees the monitors its
+  // fake reports and a re-read of them publishes the same thing again.
+  setScreensForTests(app, screenLayout(app._screens, app.scale));
   setCompositingForTests(app, true);
   app._frameInterval = 0;
   native.setBackendEventCallback((ev) => app._route(ev));
