@@ -19,8 +19,10 @@
 //   xkb_symbols    `key <AD01> { [ q, Q ] };`     keycode -> keysyms per level,
 //                  with `symbols[Group2]`/`symbols[2]` and `type=` where given
 //                  `modifier_map Mod5 { <LVL3> }` real modifier -> keycodes
-//   xkb_compat     `interpret ISO_Level3_Shift { virtualModifier= LevelThree; }`
-//                                                keysym -> virtual modifier
+//   xkb_compat     `interpret ISO_Level3_Shift { virtualModifier= LevelThree;
+//                     useModMapMods= level1; }`  keysym -> virtual modifier,
+//                                                and which of a key's symbols
+//                                                may name it
 //
 // From the last two, a virtual modifier like `LevelThree` resolves to the
 // real modifier bit the compositor will actually report in
@@ -161,6 +163,10 @@ export class XkbKeymap {
   }
 
   _parseCompat(s) {
+    // `interpret.useModMapMods= AnyLevel;` — the section default, which every
+    // keymap states, and which an interpretation overrides for itself.
+    const dflt = s.match(/interpret\.useModMapMods\s*=\s*([A-Za-z0-9_]+)/i);
+    const level1 = (word) => /^level(?:1|One)$/i.test(word ?? '');
     // interpret <keysym>[+cond] { virtualModifier= X; ... }
     const re = /interpret\s+([A-Za-z0-9_]+)(?:\+[^{]*)?\s*\{/g;
     let m;
@@ -170,7 +176,12 @@ export class XkbKeymap {
       const vm = body.match(/virtualModifier\s*=\s*([A-Za-z0-9_]+)/i);
       if (!vm) continue;
       const sym = keysymFromName(m[1]);
-      if (sym) (this._interp ??= new Map()).set(sym, vm[1]);
+      if (!sym) continue;
+      const umm = body.match(/useModMapMods\s*=\s*([A-Za-z0-9_]+)/i);
+      (this._interp ??= new Map()).set(sym, {
+        vmod: vm[1],
+        level1Only: level1(umm ? umm[1] : dflt?.[1]),
+      });
     }
   }
 
@@ -256,24 +267,51 @@ export class XkbKeymap {
   }
 
   /**
-   * Virtual modifier -> real modifier: the keys whose keysym `interpret`
-   * binds to the virtual modifier are looked up in `modifier_map`, and the
-   * real bits found there are the answer.
+   * Virtual modifier -> real modifier: a key's `interpret`ed keysyms name the
+   * virtual modifiers the key sets, and the key's `modifier_map` bits are
+   * what those virtual modifiers turn out to mean.
+   *
+   * Which of a key's keysyms may name one is `useModMapMods`, and it is the
+   * whole of AltGr working. `<RALT>` sits in `modifier_map Mod1` beside the
+   * other Alt keys and *also* carries `ISO_Level3_Shift`, on a secondary
+   * group or a second level:
+   *
+   *     key <RALT> { type= "ONE_LEVEL", symbols[1]= [ Alt_R ],
+   *                                     symbols[2]= [ ISO_Level3_Shift ] };
+   *     modifier_map Mod1 { <LALT>, <RALT>, <ALT>, <META> };
+   *     modifier_map Mod5 { <LVL3> };
+   *
+   * Attributing a key's bits to every keysym on it collected Mod1 from
+   * `<RALT>` on top of Mod5 from `<LVL3>`, so `LevelThree` resolved to
+   * `Mod1|Mod5` — and since `_levelFor` matches the masked state for
+   * equality, a real AltGr press (Mod5 alone) never reached level 3. AltGr
+   * did nothing and the third and fourth level of every layout were
+   * unreachable. `useModMapMods= level1`, which is what the keymap says for
+   * `ISO_Level3_Shift`, means a key contributes only where the keysym is its
+   * **primary** symbol — group 1, level 1 — and `<RALT>`'s primary symbol is
+   * `Alt_R`, so it never should have contributed.
    */
   _resolveVmods() {
-    const bySym = new Map(); // keysym -> real mask, from modmap via symbols
+    const bind = (vmod, bits) =>
+      this.vmods.set(vmod, (this.vmods.get(vmod) ?? 0) | bits);
     for (const [code, key] of this.keys) {
       const bits = this.modmap.get(code);
       if (!bits) continue;
-      for (const g of key.groups)
-        for (const sym of g?.syms ?? [])
-          if (sym) bySym.set(sym, (bySym.get(sym) ?? 0) | bits);
+      for (let gi = 0; gi < key.groups.length; gi++) {
+        const syms = key.groups[gi]?.syms ?? [];
+        for (let li = 0; li < syms.length; li++) {
+          const interp = syms[li] && this._interp?.get(syms[li]);
+          if (!interp) continue;
+          if (interp.level1Only && (gi || li)) continue;
+          bind(interp.vmod, bits);
+        }
+      }
     }
-    for (const { sym, bit } of this._modmapSyms ?? [])
-      bySym.set(sym, (bySym.get(sym) ?? 0) | bit);
-    for (const [sym, vmod] of this._interp ?? []) {
-      const real = bySym.get(sym);
-      if (real) this.vmods.set(vmod, (this.vmods.get(vmod) ?? 0) | real);
+    // `modifier_map Shift { Shift_L };` — the bare-keysym form names no key,
+    // so there is no level to test it against.
+    for (const { sym, bit } of this._modmapSyms ?? []) {
+      const interp = this._interp?.get(sym);
+      if (interp) bind(interp.vmod, bit);
     }
     for (const [name, bit] of Object.entries(VMOD_FALLBACK)) {
       if (!this.vmods.has(name)) this.vmods.set(name, bit);
