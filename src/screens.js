@@ -119,6 +119,11 @@ class ScreenSession {
     this._desktopAtom = null;
     this._snapshot = null;
     this._listeners = new Set();
+    /** A backend that has to be *asked* for its layout rather than told —
+     *  see `setScreenPolling`. `_revalidate` re-reads it now; `_watched` is
+     *  told whether anything is subscribed. */
+    this._revalidate = null;
+    this._watched = null;
     /** Every `X.on('event')` handler installed here, so `stop()` can take
      *  them off again rather than leaving one per root on a shared client. */
     this._handlers = [];
@@ -138,7 +143,11 @@ class ScreenSession {
       }
     }
     this._handlers.length = 0;
+    const watched = this._listeners.size > 0;
     this._listeners.clear();
+    if (watched) this._watch(false);
+    this._revalidate = null;
+    this._watched = null;
   }
 
   /** Install an X event handler that this session owns. */
@@ -183,7 +192,34 @@ class ScreenSession {
 
   subscribe(fn) {
     this._listeners.add(fn);
-    return () => this._listeners.delete(fn);
+    if (this._listeners.size === 1) this._watch(true);
+    return () => {
+      if (!this._listeners.delete(fn)) return;
+      if (!this._listeners.size) this._watch(false);
+    };
+  }
+
+  /** Ask a pulled backend to re-read the layout, now. Synchronous: the
+   *  callers are placement paths with no round trip available to them. */
+  revalidate() {
+    if (!this._revalidate || this.stopped) return;
+    try {
+      this._revalidate();
+    } catch {
+      // a backend that cannot answer leaves the layout it published
+      // standing, which is a better answer than none
+    }
+  }
+
+  /** Whether anything is subscribed, for a backend that only has to keep
+   *  asking while someone is listening. */
+  _watch(on) {
+    if (!this._watched) return;
+    try {
+      this._watched(on);
+    } catch {
+      // as above: its clock, its problem
+    }
   }
 }
 
@@ -321,6 +357,12 @@ function usable(monitor, work) {
  */
 export function availableArea(app, near = null) {
   const session = sessions.get(app);
+  // The monitor a popup is flipped and clamped into is picked here, so a
+  // backend whose layout is pulled rather than pushed is asked *now*
+  // rather than answered from whatever it last read (`setScreenPolling`).
+  // A rect the desk has since moved lands inside another monitor's stale
+  // one, and the popup opens at that monitor's edge (#617).
+  session?.revalidate();
   const screen = session?.screenRect ?? null;
   if (!session) return screen;
   const monitor = monitorAt(session.monitors, near) ?? screen;
@@ -415,6 +457,46 @@ export function watchScreens(app, fn) {
   const session = sessions.get(app);
   if (!session) return () => {};
   return session.subscribe(fn);
+}
+
+/**
+ * Register a backend whose layout has to be **pulled**.
+ *
+ * X11 and Wayland are told: RandR sends an event, a `wl_output` announces
+ * itself, and a `publish` lands from the handler. The cocoa bridge keeps
+ * its `NSScreen` copy current on macOS's own
+ * `NSApplicationDidChangeScreenParametersNotification` but emits no event
+ * for it, so there a display plugged in, rearranged or made primary is a
+ * question nobody asked (#617). This is where the asking is wired up:
+ *
+ * - `revalidate()` re-reads the layout and publishes any change. Called
+ *   before `availableArea()` picks the monitor a window is sized against
+ *   or a popup is clamped into, which is where a stale rect does visible
+ *   damage, and synchronous for that reason.
+ * - `watched(on)` is told when the *first* subscriber arrives and when the
+ *   last one leaves. A change nobody asked about still has to reach
+ *   `useScreens()`, which needs a clock where there is no event — and a
+ *   clock that only runs while a component is watching costs an app that
+ *   never asks nothing at all.
+ *
+ * Both are optional, and a session with neither behaves exactly as it did:
+ * this adds no work to the X11 path.
+ */
+export function setScreenPolling(
+  app,
+  { revalidate = null, watched = null } = {},
+) {
+  let session = sessions.get(app);
+  if (!session) {
+    session = new ScreenSession(app);
+    sessions.set(app, session);
+  }
+  session._revalidate = revalidate;
+  session._watched = watched;
+  // Registered after a `useScreens()` already mounted — the backend still
+  // has to hear that it is being watched.
+  if (watched && session._listeners.size) session._watch(true);
+  return session;
 }
 
 // --------------------------------------------------------------------------

@@ -1268,12 +1268,15 @@ async function main() {
         frameInterval: 8,
         pumpInterval: 4,
         resizeWait: 0,
+        screenPoll: 0,
         exitOnQuit: false,
       },
     })
   ).unmount();
   // @ts-expect-error -- not a presenter
   await createRoot({ cocoa: { presenter: 'metal' } });
+  // @ts-expect-error -- milliseconds, and 0 for no clock at all
+  await createRoot({ cocoa: { screenPoll: 'never' } });
   // the pacing default for every window of a root, both backends
   await (await createRoot({ frameRate: 'adaptive' })).unmount();
   await (

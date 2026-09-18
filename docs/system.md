@@ -121,6 +121,29 @@ display's own menu bar and Dock taken off — so each monitor carries its real
 usable rect and no approximation runs. `workArea` there is still one rect,
 because the field is one rect by definition; it is the primary screen's, and
 on a multi-display Mac `screens[n].available` is the answer to prefer.
+`primary` is the screen with the menu bar, `refreshRate` the panel's own rate,
+and `name` is null — the bridge does not report one.
+
+### On macOS the layout is asked for, not announced
+
+Every other backend is told: RandR sends an event, a `wl_output` announces
+itself. macOS has no such event for a client — the bridge keeps its
+`NSScreen` copy current on the system's own notification and says nothing —
+so react-x11 re-reads the layout instead, at the moments it matters:
+
+- **before a placement**, which is where a stale rect would be visible — a
+  popup flipped and clamped into a monitor that has moved, an auto-sized
+  window capped by one that is gone;
+- **when a window reports that it moved**, at most once a second, because a
+  display arriving or leaving moves the windows that were on it;
+- **on a clock while a `useScreens()` subscriber is mounted**, every
+  `createRoot({ cocoa: { screenPoll } })` ms — 500 by default, `0` for
+  never. An app that never calls `useScreens()` never polls.
+
+So a component watching the layout sees a monitor plugged in about half a
+second later than an X11 one does, and everything else sees it at the moment
+it asks. `useApp().refreshScreens()` publishes the layout right now for an
+app that knows before any of those.
 
 ### Mirroring
 

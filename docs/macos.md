@@ -539,7 +539,7 @@ successor the way wayland.md carries its measurements.
 | `transparent`                                      | `isOpaque = false`, clear background — always composited, no compositor probe needed                       | maps _better_; `useSupports('transparency')` is constant-true                    |
 | frame clock (Present + fence + estimator)          | `CADisplayLink` (macOS 14+) / `CVDisplayLink`                                                              | simpler; per-window, refresh-rate-aware                                          |
 | scale ladder (env → XSETTINGS → Xft → RandR)       | `backingScaleFactor` + `windowDidChangeBackingProperties`                                                  | collapses to one authoritative, live source                                      |
-| screens (`useScreens`)                             | `NSScreen.screens` + change notification                                                                   | maps                                                                             |
+| screens (`useScreens`)                             | `NSScreen.screens`, re-read: the bridge follows the change notification, but no event reaches a client     | maps — asked before a placement and on a clock while watched (#617)              |
 | appearance ladder                                  | `NSApp.effectiveAppearance` KVO + `NSColor.controlAccentColor`; accent-change notification                 | the osascript rung already feeds accent + ink into the palette; in-process later |
 | clipboard (selections, INCR, targets)              | `NSPasteboard` (+ lazy providers for the ownership model); no PRIMARY selection                            | maps; `transfer.js` MIME plumbing reusable; INCR dies unmourned                  |
 | DnD (XDND)                                         | `NSDraggingSource`/`NSDraggingDestination` on the hosting view                                             | maps; the `dropAccept`/`onDrag*` prop contract holds                             |
@@ -1023,6 +1023,20 @@ command line asking for it. It needs a bridge with `runMain()`,
   the size it was painted at, in AppKit's own points, and each window asks
   AppKit to wait for it for `cocoa: { resizeWait }` ms — 50 by default, 0
   for none. The layer presenter's frame commits its size too.
+- **The screen layout is pulled.** `listScreens()` is always current — the
+  bridge republishes its copy on
+  `NSApplicationDidChangeScreenParametersNotification`, and in pump mode
+  asks AppKit live — but nothing tells the app, so `CocoaApp` asks:
+  `refreshScreens()` re-reads it, compares, and publishes a desk that moved
+  into `src/screens.js`. It runs before a placement reads the layout
+  (`availableArea`), when a window reports that it moved — at most once a
+  second, since a drag reports every frame — and on a clock while a
+  `useScreens()` subscriber is mounted, `cocoa: { screenPoll }` ms apart
+  (500 by default, 0 for none). An app that never watches the layout keeps
+  no clock. What the read does **not** re-derive is `app.scale`: every rect
+  this backend speaks in is points times that factor, and moving it under
+  the windows, the events and the surfaces that already exist in that space
+  is a different change from re-reading a layout.
 - **A live resize is what AppKit brackets**: `liveResizing` is set between
   the bridge's `window-live-resize` begin and end (windowkit/appkit#63), in
   both modes. AppKit's tracking loop reports a resize per pointer move and

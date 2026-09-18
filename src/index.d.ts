@@ -233,7 +233,15 @@ export interface RootOptions {
    * `resizeWait` is how long, in ms, AppKit may hold a live-resize tick for
    * the app's frame at the new size under `react-x11/cocoa-main`, where
    * the frame is painted on another thread (50 by default; 0 lets the edge
-   * move without waiting). `appName` is what the Dock, ⌘-Tab and the app menu print for
+   * move without waiting).
+   * `screenPoll` is how often the screen layout is re-read while a
+   * {@link useScreens} subscriber is mounted, in ms — 500 by default, 0 for
+   * never. macOS has no event for a display plugged in, unplugged or
+   * rearranged that reaches a client, so a component watching the layout is
+   * kept current by asking; an app that never calls `useScreens` never
+   * polls, and the paths where a stale layout would misplace a window ask
+   * for themselves whatever this says.
+   * `appName` is what the Dock, ⌘-Tab and the app menu print for
    * an unbundled process (a bundle's Info.plist wins); `activationPolicy`
    * is `'regular'` (a Dock tile, a ⌘-Tab entry — the default),
    * `'accessory'` (a menu-bar app: windows but no tile) or `'prohibited'`,
@@ -253,6 +261,7 @@ export interface RootOptions {
     frameInterval?: number;
     pumpInterval?: number;
     resizeWait?: number;
+    screenPoll?: number;
     appName?: string;
     activationPolicy?: 'regular' | 'accessory' | 'prohibited';
     exitOnQuit?: boolean;
