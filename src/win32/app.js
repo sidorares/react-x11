@@ -14,6 +14,7 @@ import { setScaleForTests } from '../scale.js';
 import { setScreensForTests } from '../screens.js';
 
 import { createBezels } from './bezels.js';
+import { Win32Surface } from './surface.js';
 import { installGl, Win32GlWindow } from './glarea.js';
 import { Win32FontManager } from './fonts.js';
 import { loadNative } from './native.js';
@@ -217,6 +218,17 @@ class Win32App {
     return { visual: 0x21, depth: 32 };
   }
 
+
+  /**
+   * The offscreen-surface seam `react-x11/ntk`'s `Surface` dispatches on:
+   * ntk's `Surface` contract over a Direct2D bitmap (src/win32/surface.js).
+   * Its presence is what makes `new Surface(app, { width, height })` answer
+   * a surface here rather than ntk's pixmap, which needs an X connection —
+   * a backend without the method gets ntk's, so an X app is never asked.
+   */
+  createSurface(options) {
+    return new Win32Surface(this, options);
+  }
   createWindow(attributes = {}) {
     // A window with a parent is a `<glarea>`'s surface, which is a different
     // thing entirely: a child HWND with a GL context and no DirectComposition
@@ -224,12 +236,6 @@ class Win32App {
     // does on X11 where a GL surface is also just a child window.
     if (attributes.parent) return new Win32GlWindow(this, attributes);
     return new Win32Window(this, attributes);
-  }
-
-  createSurface(options = {}) {
-    const width = Math.max(1, Math.round(options.width ?? 1));
-    const height = Math.max(1, Math.round(options.height ?? 1));
-    return this._native.createSurface(width, height, this.scale);
   }
 
   close() {
@@ -374,7 +380,12 @@ class Win32App {
         wnd.emit('keydown', { keycode: event.a, keysym: event.a, buttons: 0 });
         break;
       case 'close':
-        wnd.emit('close', {});
+        // The same shape Cocoa sends. `preventDefault` is a no-op because
+        // nothing has happened yet to prevent: WM_CLOSE is answered with 0
+        // and the window is still there, so the request is the app's to
+        // grant. The listener calls it before deciding, and a close event
+        // without it throws before `onCloseRequest` is ever reached.
+        wnd.emit('close', { preventDefault() {} });
         break;
       case 'appearance': {
         // Re-read whole, and the cached bezels go with it: every one of them
