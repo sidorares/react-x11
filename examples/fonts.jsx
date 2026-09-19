@@ -440,6 +440,40 @@ const AXIS_NAMES = {
  */
 const idOf = (m) => `${m.path}\u0000${m.postscriptName ?? ''}`;
 
+/**
+ * The designer's named instances — `{ Light: { wght: 300 }, … }`.
+ *
+ * fontkit's own `namedVariations` getter is one expression over every
+ * instance in `fvar`, and it reads each one's name without checking there is
+ * one. Bahnschrift, which ships with Windows, has fifteen instances and one
+ * of them resolves to no name record: the getter throws
+ * `reading 'en'` and the whole panel — axes, metrics, coverage, all of it —
+ * collapses to that message, for a font whose two axes are perfectly
+ * readable.
+ *
+ * So the map is built here instead, and an instance with no name is skipped
+ * rather than fatal. A face that names none of them is a face with no named
+ * instances, which is a true answer; a face that names fourteen out of
+ * fifteen shows fourteen.
+ */
+function namedInstancesOf(fk) {
+  const instances = fk?.fvar?.instance;
+  if (!Array.isArray(instances)) return {};
+  const axes = fk?.fvar?.axis ?? [];
+  const named = {};
+  for (const instance of instances) {
+    const name = instance?.name?.en;
+    if (typeof name !== 'string' || !name) continue;
+    const settings = {};
+    instance.coord?.forEach?.((value, index) => {
+      const tag = axes[index]?.axisTag;
+      if (tag) settings[tag] = value;
+    });
+    named[name] = settings;
+  }
+  return named;
+}
+
 function describe(catalogue, match, size, app) {
   try {
     const font = catalogue.open(match.path, app, {
@@ -453,7 +487,7 @@ function describe(catalogue, match, size, app) {
       metrics: font.metrics(size),
       axes: font.variationAxes ?? {},
       // the designer's chosen points, which fontkit keeps beside the axes
-      named: font.fk?.namedVariations ?? {},
+      named: namedInstancesOf(font.fk),
     };
   } catch (err) {
     return { error: String(err?.message ?? err) };

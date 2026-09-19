@@ -317,7 +317,16 @@ export class Win32FontManager {
           typeof source,
       );
     }
-    const loaded = this._native.fontLoad(data);
+    // The name to reach it by, which `loadFont` has already decided — the
+    // file's own family, or one the caller asked for. A `postscriptName`
+    // alongside it narrows the registration to that one face, which is what
+    // naming a single face of a family (`Bahnschrift-Light`) means: without
+    // it the name would reach every face in the file and the weight would be
+    // whatever matching landed on.
+    const loaded = this._native.fontLoad(data, {
+      family: opts.family || undefined,
+      postscriptName: opts.postscriptName || undefined,
+    });
     if (!loaded) {
       throw new Error(
         'react-x11: loadFont — DirectWrite could not read the font' +
@@ -406,6 +415,9 @@ export class Win32FontManager {
         size: sizeOf(span.size ?? base.size),
         weight: weightOf(span.weight ?? base.weight ?? 400),
         italic: (span.style ?? base.style) === 'italic',
+        // A variable face's axes. Passed per span as well as on the base,
+        // because a span carries its own and a paragraph is one layout.
+        variations: span.variations ?? base.variations ?? undefined,
         ...(ink ? ink : {}),
       });
     }
@@ -417,6 +429,7 @@ export class Win32FontManager {
         size: sizeOf(base.size),
         weight: weightOf(base.weight ?? 400),
         italic: base.style === 'italic',
+        variations: base.variations ?? undefined,
         maxWidth: options.maxWidth,
         align: options.align,
         lineHeight: options.lineHeight,
@@ -426,14 +439,20 @@ export class Win32FontManager {
       ranges,
     );
 
+    const raw = this._native.layoutMetrics(handle);
     if (DEBUG) {
+      // The family is in here because the one way this goes quietly wrong is
+      // `familyOf` not recognising a name and answering `sans-serif`: the
+      // text still draws, in the wrong face, at the wrong metrics, and the
+      // only tell is a width that does not match the face the app thinks it
+      // asked for.
       console.error(
-        `[win32] layout "${text.slice(0, 24)}" base.size=${base.size} ` +
-          `spans=${ranges.map((r) => r.size).join(',')}`,
+        `[win32] layout "${text.slice(0, 24)}" ${raw.width}x${raw.height} ` +
+          `family=${JSON.stringify(ranges[0]?.family)} size=${base.size} ` +
+          `vars=${JSON.stringify(base.variations ?? null)}`,
       );
     }
 
-    const raw = this._native.layoutMetrics(handle);
     // `descent` is what halfLeading() in nodes/text.js subtracts to recreate
     // CSS half-leading, and DirectWrite reports a baseline and a height per
     // line rather than a descent.
