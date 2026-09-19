@@ -310,6 +310,10 @@ export class Win32Window {
       return;
     }
     const ctx = this.getContext();
+    // REACT_X11_WIN32_FULL_REPAINT=1 throws the damage away and paints the
+    // whole window every frame. Slow on purpose: it is the control for
+    // "is this a damage bug", which no amount of reading the rects settles.
+    if (process.env.REACT_X11_WIN32_FULL_REPAINT === '1') damage = null;
     if (this._owesFullPaint) {
       this._owesFullPaint = false;
       damage = null;
@@ -355,6 +359,12 @@ export class Win32Window {
    */
   scrollRegion(rect, dx, dy) {
     if (!this._composed || this.destroyed) return false;
+    if (DEBUG) {
+      console.error(
+        `[win32] scrollRegion ${Math.round(rect.x)},${Math.round(rect.y)} ` +
+          `${Math.round(rect.width)}x${Math.round(rect.height)} by ${dx},${dy}`,
+      );
+    }
     return this._native.scrollRegion(
       this.id,
       Math.round(rect.x),
