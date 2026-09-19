@@ -306,7 +306,7 @@ class Win32App {
       case 'tray-failed':
         return;
       case 'gl-ready':
-        this._glWindows.get(event.id)?._onReady(event.a === 1);
+        this._glWindows.get(event.id)?._onReady(event.a === 1, event.b);
         return;
       case 'file-dialog':
         this.filePanels?._answer(event.id, event.a === 1, event.text ?? '');

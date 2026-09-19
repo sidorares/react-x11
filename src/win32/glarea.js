@@ -60,15 +60,24 @@ export class Win32GlWindow {
    * backend but the indirect one's feature set without its portability, and
    * is docs/windows-gl.md's rung 2 rather than this one.
    */
-  _onReady(ok) {
+  _onReady(ok, why = 0) {
     if (!ok) {
+      // The bridge says which step refused, because "no GL surface" covers
+      // four quite different machines and only one of them is the one this
+      // error used to describe.
+      const REASONS = {
+        1: 'the surface window could not be created',
+        2: 'no pixel format on this device supports OpenGL — a remote ' +
+          'session or a display driver without an OpenGL ICD',
+        3: 'a pixel format was set but no OpenGL context could be made on it',
+        4: 'this machine has no vendor OpenGL driver, so only the 1.1 ' +
+          'software rasterizer is available, which has no shaders',
+      };
       this.emit(
         'error',
         new Error(
-          'react-x11: no OpenGL surface — this machine has no vendor OpenGL ' +
-            'driver, so only the 1.1 software rasterizer is available, which ' +
-            'has no shaders. docs/windows-gl.md rung 2 (ANGLE) covers this ' +
-            'case and is not built yet.',
+          `react-x11: no OpenGL surface — ${REASONS[why] ?? 'the bridge refused it'}. ` +
+            'docs/windows-gl.md rung 2 (ANGLE) covers this case and is not built yet.',
         ),
       );
       return;
@@ -199,6 +208,8 @@ function instrument(gl) {
   let errors = 0;
   const raw = gl.getError;
   const rawRead = gl.readPixels;
+  const raw_getShaderInfoLog = gl.getShaderInfoLog;
+  const raw_getProgramInfoLog = gl.getProgramInfoLog;
   // REACT_X11_GL_PEEK=<n> reads the stencil and the colour at the middle of
   // the surface after each draw. A fill pass that lays down no winding and a
   // cover pass that paints nothing look identical from outside; the stencil
@@ -276,6 +287,20 @@ function instrument(gl) {
           `[gl]     after ${name}: stencil set on ${set}/1600 (max ${peak}), ` +
             `${colours.size} colours ${[...colours].slice(0, 3).join(' | ')}\n`,
         );
+      }
+      // A shader that will not compile, or a program that will not link, is
+      // not a GL *error* — glGetError stays clean and the caller is expected
+      // to ask. An app that asks and then throws its own message leaves
+      // nothing behind, so the log is printed here where it still exists.
+      if (
+        (name === 'getShaderParameter' || name === 'getProgramParameter') &&
+        out === false
+      ) {
+        const log =
+          name === 'getShaderParameter'
+            ? raw_getShaderInfoLog(args[0])
+            : raw_getProgramInfoLog(args[0]);
+        process.stderr.write(`[gl] ${name} false — ${log || '(no log)'}\n`);
       }
       const err = raw();
       if (err !== 0 && errors < 40) {
