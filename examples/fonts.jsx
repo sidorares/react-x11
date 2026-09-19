@@ -451,12 +451,19 @@ const idOf = (m) => `${m.path}\u0000${m.postscriptName ?? ''}`;
  * collapses to that message, for a font whose two axes are perfectly
  * readable.
  *
- * So the map is built here instead, and an instance with no name is skipped
- * rather than fatal. A face that names none of them is a face with no named
- * instances, which is a true answer; a face that names fourteen out of
- * fifteen shows fourteen.
+ * So the getter is asked first — it is the face's own answer and the one that
+ * knows about shapes this does not — and the map is rebuilt here only when it
+ * throws, skipping the instance with no name rather than losing all of them.
+ * A face that names none is a face with no named instances, which is a true
+ * answer; a face that names fourteen out of fifteen shows fourteen.
  */
 function namedInstancesOf(fk) {
+  try {
+    const named = fk?.namedVariations;
+    if (named && typeof named === 'object') return named;
+  } catch {
+    // one unnamed instance takes the whole getter down with it — rebuild
+  }
   const instances = fk?.fvar?.instance;
   if (!Array.isArray(instances)) return {};
   const axes = fk?.fvar?.axis ?? [];

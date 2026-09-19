@@ -1439,9 +1439,15 @@ export class BackendContext2D {
     const family = m ? m[4] : 'sans-serif';
     const weight = m?.[2] === 'bold' ? 700 : m?.[2] ? Number(m[2]) : 400;
     const style = m?.[1] ? 'italic' : 'normal';
+    // No colour unless the caller named one, which is what `_contextInk`
+    // above is waiting for: a layout with no ink of its own is drawn with the
+    // context's fill, the way `fillText` is defined to be. Defaulting the
+    // base to black instead made every layout carry an ink, so `fillStyle`
+    // was read, found to be irrelevant, and never applied — a `fillText`
+    // under a white fill came out black on both backends.
     return fonts.layout(
       [{ text: String(text), family, size, weight, style, color }],
-      { family, size, weight, style, color: color ?? '#000' },
+      { family, size, weight, style, color },
       {},
     );
   }

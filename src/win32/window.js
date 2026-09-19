@@ -179,7 +179,9 @@ export class Win32Window {
   setWindowType() {}
   setActions() {}
   setTransientFor() {}
-  setAlwaysOnTop() {}
+  setAlwaysOnTop(on = true) {
+    this._native.windowState(this.id, 'above', on !== false);
+  }
   setProperty() {
     return Promise.resolve(this);
   }
@@ -187,15 +189,27 @@ export class Win32Window {
     return Promise.resolve(this);
   }
 
-  setWmState() {
-    // Resolves false: nothing was applied, which is the honest answer and the
-    // one `useWindowState()` reads. A latched true here would tell an app its
-    // request landed.
-    return Promise.resolve(false);
+  /**
+   * One of `<window>`'s EWMH state names, applied with the Windows call that
+   * means it: `ShowWindow` for maximized and minimized, a remembered frame
+   * and the monitor's rect for fullscreen, `SetWindowPos` for `above`.
+   *
+   * Resolves false for a name this platform has no answer for, which is what
+   * `useWindowState()` reads to know the request went nowhere — never for a
+   * call that was made and did not take. `focused` is the one that can be
+   * refused after the fact: the shell will not let a background process take
+   * the foreground, and that refusal is the documented behaviour rather than
+   * a failure, so it reports true and the state simply does not change.
+   */
+  setWmState(name, action = 'add') {
+    const on = action !== 'remove';
+    return Promise.resolve(
+      Boolean(this._native.windowState(this.id, name, on)),
+    );
   }
 
   getWmStates() {
-    return Promise.resolve([]);
+    return Promise.resolve(this._native.windowStates(this.id) ?? []);
   }
 
   setCursor(name) {

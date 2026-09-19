@@ -19,7 +19,13 @@ import { Win32Surface } from './surface.js';
 import { installGl, Win32GlWindow } from './glarea.js';
 import { Win32FontManager } from './fonts.js';
 import { loadNative } from './native.js';
-import { installTaskbar, Win32FilePanels, Win32StatusItem } from './shell.js';
+import {
+  installIdle,
+  installNotifications,
+  installTaskbar,
+  Win32FilePanels,
+  Win32StatusItem,
+} from './shell.js';
 import { Win32Window } from './window.js';
 
 // Until the compositor clock is bound (docs/windows.md §"The frame clock":
@@ -419,6 +425,19 @@ class Win32App {
         });
         break;
       }
+      // Activation, which the tree reads as focus: a caret blinks, a focus
+      // ring is drawn, and a `<window>`'s `focused` state follows it.
+      case 'window-focus':
+      case 'window-blur': {
+        const wnd = this._windows.get(event.window);
+        if (wnd) {
+          wnd.emit(event.type === 'window-focus' ? 'focus' : 'blur', {
+            buttons: 0,
+            time: Date.now(),
+          });
+        }
+        return;
+      }
       case 'close':
         // The same shape Cocoa sends. `preventDefault` is a no-op because
         // nothing has happened yet to prevent: WM_CLOSE is answered with 0
@@ -462,6 +481,11 @@ export async function createWin32App(options = {}) {
   // bezels it will keep rather than swapping to them a frame later.
   app._syncBezels(app.systemAppearance()?.colorScheme);
   installTaskbar(app);
+  // A notification centre and the two session-wide facts — whether anybody is
+  // at the keyboard, and whether the screen may sleep. All three are seams the
+  // core looks for on the app and finds on no backend but the one it is on.
+  installNotifications(app);
+  installIdle(app);
   // The GL ladder, which decides whether <glarea> has a rung here at all.
   installGl(app);
 
