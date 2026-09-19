@@ -32,6 +32,17 @@ const DEBUG = process.env.REACT_X11_WIN32_DEBUG === '1';
 // never reached the text engine" when the scale was never the problem. 14 is
 // the same floor the Cocoa engine uses.
 const DEFAULT_SIZE = 14;
+
+/** The CSS generics, which name no face on their own. */
+const GENERIC_FAMILIES = new Set([
+  'sans-serif',
+  'serif',
+  'monospace',
+  'cursive',
+  'system-ui',
+  'ui-sans-serif',
+  'ui-monospace',
+]);
 function sizeOf(value) {
   return typeof value === 'number' && value > 0 ? value : DEFAULT_SIZE;
 }
@@ -226,6 +237,53 @@ export class Win32FontManager {
     // replaces.
     this._faces.clear();
     return null;
+  }
+
+  /**
+   * The catalogue seam ntk exposes as `fonts.source` — what the fonts app
+   * browses. On X that is fontconfig; here it is DirectWrite's collections,
+   * the app's own faces before the system's.
+   *
+   * Pattern syntax: the family, with fontconfig's `:modifiers` tolerated and
+   * ignored (`Consolas:bold`, `:lang=ru` — the part after the colon is
+   * fontconfig vocabulary DirectWrite does not speak). A query that is only
+   * a modifier has no family in it and lists the catalogue instead, which is
+   * what the app does with `:lang=ja` on a backend that cannot answer it.
+   */
+  get source() {
+    return (this._source ??= {
+      matchSortedAsync: async ({ family } = {}) => {
+        const pattern = String(family ?? '').trim();
+        let name = pattern.split(':')[0].trim();
+        if (name && GENERIC_FAMILIES.has(name.toLowerCase())) {
+          // Rendering resolves the generics itself (ResolveFamily in the
+          // bridge); the catalogue wants a family it can actually enumerate,
+          // and these are the faces that resolution lands on.
+          name =
+            {
+              serif: 'Times New Roman',
+              monospace: 'Consolas',
+              'ui-monospace': 'Consolas',
+              cursive: 'Segoe Script',
+            }[name.toLowerCase()] ?? 'Segoe UI';
+        }
+        const rows = this._native.listFonts(
+          name ? { family: name } : { limit: 400 },
+        );
+        return rows
+          .filter((row) => row.path)
+          .map((row) => ({
+            path: row.path,
+            postscriptName: row.postscriptName,
+            family: row.family,
+            style: row.style,
+            // fontconfig's charset, which DirectWrite does not expose as a
+            // string. Empty rather than wrong: the app shows it when it has
+            // one and says nothing when it does not.
+            charset: '',
+          }));
+      },
+    });
   }
 
   /**
