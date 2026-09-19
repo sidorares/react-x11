@@ -518,6 +518,16 @@ class Win32App {
       case 'ime-end':
         this.inputMethod.handle(event, wnd);
         return;
+      case 'uia-wanted':
+        // A screen reader just attached to this window. The tree it reads is
+        // built now rather than left at whatever the last commit produced.
+        this._a11y?.wanted(event.id);
+        return;
+      case 'uia-action':
+        // A screen reader asking for something to happen. A request, not a
+        // change: the tree decides, through the same click a pointer makes.
+        this._a11y?.action(event);
+        return;
       case 'close':
         // The same shape Cocoa sends. `preventDefault` is a no-op because
         // nothing has happened yet to prevent: WM_CLOSE is answered with 0
@@ -567,6 +577,14 @@ export async function createWin32App(options = {}) {
   // `createStatusItem` called Shell_NotifyIcon `cocoa` and handed out AppKit's
   // feature map with it. Mechanisms, never platforms (AGENTS.md).
   app.shellMechanisms = { tray: 'shellnotifyicon', launcher: 'taskbar' };
+  // The accessibility bridge this backend has of its own. Its presence is
+  // what `startA11y()` reads to know not to climb toward an AT-SPI bus that
+  // is not there; the import is deferred so a process with no screen reader
+  // never loads it (src/win32/a11y.js).
+  app.startAccessibility = async () => {
+    const { startWin32Accessibility } = await import('./a11y.js');
+    return startWin32Accessibility(app);
+  };
   installTaskbar(app);
   // A notification centre and the two session-wide facts — whether anybody is
   // at the keyboard, and whether the screen may sleep. All three are seams the

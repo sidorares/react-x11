@@ -42,10 +42,9 @@ API's existence. "Works" means a test asserts it or it was driven and seen.
 | a jump list              | `useJumpList`                                                 | `ICustomDestinationList` — **Windows only**                                                    |
 | recent documents         | `useRecentDocument`                                           | `SHAddToRecentDocs` — **Windows only**                                                         |
 | input methods            | `onCompositionStart`/`Update`/`End`, `<textinput>`            | IMM32: the preedit is drawn in the field, the candidate list follows the caret                 |
+| screen readers           | `role`, `aria-*`, `announce()`                                | a UI Automation provider over a pushed mirror of the tree                                      |
 
-## Not implemented
-
-Ordered by what it costs an app today.
+## Built, with limits worth knowing
 
 ### Input methods — built on IMM32, with the gaps that layer has
 
@@ -65,17 +64,31 @@ those; windows.md §"IME" has the design and why it is the harder rung.
 Reconversion (asking the IME to re-open a committed word) is not wired up
 either, though IMM32 carries it.
 
-### Screen readers — nothing answers UIA
+### Screen readers — built, without text ranges
 
-`announce()` and the a11y tree reach AT-SPI on Linux and nothing here.
-`WM_GETOBJECT` is unhandled, so Narrator and NVDA see a bare window.
-windows.md §"Accessibility: UI Automation" argues for AccessKit's Windows
-adapter over a provider of our own, and the argument still holds: UIA's calls
-are synchronous and frequent, and answering them from the live tree paces the
-screen reader by the app's busiest moment.
+`WM_GETOBJECT` is answered by a UI Automation provider of this project's own
+(`windows/src/uia.cc`), served from a mirror `src/win32/a11y.js` pushes. Roles,
+names, descriptions, states, bounding rectangles, focus and the Invoke, Toggle,
+Value and RangeValue patterns all cross; `announce()` goes out as a UIA
+notification. Everything an app writes — `role`, `aria-label`, `aria-checked`,
+`aria-valuenow` — is read from `src/a11y.js`, the same pure functions the
+AT-SPI bridge reads, so the two backends cannot disagree about what a node is.
 
-This is the largest piece of work on the list and the one with the clearest
-existing answer.
+The mirror is the deliberate part. UIA's calls are synchronous and frequent —
+one focus change is dozens of property reads — so answering them from the live
+tree would pace the screen reader by the app's busiest moment. windows.md
+§"Accessibility: UI Automation" has the argument; it named AccessKit as the
+reuse candidate for the same shape, and a provider of our own was built
+instead so the release pipeline does not grow a Rust toolchain for both
+architectures.
+
+**What is missing is `ITextProvider`.** A `<textinput>` exposes its value, so a
+screen reader reads the field and hears edits, but caret-by-caret and
+word-by-word navigation _inside_ it is not there. That is the next piece.
+
+## Not implemented
+
+Ordered by what it costs an app today.
 
 ### `useDockMenu` is inert
 

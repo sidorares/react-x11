@@ -21,8 +21,9 @@ and the headless suite under `test/win32/` against a fake bridge.
 
 Still open: **live per-window scale** (the renderer cannot re-scale a window
 that is already up), the **compositor frame clock** (frames are paced by a
-timer, not by DWM), and **UI Automation**, without which Narrator and NVDA
-see a bare window. §"The plan" tracks it.
+timer, not by DWM), and UI Automation's **text ranges**, without which a
+screen reader reads a field but cannot move through it. §"The plan" tracks
+it.
 
 The line counts below are measurements from 2026-09-11. Every claim about
 Windows not marked as measured comes from Microsoft's documentation or from
@@ -1042,8 +1043,25 @@ idle — through a React commit, a layout, a paint. It is legal — a client
 waits 20 seconds by default — but it paces the screen reader by the app's
 busiest moment.
 
+**Built: the mirror, with a provider of this project's own.**
+`windows/src/uia.cc` serves UIA from a tree `src/win32/a11y.js` pushes —
+roles, names, descriptions, states, bounding rectangles, focus, hit testing,
+and the Invoke, Toggle, Value and RangeValue patterns, with `announce()` as a
+UIA notification. `ProviderOptions_ServerSideProvider` without
+`UseComThreading`, so every call arrives on a UIA thread, reads the mirror
+under one lock and returns, and nothing ever waits on JS. A provider holds a
+window id and a node id and nothing else, so a client keeping an element
+across a re-render cannot make it read freed memory. `ITextProvider` and its
+ranges are the piece that is not there; a `<textinput>` exposes its value
+through `IValueProvider` instead.
+
+The alternative considered for the same shape was AccessKit, and the reason
+it was not taken is the build rather than the design: its C bindings put Rust
+in the release pipeline, for x64 and arm64 prebuilds both. The paragraph
+below is the argument that chose the mirror, and it stands either way.
+
 **So the lean on this backend is the mirror, deliberately, and AccessKit
-is the one to use.** Its Windows adapter serves UIA from a tree the app
+would have been the other way to get one.** Its Windows adapter serves UIA from a tree the app
 pushes and answers from its own copy on UIA's threads, with text ranges for
 single- and multi-line inputs (rich text not yet), and it links into a C++
 addon through its C bindings. The push is what the AT-SPI bridge already

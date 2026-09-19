@@ -115,6 +115,11 @@ export class Win32Window {
     // The HWND exists now, which is the first moment a drop target can be
     // registered on it — the tree mounted its `dropAccept`s before this.
     this._dropTransport?.reattach();
+    // And the first moment there is a window for the accessibility mirror to
+    // be keyed by. The tree mounted and committed before this, so without
+    // this the first push would have had nowhere to go and a screen reader
+    // attaching to an idle application would find an empty window.
+    this.app._a11y?.windowReady(this);
     if (Number.isFinite(originX)) this._noteOrigin(originX, originY);
     if (!this._composed) {
       this._native.compose(this.id);

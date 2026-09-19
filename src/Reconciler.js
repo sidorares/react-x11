@@ -885,7 +885,7 @@ export async function createRoot(options = {}) {
   // critical path — every rung that fails is a normal, silent "off"
   // (docs/accessibility.md). Deliberately not awaited: a root must not
   // wait on a bus that is not there.
-  startA11y();
+  startA11y(app);
 
   // Before anything renders: the launch id has to be on the first toplevel
   // before it maps, and the environment variable has to be consumed whether

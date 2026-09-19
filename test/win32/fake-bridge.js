@@ -257,6 +257,32 @@ export function createFakeBridge() {
     record('imeCaret', windowId, x, y, width, height);
   };
 
+  // --- UI Automation -------------------------------------------------------
+  //
+  // The provider is C++ and the mirror lives there, so what the JS half can
+  // be held to is exactly this: which nodes it pushed, which it removed, and
+  // when it decided to say nothing at all.
+  bridge.uiaListeners = true;
+  bridge.uiaPushes = [];
+  bridge.uiaFocus = [];
+  bridge.uiaAnnounced = [];
+  bridge.uiaProperties = [];
+  bridge.uiaListening = () => bridge.uiaListeners;
+  bridge.uiaUpdate = (windowId, update) => {
+    bridge.uiaPushes.push({ windowId, ...update });
+    record('uiaUpdate', windowId);
+  };
+  bridge.uiaFocusChanged = (windowId, nodeId) => {
+    bridge.uiaFocus.push([windowId, nodeId]);
+  };
+  bridge.uiaAnnounce = (windowId, text, polite) => {
+    bridge.uiaAnnounced.push([windowId, text, polite]);
+    return true;
+  };
+  bridge.uiaPropertyChanged = (windowId, nodeId, which) => {
+    bridge.uiaProperties.push([windowId, nodeId, which]);
+  };
+
   return bridge;
 }
 

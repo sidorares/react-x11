@@ -1275,10 +1275,27 @@ function a11yEnabled() {
  * it stopped — which is the debugging story for "why does Orca not see my
  * app".
  */
-export function startA11y() {
+export function startA11y(app) {
   if (startPromise) return startPromise;
   if (!a11yEnabled()) {
     startPromise = Promise.resolve(null);
+    return startPromise;
+  }
+  // A backend with an accessibility bridge of its own answers first, and its
+  // presence *is* the capability — the same rule the rest of the library
+  // uses. The Windows backend installs one, because UI Automation asks
+  // synchronously and has to be answered from a pushed copy rather than from
+  // the live tree (docs/windows.md §Accessibility); AT-SPI's asynchronous
+  // questions are answered from the tree itself, below.
+  if (typeof app?.startAccessibility === 'function') {
+    startPromise = Promise.resolve()
+      .then(() => app.startAccessibility())
+      .catch((err) => {
+        if (process.env.REACT_X11_A11Y) {
+          console.warn('react-x11: accessibility bridge failed to start:', err);
+        }
+        return null;
+      });
     return startPromise;
   }
   startPromise = import('./atspi.js')
