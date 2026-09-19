@@ -57,6 +57,9 @@ class Win32App {
     this._native = native;
     this.options = options;
     this._windows = new Map();
+    // The drag this process started, while the shell is carrying it — what
+    // an in-app drop reads to keep `e.items` by reference (src/dnd.js).
+    this._activeDrag = null;
     this._rafQueue = [];
     this._frameTimer = null;
     this._closed = false;
@@ -219,6 +222,19 @@ class Win32App {
 
   /** A tray icon. `useTray()` finds this by name, not by platform — the rule
    * AGENTS.md sets for every ladder. */
+  /**
+   * A drag session's point, as the tree's own units.
+   *
+   * The bridge reports screen device pixels, like every other event it
+   * sends; `DragSession.nativeEnded` multiplies by the node's scale to get
+   * back to them, because the cocoa bridge it was written against reports
+   * points. So this divides, and the two agree at any scale.
+   */
+  _dragPoint(event) {
+    const s = this.scale || 1;
+    return { x: (event.a ?? 0) / s, y: (event.b ?? 0) / s };
+  }
+
   createStatusItem(options) {
     return new Win32StatusItem(this, options);
   }
@@ -425,19 +441,41 @@ class Win32App {
         });
         break;
       }
+      // The shell's drag, on its way through one of our windows. The
+      // transport answers each of these before returning — for a motion the
+      // answer is remembered for the next one, and for the drop the bridge's
+      // UI thread is waiting inside `IDropTarget::Drop` for exactly it.
+      case 'drag-enter':
+      case 'drag-over':
+      case 'drag-leave':
+      case 'drag-drop':
+        wnd._routeDrag(event);
+        return;
+      // Our own drag, which the shell is carrying. `DoDragDrop` reports no
+      // motion of its own, so these come from the source's feedback
+      // callback — the only news of the gesture while the shell owns the
+      // pointer, and what a `<popup dragPreview>` follows.
+      case 'drag-session-moved':
+        this._activeDrag?.nativeMoved(this._dragPoint(event));
+        return;
+      case 'drag-session-ended': {
+        const drag = this._activeDrag;
+        this._activeDrag = null;
+        drag?.nativeEnded({
+          ...this._dragPoint(event),
+          operation: event.c ? String(event.text ?? '') || null : null,
+        });
+        return;
+      }
       // Activation, which the tree reads as focus: a caret blinks, a focus
       // ring is drawn, and a `<window>`'s `focused` state follows it.
       case 'window-focus':
-      case 'window-blur': {
-        const wnd = this._windows.get(event.window);
-        if (wnd) {
-          wnd.emit(event.type === 'window-focus' ? 'focus' : 'blur', {
-            buttons: 0,
-            time: Date.now(),
-          });
-        }
+      case 'window-blur':
+        wnd.emit(event.type === 'window-focus' ? 'focus' : 'blur', {
+          buttons: 0,
+          time: Date.now(),
+        });
         return;
-      }
       case 'close':
         // The same shape Cocoa sends. `preventDefault` is a no-op because
         // nothing has happened yet to prevent: WM_CLOSE is answered with 0

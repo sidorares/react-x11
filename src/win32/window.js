@@ -16,6 +16,7 @@
 // exactly the hook for, and which makes one BeginDraw per damage rect fall out
 // for free.
 import { BackendContext2D } from '../backend/context2d.js';
+import { Win32DropTransport, dragSpec } from './dnd.js';
 
 // REACT_X11_WIN32_DEBUG=1 reports every frame and what it drew into. A window
 // that stays blank on this backend has a short list of causes — no frame
@@ -102,6 +103,9 @@ export class Win32Window {
    */
   _onReady(originX, originY) {
     this._ready = true;
+    // The HWND exists now, which is the first moment a drop target can be
+    // registered on it — the tree mounted its `dropAccept`s before this.
+    this._dropTransport?.reattach();
     if (Number.isFinite(originX)) this._noteOrigin(originX, originY);
     if (!this._composed) {
       this._native.compose(this.id);
@@ -210,6 +214,46 @@ export class Win32Window {
 
   getWmStates() {
     return Promise.resolve(this._native.windowStates(this.id) ?? []);
+  }
+
+  // --- drag and drop -------------------------------------------------------
+
+  /**
+   * The window's drop side, which the tree installs when it first mounts a
+   * `dropAccept` under this window (src/nodes/window/droptarget.js). Its
+   * presence is what tells the tree this backend has drop machinery of its
+   * own and no XDND property to write.
+   */
+  attachDropTransport(session, node) {
+    this._dropTransport = new Win32DropTransport(this, session, node);
+  }
+
+  /** A `dropAccept` came or went under this window. The shell registers no
+   *  types, so all this decides is whether the window is a target at all. */
+  dropTargetsChanged() {
+    this._dropTransport?.refreshTypes();
+  }
+
+  /** Backend events for the drag in progress, routed by the app. */
+  _routeDrag(event) {
+    this._dropTransport?.handle(event);
+  }
+
+  /**
+   * The source side: hand a `DragSession`'s gesture to the shell. Returns at
+   * once — `DoDragDrop` runs its modal loop on the bridge's UI thread, and
+   * the gesture reports back as `drag-session-moved` and
+   * `drag-session-ended`.
+   *
+   * And nothing stops here. That is the whole point of the thread split: the
+   * frame clock keeps ticking, React keeps committing and a `<popup
+   * dragPreview>` mounted by `onDragStart` is painted while the shell owns
+   * the pointer — where the cocoa backend's pump does not return until the
+   * drop.
+   */
+  beginDrag(session) {
+    if (this.destroyed) return null;
+    return this._native.beginDrag(this.id, dragSpec(session));
   }
 
   setCursor(name) {
