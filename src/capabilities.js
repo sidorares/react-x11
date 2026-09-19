@@ -79,6 +79,21 @@ function soleApp() {
   return showing.length === 1 ? showing[0] : null;
 }
 
+/**
+ * The mechanism a backend says it built one rung on, or null.
+ *
+ * Backends install the *same method names* for the same rung on purpose --
+ * `createStatusItem` is how `useTray` stays one hook -- so a method name
+ * cannot tell two mechanisms apart, and a probe that tried reported
+ * Shell_NotifyIcon as `cocoa`. A backend with more than one mechanism to
+ * distinguish declares them (`app.shellMechanisms`); one with nothing to
+ * disambiguate says nothing and the method checks below still answer.
+ */
+function shellMechanism(target, rung) {
+  const declared = target?.shellMechanisms;
+  return typeof declared?.[rung] === 'string' ? declared[rung] : null;
+}
+
 // ---------------------------------------------------------------------------
 // notifications
 // ---------------------------------------------------------------------------
@@ -154,6 +169,27 @@ async function probeNotifications({ app } = {}) {
     });
   }
 
+  if (backend === 'win32') {
+    // A Shell_NotifyIcon balloon: text with a severity, shown by the tray
+    // icon and kept by the Action Center afterwards. Everything richer is a
+    // toast, which is WinRT and a different mechanism entirely.
+    return frozen('win32', {
+      actions: false,
+      events: false, // NIN_BALLOONUSERCLICK is not routed
+      update: false,
+      close: false,
+      body: true,
+      bodyMarkup: false,
+      bodyImage: false,
+      // The balloon shows the severity's own glyph. NIIF_USER would put the
+      // caller's icon there and is not wired up, so an icon cannot be chosen.
+      icon: false,
+      sound: true, // the shell plays one; NIIF_NOSOUND is not set
+      persistence: true, // it lands in the Action Center
+      urgency: true, // low/normal/critical -> NIIF_NONE/INFO/ERROR
+    });
+  }
+
   // `osascript` and `notify-send`: one way, and that is the whole of it.
   // `notify-send -p` prints an id on newer libnotify, which is why `update`
   // is not flatly false there — see notifications.js.
@@ -178,6 +214,33 @@ async function probeNotifications({ app } = {}) {
 
 /** The tray on an app that has one of its own, which needs nothing asked. */
 function trayNow(target) {
+  // The mechanism is *declared* by the backend, not guessed from a method
+  // name, because two backends deliberately install the same names -- that
+  // sharing is what lets `useTray` be one hook -- and a probe that read
+  // `createStatusItem` as "this is AppKit" reported Shell_NotifyIcon as
+  // `cocoa`, with SF Symbols and click modifiers it does not have.
+  if (shellMechanism(target, 'tray') === 'shellnotifyicon') {
+    return frozen('shellnotifyicon', {
+      menu: true,
+      // No name vocabulary: the shell has no icon theme to look a name up
+      // in, so an icon here is always pixels or a file.
+      iconName: false,
+      iconBytes: true,
+      attention: false,
+      overlay: false,
+      tooltip: true,
+      // An NSStatusItem can show a label beside its icon; a notify icon is
+      // an icon. `title` is accepted and used as the tooltip, which is a
+      // fallback rather than the feature.
+      title: false,
+      click: true,
+      clickPosition: true,
+      clickRect: false,
+      clickModifiers: false,
+      // WM_MOUSEWHEEL is not delivered to a notify icon.
+      scroll: false,
+    });
+  }
   if (typeof target?.createStatusItem === 'function') {
     return frozen('cocoa', {
       menu: true,
@@ -234,6 +297,30 @@ async function probeTray({ app } = {}) {
 
 /** The Dock tile on an app that has one, which needs nothing asked. */
 function launcherNow(target) {
+  // Declared, not guessed -- see `trayNow`. This backend installs
+  // `setDockBadge` too, so the cocoa branch below used to answer for it and
+  // say `progress: false` with a working taskbar progress bar right there.
+  if (shellMechanism(target, 'launcher') === 'taskbar') {
+    return frozen('taskbar', {
+      badge: true,
+      // Drawn into the overlay icon, so it is text rather than a count --
+      // but a 16x16 overlay holds about three glyphs and longer labels come
+      // out as `99+`.
+      badgeText: true,
+      progress: true, // ITaskbarList3::SetProgressValue
+      urgent: true, // FlashWindowEx
+      // The taskbar button's menu is the jump list, whose entries start a
+      // *new* process; nothing on it can call back into this one. That is a
+      // different feature from the Dock menu, and `tasks` is its name --
+      // reporting `menu: true` here would promise a callback that never
+      // comes.
+      menu: false,
+      needsDesktopFile: false,
+      tasks: typeof target.jumpList === 'function',
+      thumbnailToolbar: typeof target.thumbnailToolbar === 'function',
+      recentDocuments: typeof target.noteRecentDocument === 'function',
+    });
+  }
   if (typeof target?.setDockBadge === 'function') {
     return frozen('cocoa', {
       badge: true,
@@ -243,6 +330,12 @@ function launcherNow(target) {
       menu: typeof target.setDockMenu === 'function',
       // The Dock always shows the app; nothing has to be installed for it.
       needsDesktopFile: false,
+      // The Dock has no static-task menu and no hover toolbar. macOS does
+      // keep a Recent list (`noteNewRecentDocumentURL:`), but this backend
+      // has nothing wired to it, and the map says what the backend can do.
+      tasks: false,
+      thumbnailToolbar: false,
+      recentDocuments: typeof target.noteRecentDocument === 'function',
     });
   }
   return null;
@@ -283,6 +376,11 @@ async function probeLauncher({ app } = {}) {
     urgent: true,
     menu: true, // the quicklist
     needsDesktopFile: true,
+    // The quicklist is the menu; `Actions=` in the .desktop file are the
+    // closest thing to static tasks and are not driven from here.
+    tasks: false,
+    thumbnailToolbar: false,
+    recentDocuments: false,
   });
 }
 

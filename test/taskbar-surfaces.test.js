@@ -2,25 +2,30 @@
 // from code that also runs somewhere else.
 //
 // The seam is one rule: **the backend installs a method, and its presence is
-// the capability.** `useSupports('thumbnailToolbar')` asks whether the app has
-// that method; a backend that has the feature puts it there and every other
-// one does not. So the interesting test is not that the hooks work where the
-// feature exists — it is that they are *inert* where it does not, without
-// anything in the app or in the hook knowing which platform it is on.
+// the capability.** The three surfaces are reported as features of the
+// *launcher* — the same rung as the badge and the progress bar, because all
+// of them hang off the one icon the desktop shows for this app — so a
+// component asks `useDesktopCapability('launcher')` and branches on
+// `features.thumbnailToolbar` rather than on the platform.
 //
-// That is what is checked here, against the mock backend: the capability
-// reads false, the hooks mount and unmount without touching anything, and the
-// imperative form says it did nothing rather than throwing.
+// Two things are checked here. The first is that the probe names the
+// mechanism honestly, which it did not: every backend installs the same
+// method names on purpose (that is what makes `useTray` and `useBadge` one
+// hook each), so a probe that read `setDockBadge` as "this is AppKit"
+// reported the Windows taskbar as `backend: 'cocoa'` — with `progress: false`
+// beside a working progress bar. The second is that the hooks are *inert*
+// where the surfaces do not exist, without anything in the app or in the hook
+// knowing which platform it is on.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import React from 'react';
 
+import { capabilityNow } from '../src/capabilities.js';
 import {
   noteRecentDocument,
   useJumpList,
   useRecentDocument,
-  useSupports,
   useThumbnailToolbar,
 } from '../src/index.js';
 import { renderX11 } from '../src/testing/index.js';
@@ -29,17 +34,77 @@ const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
 
 const h = React.createElement;
 
-/** Every capability this file is about, read in one render. */
-function Reads({ onRead }) {
-  const thumbnailToolbar = useSupports('thumbnailToolbar');
-  const jumpList = useSupports('jumpList');
-  const recentDocuments = useSupports('recentDocuments');
-  onRead({ thumbnailToolbar, jumpList, recentDocuments });
-  return h('box', null);
-}
+/** The methods the win32 backend installs, and the mechanisms it declares. */
+const taskbarApp = () => ({
+  shellMechanisms: { tray: 'shellnotifyicon', launcher: 'taskbar' },
+  createStatusItem() {},
+  setDockBadge() {},
+  setTaskbarProgress() {},
+  thumbnailToolbar() {},
+  jumpList() {},
+  noteRecentDocument() {},
+});
 
-test('a backend without them reports so, and the hooks do nothing', async () => {
-  const reads = [];
+/** What AppKit installs: the same two names, and no mechanism to declare. */
+const dockApp = () => ({
+  createStatusItem() {},
+  setDockBadge() {},
+  setDockMenu() {},
+});
+
+test('the mechanism is named by the backend, not guessed from a method', () => {
+  const taskbar = capabilityNow('launcher', { app: taskbarApp() });
+  const dock = capabilityNow('launcher', { app: dockApp() });
+
+  // The regression: both apps have `setDockBadge`, so the mechanism cannot be
+  // read off it. Before this was declared, the first of these said 'cocoa'.
+  assert.equal(taskbar.backend, 'taskbar');
+  assert.equal(dock.backend, 'cocoa');
+
+  // And the feature maps are the two desktops' own, not one copied onto both.
+  assert.equal(
+    taskbar.features.progress,
+    true,
+    'the taskbar has a progress bar',
+  );
+  assert.equal(dock.features.progress, false, 'NSDockTile has none');
+
+  // The tray is the same story: SF Symbols and click modifiers are AppKit's.
+  const tray = capabilityNow('tray', { app: taskbarApp() });
+  assert.equal(tray.backend, 'shellnotifyicon');
+  assert.equal(tray.features.iconName, false);
+  assert.equal(tray.features.clickModifiers, false);
+  assert.equal(capabilityNow('tray', { app: dockApp() }).backend, 'cocoa');
+});
+
+test('the three surfaces are launcher features, and follow the methods', () => {
+  const full = capabilityNow('launcher', { app: taskbarApp() });
+  assert.deepEqual(
+    {
+      tasks: full.features.tasks,
+      thumbnailToolbar: full.features.thumbnailToolbar,
+      recentDocuments: full.features.recentDocuments,
+    },
+    { tasks: true, thumbnailToolbar: true, recentDocuments: true },
+  );
+
+  // The probe reads the same methods the hooks call, which is what keeps the
+  // prediction and the hook from disagreeing: take one away and it says so.
+  const partial = taskbarApp();
+  delete partial.thumbnailToolbar;
+  assert.equal(
+    capabilityNow('launcher', { app: partial }).features.thumbnailToolbar,
+    false,
+  );
+
+  // A Dock reports them false rather than leaving them out, so a component
+  // reading `features.tasks` gets an answer everywhere.
+  const dock = capabilityNow('launcher', { app: dockApp() });
+  assert.equal(dock.features.tasks, false);
+  assert.equal(dock.features.thumbnailToolbar, false);
+});
+
+test('a backend without them mounts the hooks and nothing happens', async () => {
   const calls = [];
 
   function App() {
@@ -52,7 +117,7 @@ test('a backend without them reports so, and the hooks do nothing', async () => 
     );
     useJumpList([{ title: 'New window', arguments: '--new' }]);
     useRecentDocument('C:/tmp/a.txt');
-    return h(Reads, { onRead: (r) => reads.push(r) });
+    return h('box', null);
   }
 
   const { app, unmount } = await renderX11(h('window', null, h(App)), {
@@ -60,12 +125,6 @@ test('a backend without them reports so, and the hooks do nothing', async () => 
   });
   try {
     await nextTurn();
-    const last = reads[reads.length - 1];
-    assert.deepEqual(
-      last,
-      { thumbnailToolbar: false, jumpList: false, recentDocuments: false },
-      'a backend with none of these said it had one',
-    );
     // The point of the seam: three hooks mounted, nothing reached the app.
     assert.equal(typeof app.thumbnailToolbar, 'undefined');
     assert.equal(typeof app.jumpList, 'undefined');
@@ -85,38 +144,11 @@ test('the imperative form answers false rather than throwing', async () => {
   try {
     assert.equal(noteRecentDocument('C:/tmp/a.txt', { app }), false);
     assert.equal(noteRecentDocument(null, { app }), false);
-  } finally {
-    await unmount();
-  }
-});
 
-test('a backend that has them is reported as having them', async () => {
-  // The other half of the same rule, with the methods put on by hand: the
-  // capability follows the method, so this is the win32 backend's behaviour
-  // without needing Windows to run it.
-  const sent = [];
-  const { app, unmount } = await renderX11(h('window', null), {
-    backend: 'mock',
-  });
-  try {
-    app.thumbnailToolbar = (id, buttons) => sent.push(['toolbar', id, buttons]);
-    app.jumpList = (tasks) => sent.push(['jumpList', tasks]);
-    app.noteRecentDocument = (path) => sent.push(['recent', path]);
-
-    const reads = [];
-    const { unmount: unmount2 } = await renderX11(
-      h('window', null, h(Reads, { onRead: (r) => reads.push(r) })),
-      { backend: 'mock', app },
-    );
-    await nextTurn();
-    assert.deepEqual(reads[reads.length - 1], {
-      thumbnailToolbar: true,
-      jumpList: true,
-      recentDocuments: true,
-    });
+    const sent = [];
+    app.noteRecentDocument = (path) => sent.push(path);
     assert.equal(noteRecentDocument('C:/tmp/b.txt', { app }), true);
-    assert.deepEqual(sent.at(-1), ['recent', 'C:/tmp/b.txt']);
-    await unmount2();
+    assert.deepEqual(sent, ['C:/tmp/b.txt']);
   } finally {
     await unmount();
   }

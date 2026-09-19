@@ -1406,6 +1406,9 @@ function _Supports() {
   const overlay: boolean = useSupports('glOverlay');
   // @ts-expect-error — not a feature useSupports knows
   useSupports('webgpu');
+  // @ts-expect-error — a taskbar surface is a *desktop* capability, not a
+  // property of the display: useDesktopCapability('launcher').features
+  useSupports('thumbnailToolbar');
   void [canBlend, shaders, bezels, embedding, overlay];
   return null;
 }
@@ -1971,3 +1974,51 @@ void _loopback;
 void _err;
 void _badFrame;
 void _sessionValue;
+
+import {
+  noteRecentDocument,
+  useJumpList,
+  useRecentDocument,
+  useThumbnailToolbar,
+} from '../../src/index.js';
+import type { DesktopBackend } from '../../src/index.js';
+
+// ---------------------------------------------------------------------------
+// The Windows taskbar's surfaces, and the capability that reports them. The
+// hooks are called unconditionally — they do nothing where the backend has
+// none — so the branch is on a feature and never on a platform.
+function _Taskbar() {
+  const launcher = useDesktopCapability('launcher');
+  const backend: DesktopBackend | null = launcher.backend;
+  const canToolbar: boolean | undefined = launcher.features.thumbnailToolbar;
+  const canTasks: boolean | undefined = launcher.features.tasks;
+  const canRecent: boolean | undefined = launcher.features.recentDocuments;
+
+  useThumbnailToolbar(
+    canToolbar
+      ? [
+          { id: 'prev', tooltip: 'Previous', enabled: false },
+          {
+            id: 'play',
+            label: 'Play',
+            icon: { data: new Uint8Array(4), width: 1, height: 1 },
+            dismissOnClick: true,
+          },
+          { id: 'next', tooltip: 'Next', icon: 'C:/icons/next.ico' },
+        ]
+      : null,
+    (id: string) => void id,
+  );
+  useJumpList(canTasks ? [{ title: 'New window', arguments: '--new' }] : null);
+  useRecentDocument(canRecent ? 'C:/Music/a.flac' : null);
+  const noted: boolean = noteRecentDocument('C:/Music/a.flac');
+
+  // @ts-expect-error — a button is reported by its own id, which is required
+  useThumbnailToolbar([{ tooltip: 'Previous' }]);
+  // @ts-expect-error — a task is a title and arguments, never a callback
+  useJumpList([{ title: 'New window', onSelect: () => {} }]);
+
+  void [backend, noted];
+  return null;
+}
+void _Taskbar;

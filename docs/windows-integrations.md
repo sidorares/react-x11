@@ -9,38 +9,38 @@ API's existence. "Works" means a test asserts it or it was driven and seen.
 
 ## Works
 
-| what | the API | how |
-| --- | --- | --- |
-| a window, composed | `<window>` | DirectComposition surface per window, Direct2D verbs |
-| text and layout | `<text>`, `app.fonts` | DirectWrite: layout, line metrics, hit testing, carets |
-| glyph runs | `ctx.drawGlyphs`, `face.glyphIdFor`/`advanceOf` | `DrawGlyphRun` — what `<Terminal backend="vt">` positions its grid with |
-| variable font axes | `style.variations` | `IDWriteTextLayout4::SetFontAxisValues` |
-| app-supplied fonts | `loadFont`, `openFont` | a DirectWrite font set of the app's own, with the file's axes kept |
-| OpenGL | `<glarea>` | WGL, and `WGL_NV_DX_interop2` to reach the composed surface |
-| keyboard | `onKeyDown`, focus | `ToUnicodeEx` without consuming dead keys; X keysym vocabulary |
-| pointer | `onMouseDown`, wheel, capture | all five buttons, `SetCapture` for drags leaving the window |
-| focus | `onFocus`/`onBlur` | `WM_ACTIVATE` |
-| window states | `useWindowState`, `<window maximized fullscreen alwaysOnTop>` | `ShowWindow`, `SetWindowPos`, a remembered frame for fullscreen |
-| screens and DPI | `useScreens`, `useScale` | per-monitor v2; `WM_DPICHANGED` |
-| light/dark and accent | `useSystemAppearance` | `UISettings` and the theme registry; the frame follows through `DWMWA_USE_IMMERSIVE_DARK_MODE` |
-| native control bezels | `<button>`, `<checkbox>`… | the visual styles engine, where its dark variants are real — measured, not assumed |
-| file dialogs | `useFileDialog` | the Common Item Dialog, parented, modal on the UI thread |
-| clipboard | `useClipboard` | text and format enumeration |
-| tray icon and menu | `useTray` | `Shell_NotifyIcon` |
-| taskbar progress | `useProgress` | `ITaskbarList3::SetProgressValue` |
-| a badge on the icon | `useBadge`, `setBadge` | the count drawn into an overlay icon — Windows has no badge API |
-| demanding attention | `setUrgent` | `FlashWindowEx` |
-| global hotkeys | `useAccelerator` | `RegisterHotKey` |
-| notifications | `notify`, `useNotifier` | a tray balloon, which the shell shows as a toast |
-| idle time | `useIdle` | `GetLastInputInfo`, polled on the same adaptive wait the X rung uses |
-| keeping the screen awake | `keepAwake`, `useKeepAwake` | `SetThreadExecutionState`, counted |
-| sampling a screen colour | `useEyedropper` | the screen read through GDI, with a drawn loupe |
-| reading a window back | `window.snapshot()` | `PrintWindow` with `PW_CLIENTONLY | PW_RENDERFULLCONTENT` |
-| locale | `systemLocale`, `useLocale` | ICU's own resolution, which reads the OS on Windows — no backend code |
-| drag and drop | `useDropTarget`, `useDragSource` | `IDropTarget` and `DoDragDrop` over OLE, both directions |
-| a thumbnail toolbar | `useThumbnailToolbar` | `ITaskbarList3::ThumbBarAddButtons` — **Windows only** |
-| a jump list | `useJumpList` | `ICustomDestinationList` — **Windows only** |
-| recent documents | `useRecentDocument` | `SHAddToRecentDocs` — **Windows only** |
+| what                     | the API                                                       | how                                                                                            |
+| ------------------------ | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| a window, composed       | `<window>`                                                    | DirectComposition surface per window, Direct2D verbs                                           |
+| text and layout          | `<text>`, `app.fonts`                                         | DirectWrite: layout, line metrics, hit testing, carets                                         |
+| glyph runs               | `ctx.drawGlyphs`, `face.glyphIdFor`/`advanceOf`               | `DrawGlyphRun` — what `<Terminal backend="vt">` positions its grid with                        |
+| variable font axes       | `style.variations`                                            | `IDWriteTextLayout4::SetFontAxisValues`                                                        |
+| app-supplied fonts       | `loadFont`, `openFont`                                        | a DirectWrite font set of the app's own, with the file's axes kept                             |
+| OpenGL                   | `<glarea>`                                                    | WGL, and `WGL_NV_DX_interop2` to reach the composed surface                                    |
+| keyboard                 | `onKeyDown`, focus                                            | `ToUnicodeEx` without consuming dead keys; X keysym vocabulary                                 |
+| pointer                  | `onMouseDown`, wheel, capture                                 | all five buttons, `SetCapture` for drags leaving the window                                    |
+| focus                    | `onFocus`/`onBlur`                                            | `WM_ACTIVATE`                                                                                  |
+| window states            | `useWindowState`, `<window maximized fullscreen alwaysOnTop>` | `ShowWindow`, `SetWindowPos`, a remembered frame for fullscreen                                |
+| screens and DPI          | `useScreens`, `useScale`                                      | per-monitor v2; `WM_DPICHANGED`                                                                |
+| light/dark and accent    | `useSystemAppearance`                                         | `UISettings` and the theme registry; the frame follows through `DWMWA_USE_IMMERSIVE_DARK_MODE` |
+| native control bezels    | `<button>`, `<checkbox>`…                                     | the visual styles engine, where its dark variants are real — measured, not assumed             |
+| file dialogs             | `useFileDialog`                                               | the Common Item Dialog, parented, modal on the UI thread                                       |
+| clipboard                | `useClipboard`                                                | text and format enumeration                                                                    |
+| tray icon and menu       | `useTray`                                                     | `Shell_NotifyIcon`                                                                             |
+| taskbar progress         | `useProgress`                                                 | `ITaskbarList3::SetProgressValue`                                                              |
+| a badge on the icon      | `useBadge`, `setBadge`                                        | the count drawn into an overlay icon — Windows has no badge API                                |
+| demanding attention      | `setUrgent`                                                   | `FlashWindowEx`                                                                                |
+| global hotkeys           | `useAccelerator`                                              | `RegisterHotKey`                                                                               |
+| notifications            | `notify`, `useNotifier`                                       | a tray balloon, which the shell shows as a toast                                               |
+| idle time                | `useIdle`                                                     | `GetLastInputInfo`, polled on the same adaptive wait the X rung uses                           |
+| keeping the screen awake | `keepAwake`, `useKeepAwake`                                   | `SetThreadExecutionState`, counted                                                             |
+| sampling a screen colour | `useEyedropper`                                               | the screen read through GDI, with a drawn loupe                                                |
+| reading a window back    | `window.snapshot()`                                           | `PrintWindow` with `PW_CLIENTONLY                                                              | PW_RENDERFULLCONTENT` |
+| locale                   | `systemLocale`, `useLocale`                                   | ICU's own resolution, which reads the OS on Windows — no backend code                          |
+| drag and drop            | `useDropTarget`, `useDragSource`                              | `IDropTarget` and `DoDragDrop` over OLE, both directions                                       |
+| a thumbnail toolbar      | `useThumbnailToolbar`                                         | `ITaskbarList3::ThumbBarAddButtons` — **Windows only**                                         |
+| a jump list              | `useJumpList`                                                 | `ICustomDestinationList` — **Windows only**                                                    |
+| recent documents         | `useRecentDocument`                                           | `SHAddToRecentDocs` — **Windows only**                                                         |
 
 ## Not implemented
 
@@ -68,7 +68,7 @@ existing answer.
 
 The jump list is built (`useJumpList` above) but it is **not** what
 `useDockMenu` means, and is deliberately not wired to it. A Dock-menu item
-carries a callback; a jump-list task starts a *new process* with arguments,
+carries a callback; a jump-list task starts a _new process_ with arguments,
 because the shell launches the program rather than calling into the running
 one. Mapping one onto the other would quietly change what a click does.
 
@@ -113,12 +113,24 @@ is not built.
 
 Things with no cross-platform API to fit into. Three of them now have one of
 their own, and the rule that makes that safe is worth stating once: **a backend
-installs a method, and its presence is the capability**. `useSupports('thumbnailToolbar')`
-asks the app whether it has that method — so a component branches on what the
-backend can do rather than on what platform it is, every other backend answers
-false without knowing Windows exists, and the hooks do nothing where the method
-is absent. `examples/taskbar.jsx` is the shape; there is no `process.platform`
-in it.
+installs a method, and its presence is the capability**. They are reported as
+features of the launcher, beside the badge and the progress bar:
+
+```jsx
+const launcher = useDesktopCapability('launcher');
+launcher.backend; // 'taskbar' here, 'cocoa' on a Dock
+launcher.features.thumbnailToolbar; // the buttons under the hover preview
+launcher.features.tasks; // the jump list's Tasks category
+launcher.features.recentDocuments; // the shell's Recent lists
+```
+
+They live there rather than in `useSupports()` because `useSupports` answers
+for the **display** — transparency, shaders, embedding — and a taskbar button
+is not a display property; and because a boolean cannot say _which_ launcher
+answered, which is the whole reason capabilities carry a `backend` and a
+feature map. Every other backend answers false for the three without knowing
+Windows exists, and the hooks do nothing where the method is absent.
+`examples/taskbar.jsx` is the shape; there is no `process.platform` in it.
 
 - ~~**Thumbnail toolbars.**~~ Built: `useThumbnailToolbar`. Up to seven buttons
   under the taskbar thumbnail — play/pause/next for a media app. The Dock has

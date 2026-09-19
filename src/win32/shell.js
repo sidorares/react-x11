@@ -183,7 +183,11 @@ async function badgePixels(app, label, accent) {
   const shown = text.length > 3 ? '99+' : text;
   let surface = null;
   try {
-    surface = app.createSurface({ width: SIZE, height: SIZE, format: 'argb32' });
+    surface = app.createSurface({
+      width: SIZE,
+      height: SIZE,
+      format: 'argb32',
+    });
     const ctx = surface.getContext('2d');
     ctx.clearRect(0, 0, SIZE, SIZE);
     ctx.fillStyle = accent;
@@ -299,11 +303,13 @@ export function installIdle(app) {
 /**
  * The three surfaces the Windows taskbar has that no other desktop does.
  *
- * They are installed as methods on the app, and that *is* the capability:
- * `useSupports('thumbnailToolbar')` asks whether this method exists, so a
- * component branches on whether the backend has the feature rather than on
- * which platform it is running on, and every other backend reports false
- * without knowing anything about Windows.
+ * They are installed as methods on the app, and their presence is what the
+ * launcher capability reports as `features.tasks`,
+ * `features.thumbnailToolbar` and `features.recentDocuments`
+ * (src/capabilities.js) — so a component branches on whether this desktop has
+ * the surface, and every other backend answers false without knowing anything
+ * about Windows. The probe reads these same methods, which is what keeps the
+ * prediction and the hook from ever disagreeing.
  *
  * None of them is a rung on an existing ladder, deliberately. A jump list is
  * not a Dock menu — `useDockMenu`'s items carry a callback and a jump-list

@@ -259,7 +259,6 @@ class Win32App {
     return { visual: 0x21, depth: 32 };
   }
 
-
   /**
    * The offscreen-surface seam `react-x11/ntk`'s `Surface` dispatches on:
    * ntk's `Surface` contract over a Direct2D bitmap (src/win32/surface.js).
@@ -385,7 +384,11 @@ class Win32App {
         break;
       }
       case 'mousemove':
-        wnd.emit('mousemove', { x: event.a, y: event.b, ...rootOf(wnd, event) });
+        wnd.emit('mousemove', {
+          x: event.a,
+          y: event.b,
+          ...rootOf(wnd, event),
+        });
         break;
       case 'mouseout':
         wnd.emit('mouseout', {});
@@ -474,7 +477,10 @@ class Win32App {
       // the caller's own id for that button is what the handler wants.
       case 'thumbbutton': {
         const ids = this._thumbButtons?.get(event.id) ?? [];
-        wnd.emit('thumbbutton', { id: ids[event.a] ?? event.a, index: event.a });
+        wnd.emit('thumbbutton', {
+          id: ids[event.a] ?? event.a,
+          index: event.a,
+        });
         return;
       }
       case 'window-focus':
@@ -526,6 +532,13 @@ export async function createWin32App(options = {}) {
   // Before the first window, so a control's very first frame is drawn with the
   // bezels it will keep rather than swapping to them a frame later.
   app._syncBezels(app.systemAppearance()?.colorScheme);
+  // What each shell rung is actually built on. `src/capabilities.js` reports
+  // this as a capability's `backend`, and it has to be declared rather than
+  // inferred: this backend installs the same method names AppKit does -- that
+  // is what makes `useTray` and `useBadge` one hook each -- so a probe reading
+  // `createStatusItem` called Shell_NotifyIcon `cocoa` and handed out AppKit's
+  // feature map with it. Mechanisms, never platforms (AGENTS.md).
+  app.shellMechanisms = { tray: 'shellnotifyicon', launcher: 'taskbar' };
   installTaskbar(app);
   // A notification centre and the two session-wide facts — whether anybody is
   // at the keyboard, and whether the screen may sleep. All three are seams the
@@ -533,8 +546,9 @@ export async function createWin32App(options = {}) {
   installNotifications(app);
   installIdle(app);
   // The three the taskbar has and no other desktop does. Installing them is
-  // what `useSupports('thumbnailToolbar')` and its siblings read, so an app
-  // asks the backend rather than the platform.
+  // what the launcher capability's `tasks`, `thumbnailToolbar` and
+  // `recentDocuments` features read, so an app asks what this desktop has
+  // rather than which platform it is on.
   installTaskbarSurfaces(app);
   // The GL ladder, which decides whether <glarea> has a rung here at all.
   installGl(app);

@@ -18,9 +18,9 @@ export { setBadge, setProgress, setQuicklist, setUrgent } from './launcher.js';
 export { useBadge, useDockMenu, useProgress } from './launcherhooks.js';
 export { useTray } from './trayhooks.js';
 // The Windows taskbar's own surfaces. Exported unconditionally and inert
-// where the backend has none — `useSupports('thumbnailToolbar')` and its
-// siblings are how a component asks, so an app branches on the capability
-// rather than on the platform.
+// where the backend has none — `useDesktopCapability('launcher').features`
+// carries `tasks`, `thumbnailToolbar` and `recentDocuments`, so an app
+// branches on what this desktop has rather than on the platform.
 export {
   noteRecentDocument,
   useJumpList,

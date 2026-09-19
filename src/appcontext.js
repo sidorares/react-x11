@@ -80,23 +80,14 @@ const FEATURES = {
   },
   embedding: { watch: NEVER_CHANGES, read: canEmbed },
   glOverlay: { watch: NEVER_CHANGES, read: canOverlay },
-  // Three surfaces the Windows taskbar has that no other desktop does. Each
-  // is read as "did the backend install it", which is the whole seam: a
-  // backend that has the feature puts the method on the app, every other one
-  // does not, and a component branches on the answer instead of on the
-  // platform. They are decided when the app is made and never change.
-  thumbnailToolbar: {
-    watch: NEVER_CHANGES,
-    read: (app) => typeof app?.thumbnailToolbar === 'function',
-  },
-  jumpList: {
-    watch: NEVER_CHANGES,
-    read: (app) => typeof app?.jumpList === 'function',
-  },
-  recentDocuments: {
-    watch: NEVER_CHANGES,
-    read: (app) => typeof app?.noteRecentDocument === 'function',
-  },
+  // Everything here is a property of the **display**: what the server, the
+  // compositor and the drawing pipeline can do. A desktop's own surfaces --
+  // a tray, a launcher icon and what hangs off it, a notification daemon --
+  // are a different question with a different shape, because they can appear
+  // and vanish while the process runs and because "available" alone is a lie
+  // about them. They go through `desktopCapability()` (src/capabilities.js),
+  // which answers `{ available, backend, features }`. Adding one here would
+  // flatten that to a boolean and lose the mechanism with it.
 };
 
 /**

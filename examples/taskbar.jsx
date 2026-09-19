@@ -6,8 +6,13 @@
 // Three things the taskbar has that no other desktop does: a toolbar under the
 // hover preview, a Tasks category in the jump list, and the shell's Recent
 // list. None of them is a rung on a portable ladder, and this example does not
-// pretend otherwise — it asks `useSupports()` whether the backend has each one
-// and says so on screen.
+// pretend otherwise — it asks the **launcher capability** whether this desktop
+// has each one and says so on screen.
+//
+// They sit there, beside `badge` and `progress`, because all of them hang off
+// the single icon the desktop shows for this app; `backend` names which
+// launcher answered (`taskbar` here, `cocoa` for a Dock, `launcherentry` on
+// Linux) and is for the footer and bug reports, never for a branch.
 //
 // **The thing to copy is the shape, not the feature.** The hooks are called
 // unconditionally and do nothing where the backend has none, so there is no
@@ -19,9 +24,9 @@ import React, { useState } from 'react';
 
 import {
   createRoot,
+  useDesktopCapability,
   useJumpList,
   useRecentDocument,
-  useSupports,
   useThumbnailToolbar,
 } from '../src/index.js';
 
@@ -44,7 +49,9 @@ function glyph(draw) {
 const ICONS = {
   prev: glyph((x, y) => x >= 4 && x <= 11 && Math.abs(y - 8) <= x - 3),
   play: glyph((x, y) => x >= 5 && x <= 11 && Math.abs(y - 8) <= 11 - x),
-  pause: glyph((x, y) => x >= 4 && x <= 11 && y >= 3 && y <= 12 && (x <= 6 || x >= 9)),
+  pause: glyph(
+    (x, y) => x >= 4 && x <= 11 && y >= 3 && y <= 12 && (x <= 6 || x >= 9),
+  ),
   next: glyph((x, y) => x >= 4 && x <= 11 && Math.abs(y - 8) <= 12 - x),
 };
 
@@ -54,16 +61,24 @@ function Player() {
   const [track, setTrack] = useState(0);
   const [playing, setPlaying] = useState(false);
 
-  const canToolbar = useSupports('thumbnailToolbar');
-  const canJumpList = useSupports('jumpList');
-  const canRecent = useSupports('recentDocuments');
+  // One probe, three answers. `settled` is true on the first frame wherever
+  // the answer needed nothing asked, which is every backend that has these.
+  const launcher = useDesktopCapability('launcher');
+  const canToolbar = Boolean(launcher.features.thumbnailToolbar);
+  const canJumpList = Boolean(launcher.features.tasks);
+  const canRecent = Boolean(launcher.features.recentDocuments);
 
   // Called every render, whatever the backend. `null` where there is no
   // toolbar keeps the intent visible rather than hiding the call in a branch.
   useThumbnailToolbar(
     canToolbar
       ? [
-          { id: 'prev', tooltip: 'Previous', icon: ICONS.prev, enabled: track > 0 },
+          {
+            id: 'prev',
+            tooltip: 'Previous',
+            icon: ICONS.prev,
+            enabled: track > 0,
+          },
           {
             id: 'play',
             tooltip: playing ? 'Pause' : 'Play',
@@ -87,16 +102,25 @@ function Player() {
   // A jump-list task starts a *new* process with these arguments — the shell
   // does not call back into this one — so a task is for something the app can
   // do from a cold start.
-  useJumpList(canJumpList ? [{ title: 'New window', arguments: '--new' }] : null);
+  useJumpList(
+    canJumpList ? [{ title: 'New window', arguments: '--new' }] : null,
+  );
 
   useRecentDocument(canRecent ? `C:/Music/${TRACKS[track]}.flac` : null);
 
   const label = (name, yes) =>
-    `${name}: ${yes ? 'yes' : 'no — this backend has none'}`;
+    `${name}: ${yes ? 'yes' : 'no — this desktop has none'}`;
 
   return (
     <window title="Taskbar surfaces" width={560} height={300}>
-      <box style={{ flexGrow: 1, padding: 24, gap: 14, backgroundColor: '$background' }}>
+      <box
+        style={{
+          flexGrow: 1,
+          padding: 24,
+          gap: 14,
+          backgroundColor: '$background',
+        }}
+      >
         <text style={{ fontSize: 20, color: '$text' }}>{TRACKS[track]}</text>
         <text style={{ fontSize: 13, color: '$textMuted' }}>
           {playing ? 'Playing' : 'Paused'}
@@ -113,6 +137,9 @@ function Player() {
           </text>
           <text style={{ fontSize: 12, color: '$textMuted' }}>
             {label('recent documents', canRecent)}
+          </text>
+          <text style={{ fontSize: 11, color: '$textMuted', marginTop: 6 }}>
+            {`launcher: ${launcher.backend ?? 'none'}`}
           </text>
         </box>
       </box>

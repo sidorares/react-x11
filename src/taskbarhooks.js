@@ -3,15 +3,14 @@
 // Three things the taskbar has that no other desktop does, so none of them is
 // a rung on an existing ladder and none of them pretends to be portable. What
 // makes them safe to use anyway is that the answer to "is this here" is a
-// value a component branches on — `useSupports('thumbnailToolbar')` — rather
-// than a platform check, and the hooks below do nothing at all where the
-// backend has not installed them. An app writes the same tree everywhere and
-// gets the feature where it exists.
+// value a component branches on rather than a platform check, and the hooks
+// below do nothing at all where the backend has not installed them. An app
+// writes the same tree everywhere and gets the feature where it exists.
 //
 // ```jsx
-// const canToolbar = useSupports('thumbnailToolbar');
+// const launcher = useDesktopCapability('launcher');
 // useThumbnailToolbar(
-//   canToolbar ? [
+//   launcher.features.thumbnailToolbar ? [
 //     { id: 'prev', tooltip: 'Previous', icon: prevIcon },
 //     { id: 'play', tooltip: playing ? 'Pause' : 'Play', icon: playIcon },
 //   ] : null,
@@ -19,9 +18,13 @@
 // );
 // ```
 //
-// The seam is one rule: the backend installs a method, and its presence is
-// the capability (src/appcontext.js `FEATURES`). Nothing here knows what
-// Windows is, and neither does anything in an app that uses it.
+// They are **features of the launcher** — the same rung as the badge and the
+// progress bar, since all of them hang off the one icon the desktop shows for
+// this app — and not entries in `useSupports()`, which answers for the
+// display. The seam is one rule: the backend installs a method, and its
+// presence is the capability; the probe in `src/capabilities.js` reads those
+// same methods, so the prediction and the hook cannot disagree. Nothing here
+// knows what Windows is, and neither does anything in an app that uses it.
 import { useEffect, useRef } from 'react';
 
 import { useAppOrNull } from './appcontext.js';
@@ -119,14 +122,18 @@ export function useThumbnailToolbar(buttons, onClick) {
  */
 export function useJumpList(tasks) {
   const app = useAppOrNull();
+  const latest = useLatest(tasks);
+  // The tasks are plain data — a title, arguments, a description — so their
+  // own JSON is the dependency, and a caller rebuilding an equal array every
+  // render does not re-send it. Read through a ref for the same reason
+  // `useThumbnailToolbar` does: the value is what it is when the effect runs.
   const signature = JSON.stringify(tasks ?? null);
 
   useEffect(() => {
     if (typeof app?.jumpList !== 'function') return;
-    app.jumpList(tasks ?? []);
+    app.jumpList(latest.current ?? []);
     return () => app.jumpList([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [app, signature]);
+  }, [app, signature, latest]);
 }
 
 /**

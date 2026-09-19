@@ -10,7 +10,13 @@ export type DesktopBackend =
   | 'osascript'
   | 'notify-send'
   | 'statusnotifier'
-  | 'launcherentry';
+  | 'launcherentry'
+  /** A Shell_NotifyIcon balloon. */
+  | 'win32'
+  /** The notify icon itself, as a tray. */
+  | 'shellnotifyicon'
+  /** `ITaskbarList3` and the jump list, as a launcher. */
+  | 'taskbar';
 
 /** The capabilities {@link desktopCapability} can be asked about. */
 export type DesktopCapabilityName = 'notifications' | 'tray' | 'launcher';
@@ -60,14 +66,37 @@ export interface TrayFeatures {
 
 export interface LauncherFeatures {
   badge: boolean;
-  /** A string badge. macOS only — the launcher protocol carries a count. */
+  /**
+   * A string badge rather than a count. False on the launcher protocol,
+   * which carries a number; the taskbar draws the text into its overlay
+   * icon, where about three glyphs fit before it becomes `99+`.
+   */
   badgeText: boolean;
   progress: boolean;
   urgent: boolean;
-  /** The Dock menu / quicklist. */
+  /**
+   * The Dock menu / quicklist: entries that **call back into this process**.
+   * False on the taskbar, whose menu is the jump list — see `tasks`.
+   */
   menu: boolean;
   /** The launcher needs an installed `.desktop` file to attach this to. */
   needsDesktopFile: boolean;
+  /**
+   * Static entries on the icon's menu that start a **new process** with
+   * arguments, rather than calling back into this one: the jump list's Tasks
+   * category. A different feature from `menu`, and `useJumpList` drives it.
+   */
+  tasks: boolean;
+  /**
+   * Buttons under the icon's hover preview, which `useThumbnailToolbar`
+   * drives. The taskbar's alone.
+   */
+  thumbnailToolbar: boolean;
+  /**
+   * The launcher keeps a Recent list this app can add to, through
+   * `useRecentDocument`.
+   */
+  recentDocuments: boolean;
 }
 
 export interface DesktopCapabilityResult<F = Record<string, boolean>> {

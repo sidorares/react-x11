@@ -27,6 +27,7 @@ export * from './types/fonts.js';
 export * from './types/system.js';
 export * from './types/capabilities.js';
 export * from './types/launcher.js';
+export * from './types/taskbar.js';
 export * from './types/tray.js';
 export * from './types/permissions.js';
 export * from './types/notifications.js';
