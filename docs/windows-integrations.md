@@ -37,26 +37,16 @@ API's existence. "Works" means a test asserts it or it was driven and seen.
 | sampling a screen colour | `useEyedropper` | the screen read through GDI, with a drawn loupe |
 | reading a window back | `window.snapshot()` | `PrintWindow` with `PW_CLIENTONLY | PW_RENDERFULLCONTENT` |
 | locale | `systemLocale`, `useLocale` | ICU's own resolution, which reads the OS on Windows — no backend code |
+| drag and drop | `useDropTarget`, `useDragSource` | `IDropTarget` and `DoDragDrop` over OLE, both directions |
+| a thumbnail toolbar | `useThumbnailToolbar` | `ITaskbarList3::ThumbBarAddButtons` — **Windows only** |
+| a jump list | `useJumpList` | `ICustomDestinationList` — **Windows only** |
+| recent documents | `useRecentDocument` | `SHAddToRecentDocs` — **Windows only** |
 
 ## Not implemented
 
 Ordered by what it costs an app today.
 
-### Drag and drop — the largest gap
-
-`useDropTarget` and `useDragSource` work on X11 and on macOS and do nothing
-here. The Cocoa window carries `attachDropTransport`,
-`registerDropTypes`, `setDropResponse` and `beginDrag`; the win32 window has
-none of them.
-
-The route is `IDropTarget` on the window for receiving and `DoDragDrop` for
-dragging out, both COM, both on the UI thread, with `CF_HDROP` and
-`CF_UNICODETEXT` covering what `examples/reorder.tsx` asks for. The awkward
-part is not the API but the threading: `DoDragDrop` runs a modal loop, which is
-exactly the shape [windows.md](windows.md) §"Threads and the event loop" keeps
-off the JS thread, so the drag has to live on the UI thread and report.
-
-### IME — CJK input does not work
+### IME — CJK input does not work, and is now the largest gap
 
 No `WM_IME_*` handling at all, so composition never starts. An app is
 keyboard-usable in Latin scripts and not otherwise. windows.md §"IME" has the
@@ -74,12 +64,16 @@ screen reader by the app's busiest moment.
 This is the largest piece of work on the list and the one with the clearest
 existing answer.
 
-### Jump lists — `useDockMenu` and `setQuicklist` are inert
+### `useDockMenu` is inert
 
-`ICustomDestinationList` with `IShellLink` tasks. The tasks relaunch the
-executable with arguments, so this needs the activation work below to be
-useful: a jump-list task that starts a second copy of the app is not what the
-menu means.
+The jump list is built (`useJumpList` above) but it is **not** what
+`useDockMenu` means, and is deliberately not wired to it. A Dock-menu item
+carries a callback; a jump-list task starts a *new process* with arguments,
+because the shell launches the program rather than calling into the running
+one. Mapping one onto the other would quietly change what a click does.
+
+They become the same feature once a second launch can hand its arguments to
+the first, which is the activation work below.
 
 ### Activation — file associations, URL schemes, second launches
 
@@ -117,22 +111,25 @@ is not built.
 
 ## What Windows has that nothing else does
 
-Things with no cross-platform API to fit into, listed because they are the ones
-worth inventing one for.
+Things with no cross-platform API to fit into. Three of them now have one of
+their own, and the rule that makes that safe is worth stating once: **a backend
+installs a method, and its presence is the capability**. `useSupports('thumbnailToolbar')`
+asks the app whether it has that method — so a component branches on what the
+backend can do rather than on what platform it is, every other backend answers
+false without knowing Windows exists, and the hooks do nothing where the method
+is absent. `examples/taskbar.jsx` is the shape; there is no `process.platform`
+in it.
 
-- **Thumbnail toolbars.** `ITaskbarList3::ThumbBarAddButtons` puts up to seven
-  buttons under the taskbar thumbnail — play/pause/next for a media app. The
-  Dock has nothing like it; the closest sibling is the macOS Touch Bar, which
-  is gone. A `<ThumbnailToolbar>` element would map cleanly.
+- ~~**Thumbnail toolbars.**~~ Built: `useThumbnailToolbar`. Up to seven buttons
+  under the taskbar thumbnail — play/pause/next for a media app. The Dock has
+  nothing like it; the closest sibling is the macOS Touch Bar, which is gone.
 - **A custom taskbar thumbnail and peek.** `DWM_THUMBNAIL_PROPERTIES` and
   `WM_DWMSENDICONICTHUMBNAIL` let an app answer the hover preview with
   something other than a shrunken window — a document's first page, a chart.
 - **Tabbed thumbnails.** One taskbar entry per document with
   `ITaskbarList4::SetTabProperties`, which is how browsers put tabs on the
   taskbar.
-- **Recent documents.** `SHAddToRecentDocs` feeds the jump list's Recent
-  section and File Explorer's quick access. One call; the API to hang it on
-  would be `useRecentDocuments`.
+- ~~**Recent documents.**~~ Built: `useRecentDocument`.
 - **Explorer verbs.** "Open with", a context-menu handler, a preview handler,
   a thumbnail provider. All of these are COM servers registered per file type,
   and on Windows 11 a context-menu handler must be a packaged app extension —

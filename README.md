@@ -138,10 +138,13 @@ three:
   clipboard, file dialogs, the tray, the taskbar, global hotkeys,
   notifications and window states — on a mechanism-only bridge shaped like
   the Cocoa one, with a test suite and CI of its own. The examples run.
-  What it does not have is **drag and drop, IME and screen-reader support**:
-  an app is unusable with a screen reader and in CJK input, and nothing can
-  be dragged into it or out of it. So an app that needs any of those on
-  Windows _this month_ still wants Electron or Tauri.
+  Drag and drop works both ways with the desktop, and the taskbar's own
+  surfaces — a thumbnail toolbar, a jump list, recent documents — are there
+  behind a capability, so an app that also runs elsewhere asks
+  `useSupports()` rather than the platform. What it does not have is **IME
+  and screen-reader support**: an app is unusable with a screen reader and
+  in CJK input. So an app that needs either on Windows _this month_ still
+  wants Electron or Tauri.
   [docs/windows-integrations.md](docs/windows-integrations.md) is the
   measured status and [docs/windows.md](docs/windows.md) the design. The three
   targets are not the same app: the desktop-shell half of X11 (`<foreign>`

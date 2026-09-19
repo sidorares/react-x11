@@ -515,11 +515,21 @@ Platform notes:
 - **Linux / XWayland** — works both directions, including to and from
   native Wayland applications, which is what makes this worth having on a
   modern desktop.
-- **Windows, the win32 backend** — **not built.** `useDropTarget` and
-  `useDragSource` mount and nothing ever reaches them: the window has no
-  `IDropTarget` and there is no `DoDragDrop`, so neither the desktop nor
-  another react-x11 window can hand anything over.
-  [windows-integrations.md](windows-integrations.md) has the route.
+- **Windows, the win32 backend** — works both directions with the desktop,
+  over OLE: `IDropTarget` on every window with a `dropAccept` under it,
+  `DoDragDrop` out of one. Files arrive as CF_HDROP and become one
+  `text/uri-list`, text as CF_UNICODETEXT, and anything else as a clipboard
+  format registered under its MIME name — which two react-x11 apps agree on
+  for free and nothing else will, exactly as an X11 atom behaves.
+
+  Two things differ. A `dragData` **thunk is not lazy**: every type's bytes
+  are resolved when the drag starts, because a data object that asked JS for
+  them from inside `DoDragDrop`'s modal loop would be reaching across the
+  bridge's thread split at the one moment its UI thread cannot wait. And the
+  shell's question "may this be dropped here" is answered one motion late —
+  it picks a cursor, and the bridge returns the previous answer rather than
+  blocking. The drop itself is answered exactly, because whether it was a
+  copy or a move decides whether the source deletes its original.
 - **macOS, the cocoa backend** — works both directions with the desktop:
   files from the Finder arrive as `['files']` (each file is a pasteboard
   item of one `public.file-url`; they become one `text/uri-list`), text from
