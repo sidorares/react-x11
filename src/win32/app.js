@@ -14,6 +14,7 @@ import { setScaleForTests } from '../scale.js';
 import { setScreensForTests } from '../screens.js';
 
 import { createBezels } from './bezels.js';
+import { installGl, Win32GlWindow } from './glarea.js';
 import { Win32FontManager } from './fonts.js';
 import { loadNative } from './native.js';
 import { installTaskbar, Win32FilePanels, Win32StatusItem } from './shell.js';
@@ -38,6 +39,8 @@ class Win32App {
     this._appearanceListeners = new Set();
     /** Tray icons by the bridge's handle, so an event can find its item. */
     this._statusItems = new Map();
+    /** GL surfaces by the bridge's id, so a 'gl-ready' event finds its own. */
+    this._glWindows = new Map();
     /** The native open/save panels. Its *presence* is what puts the top rung
      * on src/filedialog.js's ladder for this app. */
     this.filePanels =
@@ -215,6 +218,11 @@ class Win32App {
   }
 
   createWindow(attributes = {}) {
+    // A window with a parent is a `<glarea>`'s surface, which is a different
+    // thing entirely: a child HWND with a GL context and no DirectComposition
+    // surface at all. `glnodes.js` asks for one through this same door, as it
+    // does on X11 where a GL surface is also just a child window.
+    if (attributes.parent) return new Win32GlWindow(this, attributes);
     return new Win32Window(this, attributes);
   }
 
@@ -296,6 +304,9 @@ class Win32App {
         return;
       case 'tray-ready':
       case 'tray-failed':
+        return;
+      case 'gl-ready':
+        this._glWindows.get(event.id)?._onReady(event.a === 1);
         return;
       case 'file-dialog':
         this.filePanels?._answer(event.id, event.a === 1, event.text ?? '');
@@ -400,6 +411,8 @@ export async function createWin32App(options = {}) {
   // bezels it will keep rather than swapping to them a frame later.
   app._syncBezels(app.systemAppearance()?.colorScheme);
   installTaskbar(app);
+  // The GL ladder, which decides whether <glarea> has a rung here at all.
+  installGl(app);
 
   // The ladder is otherwise climbed only when something asks — and its Windows
   // rung needs an app to ask, which nothing but this has. Started here and not
