@@ -188,6 +188,47 @@ export class Win32FontManager {
   }
 
   /**
+   * A font the app ships rather than one the system has — `loadFont()`'s
+   * backend half. DirectWrite keeps app-supplied faces in a collection of
+   * their own, and the bridge names that collection for exactly the families
+   * that came from it, so afterwards the font is asked for by name like any
+   * other.
+   *
+   * `null` on purpose: src/fonts.js keeps the fontkit face it already opened
+   * as the handle — that is the one whose metrics an app can read — and what
+   * draws is resolved by family name against the collection above.
+   */
+  load(source, opts = {}) {
+    let data = source;
+    if (typeof source === 'string') {
+      // A path goes to DirectWrite as a path: it maps the file itself, and
+      // the face outlives anything this process would have to hold.
+      data = source;
+    } else if (Buffer.isBuffer(source) || source instanceof Uint8Array) {
+      data = source;
+    } else {
+      throw new Error(
+        'react-x11: loadFont — expected a file path or font bytes, got ' +
+          typeof source,
+      );
+    }
+    const loaded = this._native.fontLoad(data);
+    if (!loaded) {
+      throw new Error(
+        'react-x11: loadFont — DirectWrite could not read the font' +
+          (typeof source === 'string' ? ` in ${source}` : ' data') +
+          '. It reads .ttf, .otf and .ttc; a .woff or .woff2 has to be ' +
+          'unwrapped first.',
+      );
+    }
+    // Faces matched before this one existed were matched against a smaller
+    // set of fonts, and one of them may have fallen back to what this
+    // replaces.
+    this._faces.clear();
+    return null;
+  }
+
+  /**
    * One IDWriteTextLayout over the joined string, with the spans as formatting
    * ranges. That is what makes a paragraph of mixed <text> chunks a single
    * layout rather than one per chunk — and therefore what makes line breaking
