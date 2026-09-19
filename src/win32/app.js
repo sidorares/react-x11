@@ -29,7 +29,6 @@ import { Win32Window } from './window.js';
 // it is marked so that the real clock replaces it rather than joining it.
 const FRAME_INTERVAL_MS = 1000 / 60;
 
-
 /**
  * A pointer event's position on the screen, which X carries as `rootx`/
  * `rooty` and Windows does not: WM_MOUSEMOVE and the button messages are all

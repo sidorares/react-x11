@@ -115,6 +115,19 @@ export class Win32GlWindow {
     return this._gl;
   }
 
+
+  /**
+   * The frame clock, which is the parent window's — the same delegation the
+   * Cocoa surface makes (src/cocoa/glarea.js). A `<glarea>` has no clock of
+   * its own here: it is a visual inside its parent's composition tree, so
+   * the parent's tick is the one its frames belong to. Without this
+   * `glnodes.js` falls back to `setImmediate`, which is not a frame clock at
+   * all — it is "as fast as the event loop will go", which paces a still
+   * scene against nothing.
+   */
+  requestAnimationFrame(cb) {
+    return this.parent?.requestAnimationFrame?.(cb) ?? setImmediate(cb);
+  }
   resize(width, height) {
     this.width = Math.max(1, Math.round(width));
     this.height = Math.max(1, Math.round(height));
