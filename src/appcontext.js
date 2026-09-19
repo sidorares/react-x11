@@ -80,6 +80,23 @@ const FEATURES = {
   },
   embedding: { watch: NEVER_CHANGES, read: canEmbed },
   glOverlay: { watch: NEVER_CHANGES, read: canOverlay },
+  // Three surfaces the Windows taskbar has that no other desktop does. Each
+  // is read as "did the backend install it", which is the whole seam: a
+  // backend that has the feature puts the method on the app, every other one
+  // does not, and a component branches on the answer instead of on the
+  // platform. They are decided when the app is made and never change.
+  thumbnailToolbar: {
+    watch: NEVER_CHANGES,
+    read: (app) => typeof app?.thumbnailToolbar === 'function',
+  },
+  jumpList: {
+    watch: NEVER_CHANGES,
+    read: (app) => typeof app?.jumpList === 'function',
+  },
+  recentDocuments: {
+    watch: NEVER_CHANGES,
+    read: (app) => typeof app?.noteRecentDocument === 'function',
+  },
 };
 
 /**

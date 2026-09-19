@@ -296,6 +296,75 @@ export function installIdle(app) {
   };
 }
 
+/**
+ * The three surfaces the Windows taskbar has that no other desktop does.
+ *
+ * They are installed as methods on the app, and that *is* the capability:
+ * `useSupports('thumbnailToolbar')` asks whether this method exists, so a
+ * component branches on whether the backend has the feature rather than on
+ * which platform it is running on, and every other backend reports false
+ * without knowing anything about Windows.
+ *
+ * None of them is a rung on an existing ladder, deliberately. A jump list is
+ * not a Dock menu — `useDockMenu`'s items carry a callback and a jump-list
+ * task starts a *new process* with arguments, so mapping one to the other
+ * would quietly change what a click does. Until a second launch can hand its
+ * arguments to the first (docs/windows-integrations.md) they are different
+ * features and are named differently.
+ */
+export function installTaskbarSurfaces(app) {
+  /**
+   * Up to seven buttons under the taskbar's hover preview.
+   *
+   * The ids the shell sends back are indices, so the labels are kept here and
+   * the click is reported with the button's own `id` — what the caller named
+   * it, not where it happened to sit.
+   */
+  app._thumbButtons = new Map(); // window id -> [caller ids]
+  app.thumbnailToolbar = (windowId, buttons) => {
+    const list = (buttons ?? []).slice(0, 7);
+    app._thumbButtons.set(
+      windowId,
+      list.map((button) => button.id ?? null),
+    );
+    app._native.thumbnailToolbar(
+      windowId,
+      list.map((button) => ({
+        tooltip: button.tooltip ?? button.label ?? '',
+        enabled: button.enabled !== false,
+        dismissOnClick: button.dismissOnClick === true,
+        ...iconOf(button),
+      })),
+    );
+  };
+
+  /**
+   * The Tasks category of this application's jump list, shown on a right
+   * click of its taskbar button. `null` takes it away.
+   */
+  app.jumpList = (tasks) => {
+    app._native.jumpList(
+      (tasks ?? []).map((task) => ({
+        title: String(task.title ?? ''),
+        arguments: String(task.arguments ?? ''),
+        description: String(task.description ?? ''),
+      })),
+    );
+  };
+
+  /**
+   * A document this app just opened, for the shell's Recent lists — the jump
+   * list's own, and Explorer's quick access. `null` clears the list.
+   *
+   * The same act as `NSDocumentController.noteNewRecentDocumentURL:`, and the
+   * reason it is here rather than in a cross-platform hook is that only this
+   * backend has one to call today.
+   */
+  app.noteRecentDocument = (path) => {
+    app._native.recentDocument(path == null ? null : String(path));
+  };
+}
+
 export function installTaskbar(app) {
   const handleOf = () => {
     const [first] = [...app._windows.values()];

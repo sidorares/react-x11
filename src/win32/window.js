@@ -84,6 +84,15 @@ export class Win32Window {
     (this._handlers[name] ??= []).push(fn);
   }
 
+  /** The other half of `on`. Without it a component that subscribes for as
+   *  long as it is mounted has no way to stop, and the handler outlives it. */
+  off(name, fn) {
+    const list = this._handlers[name];
+    if (!list) return;
+    const at = list.indexOf(fn);
+    if (at >= 0) list.splice(at, 1);
+  }
+
   emit(name, ev) {
     for (const fn of this._handlers[name] ?? []) fn(ev);
   }

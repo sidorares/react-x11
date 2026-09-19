@@ -23,6 +23,7 @@ import {
   installIdle,
   installNotifications,
   installTaskbar,
+  installTaskbarSurfaces,
   Win32FilePanels,
   Win32StatusItem,
 } from './shell.js';
@@ -469,6 +470,13 @@ class Win32App {
       }
       // Activation, which the tree reads as focus: a caret blinks, a focus
       // ring is drawn, and a `<window>`'s `focused` state follows it.
+      // A thumbnail toolbar button. The shell sends the index it was given;
+      // the caller's own id for that button is what the handler wants.
+      case 'thumbbutton': {
+        const ids = this._thumbButtons?.get(event.id) ?? [];
+        wnd.emit('thumbbutton', { id: ids[event.a] ?? event.a, index: event.a });
+        return;
+      }
       case 'window-focus':
       case 'window-blur':
         wnd.emit(event.type === 'window-focus' ? 'focus' : 'blur', {
@@ -524,6 +532,10 @@ export async function createWin32App(options = {}) {
   // core looks for on the app and finds on no backend but the one it is on.
   installNotifications(app);
   installIdle(app);
+  // The three the taskbar has and no other desktop does. Installing them is
+  // what `useSupports('thumbnailToolbar')` and its siblings read, so an app
+  // asks the backend rather than the platform.
+  installTaskbarSurfaces(app);
   // The GL ladder, which decides whether <glarea> has a rung here at all.
   installGl(app);
 
