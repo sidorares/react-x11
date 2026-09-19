@@ -179,8 +179,7 @@ describe('win32 window: what it refuses honestly', () => {
     bridge.windowPixels = () => null;
     await assert.rejects(() => wnd.snapshot(), /could not be read/);
 
-    bridge.windowPixels = (id, x, y, w, h) =>
-      Buffer.alloc(w * h * 4, 0x7f);
+    bridge.windowPixels = (id, x, y, w, h) => Buffer.alloc(w * h * 4, 0x7f);
     const shot = await wnd.snapshot();
     assert.equal(shot.width, wnd.width);
     assert.equal(shot.height, wnd.height);
@@ -190,7 +189,40 @@ describe('win32 window: what it refuses honestly', () => {
 
   it('resolves setWmState false rather than latching a true it did not apply', async () => {
     const { wnd } = setup();
+    // A bridge with no `windowState` verb at all — an older native module.
+    // False, not a throw: `useWindowState()` reads the false to know the
+    // request went nowhere, and there is nothing an application can do with
+    // an exception from a state its window never had.
     assert.equal(await wnd.setWmState(['fullscreen']), false);
     assert.deepEqual(await wnd.getWmStates(), []);
+  });
+
+  it('reports a state the platform refused, and applies the rest', async () => {
+    const { bridge, wnd } = setup();
+    const applied = [];
+    // The real bridge's answer: true for a state Windows has, false for one
+    // it has no call for (`shaded`, `sticky`) — see windows/test/states.js.
+    bridge.windowState = (id, name, on) => {
+      if (name === 'shaded') return false;
+      applied.push([name, on]);
+      return true;
+    };
+    bridge.windowStates = () => applied.filter(([, on]) => on).map(([n]) => n);
+
+    assert.equal(await wnd.setWmState(['maximized', 'above']), true);
+    assert.deepEqual(applied, [
+      ['maximized', true],
+      ['above', true],
+    ]);
+
+    // One refusal makes the whole call false, and does not stop the others:
+    // the caller asked for a set and is owed both the work and the truth.
+    applied.length = 0;
+    assert.equal(await wnd.setWmState(['shaded', 'maximized']), false);
+    assert.deepEqual(applied, [['maximized', true]]);
+
+    applied.length = 0;
+    assert.equal(await wnd.setWmState('maximized', 'remove'), true);
+    assert.deepEqual(applied, [['maximized', false]]);
   });
 });

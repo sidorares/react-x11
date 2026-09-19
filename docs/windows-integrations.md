@@ -41,16 +41,29 @@ API's existence. "Works" means a test asserts it or it was driven and seen.
 | a thumbnail toolbar      | `useThumbnailToolbar`                                         | `ITaskbarList3::ThumbBarAddButtons` — **Windows only**                                         |
 | a jump list              | `useJumpList`                                                 | `ICustomDestinationList` — **Windows only**                                                    |
 | recent documents         | `useRecentDocument`                                           | `SHAddToRecentDocs` — **Windows only**                                                         |
+| input methods            | `onCompositionStart`/`Update`/`End`, `<textinput>`            | IMM32: the preedit is drawn in the field, the candidate list follows the caret                 |
 
 ## Not implemented
 
 Ordered by what it costs an app today.
 
-### IME — CJK input does not work, and is now the largest gap
+### Input methods — built on IMM32, with the gaps that layer has
 
-No `WM_IME_*` handling at all, so composition never starts. An app is
-keyboard-usable in Latin scripts and not otherwise. windows.md §"IME" has the
-design; nothing is built.
+CJK input works: `WM_IME_*` reaches `src/win32/ime.js`, which drives the same
+composition events a Wayland text-input drives, so an application handles one
+composition and gets both. The preedit is drawn **in the field** rather than
+in a floating box, and the candidate list follows the caret.
+
+What it does not carry is what IMM32 itself no longer carries. Windows has
+stopped loading IMM32 input methods, so every modern one — the new Microsoft
+Japanese and Chinese IMEs included — is a TSF text service reaching an IMM32
+window through a compatibility layer, and that layer does not pass on **voice
+typing** (Win+H inserts nothing), the shell's **handwriting** panel, or
+**shape-writing** on the touch keyboard. A TSF text store is what closes
+those; windows.md §"IME" has the design and why it is the harder rung.
+
+Reconversion (asking the IME to re-open a committed word) is not wired up
+either, though IMM32 carries it.
 
 ### Screen readers — nothing answers UIA
 

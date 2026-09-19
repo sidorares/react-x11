@@ -241,6 +241,22 @@ export function createFakeBridge() {
     };
   }
 
+  // --- the input method ----------------------------------------------------
+  //
+  // Both are one-way commands to the UI thread, so recording them *is* the
+  // observation: whether the IME was taken off a window, and where the
+  // candidate list was told to sit.
+  bridge.imeEnabled = new Map();
+  bridge.imeCarets = [];
+  bridge.imeEnable = (windowId, on) => {
+    bridge.imeEnabled.set(windowId, on);
+    record('imeEnable', windowId, on);
+  };
+  bridge.imeCaret = (windowId, x, y, width, height) => {
+    bridge.imeCarets.push({ windowId, x, y, width, height });
+    record('imeCaret', windowId, x, y, width, height);
+  };
+
   return bridge;
 }
 

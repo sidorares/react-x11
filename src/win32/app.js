@@ -14,6 +14,7 @@ import { setScaleForTests } from '../scale.js';
 import { setScreensForTests } from '../screens.js';
 
 import { createBezels } from './bezels.js';
+import { Win32InputMethod } from './ime.js';
 import { decodeKey, modifierMask } from './keymap.js';
 import { Win32Surface } from './surface.js';
 import { installGl, Win32GlWindow } from './glarea.js';
@@ -68,6 +69,10 @@ class Win32App {
     this._appearanceListeners = new Set();
     /** Tray icons by the bridge's handle, so an event can find its item. */
     this._statusItems = new Map();
+    /** The input method. Composition is a property of the platform rather
+     *  than of a window, so there is one of these and it follows whichever
+     *  field is focused (src/win32/ime.js). */
+    this.inputMethod = new Win32InputMethod(this);
     /** GL surfaces by the bridge's id, so a 'gl-ready' event finds its own. */
     this._glWindows = new Map();
     /** The native open/save panels. Its *presence* is what puts the top rung
@@ -283,6 +288,7 @@ class Win32App {
     this._closed = true;
     if (this._frameTimer) clearTimeout(this._frameTimer);
     this._frameTimer = null;
+    this.inputMethod.destroy();
     this._native.stop();
     return Promise.resolve();
   }
@@ -327,6 +333,16 @@ class Win32App {
         // the renderer's own error plumbing has already had its say by here.
         if (process.env.NODE_ENV !== 'production') console.error(err);
       }
+    }
+    // The input method hears about the focused field now, after the frame has
+    // laid the tree out and the caret rectangle is one a candidate list can
+    // be put next to (src/win32/ime.js). Once per window, however many
+    // callbacks it had.
+    const seen = new Set();
+    for (const { wnd } of due) {
+      if (!wnd || seen.has(wnd)) continue;
+      seen.add(wnd);
+      this.inputMethod.sync(wnd);
     }
   }
 
@@ -489,6 +505,18 @@ class Win32App {
           buttons: 0,
           time: Date.now(),
         });
+        // A field focused before the window got the keyboard should compose
+        // from the first key rather than from the first frame after it.
+        // Nothing is done on blur: Windows deactivates the IME for a window
+        // that is not in front, and a composition left open is one the user
+        // comes back to, which is what every other application does.
+        if (event.type === 'window-focus') this.inputMethod.sync(wnd);
+        return;
+      case 'ime-start':
+      case 'ime-preedit':
+      case 'ime-commit':
+      case 'ime-end':
+        this.inputMethod.handle(event, wnd);
         return;
       case 'close':
         // The same shape Cocoa sends. `preventDefault` is a no-op because

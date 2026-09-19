@@ -214,15 +214,35 @@ export class Win32Window {
    * the foreground, and that refusal is the documented behaviour rather than
    * a failure, so it reports true and the state simply does not change.
    */
-  setWmState(name, action = 'add') {
-    const on = action !== 'remove';
-    return Promise.resolve(
-      Boolean(this._native.windowState(this.id, name, on)),
-    );
+  setWmState(names, action = 'add') {
+    // A name or a list of them, which is the contract the other backends
+    // keep (src/cocoa/window.js) even though the renderer's own caller sends
+    // them one at a time.
+    const list = Array.isArray(names) ? names : [names];
+    // A bridge too old to have the verb answers false for every name rather
+    // than throwing: `useWindowState()` reads that false to know the request
+    // went nowhere, and a throw from a state a window never had is not a
+    // failure an application can do anything with.
+    if (typeof this._native.windowState !== 'function') {
+      return Promise.resolve(false);
+    }
+    const held = action === 'toggle' ? new Set(this.getWmStatesNow()) : null;
+    let honoured = true;
+    for (const name of list) {
+      const on = held ? !held.has(name) : action !== 'remove';
+      if (!this._native.windowState(this.id, name, on)) honoured = false;
+    }
+    return Promise.resolve(honoured);
+  }
+
+  /** The live states, synchronously — what a toggle has to read first. */
+  getWmStatesNow() {
+    if (typeof this._native.windowStates !== 'function') return [];
+    return this._native.windowStates(this.id) ?? [];
   }
 
   getWmStates() {
-    return Promise.resolve(this._native.windowStates(this.id) ?? []);
+    return Promise.resolve(this.getWmStatesNow());
   }
 
   // --- drag and drop -------------------------------------------------------

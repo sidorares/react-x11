@@ -15,10 +15,14 @@ build 26200 with a GTX 1080 Ti. What that first session settled:
 - `examples/simple.jsx`, `widgets.jsx`, `tasks.jsx`, `form/` and
   `dashboard.jsx` render, and synthetic input reaches React handlers.
 
-Still open, and the reason this is not phase 3: the desktop services
-(clipboard, drag and drop, dialogs, tray, notifications), IME, live
-per-window scale, the compositor frame clock, `<popup>`, and a headless
-suite under `test/win32/` against a fake bridge. §"The plan" tracks it.
+Since then: the desktop services (clipboard — text only —, drag and drop
+both ways, dialogs, tray, notifications), `<popup>`, input methods on IMM32,
+and the headless suite under `test/win32/` against a fake bridge.
+
+Still open: **live per-window scale** (the renderer cannot re-scale a window
+that is already up), the **compositor frame clock** (frames are paced by a
+timer, not by DWM), and **UI Automation**, without which Narrator and NVDA
+see a bare window. §"The plan" tracks it.
 
 The line counts below are measurements from 2026-09-11. Every claim about
 Windows not marked as measured comes from Microsoft's documentation or from
@@ -875,13 +879,44 @@ swappable; the default is DirectWrite.
 
 ### IME
 
-Input methods are where this backend can be ahead of both shipped ones:
-X11 has none ([#272](https://github.com/sidorares/react-x11/issues/272)) and
-Cocoa's `NSTextInputClient` is unbuilt. The surface they arrive on exists
-already — the composition state machine in `events.js`
-(`CompositionStart`, `Update`, `End`, each defaultable) and the preedit
-model in `src/nodes/preedit.js`, which keeps a composition out of the value
-and the undo history. Two Windows APIs can feed it:
+**Built, on IMM32** — `windows/src/ime.cc` and `src/win32/ime.js`. Input
+methods are where this backend is ahead of both shipped ones: X11 has none
+([#272](https://github.com/sidorares/react-x11/issues/272)) and Cocoa's
+`NSTextInputClient` is unbuilt. The surface they arrive on existed already —
+the composition state machine in `events.js` (`CompositionStart`, `Update`,
+`End`, each defaultable) and the preedit model in `src/nodes/preedit.js`,
+which keeps a composition out of the value and the undo history — so what was
+written is a transport and nothing else.
+
+What it does:
+
+- The composition **string** is the application's and the composition
+  **window** is suppressed (`WM_IME_SETCONTEXT` minus
+  `ISC_SHOWUICOMPOSITIONWINDOW`), because the preedit belongs in the field,
+  where it is laid out and styled with the rest of the text. The **candidate
+  list** is not suppressed: choosing among homophones is the input method's
+  own interface and its vocabulary, not this application's.
+- The order is the one `src/wayland/textinput.js` `_apply` fixes — **the
+  commit first, then the new preedit** — because that is the order the
+  renderer's events are defined in rather than a detail of either protocol.
+  One `WM_IME_COMPOSITION` can carry both.
+- `GCS_COMPATTR`'s target clause becomes the preedit cursor
+  (`cursorBegin`/`cursorEnd`), which is the same fact Wayland's text-input
+  carries under that name, so the field's existing preedit styling draws it.
+- Offsets cross the bridge as UTF-16 code units and are converted to code
+  points in JS, where the string is.
+- `ImmSetCompositionWindow` and `ImmSetCandidateWindow` are fed from the
+  caret rect, pushed after each frame — the layout the rect is read off is
+  the one just painted.
+- A `sensitive` field is not offered to an input method at all: its context
+  is disassociated, so the text never reaches a word history. Windows does
+  the same for its own password boxes.
+- `VK_PROCESSKEY` is forwarded and **not** decoded, or every keystroke of a
+  composition would also type its Latin letter into the field; `WM_IME_CHAR`
+  is swallowed, since the committed text has already arrived as
+  `GCS_RESULTSTR`.
+
+Two Windows APIs can feed this, and the second is still ahead:
 
 | toolkit                    | IME API                                                         |
 | -------------------------- | --------------------------------------------------------------- |
@@ -890,7 +925,7 @@ and the undo history. Two Windows APIs can feed it:
 | Qt 6, winit, Flutter, SDL3 | IMM32                                                           |
 | GLFW                       | no composition at all                                           |
 
-- **IMM32** — `WM_IME_STARTCOMPOSITION`; `WM_IME_COMPOSITION`, with
+- **IMM32** (built) — `WM_IME_STARTCOMPOSITION`; `WM_IME_COMPOSITION`, with
   `ImmGetCompositionString` for the preedit, its cursor, its clause
   attributes and the committed result; `WM_IME_ENDCOMPOSITION`; and
   `ImmSetCompositionWindow`/`ImmSetCandidateWindow` fed from the caret rect
@@ -913,8 +948,11 @@ and the undo history. Two Windows APIs can feed it:
   flowing out when JS rewrites the field under an open composition.
 
 **IMM32 first, TSF as the target.** IMM32 fits the threading rules with no
-mirror and carries CJK composition and candidate lists; TSF is Phase 5,
-with a mirror scoped to the focused field and nothing else. The touch
+mirror and carries CJK composition and candidate lists, and is what is built;
+TSF is Phase 5, with a mirror scoped to the focused field and nothing else.
+The compatibility-layer gaps above — voice typing, handwriting,
+shape-writing — are the price of the first rung and the reason there is a
+second one. The touch
 keyboard, separately, appears for a focused text field because UI
 Automation says it is one — not because of either API (§Accessibility).
 
