@@ -88,32 +88,53 @@ with the rest of the window* is the design problem, and Windows makes it
 harder than either shipped backend does.
 
 The window's content is a DirectComposition surface, and a GL context cannot
-draw into one. Three ways out:
+draw into one. Three ways out were on the table:
 
-- **A child HWND with its own context.** This is the X11 model exactly: a
-  `<glarea>` there is a child X window on a GL visual, stacked above the
-  parent's content, and `glnodes.js` already positions it from the parent's
-  yoga rect and already knows that a child window cannot be overlapped by the
-  parent's 2D content. The Windows version is a child HWND with a pixel
-  format and a WGL context, and `SwapBuffers` on its own DC. **Cheapest by
-  far**, and it reuses the node layer's existing shape rather than inventing
-  one. What it costs is what it costs on X11: the surface is a separate
-  window, so it does not composite with the window's own alpha and the
-  overlay panes above it are separate windows too (`gloverlay.js` already
-  does exactly this on X11, "one opaque child window per region").
+- **A child HWND with its own context.** This looks like the X11 model
+  exactly: a `<glarea>` there is a child X window on a GL visual, stacked
+  above the parent's content, and `glnodes.js` already positions it from the
+  parent's yoga rect and already knows that a child window cannot be
+  overlapped by the parent's 2D content. The Windows version would be a child
+  HWND with a pixel format and a WGL context, and `SwapBuffers` on its own
+  DC. Cheapest by far, and it reuses the node layer's existing shape rather
+  than inventing one.
+
+  **It does not work, and this was built and measured before that was
+  believed.** A window that presents through a DirectComposition target is
+  shown by DWM *from that visual tree*; the window's redirection bitmap — the
+  surface a child HWND's pixels go to — is not part of what is composited.
+  So the child was invisible with the composition tree above it, invisible
+  with the tree below it (`CreateTargetForHwnd`'s `topmost` argument, both
+  ways), invisible with the window created without
+  `WS_EX_NOREDIRECTIONBITMAP` so that a redirection bitmap existed at all,
+  and invisible through a transparent hole punched in the 2D layer over its
+  rect — that hole showed the desktop. The GL side was healthy throughout:
+  with the 2D layer silenced, the same frame appeared in full.
+
+  There is no ordering that puts the two together, because they are not two
+  layers of one thing.
 - **`WGL_NV_DX_interop2`** — render GL into a texture shared with the D3D11
-  device and put that on a composition visual. This is the one that composites
-  properly. docs/windows.md already flags it: "a driver's promise rather than
-  the system's". It is present on NVIDIA and AMD, absent on some Intel
+  device and put that on a composition visual. This is the one that
+  composites properly. docs/windows.md flags it as "a driver's promise rather
+  than the system's": it is present on NVIDIA and AMD, absent on some Intel
   configurations, and absent from WARP.
 - **ANGLE into a composition swapchain**, which is docs/windows.md's plan and
   is the only one that is both composited and universal — because ANGLE is
   already D3D11, so its output is a D3D texture by construction.
 
-The honest reading: **the child-HWND route is the one to build first**, because
-it is a week rather than a month, it matches what the node layer already
-expects, and it is enough for `maps-gl` and for `three`. The composited route
-is the right end state and should follow ANGLE rather than precede it.
+**What shipped is the second**, not because it was the plan but because the
+first is not a route. Each surface owns a swap chain made for composition,
+shown by a visual of its own stacked over the window's 2D visual, and the GL
+context draws into a Direct3D texture the frame copies into that swap chain.
+What a child window is on X11 and a subview is on Cocoa, said in this
+platform's terms — and it composites with the window's alpha, which the child
+route would not have.
+
+The consequence for the plan below is that **G5 came first**. ANGLE is still
+the rung this needs for a machine with no vendor driver, for an Intel
+configuration without the interop extension, and for CI on WARP — and it is
+now a *fallback* under a working composited path rather than the step before
+one.
 
 ## How much API is actually needed
 
@@ -160,15 +181,20 @@ family). Budget the full WebGL 2 surface for it rather than the measured 64.
   rest of WebGL 2. Entry points above GL 1.1 come from `wglGetProcAddress`,
   which is per-context and must be resolved after the context is current.
   _Exit: `maps-gl` draws._
-- **Phase G3 — the overlay and the input.** `gloverlay.js`'s panes over a
-  child window, and the rule `glnodes.js` already states: the surface selects
-  no pointer input, so the pointer reaches the tree by propagation.
-- **Phase G4 — ANGLE as the lower rung**, for the driverless case and for CI,
-  behind the same `chooseGLConfig` seam.
-- **Phase G5 — composited GL**, either `WGL_NV_DX_interop2` where the driver
-  offers it or ANGLE's own D3D texture, onto a composition visual — which is
-  what makes a `<glarea>` participate in the window's alpha instead of
-  punching a hole in it.
+- **Phase G3 — the overlay and the input.** `gloverlay.js`'s panes over the
+  surface, and the rule `glnodes.js` already states: the surface selects no
+  pointer input, so the pointer reaches the tree by propagation. On this
+  backend the surface is a visual rather than a window and selects no input
+  at all, so the second half is free; the panes are the work.
+- **Phase G5 — composited GL. Done, and first.** `WGL_NV_DX_interop2` onto a
+  composition visual, because the child-window route above is not a route.
+  It is what makes a `<glarea>` participate in the window's alpha instead of
+  punching a hole in it — and a hole, as it turns out, would not have shown
+  the surface anyway.
+- **Phase G4 — ANGLE as the lower rung**, for the driverless case, for an
+  Intel configuration without the interop extension, and for CI on WARP,
+  behind the same `chooseGLConfig` seam. Now a fallback under a working
+  composited path rather than the step before one.
 
 ## Open questions
 

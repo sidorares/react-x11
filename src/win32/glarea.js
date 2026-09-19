@@ -1,19 +1,25 @@
-// `<glarea>` on Windows: a child HWND with a WGL core context.
+// `<glarea>` on Windows: a WGL core context, composited as a visual.
 //
-// docs/windows-gl.md is the report behind this, and the route is the X11 model
-// rather than ANGLE — a GL surface is a child window stacked above the
-// parent's 2D content, positioned from the parent's yoga rect. src/glnodes.js
-// already expects exactly that, including the rule that the surface selects no
+// docs/windows-gl.md is the report behind this, and the route is the X11
+// model rather than ANGLE — a GL surface covers its rect and the tree draws
+// under it, positioned from the parent's yoga rect. src/glnodes.js already
+// expects exactly that, including the rule that the surface selects no
 // pointer input so a press over it reaches the tree by propagation.
 //
-// What it costs is what it costs on X11: a child window does not composite
-// with the parent's alpha. docs/windows-gl.md phase G5 is the composited
-// answer and it follows ANGLE rather than preceding it.
+// Where it parts from X11 is how the surface reaches the screen. It is not a
+// child window: a window presenting through DirectComposition is shown from
+// its visual tree, and a child HWND's pixels go to a redirection bitmap that
+// is then no part of what is composited. That was built and measured before
+// it was believed — see the commit and the report. So the bridge gives each
+// surface a composition swap chain under the window's own visual, and GL
+// draws into a Direct3D texture the frame copies into it. Which means a
+// `<glarea>` here *does* composite with the window's alpha, where on X11 it
+// does not.
 
 /**
  * The window object a `<glarea>` gets. It is *not* a Win32Window: it has no
- * DirectComposition surface, no 2d context and no frame clock of the window's
- * — GL draws into it directly and swaps, which is the whole difference.
+ * 2d context and no frame clock of the window's — GL draws into its own
+ * composition surface and presents it, which is the whole difference.
  */
 export class Win32GlWindow {
   constructor(app, attributes = {}) {
