@@ -33,11 +33,11 @@ export class Win32GlWindow {
      * dropped — `glnodes.js` re-requests it from `onFrameAvailable`. */
     this._ready = false;
 
-    const parentHandle = attributes.parent
-      ? this._native.windowHandle(attributes.parent.id)
-      : 0;
+    // The parent window's id, not its handle: the surface is composited as a
+    // visual inside that window's tree rather than parented as a child HWND.
+    const parentId = attributes.parent ? attributes.parent.id : 0;
     this.id = this._native.glCreateSurface(
-      parentHandle,
+      parentId,
       this.x,
       this.y,
       this.width,
