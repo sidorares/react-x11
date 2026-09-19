@@ -500,24 +500,47 @@ const CONSTANTS = Object.freeze({
 });
 
 /**
- * `app.chooseGLConfig` — the seam `glxConfig()` asks, and whose presence is
- * what makes `hasDirectGL()` true for this app.
+ * The GL seams on the app — asked, not answered.
  *
- * There is no visual to choose on Windows: a pixel format is picked against
- * the child window's own DC when the surface is made, because a format can be
- * set on a DC only once and the DC does not exist until the window does. So
- * this answers the shape the caller expects and defers the real choice.
+ * Probing for a context is not free: making one, asking it its version and
+ * throwing it away costs about 120ms on a vendor driver, and it used to be
+ * spent by every app during `createRoot`, whether or not it would ever hold
+ * a `<glarea>`. Most never do. So this installs the seams and nothing else,
+ * and the probe happens the first time something actually asks.
+ *
+ * `glCapabilities()` answering a promise is what makes that safe:
+ * `watchDirectGL` (src/glbackend.js) already calls it and re-reads when it
+ * settles, which is the machinery for an answer that is not ready at the
+ * first render. `useSupports('shaders')` is false for a tick and then true,
+ * rather than costing every app a fifth of a second at startup.
  */
 export function installGl(app) {
-  const probe = app._native.glProbe?.();
-  // A core context is the line. Below it there is no vendor driver, and the
-  // software rasterizer's GL 1.1 is not a degraded direct backend.
-  if (!probe || !probe.core) return false;
+  let settled = null;
 
+  const probe = () => {
+    if (settled) return settled;
+    const result = app._native.glProbe?.();
+    // A core context is the line. Below it there is no vendor driver, and
+    // the software rasterizer's GL 1.1 is not a degraded direct backend.
+    const direct = Boolean(result && result.core);
+    app._glCapsResolved = { direct, indirect: false, probe: result ?? null };
+    settled = Promise.resolve(app._glCapsResolved);
+    return settled;
+  };
+
+  // A statement of intent, not of capability — `hasDirectGL` reads the
+  // policy *and* the capabilities, and only the second needs the probe.
   app.glPolicy = { mode: 'direct' };
-  app._glCapsResolved = { direct: true, indirect: false, probe };
+  app.glCapabilities = () => probe();
   app.chooseGLConfig = () =>
-    Promise.resolve({ backend: 'direct', visual: 0, depth: 32 });
-  app.glCapabilities = () => ({ direct: true, indirect: false });
+    probe().then((caps) => {
+      if (caps.direct) return { backend: 'direct', visual: 0, depth: 32 };
+      throw new Error(
+        'react-x11: <glarea> has no GL surface — this machine has no vendor ' +
+          'OpenGL driver, so only the 1.1 software rasterizer is available, ' +
+          'which has no shaders. docs/windows-gl.md rung 2 (ANGLE) covers ' +
+          'this case and is not built yet.',
+      );
+    });
   return true;
 }
