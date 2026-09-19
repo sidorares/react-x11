@@ -223,11 +223,60 @@ export class Win32Window {
   // --- painting ------------------------------------------------------------
 
   getContext() {
-    this._ctx ??= new BackendContext2D(
+    if (this._ctx) return this._ctx;
+    this._ctx = new BackendContext2D(
       this._native,
       () => this._surface,
       () => this._gen,
     );
+    // Reading a *window* is not reading a surface. The surface handle the
+    // context draws through belongs to one BeginDraw and is write-only
+    // anyway; what a caller asking a window for its pixels means is "what is
+    // on screen", and only DWM has that (`windowPixels`, src/win32.cc).
+    //
+    // The callback form is the contract — the X backend's read is a round
+    // trip and every caller is written for one (examples/configurator reads
+    // its own UI this way to put it on the laptop's screen). Here the answer
+    // is already in hand, so it is delivered on a microtask rather than
+    // pretended to be slower than it is.
+    this._ctx.getImageData = (x, y, width, height, cb) => {
+      const read = () => {
+        const w = Math.round(width);
+        const h = Math.round(height);
+        const bytes = this._native.windowPixels(
+          this.id,
+          Math.round(x),
+          Math.round(y),
+          w,
+          h,
+        );
+        if (!bytes) throw new Error('react-x11: the window could not be read');
+        if (DEBUG) {
+          let lit = 0;
+          for (let i = 0; i < bytes.length; i += 4) {
+            if (bytes[i] || bytes[i + 1] || bytes[i + 2]) lit++;
+          }
+          console.error(
+            `[win32] getImageData ${x},${y} ${w}x${h} -> ${lit}/${bytes.length / 4} lit`,
+          );
+        }
+        return {
+          data: new Uint8ClampedArray(bytes.buffer, bytes.byteOffset, bytes.length),
+          width: w,
+          height: h,
+        };
+      };
+      if (typeof cb !== 'function') return read();
+      let result;
+      let failure;
+      try {
+        result = read();
+      } catch (err) {
+        failure = err;
+      }
+      queueMicrotask(() => cb(failure ?? null, result));
+      return undefined;
+    };
     return this._ctx;
   }
 
@@ -337,14 +386,29 @@ export class Win32Window {
    * readable the way an IOSurface's or an X drawable's are. docs/windows.md
    * answers this with PrintWindow once the commit has completed; not bound
    * yet, and it says so rather than answering with something wrong. */
+  /**
+   * The window's pixels, as RGBA. PrintWindow is the door DWM opens on a
+   * composed window — see `windowPixels` in src/win32.cc for which flags are
+   * the ones that work and what the others answer instead.
+   */
   snapshot() {
-    return Promise.reject(
-      new Error(
-        'react-x11: the win32 backend cannot snapshot a window yet — a ' +
-          'DirectComposition surface cannot be read back, and the PrintWindow ' +
-          'path is not built. Draw into an offscreen surface and read that.',
-      ),
-    );
+    const width = Math.round(this.width);
+    const height = Math.round(this.height);
+    const bytes = this._native.windowPixels(this.id, 0, 0, width, height);
+    if (!bytes) {
+      return Promise.reject(
+        new Error(
+          'react-x11: the window could not be read — PrintWindow refused it. ' +
+            'A window that is minimised or not yet composed has nothing to ' +
+            'read; draw into an offscreen surface and read that instead.',
+        ),
+      );
+    }
+    return Promise.resolve({
+      data: new Uint8ClampedArray(bytes.buffer, bytes.byteOffset, bytes.length),
+      width,
+      height,
+    });
   }
 
   /** How many damage rects a frame may carry before it collapses to their

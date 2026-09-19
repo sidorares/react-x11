@@ -367,6 +367,21 @@ function instrument(gl) {
  * a context, so they live here rather than being asked of the driver — which
  * is also what every WebGL implementation does.
  */
+
+/**
+ * The texture units, as a range rather than one entry.
+ *
+ * `TEXTURE0` alone was here, and a scene that binds a second texture —
+ * anything with a base map and an overlay, which is most of them — asked for
+ * `gl.TEXTURE1`, got `undefined`, and passed it to `activeTexture` as an
+ * invalid enum. The bind then landed on unit 0 and the sampler read black.
+ *
+ * GL guarantees the units are consecutive from TEXTURE0, so this is the
+ * definition rather than a table of 32 lines.
+ */
+const TEXTURE_UNITS = Object.fromEntries(
+  Array.from({ length: 32 }, (_, i) => [`TEXTURE${i}`, 0x84c0 + i]),
+);
 const CONSTANTS = Object.freeze({
   DEPTH_BUFFER_BIT: 0x0100,
   STENCIL_BUFFER_BIT: 0x0400,
@@ -437,7 +452,7 @@ const CONSTANTS = Object.freeze({
   REPEAT: 0x2901,
   CLAMP_TO_EDGE: 0x812f,
   MIRRORED_REPEAT: 0x8370,
-  TEXTURE0: 0x84c0,
+  ...TEXTURE_UNITS,
   ARRAY_BUFFER: 0x8892,
   ELEMENT_ARRAY_BUFFER: 0x8893,
   STREAM_DRAW: 0x88e0,

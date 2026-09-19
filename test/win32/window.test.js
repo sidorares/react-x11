@@ -170,9 +170,22 @@ describe('win32 window: what it refuses honestly', () => {
     assert.equal(wnd.frameInFlight(), false);
   });
 
-  it('refuses a snapshot rather than answering with something wrong', async () => {
-    const { wnd } = setup();
-    await assert.rejects(() => wnd.snapshot(), /cannot snapshot/);
+  it('reads the window back, and says so when the platform will not', async () => {
+    const { wnd, bridge } = setup();
+    // PrintWindow is the only door DWM opens on a composed window, and it
+    // can refuse — a minimised window has nothing to print. The refusal has
+    // to arrive as a rejection rather than as a black rectangle, which is
+    // indistinguishable from a window that really is black.
+    bridge.windowPixels = () => null;
+    await assert.rejects(() => wnd.snapshot(), /could not be read/);
+
+    bridge.windowPixels = (id, x, y, w, h) =>
+      Buffer.alloc(w * h * 4, 0x7f);
+    const shot = await wnd.snapshot();
+    assert.equal(shot.width, wnd.width);
+    assert.equal(shot.height, wnd.height);
+    assert.equal(shot.data.length, wnd.width * wnd.height * 4);
+    assert.equal(shot.data[0], 0x7f);
   });
 
   it('resolves setWmState false rather than latching a true it did not apply', async () => {
