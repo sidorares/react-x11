@@ -33,6 +33,11 @@ const DEBUG = process.env.REACT_X11_WIN32_DEBUG === '1';
 // the same floor the Cocoa engine uses.
 const DEFAULT_SIZE = 14;
 
+// The size a coverage question is asked at. A cmap does not depend on one, so
+// every `hasGlyph`/`glyphIdFor` shares a single handle per face rather than
+// resolving one per size the caller happens to be drawing at.
+const PROBE_SIZE = 16;
+
 /** The CSS generics, which name no face on their own. */
 const GENERIC_FAMILIES = new Set([
   'sans-serif',
@@ -190,13 +195,102 @@ class Win32Face {
       this.italic,
     );
   }
+
+  /**
+   * The bridge's handle for this face at a pixel size — a resolved
+   * IDWriteFontFace and the em size to draw it at, which is the pair
+   * DirectWrite's DrawGlyphRun takes and the pair CoreText folds into one
+   * CTFont. Cached on the manager, so the same face at the same size is one
+   * object across a frame and `drawGlyphs` can batch by it.
+   */
+  _handle(size) {
+    return this._manager._handleFor(this, size);
+  }
+
+  /**
+   * Coverage. A code point (ntk's contract) or a string — the two forms
+   * `hasGlyph` has been asked in.
+   */
+  hasGlyph(codepoint) {
+    if (typeof codepoint === 'number') return this.glyphIdFor(codepoint) !== null;
+    const handle = this._handle(PROBE_SIZE);
+    if (!handle) return false;
+    return this._manager._native.fontHasGlyph(handle, String(codepoint));
+  }
+
+  /**
+   * Glyph id for a code point, or `null` when this face does not map it —
+   * the lookup twin of `hasGlyph` (ntk#254). A cmap lookup only: no shaping,
+   * so text that needs ligatures or marks goes through the layout path, and
+   * `hasGlyphRuns` on the renderer's side is the gate that decides.
+   *
+   * The size does not matter to a cmap, so this asks at one fixed size and
+   * the answers are shared rather than looked up per size.
+   */
+  glyphIdFor(codepoint) {
+    if (typeof codepoint !== 'number') return null;
+    const handle = this._handle(PROBE_SIZE);
+    if (!handle) return null;
+    return this._manager._native.fontGlyphForCodepoint(handle, codepoint);
+  }
+
+  /** Nominal (unshaped) horizontal advance of a glyph id, in pixels at
+   *  `size`. */
+  advanceOf(glyphId, size) {
+    const handle = this._handle(size);
+    if (!handle) return 0;
+    const advances = this._manager._native.fontGlyphAdvances(handle, [glyphId]);
+    return advances?.[0] ?? 0;
+  }
 }
 
 export class Win32FontManager {
   constructor(native) {
     this._native = native;
     this._faces = new Map();
+    // family|weight|italic|size -> the bridge's handle, or null when there is
+    // no such face
+    this._handles = new Map();
   }
+
+  /**
+   * A face at a size, as the bridge's handle. Cached on the four things that
+   * pick it, because a terminal asks for the same handful of faces on every
+   * frame — and because `BackendContext2D.drawGlyphs` groups a frame's glyphs
+   * by handle identity, so two asks for the same face must answer the same
+   * number or a line of text goes out as one call per glyph.
+   */
+  _handleFor(face, size) {
+    const px = Math.max(1, Math.round((size ?? 0) * 64)) / 64;
+    const key = `${face.family}|${face.weight}|${face.italic ? 1 : 0}|${px}`;
+    let handle = this._handles.get(key);
+    if (handle === undefined) {
+      handle = this._native.fontHandle(face.family, px, face.weight, face.italic) || null;
+      this._handles.set(key, handle);
+    }
+    return handle;
+  }
+
+  /**
+   * The handle a glyph run draws with (`BackendContext2D.drawGlyphs`): a face
+   * this engine made, or one of ntk's `Font` objects, which carries the family
+   * it was opened as — `loadFont()` registered the file with DirectWrite under
+   * that name, so asking for it by name reaches the same face.
+   */
+  _runHandle(font, size) {
+    if (font instanceof Win32Face) return font._handle(size);
+    const family = font?.familyName ?? font?.family ?? font?.postscriptName;
+    if (!family) return null;
+    return this._handleFor(
+      {
+        family: String(family),
+        weight: weightOf(font.weight ?? 400),
+        italic: font.italic === true || font.style === 'italic',
+      },
+      size,
+    );
+  }
+
 
   /**
    * A font the app ships rather than one the system has — `loadFont()`'s
@@ -236,6 +330,7 @@ export class Win32FontManager {
     // set of fonts, and one of them may have fallen back to what this
     // replaces.
     this._faces.clear();
+    this._handles.clear();
     return null;
   }
 
