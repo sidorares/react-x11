@@ -14,6 +14,7 @@ import { setScaleForTests } from '../scale.js';
 import { setScreensForTests } from '../screens.js';
 
 import { createBezels } from './bezels.js';
+import { decodeKey, modifierMask } from './keymap.js';
 import { Win32Surface } from './surface.js';
 import { installGl, Win32GlWindow } from './glarea.js';
 import { Win32FontManager } from './fonts.js';
@@ -377,8 +378,22 @@ class Win32App {
         wnd.emit('mouseup', { x: event.a, y: event.b, keycode: 1 });
         break;
       case 'keydown':
-        wnd.emit('keydown', { keycode: event.a, keysym: event.a, buttons: 0 });
+      case 'keyup': {
+        // The bridge asked the active layout what the key types before the
+        // modifiers were stripped from it, because that question can only be
+        // answered where the keyboard state is (src/win32.cc, EmitKey).
+        const decoded = decodeKey(event);
+        wnd.emit(event.type, {
+          keycode: event.a,
+          keysym: decoded.keysym,
+          baseKeysym: decoded.baseKeysym,
+          codepoint: decoded.codepoint,
+          buttons: modifierMask(event.d),
+          group: 0,
+          time: Date.now(),
+        });
         break;
+      }
       case 'close':
         // The same shape Cocoa sends. `preventDefault` is a no-op because
         // nothing has happened yet to prevent: WM_CLOSE is answered with 0
