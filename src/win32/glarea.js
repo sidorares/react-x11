@@ -181,6 +181,15 @@ function instrument(gl) {
   const counts = new Map();
   const missing = new Set();
   let swaps = 0;
+  // Frame timing, split at the only place it can be split from here: the work
+  // between making the context current and presenting is the GL frame; the
+  // rest of the interval is everything else — the tile and label work, the
+  // React render, the 2D layer, and whatever the pacer decides to wait.
+  let frameStart = 0;
+  let drawTotal = 0;
+  let gapTotal = 0;
+  let lastSwap = 0;
+  let presentTotal = 0;
   let errors = 0;
   const raw = gl.getError;
   const rawRead = gl.readPixels;
@@ -211,6 +220,7 @@ function instrument(gl) {
     const fn = gl[name];
     if (typeof fn !== 'function' || name === 'getError') continue;
     gl[name] = (...args) => {
+      if (name === 'makeCurrent') frameStart = performance.now();
       const out = fn(...args);
       counts.set(name, (counts.get(name) ?? 0) + 1);
       if (traced < trace && swaps >= traceAfter) {
@@ -275,18 +285,32 @@ function instrument(gl) {
   const swap = gl.SwapBuffers;
   gl.SwapBuffers = (...args) => {
     swaps += 1;
+    const now = performance.now();
+    if (frameStart) drawTotal += now - frameStart;
+    if (lastSwap) gapTotal += now - lastSwap;
+    lastSwap = now;
     if (swaps % 30 === 0) {
       const top = [...counts.entries()]
         .sort((a, b) => b[1] - a[1])
         .slice(0, Number(process.env.REACT_X11_GL_TOP ?? 12))
         .map(([k, v]) => `${k}=${v}`)
         .join(' ');
-      process.stderr.write(`[gl] after ${swaps} swaps: ${top}\n`);
+      process.stderr.write(
+        `[gl] after ${swaps} swaps: GL frame ${(drawTotal / 30).toFixed(1)} ms, ` +
+          `present ${(presentTotal / 30).toFixed(1)} ms, interval ${(gapTotal / 30).toFixed(1)} ms — ${top}
+`,
+      );
+      drawTotal = 0;
+      gapTotal = 0;
+      presentTotal = 0;
       if (missing.size > 0) {
         process.stderr.write(`[gl] NOT IN TABLE: ${[...missing].join(', ')}\n`);
       }
     }
-    return swap(...args);
+    const before = performance.now();
+    const result = swap(...args);
+    presentTotal += performance.now() - before;
+    return result;
   };
 
   return new Proxy(gl, {
