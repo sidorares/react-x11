@@ -29,6 +29,24 @@ import { Win32Window } from './window.js';
 // it is marked so that the real clock replaces it rather than joining it.
 const FRAME_INTERVAL_MS = 1000 / 60;
 
+
+/**
+ * A pointer event's position on the screen, which X carries as `rootx`/
+ * `rooty` and Windows does not: WM_MOUSEMOVE and the button messages are all
+ * client-relative. The window knows where its client area is, so the sum is
+ * exact and costs nothing.
+ *
+ * Anything that places something *outside* the window reads these — a
+ * `ContextMenu` opens at the pointer, and a drag's feedback follows it
+ * (src/components/Menu.js, src/dnd.js). Without them both fall back to the
+ * window-relative coordinate and treat it as a screen one, which puts a
+ * right-click menu a whole window-offset away from the pointer.
+ */
+function rootOf(wnd, event) {
+  const origin = wnd._screenOrigin ?? { x: wnd.x ?? 0, y: wnd.y ?? 0 };
+  return { rootx: event.a + origin.x, rooty: event.b + origin.y };
+}
+
 class Win32App {
   constructor(native, options = {}) {
     this._native = native;
@@ -345,7 +363,7 @@ class Win32App {
         break;
       }
       case 'mousemove':
-        wnd.emit('mousemove', { x: event.a, y: event.b });
+        wnd.emit('mousemove', { x: event.a, y: event.b, ...rootOf(wnd, event) });
         break;
       case 'mouseout':
         wnd.emit('mouseout', {});
@@ -372,10 +390,18 @@ class Win32App {
         break;
       }
       case 'mousedown':
-        wnd.emit('mousedown', { x: event.a, y: event.b, keycode: 1 });
-        break;
       case 'mouseup':
-        wnd.emit('mouseup', { x: event.a, y: event.b, keycode: 1 });
+        // `keycode` is the button, numbered as X numbers them — the bridge
+        // already speaks that vocabulary. It used to be hardcoded to 1, so
+        // a right-click arrived as a left-click and no context menu ever
+        // opened.
+        wnd.emit(event.type, {
+          x: event.a,
+          y: event.b,
+          keycode: event.c || 1,
+          buttons: modifierMask(event.d),
+          ...rootOf(wnd, event),
+        });
         break;
       case 'keydown':
       case 'keyup': {
