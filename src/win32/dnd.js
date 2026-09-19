@@ -105,7 +105,8 @@ export class Win32DropTransport {
    */
   refreshTypes() {
     const wanted =
-      (this.node._dndConcreteTypes?.() ?? []).length > 0 || this.node._dnd != null;
+      (this.node._dndConcreteTypes?.() ?? []).length > 0 ||
+      this.node._dnd != null;
     if (wanted === this._enabled) return;
     this._enabled = wanted;
     if (DEBUG) console.error(`[win32] dropTarget ${this.wnd.id} -> ${wanted}`);
@@ -127,7 +128,8 @@ export class Win32DropTransport {
   }
 
   handle(ev) {
-    if (DEBUG) console.error(`[win32] ${ev.type} ${ev.a},${ev.b} "${ev.text ?? ''}"`);
+    if (DEBUG)
+      console.error(`[win32] ${ev.type} ${ev.a},${ev.b} "${ev.text ?? ''}"`);
     switch (ev.type) {
       case 'drag-enter':
       case 'drag-over':
@@ -259,7 +261,9 @@ export class Win32DropTransport {
     const best = TEXT_TARGETS.find((t) => values[t] !== undefined);
     return {
       items: values,
-      files: values['text/uri-list'] ? parseUriList(values['text/uri-list']) : [],
+      files: values['text/uri-list']
+        ? parseUriList(values['text/uri-list'])
+        : [],
       text: best ? values[best] : undefined,
       // A promise, like the cocoa transport's: the payload is already in
       // hand, and answering synchronously here would make this the one

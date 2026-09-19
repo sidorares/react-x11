@@ -17,11 +17,11 @@ draws reach the screen composited with everything else?
 Three answers ship today, and they are different APIs rather than three
 spellings of one:
 
-| | how it draws | shaders |
-| --- | --- | --- |
-| **direct** (X11) | GLES 2 on the GPU via the `x11-dri` addon; frames reach the server as dma-buf over DRI3 + Present, or over Apple-DRI on XQuartz | yes |
-| **indirect** (X11) | GL commands encoded into the X connection | no — the protocol encodes no shader objects |
-| **Cocoa** | the same `x11-dri` CGL context, rendering into IOSurfaces presented as a `CALayer` sublayer | yes |
+|                    | how it draws                                                                                                                    | shaders                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| **direct** (X11)   | GLES 2 on the GPU via the `x11-dri` addon; frames reach the server as dma-buf over DRI3 + Present, or over Apple-DRI on XQuartz | yes                                         |
+| **indirect** (X11) | GL commands encoded into the X connection                                                                                       | no — the protocol encodes no shader objects |
+| **Cocoa**          | the same `x11-dri` CGL context, rendering into IOSurfaces presented as a `CALayer` sublayer                                     | yes                                         |
 
 The shape worth noticing: **`x11-dri` is not an X11 thing.** It is the GL
 addon, and the Cocoa backend uses it with the X-specific half swapped out.
@@ -83,8 +83,8 @@ downloads.
 
 ## The hard part is presentation, not the context
 
-Getting a GL context is a day. Getting its output onto the screen *composited
-with the rest of the window* is the design problem, and Windows makes it
+Getting a GL context is a day. Getting its output onto the screen _composited
+with the rest of the window_ is the design problem, and Windows makes it
 harder than either shipped backend does.
 
 The window's content is a DirectComposition surface, and a GL context cannot
@@ -101,7 +101,7 @@ draw into one. Three ways out were on the table:
 
   **It does not work, and this was built and measured before that was
   believed.** A window that presents through a DirectComposition target is
-  shown by DWM *from that visual tree*; the window's redirection bitmap — the
+  shown by DWM _from that visual tree_; the window's redirection bitmap — the
   surface a child HWND's pixels go to — is not part of what is composited.
   So the child was invisible with the composition tree above it, invisible
   with the tree below it (`CreateTargetForHwnd`'s `topmost` argument, both
@@ -113,6 +113,7 @@ draw into one. Three ways out were on the table:
 
   There is no ordering that puts the two together, because they are not two
   layers of one thing.
+
 - **`WGL_NV_DX_interop2`** — render GL into a texture shared with the D3D11
   device and put that on a composition visual. This is the one that
   composites properly. docs/windows.md flags it as "a driver's promise rather
@@ -133,7 +134,7 @@ route would not have.
 The consequence for the plan below is that **G5 came first**. ANGLE is still
 the rung this needs for a machine with no vendor driver, for an Intel
 configuration without the interop extension, and for CI on WARP — and it is
-now a *fallback* under a working composited path rather than the step before
+now a _fallback_ under a working composited path rather than the step before
 one.
 
 ## How much API is actually needed

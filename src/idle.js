@@ -400,7 +400,12 @@ export function setIdleForTests(app, timeout, idle) {
  * code and for tests.
  */
 export async function keepAwake({ reason = 'Busy', app = null } = {}) {
-  for (const rung of [windowsInhibit, portalInhibit, screenSaverInhibit, xInhibit]) {
+  for (const rung of [
+    windowsInhibit,
+    portalInhibit,
+    screenSaverInhibit,
+    xInhibit,
+  ]) {
     try {
       const release = await rung(reason, app);
       if (release) return once(release);

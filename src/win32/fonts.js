@@ -212,7 +212,8 @@ class Win32Face {
    * `hasGlyph` has been asked in.
    */
   hasGlyph(codepoint) {
-    if (typeof codepoint === 'number') return this.glyphIdFor(codepoint) !== null;
+    if (typeof codepoint === 'number')
+      return this.glyphIdFor(codepoint) !== null;
     const handle = this._handle(PROBE_SIZE);
     if (!handle) return false;
     return this._manager._native.fontHasGlyph(handle, String(codepoint));
@@ -265,7 +266,9 @@ export class Win32FontManager {
     const key = `${face.family}|${face.weight}|${face.italic ? 1 : 0}|${px}`;
     let handle = this._handles.get(key);
     if (handle === undefined) {
-      handle = this._native.fontHandle(face.family, px, face.weight, face.italic) || null;
+      handle =
+        this._native.fontHandle(face.family, px, face.weight, face.italic) ||
+        null;
       this._handles.set(key, handle);
     }
     return handle;
@@ -290,7 +293,6 @@ export class Win32FontManager {
       size,
     );
   }
-
 
   /**
    * A font the app ships rather than one the system has — `loadFont()`'s

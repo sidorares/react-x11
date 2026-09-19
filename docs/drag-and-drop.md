@@ -530,6 +530,7 @@ Platform notes:
   it picks a cursor, and the bridge returns the previous answer rather than
   blocking. The drop itself is answered exactly, because whether it was a
   copy or a move decides whether the source deletes its original.
+
 - **macOS, the cocoa backend** — works both directions with the desktop:
   files from the Finder arrive as `['files']` (each file is a pasteboard
   item of one `public.file-url`; they become one `text/uri-list`), text from

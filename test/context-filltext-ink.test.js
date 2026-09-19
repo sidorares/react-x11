@@ -60,7 +60,11 @@ function recordingNative() {
 }
 
 function contextWith(fonts, native) {
-  const ctx = new BackendContext2D(native, () => 1, () => 1);
+  const ctx = new BackendContext2D(
+    native,
+    () => 1,
+    () => 1,
+  );
   ctx._fonts = fonts;
   return ctx;
 }
@@ -101,7 +105,11 @@ describe('fillText takes the context fill', () => {
     assert.ok(draw !== -1, 'nothing was drawn');
     assert.ok(fill < draw, 'the fill was applied after the text was drawn');
     const [, , r, g, b] = native.calls[fill];
-    assert.deepEqual([r, g, b], [1, 1, 1], `the ink was ${[r, g, b]}, not white`);
+    assert.deepEqual(
+      [r, g, b],
+      [1, 1, 1],
+      `the ink was ${[r, g, b]}, not white`,
+    );
   });
 
   test('measureText asks for the same layout and draws nothing', () => {
@@ -123,8 +131,9 @@ describe('fillText takes the context fill', () => {
     // and must keep it: the fill under a paint pass is whatever the last node
     // set, and a coloured span that started following it would be a different
     // bug in the other direction.
+    // No context here on purpose: this is the engine's own answer, and it
+    // has to hold before anything draws with it.
     const fonts = recordingFonts();
-    const ctx = contextWith(fonts, recordingNative());
     const layout = fonts.layout(
       [{ text: 'hi', color: '#ff0000' }],
       { color: '#ff0000' },

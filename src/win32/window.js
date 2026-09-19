@@ -328,7 +328,11 @@ export class Win32Window {
           );
         }
         return {
-          data: new Uint8ClampedArray(bytes.buffer, bytes.byteOffset, bytes.length),
+          data: new Uint8ClampedArray(
+            bytes.buffer,
+            bytes.byteOffset,
+            bytes.length,
+          ),
           width: w,
           height: h,
         };
