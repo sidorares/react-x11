@@ -173,14 +173,19 @@ family). Budget the full WebGL 2 surface for it rather than the measured 64.
 - **Phase G0 — the probe.** `glProbe()` in the bridge, reporting vendor,
   renderer, version, GLSL and whether a core context could be created. Done;
   the numbers above are its output. It is also what the ladder branches on.
-- **Phase G1 — a child HWND and a context.** A `<glarea>` becomes a child
-  window with a WGL core context, positioned from the parent's yoga rect, with
-  `SwapBuffers` per frame. `app.chooseGLConfig` answers, so `glnodes.js`
-  stops reporting "not built" and takes its existing path. _Exit: a triangle._
-- **Phase G2 — the table.** The 64 functions the map renderer needs, then the
-  rest of WebGL 2. Entry points above GL 1.1 come from `wglGetProcAddress`,
-  which is per-context and must be resolved after the context is current.
-  _Exit: `maps-gl` draws._
+- **Phase G1 — a context. Done, though not as written.** A `<glarea>` was to
+  become a child window with a WGL core context. It does not: a window
+  presenting through DirectComposition has no redirection bitmap, so a child
+  HWND composites nowhere and is invisible whatever it draws. The context is
+  made against a hidden window and its output reaches the screen through G5
+  below. `app.chooseGLConfig` answers, so `glnodes.js` takes its existing
+  path. The context is an **ES** one (`WGL_CONTEXT_ES_PROFILE_BIT_EXT`),
+  because the shaders these examples ship are GLSL ES and desktop GLSL 1.10
+  rejects things like `mat3(mat4)` that ES 1.00 allows.
+- **Phase G2 — the table. Done.** Entry points above GL 1.1 come from
+  `wglGetProcAddress`, which is per-context and must be resolved after the
+  context is current. `maps-gl` draws, and so does the `configurator`
+  example's laptop.
 - **Phase G3 — the overlay and the input.** `gloverlay.js`'s panes over the
   surface, and the rule `glnodes.js` already states: the surface selects no
   pointer input, so the pointer reaches the tree by propagation. On this
@@ -203,10 +208,12 @@ family). Budget the full WebGL 2 surface for it rather than the measured 64.
    platform that settles it: the addon is the GL context and the WebGL-shaped
    table, and the display system is a parameter. A Windows context could be a
    fourth backend inside it rather than a second GL addon in `@windowkit`.
-2. **Whether the child HWND is acceptable as the shipped answer** or only as
-   the first one. It is what X11 does and nobody calls X11's `<glarea>` broken
-   — but Windows users will compare against a compositing toolkit, and a
-   surface that cannot sit under a translucent panel is visible.
+2. ~~**Whether the child HWND is acceptable as the shipped answer**~~ —
+   **settled, and not by taste.** A child HWND is not an answer at all here:
+   `WS_EX_NOREDIRECTIONBITMAP` is what lets the window present through
+   DirectComposition, and DWM drops the redirection bitmap a child window
+   would composite into. The question was whether a hole in the window was
+   acceptable; it turned out a hole would not have shown the surface anyway.
 3. **Which rung CI gets.** WARP gives D3D11 and therefore ANGLE, and gives
    WGL nothing. If `<glarea>` is to be tested at all on a GitHub runner, G4
    stops being optional.

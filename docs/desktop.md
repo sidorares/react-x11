@@ -164,13 +164,13 @@ it is the mark on its icon — an unread count on the Dock tile, a dot on the
 taskbar entry. Three things live here, and they are on both backends only
 where both have a mechanism:
 
-|                   | Linux (`launcherentry`)                                                                            | macOS (`cocoa`)                                      |
-| ----------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| a **badge**       | `com.canonical.Unity.LauncherEntry` — KDE, elementary, Cairo-Dock listen; GNOME needs an extension | `NSDockTile.badgeLabel`                              |
-| badge **text**    | — the protocol carries a count and nothing else                                                    | any label                                            |
-| **progress**      | `useProgress(0…1)` — a bar across the tile                                                         | — `NSDockTile` has none                              |
-| **attention**     | `states={['demands_attention']}`, or `setUrgent()` for the launcher entry itself                   | the same prop: the Dock icon bounces until activated |
-| the **Dock menu** | `useDockMenu(items)` — the launcher protocol's quicklist                                           | `useDockMenu(items)`                                 |
+|                   | Linux (`launcherentry`)                                                                            | macOS (`cocoa`)                                      | Windows (`win32`)                                                  |
+| ----------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------ |
+| a **badge**       | `com.canonical.Unity.LauncherEntry` — KDE, elementary, Cairo-Dock listen; GNOME needs an extension | `NSDockTile.badgeLabel`                              | an overlay icon with the label drawn into it                        |
+| badge **text**    | — the protocol carries a count and nothing else                                                    | any label                                            | up to three glyphs; longer clamps to `99+`, and it is ~16px on screen |
+| **progress**      | `useProgress(0…1)` — a bar across the tile                                                         | — `NSDockTile` has none                              | `ITaskbarList3::SetProgressValue`, across the taskbar button        |
+| **attention**     | `states={['demands_attention']}`, or `setUrgent()` for the launcher entry itself                   | the same prop: the Dock icon bounces until activated | `FlashWindowEx`                                                     |
+| the **Dock menu** | `useDockMenu(items)` — the launcher protocol's quicklist                                           | `useDockMenu(items)`                                 | — a jump list is not built ([windows-integrations.md](windows-integrations.md)) |
 
 ### The badge
 

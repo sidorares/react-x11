@@ -515,6 +515,11 @@ Platform notes:
 - **Linux / XWayland** — works both directions, including to and from
   native Wayland applications, which is what makes this worth having on a
   modern desktop.
+- **Windows, the win32 backend** — **not built.** `useDropTarget` and
+  `useDragSource` mount and nothing ever reaches them: the window has no
+  `IDropTarget` and there is no `DoDragDrop`, so neither the desktop nor
+  another react-x11 window can hand anything over.
+  [windows-integrations.md](windows-integrations.md) has the route.
 - **macOS, the cocoa backend** — works both directions with the desktop:
   files from the Finder arrive as `['files']` (each file is a pasteboard
   item of one `public.file-url`; they become one `text/uri-list`), text from

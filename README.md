@@ -131,15 +131,19 @@ That is the shape of the problem this is good at:
 And the shape it is not good at, so you can stop here rather than in week
 three:
 
-- **Windows — today.** The Windows backend is young. It renders and it
-  responds to the mouse — Win32 windows, Direct2D and DirectWrite,
-  composited by DWM through DirectComposition, on a mechanism-only bridge
-  shaped like the Cocoa one — and the examples run. What it does not have
-  yet is most of the desktop: no clipboard, no drag and drop, no file
-  dialogs, no tray, no notifications, no IME, no `<popup>`, and no headless
-  test suite of its own. So an app that has to ship on Windows _this month_
-  still wants Electron or Tauri. [docs/windows.md](docs/windows.md) is the
-  design record and tracks what is built against what is planned. The three
+- **Windows — today.** The Windows backend is young, and further along than
+  that sounds. Win32 windows composited by DWM through DirectComposition,
+  Direct2D and DirectWrite behind the same contracts the Cocoa backend
+  proved, OpenGL, the keyboard and all five mouse buttons, popups, the
+  clipboard, file dialogs, the tray, the taskbar, global hotkeys,
+  notifications and window states — on a mechanism-only bridge shaped like
+  the Cocoa one, with a test suite and CI of its own. The examples run.
+  What it does not have is **drag and drop, IME and screen-reader support**:
+  an app is unusable with a screen reader and in CJK input, and nothing can
+  be dragged into it or out of it. So an app that needs any of those on
+  Windows _this month_ still wants Electron or Tauri.
+  [docs/windows-integrations.md](docs/windows-integrations.md) is the
+  measured status and [docs/windows.md](docs/windows.md) the design. The three
   targets are not the same app: the desktop-shell half of X11 (`<foreign>`
   embedding, panel struts, substructure redirect, the window-manager example
   below) has no macOS or Windows equivalent, and `react-x11/test` drives the

@@ -280,7 +280,9 @@ Where the X server carries an `IDLETIME` counter — Xorg does — this costs **
 timer at all**: a SYNC alarm fires when the counter crosses `timeout` and
 another when input pulls it back down, which is what every idle daemon on the
 desktop is built on. On a server without one (XQuartz) it falls back to polling
-MIT-SCREEN-SAVER, scheduled against the remaining time rather than on a tick.
+MIT-SCREEN-SAVER, scheduled against the remaining time rather than on a tick —
+and on win32, `GetLastInputInfo` on the same schedule, which answers for the
+whole session the way the X counter does.
 On a display with neither it stays `false`.
 
 `timeout` is a dependency, so hold it in a constant rather than building it
@@ -296,15 +298,22 @@ Held while the flag is true and the component is mounted, released on either —
 including on an unmount mid-playback, which is the case that leaves a desktop
 permanently un-blanking when this is done by hand.
 
-Three rungs: the settings portal's `Inhibit`, the older
+Four rungs. On [win32](windows-integrations.md), `SetThreadExecutionState`
+with `ES_CONTINUOUS`, which is what makes it a state rather than a one-shot
+nudge, and which is counted here so that one caller finishing does not speak
+for another. Elsewhere: the settings portal's `Inhibit`, the older
 `org.freedesktop.ScreenSaver` service, and `ScreenSaverSuspend`, which is a
-plain X request and needs no session bus at all. **All three inhibit screen
-blanking only.** Nothing here stops a suspend — only the portal rung could, and
-a seam that works on one desktop in three is worse than not offering it.
+plain X request and needs no session bus at all. **The three freedesktop
+rungs inhibit screen blanking only.** Nothing there stops a suspend — only
+the portal rung could, and a seam that works on one desktop in three is worse
+than not offering it. The Windows rung asks for both the display and the
+system, which is the same call either way.
 
 `reason` is shown by desktops that list what is holding the screen on, so it
 reads best as a sentence about the app's state rather than the app's name,
-which they already show.
+which they already show. Windows takes no string with the call —
+`powercfg /requests` names the process — so there it is dropped rather than
+put somewhere the system will not show it.
 
 Failure is silent by design: a machine with no portal, no screensaver service
 and no MIT-SCREEN-SAVER cannot be asked, and a video player is not the place to

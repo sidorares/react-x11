@@ -964,6 +964,10 @@ Every ladder in the README gets a Windows rung or an honest floor. The
 D-Bus and portal rungs are absent (§"What already carries over"); the
 shell-out rungs have Windows equivalents only where they are worth having.
 
+This table is the design. For what is built,
+[windows-integrations.md](windows-integrations.md) is the measured status —
+every row of it driven on hardware rather than inferred from an API existing.
+
 | what                                           | the Windows rung                                                                                                                                                                                                                                                                                                                                                                          | below it                                                                 |
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | open/save panels, `useFileDialog()`            | the Common Item Dialog (`IFileOpenDialog`, `IFileSaveDialog`), parented to the window, its modal loop on the UI thread                                                                                                                                                                                                                                                                    | the dialog react-x11 draws                                               |
@@ -975,7 +979,7 @@ shell-out rungs have Windows equivalents only where they are worth having.
 | a badge on the icon, `setBadge()`              | a taskbar overlay icon (`ITaskbarList3::SetOverlayIcon`) with the count drawn into it, once the taskbar button exists                                                                                                                                                                                                                                                                     | —                                                                        |
 | the Dock menu, `useDockMenu()`                 | a jump list, whose tasks relaunch the app with arguments that arrive through the single-instance path                                                                                                                                                                                                                                                                                     | —                                                                        |
 | a tray icon, `useTray()`                       | `Shell_NotifyIcon`                                                                                                                                                                                                                                                                                                                                                                        | —                                                                        |
-| progress on the icon                           | `ITaskbarList3::SetProgressValue`                                                                                                                                                                                                                                                                                                                                                         | **gained** — no hook exists yet                                          |
+| progress on the icon, `useProgress()`          | `ITaskbarList3::SetProgressValue`                                                                                                                                                                                                                                                                                                                                                         | —                                                                        |
 
 ## Accessibility: UI Automation
 
@@ -1103,25 +1107,38 @@ Each phase has an exit that makes the next one safe to start.
   and the promotion policy have **not** moved: the context was what a second
   native backend actually needed, and moving the rest before anything
   consumes it would be renaming for its own sake.
-- **Phase 2 — the surface backend. Done for rendering and the mouse.**
-  `src/win32/` — app, window, fonts — over `@windowkit/win32`, with
+- **Phase 2 — the surface backend. Done.** `src/win32/` — app, window,
+  fonts, surfaces, bezels — over `@windowkit/win32`, with
   `createRoot({ backend: 'win32' })` and `'auto'` choosing it on Windows.
-  `simple`, `widgets`, `tasks`, `form` and `dashboard` render; a synthetic
-  click reaches a React handler (`scripts/win32-probe.jsx`). **Outstanding
-  against the original exit criteria**: the fake-bridge suite under
-  `test/win32/`, which every other backend has and this one does not; the
-  bench twin and its baselines; the keyboard beyond raw key-downs; and
-  `<popup>`, so anything with a menu is untested.
-- **Phase 3 — input, scale and the desktop.** IMM32 composition; the
-  clipboard and drag and drop over OLE; live per-window scale (§Layout),
-  monitors, appearance and window state; file dialogs, notifications, the
-  tray and the taskbar; single instance and URI schemes. _Exit: a window
-  dragged between a 100% and a 150% monitor re-lays out at each; every
-  ladder in the README has a Windows rung or an honest floor, each verified
-  on hardware._
+  41 of the 43 examples open; the two that do not (`wm`, `xeyes`) are X11
+  window-manager demos that do not run on Cocoa either. The keyboard decodes
+  through `ToUnicodeEx` without consuming dead keys, all five mouse buttons
+  and the wheel route, and `<popup>` places menus against the monitor's work
+  area. **Outstanding against the original exit criteria**: the fake-bridge
+  suite under `test/win32/`, which every other backend has and this one does
+  not, and the bench twin with its baselines. The bridge has a suite of its
+  own against the real thing, which is not the same test and does not
+  replace it.
+- **Phase 3 — input, scale and the desktop. Mostly done.** Built and
+  verified on hardware: the clipboard, per-monitor-v2 scale and
+  `WM_DPICHANGED`, monitors, appearance (light/dark, accent, the frame
+  through `DWMWA_USE_IMMERSIVE_DARK_MODE`), window states, file dialogs, the
+  tray, the taskbar's progress, badge and flash, global hotkeys,
+  notifications as a balloon, idle time and keeping the screen awake.
+  **Not built**: IMM32 composition, drag and drop over OLE, single instance
+  and URI schemes — and the jump list, which waits on the last of those.
+  [windows-integrations.md](windows-integrations.md) is the row-by-row
+  status. _Exit: a window dragged between a 100% and a 150% monitor
+  re-lays out at each; every ladder in the README has a Windows rung or an
+  honest floor, each verified on hardware._
 - **Phase 4 — the compositor tier.** Promotion onto composition visuals,
   with the classic-or-visual-layer question settled by its probe;
-  element-owned surfaces; `<glarea>` over ANGLE. _Exit:
+  element-owned surfaces. `<glarea>` is **done**, and not over ANGLE: a WGL
+  context on the vendor driver, with `WGL_NV_DX_interop2` lending its
+  texture to the composed surface, because a child HWND cannot composite
+  over a window presenting through DirectComposition. ANGLE stays the rung
+  below for a machine with no vendor driver, where the probe reports no core
+  context and `useSupports('shaders')` is false. _Exit:
   `examples/animation.jsx`'s loops keep running through its deliberate JS
   block, as they do on Cocoa._
 - **Phase 5 — the deep integrations.** UI Automation; TSF; Direct

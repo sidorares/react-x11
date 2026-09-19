@@ -7,8 +7,9 @@ on macOS where the bridge is installed, X11 otherwise. Every page below is
 about both unless it says otherwise; where a backend changes the answer, it
 is called out where the answer is. A native Wayland backend exists and is
 opt-in ([wayland-backend.md](wayland-backend.md), with its research RFC in
-[wayland.md](wayland.md)); Windows ([windows.md](windows.md)) is still a
-design document, and everything else describes the backends that ship.
+[wayland.md](wayland.md)); Windows ships too
+([windows-integrations.md](windows-integrations.md) for what it reaches,
+[windows.md](windows.md) for why it is built the way it is).
 
 - [macos.md](macos.md) — the Cocoa backend: what a retained layer tree
   changes about a renderer built for a drawing protocol, the two presenters
@@ -165,8 +166,14 @@ design document, and everything else describes the backends that ship.
   client-side decorations, the XKB keymap reader, the in-process test
   compositor; what was measured (the protocol layer is not the cost, and
   no native protocol bridge was built), and what is still open.
-- [windows.md](windows.md) — the research PRD for a native Windows
-  backend, the next step toward full cross-platform support. Where Windows
+- [windows-integrations.md](windows-integrations.md) — what an app on
+  Windows can actually reach, measured rather than inferred: the table of
+  what works, the gaps that cost an app something today (drag and drop, IME,
+  UI Automation) with the route for each, the integrations that are blocked
+  on package identity rather than missing, and the things Windows has that
+  no other desktop does.
+- [windows.md](windows.md) — the design record behind it, written as a PRD
+  before any of it existed. Where Windows
   sits between the Wayland and macOS inversions (the client rasterizes, into
   retained composition surfaces that keep the damage model intact), a UI
   thread of the addon's own so that Windows' modal loops never freeze JS,
