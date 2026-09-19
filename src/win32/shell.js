@@ -69,11 +69,21 @@ export class Win32StatusItem {
   }
 
   /** The item the action belongs to, found by the id `setMenu` handed over. */
+  /**
+   * A menu item was chosen. `action` is the string this item was registered
+   * under — the bridge holds no item model, so the menu the app wrote is
+   * found again here by that string.
+   *
+   * `onSelect`, given the item, is the contract every backend keeps
+   * (src/cocoa/statusitem.js, src/cocoa/dock.js). This used to call
+   * `onClick()` with no argument, which is a different callback — the one
+   * for a click on the *icon* — so every menu command did nothing at all.
+   */
   _activate(action) {
     const item = this._menu.find(
       (entry, at) => String(entry.id ?? entry.action ?? at) === action,
     );
-    item?.onClick?.();
+    item?.onSelect?.(item);
     this._emit('action', item ?? action);
   }
 
