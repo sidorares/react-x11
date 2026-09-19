@@ -782,15 +782,23 @@ export async function createRoot(options = {}) {
   // synchronous block, and only where the handshake takes longer than it. It
   // is not measurable on a Unix socket, and it is lost in the noise on a link
   // slow enough to matter. This is the right order, not a fast one.
-  const connectX11 = () =>
-    connect(
-      Object.fromEntries(
-        CONNECT_OPTIONS.filter((k) => rest[k] !== undefined).map((k) => [
-          k,
-          rest[k],
-        ]),
-      ),
+  // `REACT_X11_FONT_SOURCE` is the companion to `REACT_X11_BACKEND` above:
+  // an A/B run without touching code. ntk finds its fonts through fontconfig,
+  // and a machine with no `fc-match` — a slim container, or Windows, where
+  // the X11 backend is only ever run to compare it against the native one —
+  // has to be told where the fonts are instead. An explicit `fontSource`
+  // wins; this only fills the gap.
+  const connectX11 = () => {
+    const options = Object.fromEntries(
+      CONNECT_OPTIONS.filter((k) => rest[k] !== undefined).map((k) => [
+        k,
+        rest[k],
+      ]),
     );
+    options.fontSource ??= process.env.REACT_X11_FONT_SOURCE || undefined;
+    if (options.fontSource === undefined) delete options.fontSource;
+    return connect(options);
+  };
   const cocoaAsked =
     rest.backend === 'cocoa' || process.env.REACT_X11_BACKEND === 'cocoa';
   const win32Asked =
