@@ -283,14 +283,88 @@ export function createFakeBridge() {
     bridge.uiaProperties.push([windowId, nodeId, which]);
   };
 
+  // --- panes -------------------------------------------------------------
+  //
+  // A `<Frame>`'s two halves. The real ones share a composition surface
+  // handle between processes; here both ends are objects in a map, which is
+  // enough for everything this side decides — which frames are bounded by
+  // what, when the handle is published, and how often it is attached.
+
+  bridge.panes = new Map();
+  bridge.views = new Map();
+  /** Set to refuse, the way paneCreate does when it cannot reach the host. */
+  bridge.paneCreateFails = false;
+  /** Every present, as the size the pane had when it happened. */
+  bridge.presented = [];
+
+  let nextPane = 1;
+  let nextView = 1;
+
+  bridge.paneCreate = (width, height, hostPid) => {
+    record('paneCreate', width, height, hostPid);
+    if (bridge.paneCreateFails) return null;
+    const id = nextPane++;
+    bridge.panes.set(id, { id, width, height, hostPid, handle: 0xf00 + id });
+    return { id, handle: 0xf00 + id };
+  };
+  bridge.paneResize = (id, width, height) => {
+    record('paneResize', id, width, height);
+    const pane = bridge.panes.get(id);
+    if (!pane) return false;
+    pane.width = width;
+    pane.height = height;
+    return true;
+  };
+  bridge.paneBeginDraw = (id) => {
+    const pane = bridge.panes.get(id);
+    if (!pane) return 0;
+    const handle = nextSurface++;
+    bridge.open.set(handle, { pane: id });
+    record('paneBeginDraw', id, handle);
+    return handle;
+  };
+  bridge.paneEndDraw = (id) => {
+    record('paneEndDraw', id);
+    const pane = bridge.panes.get(id);
+    if (pane) bridge.presented.push({ width: pane.width, height: pane.height });
+    return true;
+  };
+  bridge.paneDestroy = (id) => {
+    record('paneDestroy', id);
+    bridge.panes.delete(id);
+  };
+  bridge.paneAttach = (windowId, handle) => {
+    record('paneAttach', windowId, handle);
+    const id = nextView++;
+    bridge.views.set(id, { id, windowId, handle, rect: null });
+    return id;
+  };
+  bridge.paneSetRect = (viewId, x, y, width, height) => {
+    record('paneSetRect', viewId, x, y, width, height);
+    const view = bridge.views.get(viewId);
+    if (view) view.rect = { x, y, width, height };
+  };
+  bridge.paneDetach = (viewId) => {
+    record('paneDetach', viewId);
+    bridge.views.delete(viewId);
+  };
+
   return bridge;
 }
 
-/** The smallest app object Win32Window needs. */
-export function createFakeApp(bridge) {
+/** The smallest app object Win32Window needs. `sent` collects what a pane
+ *  would have put on the frame channel, which is the only thing a pane says
+ *  to its host. */
+export function createFakeApp(bridge, options = {}) {
+  const sent = [];
   return {
     _native: bridge,
     _windows: new Map(),
+    options,
+    scale: options.scale ?? 1,
+    fonts: null,
+    sent,
+    _paneSend: (msg) => sent.push(msg),
     _register(wnd) {
       this._windows.set(wnd.id, wnd);
     },

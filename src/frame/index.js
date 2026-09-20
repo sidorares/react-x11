@@ -44,6 +44,7 @@ import React, {
 } from 'react';
 
 import { useAppOrNull } from '../appcontext.js';
+import { canEmbed } from '../embedding.js';
 import { FrameEnv } from './env.js';
 import { CallbackTable, PROTOCOL } from './protocol.js';
 
@@ -221,11 +222,14 @@ export function Frame({
   ref,
 }) {
   const env = useContext(FrameEnv);
-  // A backend that composites panes from shared memory (Cocoa) declares
-  // itself with createPaneHost; everything else embeds the pane's real
-  // window through <foreign>, exactly as before.
+  // A backend that composites panes from a shared buffer (Cocoa, Windows)
+  // declares itself with createPaneHost; everything else embeds the pane's
+  // real window through <foreign>, exactly as before.
   const appOrNull = useAppOrNull();
   const paneApp = appOrNull?.createPaneHost ? appOrNull : null;
+  // Two mechanisms, one question: is there any way to *show* a pane here?
+  // Asked before the fork rather than after it — see the session effect.
+  const canShowPane = Boolean(paneApp) || canEmbed(appOrNull);
   const [state, setState] = useState({
     phase: 'starting',
     windowId: null,
@@ -261,6 +265,28 @@ export function Frame({
       if (!alive) return;
       setState({ phase: 'failed', windowId: null, error });
     };
+
+    // Before the fork, not after it. A backend with neither mechanism used
+    // to start the pane, let it load its module and mount, and only then
+    // discover at the embed that there was nowhere to put it — a whole
+    // process spawned and killed to reach a conclusion the app object had
+    // all along. The fallback it renders is the same one either way; what
+    // changes is that it renders at once and costs nothing.
+    if (!canShowPane) {
+      fail(
+        Object.assign(
+          new Error(
+            'react-x11: <Frame> needs a backend that can show a pane — one ' +
+              'that composites panes from a shared buffer, or one with ' +
+              'cross-process window embedding — and this one has neither, ' +
+              'so no pane was started. Ask ' +
+              "useSupports('embedding') before rendering one.",
+          ),
+          { phase: 'embed' },
+        ),
+      );
+      return undefined;
+    }
 
     let t;
     try {
@@ -396,7 +422,7 @@ export function Frame({
       // ask, and everything is unref'd so nothing holds the host open
       if (session.current === s) session.current = null;
     };
-  }, [source, display, generation, makeTransport]);
+  }, [source, display, generation, makeTransport, canShowPane]);
 
   // One update per commit that changed the pane's inputs, props and env in
   // the same message — so a theme flip and the state change that caused it

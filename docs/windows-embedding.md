@@ -36,9 +36,10 @@ which is correct and deliberate — see the section on it below. `<Frame>` no
 longer goes near that path: a backend that composites panes from a shared
 buffer answers `createPaneHost`, and `<Frame>` dispatches on that instead.
 
-The one wart left: the pane process is **forked before the embed is
-attempted**, so a backend that can do neither still pays for starting and
-killing one. Asking first is a small, separate fix — step 3.
+The pane is no longer forked before anyone asks whether it can be shown —
+that was step 3, and it is done too. What is left is the two directions this
+page has not built: `<foreign>`, which stays refused on purpose, and
+`<window embeddable>`, which is the guest half.
 
 ## The two directions are different problems
 
@@ -201,10 +202,11 @@ same question X11 answers with a window id.
    of this page as its result. `src/win32/panewindow.js` is the pane's half,
    `src/win32/panehost.js` the host's, and `windows/src/pane.cc` the eight
    exports under them.
-3. **Do not fork a pane that cannot be shown.** `<Frame>` asks about embedding
-   only after starting the process; asking first costs one branch and saves a
-   spawn on any backend that answers no. Independent of the rest, and still
-   worth doing — there are backends that answer no.
+3. ~~**Do not fork a pane that cannot be shown.**~~ — **done.** `<Frame>` now
+   asks before the fork: `createPaneHost` or `canEmbed`, either of which is a
+   way to show a pane, and neither of which needs a process to find out.
+   Backend-agnostic, and `test/frame-capability.test.js` holds all three
+   answers.
 4. **Publish an embeddable window's HWND**, and a host-side way to place one —
    the guest direction, which needs no new element.
 5. OLE, if a document embedding is actually wanted, on top of (4).
