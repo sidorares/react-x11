@@ -32,12 +32,27 @@ import {
 } from './shell.js';
 import { Win32Window } from './window.js';
 
-// Until the compositor clock is bound (docs/windows.md §"The frame clock":
-// DCompositionWaitForCompositorClock on Windows 11, IDXGIOutput::WaitForVBlank
-// before it), frames are paced by a timer at a sixty-hertz period. It is the
-// one piece of this backend that is a placeholder rather than a decision, and
-// it is marked so that the real clock replaces it rather than joining it.
+// The fallback frame period, for a Windows with no compositor clock to wait
+// on (before 10/1803) — and only that, because as a *clock* a JS timer is a
+// bad one here. Node rounds a timer up to the next system tick, the default
+// tick is 15.6ms, and a 16.67ms request therefore lands on the second one:
+// measured, 155 of 200 intervals at 31ms and 24 at 16ms, which is 34.8
+// frames a second alternating between one tick and two. Everything paced
+// judders at that however cheap its frames are.
+//
+// So the clock is `frameClockRequest` (windows/src/frameclock.cc), which
+// blocks a thread of its own on DCompositionWaitForCompositorClock and tells
+// JS when the compositor is ready for a frame. This number is what is left
+// when that is unavailable.
 const FRAME_INTERVAL_MS = 1000 / 60;
+
+// How long a promised compositor tick may take before the timer takes over
+// for the rest of the session. A tick that is asked for and never arrives
+// would stop every frame in the application for good — an app frozen with a
+// clean event loop, which is the worst kind to be told about — so the clock
+// is watched. One timer per frame costs nothing: what was wrong with a timer
+// here was never its cost, only its granularity.
+const CLOCK_WATCHDOG_MS = 250;
 
 /**
  * A pointer event's position on the screen, which X carries as `rootx`/
@@ -66,6 +81,12 @@ export class Win32App {
     this._activeDrag = null;
     this._rafQueue = [];
     this._frameTimer = null;
+    /** A frame has been asked for and not yet delivered — one outstanding
+     *  request at a time, whether the clock or the timer is answering it. */
+    this._framePending = false;
+    /** The compositor promised a tick and did not deliver one. Latched: the
+     *  timer answers every frame from then on. */
+    this._clockLost = false;
     this._closed = false;
     this._atoms = new Map();
     this._appearanceListeners = new Set();
@@ -370,6 +391,7 @@ export class Win32App {
     this._closed = true;
     if (this._frameTimer) clearTimeout(this._frameTimer);
     this._frameTimer = null;
+    this._framePending = false;
     this.inputMethod.destroy();
     this._native.stop();
     return Promise.resolve();
@@ -393,13 +415,27 @@ export class Win32App {
 
   _requestFrame(cb, wnd = null) {
     this._rafQueue.push({ cb, wnd });
-    if (!this._frameTimer && !this._closed) {
+    if (this._framePending || this._closed) return this._rafQueue.length;
+    this._framePending = true;
+    // One tick, from the compositor if this Windows has a clock to wait on.
+    // It answers false when it has not, and then — and only then — a timer.
+    if (!this._clockLost && this._native.frameClockRequest?.()) {
       this._frameTimer = setTimeout(() => {
         this._frameTimer = null;
+        if (!this._framePending || this._closed) return;
+        this._clockLost = true;
+        this._framePending = false;
         this._tickFrames();
-      }, FRAME_INTERVAL_MS);
+      }, CLOCK_WATCHDOG_MS);
       this._frameTimer.unref?.();
+      return this._rafQueue.length;
     }
+    this._frameTimer = setTimeout(() => {
+      this._frameTimer = null;
+      this._framePending = false;
+      this._tickFrames();
+    }, FRAME_INTERVAL_MS);
+    this._frameTimer.unref?.();
     return this._rafQueue.length;
   }
 
@@ -440,6 +476,15 @@ export class Win32App {
     // hotkey each carry an id of their own, and looking one up in the window
     // map would drop it.
     switch (event.type) {
+      // The compositor is ready for a frame. Carries no id and belongs to no
+      // window: it is the clock, and every window that asked for a frame in
+      // the meantime is paced by this one tick.
+      case 'frame-clock':
+        if (this._frameTimer) clearTimeout(this._frameTimer);
+        this._frameTimer = null;
+        this._framePending = false;
+        if (!this._closed) this._tickFrames();
+        return;
       case 'tray-click':
         this._statusItems.get(event.id)?._emit('click', event);
         return;
