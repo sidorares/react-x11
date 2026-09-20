@@ -115,7 +115,7 @@ is two facts the implementation rests on — both now asserted by the bridge's
   buffers rather than keeping a bitmap, so a pane repainting only its damage
   leaves the rest of itself showing frame N-2. Five presents, the fifth
   touching one corner: the rest came back as the third. The pane window
-  therefore repaints this frame's damage *and* the last frame's
+  therefore repaints this frame's damage _and_ the last frame's
   (`STALE_FRAMES`, src/win32/panewindow.js), as one clipped pass over their
   bounding box — one pass and not one per rect, because two passes over the
   same pixel composite it twice and a translucent node painted twice is the
@@ -154,12 +154,49 @@ under it. The prop already means exactly the right thing — "created, not
 shown; somebody else will place me" — and core already honours it on every
 backend by not mapping the window.
 
-**As a child HWND.** We create the window `WS_CHILD`-capable, do not show it,
-and publish its HWND; the host calls `SetParent` and sizes it. This is the
-literal XEmbed analogue and is what OLE in-place activation renders into
-underneath. Same input-queue caveat as above, but reversed and much more
-acceptable: _we_ are the guest, the host chose to embed us, and a guest that
-hangs its host is a guest the host can kill.
+**As a child HWND — measured, and it does not work.** This was the
+recommendation on this page, and it is wrong. A composition target bound to
+one of our windows **stops presenting the moment that window becomes a
+child**, and the guest goes blank. Three ways of asking, one answer:
+
+| what was tried                                      | the guest's own pixels |
+| --------------------------------------------------- | ---------------------- |
+| top-level, composed, drawn — the baseline           | **30800 / 30800**      |
+| …then `SetParent` into another window as `WS_CHILD` | 0 / 30800              |
+| created, reparented, and composed only _afterwards_ | 0 / 30800              |
+| the same again without `WS_EX_NOREDIRECTIONBITMAP`  | 0 / 30800              |
+
+So it is not an ordering mistake and not the no-redirection style: a
+DirectComposition target wants a top-level window. Reading the _host_ back
+cannot see this either way — a child's composition tree is its own and
+`PrintWindow` on the parent never contains it — which is why the numbers
+above are the guest's own pixels, with a screen capture agreeing.
+
+What a child HWND would cost, then, is not `SetParent`: it is **a second
+presentation path** for embeddable windows, drawing through a redirection
+bitmap instead of a composition surface. That is not a flag. It is
+`beginDraw` per damage rect, `scrollRegion`, transparency and rounded popups
+— the whole surface model this backend is built on — written again, for the
+one case that cannot have the first one.
+
+**What to do instead: publish the buffer, not the window.** The pane
+mechanism already built for `<Frame>` is the answer, pointed the other way: a
+guest makes a composition surface handle, draws into it, and hands the handle
+out; the host binds it to a visual in its own tree. It exists, it is tested,
+it needs no reparenting, and it does not attach the two processes' input
+queues — so the input-queue caveat that makes `<foreign>` unattractive here
+does not apply to the guest direction at all.
+
+It asks something of the host: the host must be able to bind a composition
+surface, which WinUI 3, another react-x11 app, a DComp-based Electron host
+or a game editor can, and a plain Win32 or OLE document host cannot. That is
+the real trade, and it is a better one than a second renderer.
+
+The open question is the **API**, not the mechanism. X11's guest hands out a
+window id from `windowIdOf(ref)`; Windows' would hand out a buffer handle,
+which is the same shape and a different number — "same public API, different
+implementation", exactly as asked. What it needs is a name and a home, and
+that is a decision rather than a build.
 
 **As an OLE embedding, for actual documents.** "Embed into a Windows document"
 in the literal sense — a pane inside a Word or Outlook document — is OLE
@@ -174,12 +211,13 @@ activated" state (a document has to show _something_ when the object is not
 running — a metafile or a bitmap, which `window.snapshot()` can already
 produce). Worth its own decision, not worth folding into this one.
 
-**Recommendation: build the child-HWND form, and expose the handle.** It is
-small, it serves every host that can give us a parent — including another
-react-x11 app, a WinUI host, an Electron `BrowserWindow`, a game editor — and
-it is the layer OLE would be built on if it is ever wanted. The API is already
-`<window embeddable>`; what is new is a way to _get_ the handle, which is the
-same question X11 answers with a window id.
+**Recommendation: publish a composition surface handle, and settle on the
+name for it first.** `<window embeddable>` already means the right thing on
+every backend, and the pane halves already do the work; what is missing is
+one public way to ask a window for the handle a host can embed — the same
+question X11 answers with a window id. OLE, if it is ever wanted, is then a
+separate question about a host that cannot bind a surface, not a variation on
+this one.
 
 ## What must not change
 
@@ -207,9 +245,12 @@ same question X11 answers with a window id.
    way to show a pane, and neither of which needs a process to find out.
    Backend-agnostic, and `test/frame-capability.test.js` holds all three
    answers.
-4. **Publish an embeddable window's HWND**, and a host-side way to place one —
-   the guest direction, which needs no new element.
-5. OLE, if a document embedding is actually wanted, on top of (4).
+4. **Publish an embeddable window's buffer handle** — _not_ its HWND, which
+   the table above rules out. The guest direction, which needs no new element
+   but does need a name for the accessor.
+5. OLE, if a document embedding is actually wanted — and now a bigger
+   question than it looked, because in-place activation renders into a child
+   HWND and this backend cannot draw into one.
 
 Steps 1 and 2 are what made `<Frame src>` mean the same thing on three
 backends. Everything after them is new ground.
