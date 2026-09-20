@@ -49,7 +49,10 @@ test('<foreign> refuses on Cocoa rather than hand out an id it does not have', a
       `onReady was called with windowId ${ready.map((r) => r.windowId)}`,
     );
     assert.equal(errors.length, 1, 'one onError');
-    assert.match(errors[0].message, /<foreign> needs the X11 backend/);
+    assert.match(
+      errors[0].message,
+      /<foreign> needs a backend with cross-process window embedding/,
+    );
     assert.equal(children.length, 0, 'no container was created');
   } finally {
     await root.unmount();

@@ -15,9 +15,9 @@ Measured, not assumed. A `<Frame>` rendered on Windows starts its pane, fails
 at the embed, shuts the pane down and renders its `fallback` with this:
 
 ```
-react-x11: <foreign> needs the X11 backend — this one has no cross-process
-window embedding, so nothing can be put in it. Ask useSupports('embedding')
-before rendering one.
+react-x11: <foreign> needs a backend with cross-process window embedding,
+and this one has none — so nothing can be put in it. Ask
+useSupports('embedding') before rendering one.
 ```
 
 So **the process half of `<Frame>` already works here, the display half says
