@@ -212,6 +212,51 @@ export class Win32Window {
   setClass(instance, className) {
     const id = className ?? instance;
     this._native.windowAppId?.(this.id, id == null ? null : String(id));
+    this._setRelaunch(id == null ? null : String(id));
+  }
+
+  /**
+   * What a **pinned** tile starts, and what it is called while pinned.
+   *
+   * An id on its own is half the story. It makes the taskbar group this
+   * window under an identity of its own — and then a user who pins that
+   * button gets a shortcut to whatever the shell can work out by itself,
+   * which for `node app.js` is node.exe, under node's name and icon. The
+   * relaunch properties are the other half, and Microsoft's guidance is that
+   * an application setting the id sets these too.
+   *
+   * Derived rather than asked for, because every part of it is already known
+   * and a second Windows-only prop to make the first one work is a bad trade:
+   *
+   * - **the command** is the one that started this process, quoted — argv as
+   *   it was, so the relaunch is the launch;
+   * - **the name** is the window's title, falling back to the id. It is what
+   *   the pin menu and the button's tooltip show;
+   * - **the icon** is the executable's own, which is what the shell would
+   *   have used anyway — named explicitly so the pinned tile keeps it rather
+   *   than resolving it again from a shortcut that may not exist.
+   *
+   * Clearing the id clears all three: a window with no identity of its own
+   * should not keep claiming how to relaunch one.
+   */
+  _setRelaunch(id) {
+    if (typeof this._native.windowRelaunch !== 'function') return;
+    if (id == null) {
+      this._native.windowRelaunch(this.id, {
+        command: null,
+        displayName: null,
+        icon: null,
+      });
+      return;
+    }
+    const quote = (arg) =>
+      /[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg;
+    const argv = process.argv.slice(1).map(quote).join(' ');
+    this._native.windowRelaunch(this.id, {
+      command: `${quote(process.execPath)}${argv ? ` ${argv}` : ''}`,
+      displayName: this.title || id,
+      icon: `${process.execPath},0`,
+    });
   }
 
   // Still X11's names, still accepted and dropped: each is optional
