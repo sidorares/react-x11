@@ -307,6 +307,26 @@ export class Win32PaneWindow {
     return false; // no window of our own; the host's is where these show
   }
 
+  /**
+   * What another process embeds to show this window — `windowHandleOf`'s
+   * answer here (src/windowid.js).
+   *
+   * On X11 that is the window's own id, because an XID means the same thing
+   * in every process on the display. Windows has no such number: a window
+   * cannot be embedded at all, because a composition target stops presenting
+   * the moment its window becomes a child (docs/windows-embedding.md, with
+   * the measurements). What crosses instead is the **buffer** — the same
+   * composition surface handle a `<Frame>` pane publishes — and the host
+   * binds it to a visual of its own rather than reparenting anything.
+   *
+   * The handle is already valid in the host process: it was duplicated there
+   * when the pane was made. Which host that is, is `paneHostPid` — the
+   * parent by default, because a host starts its guest.
+   */
+  embedHandle() {
+    return this.destroyed ? null : this._handle;
+  }
+
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;

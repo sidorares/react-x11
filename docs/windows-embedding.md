@@ -36,10 +36,11 @@ which is correct and deliberate — see the section on it below. `<Frame>` no
 longer goes near that path: a backend that composites panes from a shared
 buffer answers `createPaneHost`, and `<Frame>` dispatches on that instead.
 
-The pane is no longer forked before anyone asks whether it can be shown —
-that was step 3, and it is done too. What is left is the two directions this
-page has not built: `<foreign>`, which stays refused on purpose, and
-`<window embeddable>`, which is the guest half.
+Steps 3 and 4 are done too: no pane is forked before anyone asks whether it
+can be shown, and an embeddable window hands out a handle a host can embed.
+What is left is `<foreign>` — the one direction this page recommends _not_
+building — and OLE, which the finding below makes a larger question than it
+looked.
 
 ## The two directions are different problems
 
@@ -211,13 +212,26 @@ activated" state (a document has to show _something_ when the object is not
 running — a metafile or a bitmap, which `window.snapshot()` can already
 produce). Worth its own decision, not worth folding into this one.
 
-**Recommendation: publish a composition surface handle, and settle on the
-name for it first.** `<window embeddable>` already means the right thing on
-every backend, and the pane halves already do the work; what is missing is
-one public way to ask a window for the handle a host can embed — the same
-question X11 answers with a window id. OLE, if it is ever wanted, is then a
-separate question about a host that cannot bind a surface, not a variation on
-this one.
+**Built: `windowHandleOf(ref)` / `useWindowHandle(ref)`.** `<window
+embeddable>` already meant the right thing on every backend; this is the
+number that goes with it, and it is deliberately not `windowIdOf` — on X11
+the two are the same, and that is exactly why nobody noticed they were two
+questions.
+
+| backend       | what it hands out                               |
+| ------------- | ----------------------------------------------- |
+| X11           | the XID — the same number in any process        |
+| Windows       | a composition surface handle, valid in the host |
+| anything else | `null`, which is the capability                 |
+
+An embeddable window on Windows is therefore not an HWND at all: it is the
+same shared buffer a `<Frame>` pane draws into, and `createRoot({ win32: {
+paneHostPid } })` names the host when it is not the parent process. An app
+writes the same thing everywhere and passes the number out of band, as an XID
+is passed; what the host does with it is the host's business.
+
+OLE, if it is ever wanted, is a separate question about a host that cannot
+bind a surface, not a variation on this one.
 
 ## What must not change
 
@@ -245,9 +259,10 @@ this one.
    way to show a pane, and neither of which needs a process to find out.
    Backend-agnostic, and `test/frame-capability.test.js` holds all three
    answers.
-4. **Publish an embeddable window's buffer handle** — _not_ its HWND, which
-   the table above rules out. The guest direction, which needs no new element
-   but does need a name for the accessor.
+4. ~~**Publish an embeddable window's buffer handle**~~ — **done.**
+   `windowHandleOf(ref)` / `useWindowHandle(ref)`, answering an XID on X11
+   and a surface handle here, with `test/window-handle.test.js` holding the
+   difference. Not its HWND, which the table above rules out.
 5. OLE, if a document embedding is actually wanted — and now a bigger
    question than it looked, because in-place activation renders into a child
    HWND and this backend cannot draw into one.

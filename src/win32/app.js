@@ -335,11 +335,17 @@ export class Win32App {
     return new Win32Surface(this, options);
   }
   createWindow(attributes = {}) {
-    // `embeddable` in a pane process is the pane's own window — the one
-    // thing this process draws, and not a window at all here but a shared
-    // buffer. Before the `parent` branch: a pane's window has no parent, and
+    // `embeddable` is "created, not shown; somebody else will place me", and
+    // on this backend that cannot be a window: a composition target stops
+    // presenting the moment its window becomes a child, so an HWND is not
+    // something another process can take (docs/windows-embedding.md). What a
+    // host can take is the **buffer**, so an embeddable window here is the
+    // same shared surface a `<Frame>` pane draws into — whether this process
+    // was forked as a pane or is a guest somebody else started.
+    //
+    // Before the `parent` branch: an embeddable window has no parent, and
     // this is the only place the two could be confused.
-    if (this._paneMode && attributes.embeddable) {
+    if (attributes.embeddable) {
       return new Win32PaneWindow(this, attributes);
     }
     // A window with a parent is a `<glarea>`'s surface, which is a different

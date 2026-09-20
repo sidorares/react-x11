@@ -4,7 +4,13 @@ import './bootstrap.js';
 
 export { createRoot, Renderer } from './Reconciler.js';
 export { createStyles, flattenStyle } from './styles.js';
-export { windowIdOf, useWindowId, useTopLevelWindow } from './windowid.js';
+export {
+  windowIdOf,
+  useWindowId,
+  windowHandleOf,
+  useWindowHandle,
+  useTopLevelWindow,
+} from './windowid.js';
 export { launchTimestamp, notifyStartupComplete } from './startup.js';
 export { activateWindow } from './activate.js';
 export { lastInputTime, serverTime } from './inputtime.js';
