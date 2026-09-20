@@ -1,6 +1,11 @@
 // xeyes, the react-x11 way: flex layout (zero manual layout math), the
 // <canvas> escape hatch for custom drawing, and hooks for state + polling.
-// Run with: npm run examples:xeyes  (needs an X server / DISPLAY)
+// Run with: npm run examples:xeyes
+//
+// Runs on every backend. Following the pointer *outside* the window needs
+// X11's root-window query and is asked for by capability, not assumed — see
+// `canQueryRoot` below, which is the shape any example that wants one
+// backend's extra should have.
 import React, { useEffect, useState } from 'react';
 import { createRoot } from '../src/index.js';
 
@@ -56,16 +61,36 @@ function Eye({ lookingAt }) {
 function App({ app }) {
   const [lookingAt, setLookingAt] = useState({ x: 0, y: 0 });
 
-  // While the pointer is outside the window we get no motion events; poll.
+  // While the pointer is outside the window there are no motion events, so
+  // the eyes would freeze at the edge. Polling the *root* window is how the
+  // original xeyes follows a pointer that has left: it asks the server where
+  // the pointer is, whoever it is over.
+  //
+  // That is an X11 question and nothing else has it — there is no
+  // cross-application pointer position on Wayland by design, and none is
+  // bound on the Windows backend. So it is asked for by capability rather
+  // than assumed: where `rootWindow()` exists the eyes follow the pointer
+  // across the whole screen, and everywhere else they follow it inside this
+  // window, through `onMouseMove` below, which every backend sends.
+  const canQueryRoot = typeof app?.rootWindow === 'function';
   useEffect(() => {
-    if (!app) return undefined;
+    if (!canQueryRoot) return undefined;
     const id = setInterval(() => {
       app.rootWindow().queryPointer((err, pointer) => {
         if (!err) setLookingAt({ x: pointer.childX, y: pointer.childY });
       });
     }, 100);
     return () => clearInterval(id);
-  }, [app]);
+  }, [app, canQueryRoot]);
+
+  useEffect(() => {
+    if (canQueryRoot) return;
+    console.log(
+      'xeyes: this backend has no root-window pointer query (X11 only), so the\n' +
+        '       eyes follow the pointer while it is over this window and rest when\n' +
+        '       it leaves. Run it under X11 to see them track across the screen.',
+    );
+  }, [canQueryRoot]);
 
   return (
     <window

@@ -326,6 +326,18 @@ export class WindowManager {
    * null to drive the no-previews path.
    */
   constructor(app, { openThumbnails = Thumbnails.open } = {}) {
+    // Said here as well as in wm.jsx, because this half is importable on its
+    // own: without it the first line below is a bare
+    // `TypeError: app.rootWindow is not a function`, which names neither the
+    // requirement nor the fix.
+    if (typeof app?.rootWindow !== 'function') {
+      throw new Error(
+        'examples/wm-core: a window manager needs the X11 backend — it claims ' +
+          'the X root window, which this backend does not have. Run the ' +
+          'example under a nested X server (Xephyr :10 -screen 1200x800, then ' +
+          'DISPLAY=:10).',
+      );
+    }
     this.app = app;
     this.X = app.X;
     this.root = app.rootWindow();

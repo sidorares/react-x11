@@ -31,7 +31,7 @@ const s = createStyles({
   heading: { fontSize: 20, fontWeight: 'bold' },
   para: { fontSize: 14, lineHeight: 1.4 },
   row: { flexDirection: 'row', gap: 10 },
-  marker: { width: 22, color: '$dim' },
+  marker: { width: 22, color: '$textMuted' },
   name: { width: 150 },
   field: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   readout: {
@@ -41,7 +41,7 @@ const s = createStyles({
     borderTopWidth: 1,
     borderColor: '$track',
   },
-  small: { fontSize: 11, color: '$dim' },
+  small: { fontSize: 11, color: '$textMuted' },
 });
 
 const files = [
