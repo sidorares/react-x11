@@ -83,7 +83,7 @@ jobs:
         continue-on-error: true
         working-directory: ${{ runner.temp }}/probe
         run: node wayland-ci-probe.mjs compositor sway-pixman
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: wayland-probe-hosted
@@ -146,7 +146,7 @@ jobs:
               as_probe node wayland-ci-probe.mjs gpu
               as_probe node wayland-ci-probe.mjs compositor kwin
             '
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: wayland-probe-kwin
