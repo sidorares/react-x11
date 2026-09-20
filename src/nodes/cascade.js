@@ -422,6 +422,15 @@ export class NodeCascade {
   get placed() {
     const owner = this.isWindow ? this : this.root;
     if (!owner) return false;
+    // A window written under a root `<ThemeProvider>` is handed that palette
+    // when the scope inserts it, which is after it and its subtree were built
+    // and first resolved (nodes/scope.js `insertBefore`). Until then its
+    // ancestry is as incomplete as a popup's without its parent, and every
+    // token the provider defines would be reported as unknown — a warning for
+    // a style that then resolves correctly, and under
+    // `REACT_X11_STRICT_TOKENS=1` a throw that killed an app whose palette was
+    // fine.
+    if (owner._awaitsRootScope && owner._scope == null) return false;
     return owner.isPopup ? owner.parent != null : true;
   }
 

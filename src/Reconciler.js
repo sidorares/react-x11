@@ -116,6 +116,9 @@ const ROOT_CONTEXT = Object.freeze({
   isInsideText: false,
   isInsideSvg: false,
   atRoot: true,
+  // Nothing is above the root, so a window written straight into it waits for
+  // no palette — unlike one under a `<ThemeProvider>` there.
+  underRootScope: false,
   inWindow: false,
 });
 
@@ -191,6 +194,11 @@ const HostConfig = {
       // Still at the root under a `<ThemeProvider>` written there, which
       // draws nothing; under anything else, inside a window.
       atRoot: parentHostContext.atRoot && type === THEME_SCOPE,
+      // *Below* one of those providers, which is a different fact: a window
+      // here is handed its palette when the scope inserts it, after it was
+      // built. `atRoot` is true at the root itself, where no provider is
+      // waiting to hand anything over, so the two cannot be one flag.
+      underRootScope: parentHostContext.atRoot && type === THEME_SCOPE,
       // Directly inside a window, where a provider can hand a nested window
       // on to it.
       inWindow: type === 'window' || type === 'popup',
@@ -255,10 +263,19 @@ const HostConfig = {
       case 'window':
         // No X11 calls here: the render phase may be discarded. The real
         // window is created top-down in the commit phase (realize).
+        // `underRootScope` goes in at construction, not after it: this
+        // constructor resolves the window's own style, and a window under a
+        // root `<ThemeProvider>` is handed that palette only when the scope
+        // inserts it (nodes/scope.js). Until then its ancestry is incomplete
+        // and every `$token` the provider defines would be reported as
+        // unknown — a warning for a style that resolves correctly a moment
+        // later, and under `REACT_X11_STRICT_TOKENS=1` a throw that killed an
+        // app whose palette was fine.
         node = new WindowNode(
           rootContainer,
           windowAttributes(props, scaleOf(rootContainer)),
           props,
+          { awaitsRootScope: hostContext.underRootScope },
         );
         break;
       case 'popup':
