@@ -15,7 +15,10 @@ import { PNG } from 'pngjs';
 import * as ntk from 'ntk';
 
 import { CocoaApp } from '../src/cocoa/app.js';
-import { BackendContext2D, releaseImageUpload } from '../src/backend/context2d.js';
+import {
+  BackendContext2D,
+  releaseImageUpload,
+} from '../src/backend/context2d.js';
 import { loadNative } from '../src/cocoa/native.js';
 import { CocoaSurface } from '../src/cocoa/surface.js';
 import { setCompositingForTests } from '../src/compositing.js';

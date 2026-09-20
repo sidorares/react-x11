@@ -72,7 +72,8 @@ function fixedKeysym(vk) {
   const known = VK_KEYSYMS.get(vk);
   if (known) return known;
   if (vk >= VK_F1 && vk <= VK_F1 + 23) return XK_F1 + (vk - VK_F1);
-  if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD0 + 9) return XK_KP_0 + (vk - VK_NUMPAD0);
+  if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD0 + 9)
+    return XK_KP_0 + (vk - VK_NUMPAD0);
   return 0;
 }
 

@@ -67,10 +67,12 @@ export class Win32GlWindow {
       // error used to describe.
       const REASONS = {
         1: 'the surface window could not be created',
-        2: 'no pixel format on this device supports OpenGL — a remote ' +
+        2:
+          'no pixel format on this device supports OpenGL — a remote ' +
           'session or a display driver without an OpenGL ICD',
         3: 'a pixel format was set but no OpenGL context could be made on it',
-        4: 'this machine has no vendor OpenGL driver, so only the 1.1 ' +
+        4:
+          'this machine has no vendor OpenGL driver, so only the 1.1 ' +
           'software rasterizer is available, which has no shaders',
       };
       this.emit(
@@ -114,7 +116,6 @@ export class Win32GlWindow {
     this._gl = GL_DEBUG ? instrument(gl) : gl;
     return this._gl;
   }
-
 
   /**
    * The frame clock, which is the parent window's — the same delegation the
@@ -275,7 +276,8 @@ function instrument(gl) {
         );
       }
       if (name === 'readPixels' && trace > 0 && ArrayBuffer.isView(args[6])) {
-        process.stderr.write(`[gl]     read back: [${[...args[6].slice(0, 16)].join(', ')}]
+        process.stderr
+          .write(`[gl]     read back: [${[...args[6].slice(0, 16)].join(', ')}]
 `);
       }
       if (peek > 0 && peeked < peek && name.startsWith('draw')) {
