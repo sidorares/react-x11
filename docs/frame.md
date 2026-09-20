@@ -26,6 +26,13 @@ you are on when reading a trace:
   `IOSurface`s created shared and presents by message; the host points one
   sublayer of its window at whichever surface the pane last presented. The
   pane has no `NSWindow` at all.
+- **Windows** — **not built yet.** The process half runs: the pane forks,
+  loads and tears down cleanly. The display half refuses, with the message
+  `<foreign>` gives for a backend that cannot embed, so a `<Frame>` here
+  renders its `fallback` rather than an empty box.
+  [windows-embedding.md](windows-embedding.md) works out which primitive it
+  should use — a DirectComposition surface handle, which is the same shape as
+  the Cocoa path — and what the rest of that costs.
 
 Either way the host owns layout and hit testing and the pane owns its
 drawing, which is the line that makes this **CPU offloading, not
