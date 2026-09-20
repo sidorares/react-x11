@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.17.0](https://github.com/sidorares/react-x11/compare/v2.16.1...v2.17.0) (2026-09-20)
+
+
+### Features
+
+* a Windows backend, and `<Frame src>` over a shared composition surface ([#627](https://github.com/sidorares/react-x11/issues/627)) ([752c807](https://github.com/sidorares/react-x11/commit/752c807179836e8bce96fb83adb5ec65c4e18e45))
+
 ## [2.16.1](https://github.com/sidorares/react-x11/compare/v2.16.0...v2.16.1) (2026-09-18)
 
 
