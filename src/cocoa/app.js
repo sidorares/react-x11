@@ -204,7 +204,7 @@ export class CocoaApp {
       native.setAppName(String(appName));
     }
 
-    // The Dock menu (src/cocoa/dock.js), installed by `useDockMenu`.
+    // The Dock menu (src/cocoa/dock.js), installed by `useLauncherMenu`.
     this._dockMenu = new CocoaDockMenu(this);
     // The tray items (src/cocoa/statusitem.js), by the bridge's handle —
     // which is what a click event names them by.
@@ -703,8 +703,12 @@ export class CocoaApp {
     this._native.setDockBadge(label == null ? null : String(label));
   }
 
-  /** The menu behind a right-click on the Dock icon — `useDockMenu()`. */
-  setDockMenu(items) {
+  /**
+   * The menu behind a right-click on the launcher icon — `useLauncherMenu()`.
+   * Here the launcher is the Dock, which is why the AppKit call below keeps
+   * its own name: `_native.setDockMenu` *is* what Apple calls it.
+   */
+  setLauncherMenu(items) {
     this._dockMenu.update(items);
   }
 

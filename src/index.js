@@ -14,8 +14,19 @@ export {
   registerApplication,
 } from './application.js';
 export { useAppActivate, useAppOpen } from './apphooks.js';
-export { setBadge, setProgress, setQuicklist, setUrgent } from './launcher.js';
-export { useBadge, useDockMenu, useProgress } from './launcherhooks.js';
+export {
+  setBadge,
+  setLauncherMenu,
+  setProgress,
+  setQuicklist,
+  setUrgent,
+} from './launcher.js';
+export {
+  useBadge,
+  useDockMenu,
+  useLauncherMenu,
+  useProgress,
+} from './launcherhooks.js';
 export { useTray } from './trayhooks.js';
 // The Windows taskbar's own surfaces. Exported unconditionally and inert
 // where the backend has none — `useDesktopCapability('launcher').features`

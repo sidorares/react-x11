@@ -784,7 +784,7 @@ function App(props) {
       width={880}
       height={560}
       title="Model viewer"
-      wmClass="com.example.x11viewer3d"
+      appId="com.example.x11viewer3d"
       style={{ flexGrow: 1 }}
     >
       <ViewerPanel {...props} />

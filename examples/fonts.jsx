@@ -1280,7 +1280,7 @@ function App(props) {
       width={980}
       height={640}
       title="Fonts"
-      wmClass="com.example.x11fonts"
+      appId="com.example.x11fonts"
       style={{ flexGrow: 1 }}
     >
       <FontsPanel {...props} />

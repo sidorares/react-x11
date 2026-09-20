@@ -327,7 +327,7 @@ function launcherNow(target) {
       badgeText: true, // the tile takes any label
       progress: false, // NSDockTile has no progress bar
       urgent: true, // requestUserAttention, via window states
-      menu: typeof target.setDockMenu === 'function',
+      menu: typeof target.setLauncherMenu === 'function',
       // The Dock always shows the app; nothing has to be installed for it.
       needsDesktopFile: false,
       // The Dock has no static-task menu and no hover toolbar. macOS does

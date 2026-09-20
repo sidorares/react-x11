@@ -110,7 +110,7 @@ function App() {
       ref={win}
       width={680}
       height={420}
-      wmClass={APP_ID}
+      appId={APP_ID}
       title="react-x11 — deep links"
       style={{ backgroundColor: '$surfaceHover' }}
     >

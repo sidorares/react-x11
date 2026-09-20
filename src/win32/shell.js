@@ -312,7 +312,7 @@ export function installIdle(app) {
  * prediction and the hook from ever disagreeing.
  *
  * None of them is a rung on an existing ladder, deliberately. A jump list is
- * not a Dock menu — `useDockMenu`'s items carry a callback and a jump-list
+ * not a launcher menu — `useLauncherMenu`'s items carry a callback and a jump-list
  * task starts a *new process* with arguments, so mapping one to the other
  * would quietly change what a click does. Until a second launch can hand its
  * arguments to the first (docs/windows-integrations.md) they are different

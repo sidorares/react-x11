@@ -364,7 +364,7 @@ export function App() {
       width={720}
       height={440}
       title="2D over a GL surface"
-      wmClass="com.example.x11gloverlay"
+      appId="com.example.x11gloverlay"
       style={{ flexGrow: 1, backgroundColor: '#0e1320' }}
     >
       <Stage />

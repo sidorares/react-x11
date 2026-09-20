@@ -53,6 +53,7 @@ import {
   setBadge,
   useBadge,
   useDockMenu,
+  useLauncherMenu,
   useTray,
   useDesktopCapability,
   NoPermissionServiceError,
@@ -1508,8 +1509,13 @@ function _DeepLinks() {
     await setBadge('•', { app: undefined });
     await setBadge(null);
     useBadge(badged ? 2 : 0);
-    useDockMenu([{ label: 'New', onSelect: () => {} }, { type: 'separator' }]);
-    useDockMenu(null);
+    useLauncherMenu([
+      { label: 'New', onSelect: () => {} },
+      { type: 'separator' },
+    ]);
+    useLauncherMenu(null);
+    // the deprecated alias is still typed, because an app on it still compiles
+    useDockMenu([{ label: 'New', onSelect: () => {} }]);
     const tray: { available: boolean } = useTray({
       icon: 'bell.badge',
       tooltip: 'Notifications',

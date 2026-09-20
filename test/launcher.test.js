@@ -20,6 +20,7 @@ import {
   launcherAppUri,
   launcherEntryPath,
   setBadge,
+  setLauncherMenu,
   setProgress,
   setQuicklist,
   setUrgent,
@@ -165,14 +166,14 @@ describe('the LauncherEntry rung', { ...needsBroker }, () => {
         await until(() => launcher.seen.length === 3, 'the clamped Update');
         assert.equal(Number(plain(launcher.seen[2][1]).progress), 1);
 
-        assert.equal(await setQuicklist([{ label: 'New Window' }]), true);
+        assert.equal(await setLauncherMenu([{ label: 'New Window' }]), true);
         await until(() => launcher.seen.length === 4, 'the quicklist Update');
         p = plain(launcher.seen[3][1]);
         assert.ok(String(p.quicklist).endsWith('/Menu'), 'a menu object path');
 
         await setProgress(null);
         await setUrgent(false);
-        await setQuicklist(null);
+        await setLauncherMenu(null);
         await reg.release();
         await _resetLauncher();
       } finally {
@@ -195,7 +196,7 @@ describe('the LauncherEntry rung', { ...needsBroker }, () => {
         const reg = await registerApplication({ appId: APP_ID });
         const picked = [];
         assert.equal(
-          await setQuicklist([
+          await setLauncherMenu([
             { label: 'New Window', onSelect: () => picked.push('new') },
             { type: 'separator' },
             {
@@ -248,7 +249,7 @@ describe('the LauncherEntry rung', { ...needsBroker }, () => {
         await until(() => picked.length === 1, 'the handler to run');
         assert.deepEqual(picked, ['new']);
 
-        await setQuicklist(null);
+        await setLauncherMenu(null);
         await reg.release();
         await _resetLauncher();
       } finally {
@@ -262,5 +263,14 @@ describe('the LauncherEntry rung', { ...needsBroker }, () => {
     await withBus(async () => {
       assert.equal(await setBadge(7), false);
     });
+  });
+
+  test('the old name is the new one, not a copy of it', () => {
+    // `setQuicklist` was the Unity launcher's word for the menu macOS calls
+    // the Dock menu, and this function always drove both. Renamed to the one
+    // word that is neither desktop's; the old name stays because an app that
+    // used it is not wrong, only early. Identity rather than a wrapper, so a
+    // caller cannot end up holding two functions that drift apart.
+    assert.equal(setQuicklist, setLauncherMenu);
   });
 });

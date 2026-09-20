@@ -90,11 +90,11 @@ word-by-word navigation _inside_ it is not there. That is the next piece.
 
 Ordered by what it costs an app today.
 
-### `useDockMenu` is inert
+### `useLauncherMenu` is inert
 
 The jump list is built (`useJumpList` above) but it is **not** what
-`useDockMenu` means, and is deliberately not wired to it. A Dock-menu item
-carries a callback; a jump-list task starts a _new process_ with arguments,
+`useLauncherMenu` means, and is deliberately not wired to it. A launcher-menu
+item carries a callback; a jump-list task starts a _new process_ with arguments,
 because the shell launches the program rather than calling into the running
 one. Mapping one onto the other would quietly change what a click does.
 

@@ -5,7 +5,7 @@
 //
 // It renders on the mock backend, whose window records `setWmState` and whose
 // fonts lay text out, with the two launcher methods the mock does not have
-// (`setDockBadge`, `setDockMenu`) added as spies. So this pins the app's
+// (`setDockBadge`, `setLauncherMenu`) added as spies. So this pins the app's
 // behaviour; that the calls it makes then reach the Dock is
 // `test/cocoa-dock.test.js` against the real bridge.
 import assert from 'node:assert';
@@ -40,7 +40,7 @@ function inboxApp() {
   app.badges = [];
   app.dockMenus = [];
   app.setDockBadge = (label) => app.badges.push(label);
-  app.setDockMenu = (items) => app.dockMenus.push(items);
+  app.setLauncherMenu = (items) => app.dockMenus.push(items);
   return app;
 }
 

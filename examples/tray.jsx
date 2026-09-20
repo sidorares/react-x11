@@ -102,7 +102,7 @@ export default function App({ initial = 'available', onQuit = () => {} }) {
   const [status, setStatus] = useState(initial);
 
   // The tray menu: one item per status, the current one checked, then Quit.
-  // Same `items` vocabulary as `MenuBar` and `useDockMenu` — `iconName` is an
+  // Same `items` vocabulary as `MenuBar` and `useLauncherMenu` — `iconName` is an
   // SF Symbol, `toggleState` draws the check.
   const menu = useMemo(
     () => [
@@ -137,7 +137,7 @@ export default function App({ initial = 'available', onQuit = () => {} }) {
       width={300}
       height={280}
       title={`Status — ${STATUSES[status].label}`}
-      wmClass="com.example.x11status"
+      appId="com.example.x11status"
       style={{ backgroundColor: SURFACE }}
     >
       <box style={{ flexGrow: 1, padding: 16, gap: 10 }}>

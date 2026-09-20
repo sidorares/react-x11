@@ -58,7 +58,7 @@ export interface JumpListTask {
  * click of its taskbar button. `null` deletes the category.
  *
  * Each entry **relaunches this executable** with the arguments given, which
- * is what a jump-list task is. That is why this is not `useDockMenu`, whose
+ * is what a jump-list task is. That is why this is not `useLauncherMenu`, whose
  * items carry a callback: reported as `features.tasks` rather than
  * `features.menu`, so an app cannot mistake one for the other.
  */

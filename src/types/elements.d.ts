@@ -371,7 +371,29 @@ export interface WindowProps
   y?: number;
   /** Palette that `$token` style values resolve against, for this subtree. */
   theme?: Record<string, string | number>;
-  /** ICCCM `WM_CLASS`. */
+  /**
+   * The desktop identity of this window — which application it belongs to,
+   * and so which launcher icon it groups under and which `.desktop` entry a
+   * launcher matches it to.
+   *
+   * One name for what every desktop calls something else: ICCCM `WM_CLASS` on
+   * X11, `xdg_toplevel.set_app_id` on Wayland, the AppUserModelID on Windows.
+   * Normally the same string as `registerApplication({ appId })`, which is
+   * what a launcher matches against.
+   *
+   * A string is the modern single-id form. X11's instance/class pair is still
+   * accepted and passed through on that backend; every other backend takes
+   * the class, which is the part naming the application.
+   *
+   * Honoured on X11 and, for windows opened after it is set, on Wayland —
+   * `app_id` is fixed when the surface is created. The cocoa and win32
+   * backends accept it and do nothing with it yet: macOS identity is the
+   * bundle's, and the AppUserModelID is not bound (docs/windows.md
+   * §"Packaging and identity").
+   */
+  appId?: string | [string, string] | { instance: string; class?: string };
+  /** @deprecated Renamed to {@link WindowProps.appId} — `wmClass` is X11's
+   *  word for an identity every desktop has. Still accepted. */
   wmClass?: string | [string, string] | { instance: string; class?: string };
   /** EWMH `_NET_WM_WINDOW_TYPE`, or a list of fallbacks. */
   windowType?: WindowType | WindowType[];

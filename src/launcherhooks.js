@@ -1,4 +1,4 @@
-// `useBadge()`, `useProgress()` and `useDockMenu()` — the launcher's view of
+// `useBadge()`, `useProgress()` and `useLauncherMenu()` — the launcher's view of
 // the app, as things a component declares rather than manages.
 //
 // All three now have a rung on both backends except progress, which has one
@@ -7,7 +7,7 @@
 // feature an app should branch on, and a development warning for every
 // desktop that lacks one is a warning nobody can act on.
 //
-// The one that changed shape is `useDockMenu`. It used to be cocoa-only on
+// The one that changed shape is `useLauncherMenu`. It used to be cocoa-only on
 // the grounds that the freedesktop counterpart was an install step — see
 // `launcher.js`, where that reasoning is corrected: the launcher protocol
 // carries a `quicklist` dbusmenu, so the Dock menu is runtime code on both.
@@ -15,7 +15,7 @@
 import { useEffect, useRef } from 'react';
 
 import { useAppOrNull } from './appcontext.js';
-import { setBadge, setProgress, setQuicklist } from './launcher.js';
+import { setBadge, setLauncherMenu, setProgress } from './launcher.js';
 
 /**
  * Show `value` on the app's icon while this component is mounted, and clear
@@ -63,12 +63,12 @@ export function useProgress(value) {
 }
 
 /**
- * The menu behind a right-click on the app's icon in the Dock or launcher,
- * from the same `items` vocabulary `MenuBar` and `ContextMenu` take — an
- * item's `onSelect` fires when the user picks it.
+ * The menu behind a right-click on the app's **launcher icon** — the Dock on
+ * macOS, the launcher on Linux — from the same `items` vocabulary `MenuBar`
+ * and `ContextMenu` take. An item's `onSelect` fires when the user picks it.
  *
  * ```jsx
- * useDockMenu([
+ * useLauncherMenu([
  *   { label: 'New Window', onSelect: openWindow },
  *   { type: 'separator' },
  *   { label: 'Recent', items: recent.map(toItem) },
@@ -80,8 +80,14 @@ export function useProgress(value) {
  * backend; the launcher protocol's `quicklist` on Linux, which needs the
  * identity `registerApplication({ appId })` establishes and a `.desktop` file
  * of that name for a launcher to attach it to.
+ *
+ * It reads `useDesktopCapability('launcher').features.menu`, which is where
+ * the name comes from: every desktop has one icon standing for this
+ * application and calls it something different — Dock, taskbar, panel, dash —
+ * and `launcher` is the one word that is none of their words and all of their
+ * meanings (AGENTS.md, "Vocabulary").
  */
-export function useDockMenu(items) {
+export function useLauncherMenu(items) {
   const app = useAppOrNull();
   // read at activation time, so a pick three minutes from now runs the
   // handler from the current render rather than the mounting one
@@ -89,12 +95,20 @@ export function useDockMenu(items) {
   live.current = items;
 
   useEffect(() => {
-    setQuicklist(items ?? null, { app }).catch(() => {});
+    setLauncherMenu(items ?? null, { app }).catch(() => {});
   }, [items, app]);
 
   useEffect(() => {
     return () => {
-      setQuicklist(null, { app }).catch(() => {});
+      setLauncherMenu(null, { app }).catch(() => {});
     };
   }, [app]);
 }
+
+/**
+ * @deprecated Renamed to {@link useLauncherMenu}. "Dock" is one desktop's
+ * word for the icon every desktop has; this hook drove the Linux launcher's
+ * quicklist long before the name caught up. Kept working, and kept quiet —
+ * an alias that warned would punish an app for code that is still correct.
+ */
+export const useDockMenu = useLauncherMenu;

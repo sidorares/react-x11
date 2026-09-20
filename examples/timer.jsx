@@ -728,7 +728,7 @@ function App(props) {
     <window
       width={620}
       height={430}
-      wmClass={APP_ID}
+      appId={APP_ID}
       title="Timer"
       style={s.root}
     >

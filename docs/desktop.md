@@ -164,16 +164,16 @@ it is the mark on its icon — an unread count on the Dock tile, a dot on the
 taskbar entry. Three things live here, and they are on both backends only
 where both have a mechanism:
 
-|                      | Linux (`launcherentry`)                                                                            | macOS (`cocoa`)                                      | Windows (`taskbar`)                                                                                                                                                                                  |
-| -------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| a **badge**          | `com.canonical.Unity.LauncherEntry` — KDE, elementary, Cairo-Dock listen; GNOME needs an extension | `NSDockTile.badgeLabel`                              | an overlay icon with the label drawn into it                                                                                                                                                         |
-| badge **text**       | — the protocol carries a count and nothing else                                                    | any label                                            | up to three glyphs; longer clamps to `99+`, and it is ~16px on screen                                                                                                                                |
-| **progress**         | `useProgress(0…1)` — a bar across the tile                                                         | — `NSDockTile` has none                              | `ITaskbarList3::SetProgressValue`, across the taskbar button                                                                                                                                         |
-| **attention**        | `states={['demands_attention']}`, or `setUrgent()` for the launcher entry itself                   | the same prop: the Dock icon bounces until activated | `FlashWindowEx`                                                                                                                                                                                      |
-| the **Dock menu**    | `useDockMenu(items)` — the launcher protocol's quicklist                                           | `useDockMenu(items)`                                 | — the taskbar button's menu is the jump list, whose entries start a _new_ process, so it is `features.tasks` and `useJumpList` rather than this ([windows-integrations.md](windows-integrations.md)) |
-| **tasks**            | — `Actions=` in the `.desktop` file, not driven from here                                          | —                                                    | `useJumpList(tasks)` — the jump list's Tasks category                                                                                                                                                |
-| a **hover toolbar**  | —                                                                                                  | —                                                    | `useThumbnailToolbar(buttons)` — up to seven, under the preview                                                                                                                                      |
-| **recent documents** | —                                                                                                  | — the platform has one; this backend does not use it | `useRecentDocument(path)` — the shell's Recent lists                                                                                                                                                 |
+|                       | Linux (`launcherentry`)                                                                            | macOS (`cocoa`)                                      | Windows (`taskbar`)                                                                                                                                                                                  |
+| --------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a **badge**           | `com.canonical.Unity.LauncherEntry` — KDE, elementary, Cairo-Dock listen; GNOME needs an extension | `NSDockTile.badgeLabel`                              | an overlay icon with the label drawn into it                                                                                                                                                         |
+| badge **text**        | — the protocol carries a count and nothing else                                                    | any label                                            | up to three glyphs; longer clamps to `99+`, and it is ~16px on screen                                                                                                                                |
+| **progress**          | `useProgress(0…1)` — a bar across the tile                                                         | — `NSDockTile` has none                              | `ITaskbarList3::SetProgressValue`, across the taskbar button                                                                                                                                         |
+| **attention**         | `states={['demands_attention']}`, or `setUrgent()` for the launcher entry itself                   | the same prop: the Dock icon bounces until activated | `FlashWindowEx`                                                                                                                                                                                      |
+| the **launcher menu** | `useLauncherMenu(items)` — the launcher protocol's quicklist                                       | `useLauncherMenu(items)`                             | — the taskbar button's menu is the jump list, whose entries start a _new_ process, so it is `features.tasks` and `useJumpList` rather than this ([windows-integrations.md](windows-integrations.md)) |
+| **tasks**             | — `Actions=` in the `.desktop` file, not driven from here                                          | —                                                    | `useJumpList(tasks)` — the jump list's Tasks category                                                                                                                                                |
+| a **hover toolbar**   | —                                                                                                  | —                                                    | `useThumbnailToolbar(buttons)` — up to seven, under the preview                                                                                                                                      |
+| **recent documents**  | —                                                                                                  | — the platform has one; this backend does not use it | `useRecentDocument(path)` — the shell's Recent lists                                                                                                                                                 |
 
 ### The badge
 
@@ -233,7 +233,7 @@ zoom, miniaturize and fullscreen.
 ### The Dock menu
 
 ```jsx
-useDockMenu([
+useLauncherMenu([
   { label: 'New Window', onSelect: openWindow },
   { type: 'separator' },
   {
@@ -566,7 +566,7 @@ For us that is good news and one hazard:
 - **The window needs a title worth matching.** Auto-type's default matching is
   on the window title, so `<window title="…">` is the integration surface.
   A window titled after the document with nothing identifying the app is one
-  a user cannot write an auto-type rule for; `wmClass` is worth setting too,
+  a user cannot write an auto-type rule for; `appId` is worth setting too,
   since a manager that grew a smarter matcher would read that.
 - **The keymap race is real.** ntk refetches the mapping when the server sends
   `MappingNotify`, which is what makes a remapped keycode decode correctly —

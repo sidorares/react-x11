@@ -63,7 +63,7 @@ import {
   registerApplication,
   useApp,
   useBadge,
-  useDockMenu,
+  useLauncherMenu,
   useWindowState,
 } from '../src/index.js';
 
@@ -257,12 +257,12 @@ function Inbox({ source }) {
     ],
     [markAllRead, source],
   );
-  useDockMenu(dockMenu);
+  useLauncherMenu(dockMenu);
 
   // What this machine can actually do, for the footer — read off the app the
   // tree renders through, the way `useSupports` reads a capability.
   const app = useApp();
-  const dockMenuLive = typeof app?.setDockMenu === 'function';
+  const dockMenuLive = typeof app?.setLauncherMenu === 'function';
 
   return (
     <window
@@ -271,7 +271,7 @@ function Inbox({ source }) {
       title={unread ? `Inbox (${unread})` : 'Inbox'}
       minWidth={340}
       minHeight={320}
-      wmClass={APP_ID}
+      appId={APP_ID}
       states={wantsAttention ? ['demands_attention'] : []}
       style={{ backgroundColor: SURFACE }}
     >

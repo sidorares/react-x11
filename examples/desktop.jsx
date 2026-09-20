@@ -25,7 +25,7 @@
 //                   fastest way to be ignored.
 //
 //   Right-click     the tray icon, or the app's icon in the dock. The same
-//                   `items` array feeds both: `useDockMenu` is the launcher
+//                   `items` array feeds both: `useLauncherMenu` is the launcher
 //                   protocol's **quicklist** on Linux now, not macOS alone.
 //
 //   Scroll over     the tray icon: the rate limit moves. `Scroll` is in the
@@ -83,12 +83,12 @@ import {
   registerApplication,
   setBadge,
   setProgress,
-  setQuicklist,
+  setLauncherMenu,
   setUrgent,
   useApp,
   useBadge,
   useDesktopCapability,
-  useDockMenu,
+  useLauncherMenu,
   useNotifier,
   useProgress,
   useTray,
@@ -99,7 +99,7 @@ const APP_ID = 'com.example.x11backup';
 // ---------------------------------------------------------------------------
 // The desktop entry, which is the half of the launcher that is not code.
 //
-// `setBadge`/`setQuicklist` resolve **true** with no `.desktop` file installed
+// `setBadge`/`setLauncherMenu` resolve **true** with no `.desktop` file installed
 // — and nothing appears. That is not a bug in either: the signal is addressed
 // to `application://<APP_ID>.desktop`, so it is delivered correctly and simply
 // matches no icon. The launcher has to be able to find (a) an entry of that
@@ -109,7 +109,7 @@ const APP_ID = 'com.example.x11backup';
 //   Wayland   the toplevel's xdg `app_id`, which is `createRoot({ appId })`
 //             or `<window appId>` — **not** `registerApplication({ appId })`,
 //             which is a different identity that happens to share a spelling.
-//   X11       `WM_CLASS`, i.e. `<window wmClass>`, matched against the
+//   X11       `WM_CLASS`, i.e. `<window appId>`, matched against the
 //             entry's `StartupWMClass=`.
 //
 // So the id is stated in three places on purpose here, and they must agree.
@@ -374,7 +374,7 @@ function Bar({ value, tone = ACCENT }) {
  *
  * Worth its own row because it is the only "everything says yes and nothing
  * appears" state on this pane. `desktopCapability('launcher')` reports
- * `available: true` and `setQuicklist()` resolves `true`, both correctly —
+ * `available: true` and `setLauncherMenu()` resolves `true`, both correctly —
  * the signal really was delivered — and the dock still shows nothing, because
  * no icon claims that id. Guessing at it from inside the capability probe
  * would be wrong (the file may live in any XDG data dir, and a launcher may
@@ -599,7 +599,7 @@ function Backup({ source, onQuit }) {
     [phase, conflicts.length, pause, resume, start],
   );
 
-  useDockMenu(actions);
+  useLauncherMenu(actions);
 
   // ------------------------------------------------------------ the tray
   const app = useApp();
@@ -711,7 +711,7 @@ function Backup({ source, onQuit }) {
       minHeight={460}
       title={conflicts.length ? `Backup (${conflicts.length})` : 'Backup'}
       // X11: matched against the entry's `StartupWMClass=`.
-      wmClass={APP_ID}
+      appId={APP_ID}
       // Wayland: the xdg `app_id`, matched against the entry's file name.
       appId={APP_ID}
       style={{ backgroundColor: SURFACE }}
@@ -910,7 +910,7 @@ if (!process.env.REACT_X11_NO_AUTORUN && !import.meta.hot) {
   const root = await createRoot({
     // The toplevel's xdg `app_id` on Wayland — the same string the launcher
     // entry is attributed to, and the only way the dock can tell that this
-    // window is the app the badge belongs to. `<window wmClass>` below is its
+    // window is the app the badge belongs to. `<window appId>` below is its
     // X11 counterpart.
     appId: APP_ID,
     cocoa: { appName: 'Backup', activationPolicy: 'regular' },
@@ -925,7 +925,7 @@ if (!process.env.REACT_X11_NO_AUTORUN && !import.meta.hot) {
     void Promise.all([
       setBadge(null),
       setProgress(null),
-      setQuicklist(null),
+      setLauncherMenu(null),
       setUrgent(false),
     ])
       .catch(() => {})

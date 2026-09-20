@@ -35,17 +35,23 @@ export declare function setBadge(
 export declare function useBadge(value: BadgeValue): void;
 
 /**
- * The menu behind a right-click on the app's icon in the Dock or launcher,
- * from the same item vocabulary `MenuBar` takes; an item's `onSelect` fires
- * when picked. Installed while mounted, replaced when `items` changes, taken
- * down on unmount.
+ * The menu behind a right-click on the app's **launcher icon** — the Dock on
+ * macOS, the launcher on Linux — from the same item vocabulary `MenuBar`
+ * takes; an item's `onSelect` fires when picked. Installed while mounted,
+ * replaced when `items` changes, taken down on unmount.
  *
  * `NSDockTile`'s menu on the cocoa backend; the launcher protocol's
  * **quicklist** on Linux — a `com.canonical.dbusmenu` tree, the same menu
  * protocol the tray and the global menu speak. Needs the identity
  * `registerApplication({ appId })` establishes and a `.desktop` file of that
  * name, like the badge.
+ *
+ * Reads `useDesktopCapability('launcher').features.menu`.
  */
+export declare function useLauncherMenu(items: MenuItem[] | null): void;
+
+/** @deprecated Renamed to {@link useLauncherMenu} — "Dock" is one desktop's
+ *  word for the icon every desktop has. Still exported and still works. */
 export declare function useDockMenu(items: MenuItem[] | null): void;
 
 /**
@@ -80,9 +86,17 @@ export declare function setUrgent(
 ): Promise<boolean>;
 
 /**
- * {@link useDockMenu}'s imperative twin, for code with no component. `null`
- * takes the menu down.
+ * {@link useLauncherMenu}'s imperative twin, for code with no component.
+ * `null` takes the menu down.
  */
+export declare function setLauncherMenu(
+  items: MenuItem[] | null,
+  options?: SetBadgeOptions,
+): Promise<boolean>;
+
+/** @deprecated Renamed to {@link setLauncherMenu} — "quicklist" is the Unity
+ *  launcher's word for the menu macOS calls the Dock menu, and this drove
+ *  both all along. Still exported and still works. */
 export declare function setQuicklist(
   items: MenuItem[] | null,
   options?: SetBadgeOptions,

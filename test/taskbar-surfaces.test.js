@@ -49,7 +49,7 @@ const taskbarApp = () => ({
 const dockApp = () => ({
   createStatusItem() {},
   setDockBadge() {},
-  setDockMenu() {},
+  setLauncherMenu() {},
 });
 
 test('the mechanism is named by the backend, not guessed from a method', () => {

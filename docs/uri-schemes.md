@@ -248,7 +248,7 @@ StartupWMClass=com.example.myapp
 MimeType=x-scheme-handler/com.example.myapp;
 ```
 
-`StartupWMClass` must match the `wmClass` prop on your `<window>`, or the
+`StartupWMClass` must match the `appId` prop on your `<window>`, or the
 window manager cannot match the window that appears to the launch that asked
 for it.
 
