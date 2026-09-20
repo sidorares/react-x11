@@ -15,13 +15,14 @@
 // boundary is all that stands between the pane and the whole app), and the
 // pane printing which pid it computes in.
 //
-// What does not work, so it is not rediscovered: the pane's window is a
-// real X child window, so host-drawn content cannot overlap it — an overlay
-// belongs in a sibling <popup> (docs/embedding.md). And the process
-// boundary contains failures, not intentions: the pane holds a
-// full-privilege connection to the same X server (docs/security.md).
+// What does not work, so it is not rediscovered: the pane's pixels sit above
+// the host's wherever they land — a child window on X11, a visual of its own
+// on Windows and macOS — so host-drawn content cannot overlap them. An
+// overlay belongs in a sibling <popup> (docs/embedding.md). And the process
+// boundary contains failures, not intentions: on X11 the pane holds a
+// full-privilege connection to the same server (docs/security.md).
 //
-// Run with: npm run examples:frame     (needs an X server / DISPLAY)
+// Run with: npm run examples:frame
 import React, { useCallback, useEffect, useState } from 'react';
 
 import { Button, Frame, ThemeProvider, createRoot } from '../src/index.js';

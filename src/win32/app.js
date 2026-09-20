@@ -16,6 +16,8 @@ import { setScreensForTests } from '../screens.js';
 import { createBezels } from './bezels.js';
 import { Win32InputMethod } from './ime.js';
 import { decodeKey, modifierMask } from './keymap.js';
+import { Win32PaneHost } from './panehost.js';
+import { Win32PaneWindow } from './panewindow.js';
 import { Win32Surface } from './surface.js';
 import { installGl, Win32GlWindow } from './glarea.js';
 import { Win32FontManager } from './fonts.js';
@@ -79,6 +81,11 @@ export class Win32App {
     this._dismissOnOutside = new Set();
     /** GL surfaces by the bridge's id, so a 'gl-ready' event finds its own. */
     this._glWindows = new Map();
+    /** This process *is* a `<Frame>`'s pane: it has no windows of its own,
+     *  only a buffer the host composites (REACT_X11_FRAME is what the Frame
+     *  host sets on the fork). */
+    this._paneMode = options.pane ?? process.env.REACT_X11_FRAME === '1';
+    this._paneSend = null;
     /** The native open/save panels. Its *presence* is what puts the top rung
      * on src/filedialog.js's ladder for this app. */
     this.filePanels =
@@ -307,12 +314,55 @@ export class Win32App {
     return new Win32Surface(this, options);
   }
   createWindow(attributes = {}) {
+    // `embeddable` in a pane process is the pane's own window — the one
+    // thing this process draws, and not a window at all here but a shared
+    // buffer. Before the `parent` branch: a pane's window has no parent, and
+    // this is the only place the two could be confused.
+    if (this._paneMode && attributes.embeddable) {
+      return new Win32PaneWindow(this, attributes);
+    }
     // A window with a parent is a `<glarea>`'s surface, which is a different
     // thing entirely: a child HWND with a GL context and no DirectComposition
     // surface at all. `glnodes.js` asks for one through this same door, as it
     // does on X11 where a GL surface is also just a child window.
     if (attributes.parent) return new Win32GlWindow(this, attributes);
     return new Win32Window(this, attributes);
+  }
+
+  /**
+   * The seam `<Frame>` dispatches on (src/frame/index.js): a backend that
+   * composites a pane from a shared buffer answers here, and one that
+   * reparents the pane's real window does not. Its presence is the whole
+   * capability — the element, the props, the fallback and the restart are
+   * the same code on every backend.
+   */
+  createPaneHost(wnd) {
+    return new Win32PaneHost(this, wnd);
+  }
+
+  /**
+   * The pane process's end of the frame channel: geometry and input in,
+   * presents out. Feature-detected by the pane bootstrap
+   * (src/frame/childmain.js), and a no-op in a process that is not a pane.
+   */
+  attachPaneChannel(channel) {
+    if (!this._paneMode) return;
+    this._paneSend = (msg) => {
+      try {
+        channel.send(msg);
+      } catch {
+        // the host is going away; its shutdown owns the rest
+      }
+    };
+    channel.onMessage((msg) => {
+      const wnd = [...this._windows.values()][0];
+      if (!wnd) return;
+      if (msg?.type === 'pane-rect') {
+        wnd.setPaneSize?.(msg.width, msg.height, msg.scale);
+      } else if (msg?.type === 'pane-event') {
+        wnd.emit(msg.name, msg.ev);
+      }
+    });
   }
 
   close() {

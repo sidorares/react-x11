@@ -9,10 +9,22 @@ app writes `<Frame src>`, `<foreign windowId>` and `<window embeddable>` and
 asks `useSupports('embedding')`; which primitive answers is the backend's
 business and nobody else's.
 
-## Where this actually stands today
+## Where this stands today
 
-Measured, not assumed. A `<Frame>` rendered on Windows starts its pane, fails
-at the embed, shuts the pane down and renders its `fallback` with this:
+**`<Frame src>` is built and works.** Steps 1 and 2 below are done; what
+follows them is still open ground. The numbers, because the whole point of
+the element is a number:
+
+| the host's event loop, while the pane computes | beats in 9s | median | p95   | worst     |
+| ---------------------------------------------- | ----------- | ------ | ----- | --------- |
+| the pane in its own process                    | 261         | 11ms   | 12ms  | **13ms**  |
+| the same module inline                         | 172         | 11ms   | 114ms | **411ms** |
+
+Same component, same work, mounted two ways. Framed, the host never stalls
+longer than a frame; inline it stalls for a third of a second and loses a
+third of its heartbeats. That is the ticker not breaking stride.
+
+`<foreign>` still refuses here, and still says so:
 
 ```
 react-x11: <foreign> needs a backend with cross-process window embedding,
@@ -20,19 +32,13 @@ and this one has none — so nothing can be put in it. Ask
 useSupports('embedding') before rendering one.
 ```
 
-So **the process half of `<Frame>` already works here, the display half says
-plainly that it does not, and the failure is the documented one.** The pane
-forks, loads its module, and is torn down cleanly; `canEmbed()`
-(src/embedding.js) asks for `X.ReparentWindow` and `X.ChangeSaveSet`, the
-win32 app has neither, `useSupports('embedding')` is false, and `<foreign>`
-refuses with the message above, which `<Frame>` turns into its fallback.
+which is correct and deliberate — see the section on it below. `<Frame>` no
+longer goes near that path: a backend that composites panes from a shared
+buffer answers `createPaneHost`, and `<Frame>` dispatches on that instead.
 
-That is a much better starting point than a silent gap, and it changes what is
-worth doing first: there is nothing to make honest, only something to build.
-
-The one wart: the pane process is **forked before the embed is attempted**, so
-a backend that cannot show a pane still pays for starting and killing one.
-Asking the same question before the fork is a small, separate fix.
+The one wart left: the pane process is **forked before the embed is
+attempted**, so a backend that can do neither still pays for starting and
+killing one. Asking first is a small, separate fix — step 3.
 
 ## The two directions are different problems
 
@@ -46,7 +52,7 @@ X11 answers all three with one primitive — reparenting, with XEmbed as the
 handshake — which is why they look like one feature there. Windows has no
 single primitive that covers them, so each needs deciding on its own.
 
-## `<Frame>`: the surface path, and it is nearly built
+## `<Frame>`: the surface path — how it was built
 
 The seam already exists and is tiny. A backend that composites panes from
 shared memory declares itself with `app.createPaneHost(wnd)`, returning an
@@ -94,10 +100,31 @@ boundary, and `present(handle)` then means what `present(iosurfaceId)` means
 on Cocoa — "this buffer is the current one" — which keeps the seam honest
 rather than only similar.
 
-The one real question a spike has to answer: the pane process must create DComp
-objects, which means a **D3D device of its own**. Two devices, one adapter; the
-handle is shared, the devices are not. Cheap to verify and it decides whether
-the pane can keep the bridge unchanged or needs a device-only mode.
+The one real question a spike had to answer: the pane process must create
+DComp objects, which means a **D3D device of its own**. Two devices, one
+adapter; the handle is shared, the devices are not.
+
+**Answered: the pane keeps the bridge unchanged.** `start()` already builds
+this process's devices, the pane calls it like any other process, and the
+handle crosses. What the spike also turned up, and what no document states,
+is two facts the implementation rests on — both now asserted by the bridge's
+`test/pane.js`, because both fail silently:
+
+- **A pane's back buffer is two frames stale.** A flip chain recycles
+  buffers rather than keeping a bitmap, so a pane repainting only its damage
+  leaves the rest of itself showing frame N-2. Five presents, the fifth
+  touching one corner: the rest came back as the third. The pane window
+  therefore repaints this frame's damage *and* the last frame's
+  (`STALE_FRAMES`, src/win32/panewindow.js), as one clipped pass over their
+  bounding box — one pass and not one per rect, because two passes over the
+  same pixel composite it twice and a translucent node painted twice is the
+  wrong colour.
+- **A pane has to be clipped to its rect.** The two sides disagree about a
+  pane's size for as long as a round trip takes, and every shrink of a
+  `<Frame>`'s box is one of those. Unclipped, the frames in between paint at
+  the old size over whatever is beside the pane; `paneSetRect` now sets the
+  visual's clip, so a pane that has not caught up is short of its corner
+  instead.
 
 ## `<foreign>`: child HWNDs, and why it is the least attractive of the three
 
@@ -166,19 +193,21 @@ same question X11 answers with a window id.
 
 ## Order of work
 
-1. **Spike the two-device question** — a pane process creating its own D3D11
-   device and a DComp surface handle the host can open. A day, and it decides
-   everything after it.
-2. **`Win32PaneHost`**, against the existing three-method seam, with
-   `examples/frame.jsx` as the acceptance test: the ticker keeps ticking while
-   the fractal pane grinds.
+1. ~~**Spike the two-device question**~~ — **done.** The pane creates its own
+   D3D11 device through the ordinary `start()`, and the handle crosses. It
+   also turned up the two silent facts above.
+2. ~~**`Win32PaneHost`**, against the existing three-method seam~~ — **done**,
+   with `examples/frame.jsx` as the acceptance test and the table at the top
+   of this page as its result. `src/win32/panewindow.js` is the pane's half,
+   `src/win32/panehost.js` the host's, and `windows/src/pane.cc` the eight
+   exports under them.
 3. **Do not fork a pane that cannot be shown.** `<Frame>` asks about embedding
    only after starting the process; asking first costs one branch and saves a
-   spawn on any backend that answers no. Independent of the rest, and worth
-   doing whether or not (2) happens.
+   spawn on any backend that answers no. Independent of the rest, and still
+   worth doing — there are backends that answer no.
 4. **Publish an embeddable window's HWND**, and a host-side way to place one —
    the guest direction, which needs no new element.
 5. OLE, if a document embedding is actually wanted, on top of (4).
 
-Step 2 is what makes `<Frame src>` mean the same thing on three backends.
-Everything after it is new ground.
+Steps 1 and 2 are what made `<Frame src>` mean the same thing on three
+backends. Everything after them is new ground.

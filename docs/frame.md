@@ -14,7 +14,7 @@ import { Frame } from 'react-x11';
 `<Frame>` mounts a module of your application in a **process of its own** and
 embeds its output here, laid out like any other child. It is this package's
 iframe: the same composition of a display boundary and a process boundary,
-behind one element, and it works on both backends.
+behind one element, and it works on every backend.
 
 How the display boundary is drawn differs, and it is worth knowing which one
 you are on when reading a trace:
@@ -26,13 +26,14 @@ you are on when reading a trace:
   `IOSurface`s created shared and presents by message; the host points one
   sublayer of its window at whichever surface the pane last presented. The
   pane has no `NSWindow` at all.
-- **Windows** — **not built yet.** The process half runs: the pane forks,
-  loads and tears down cleanly. The display half refuses, with the message
-  `<foreign>` gives for a backend that cannot embed, so a `<Frame>` here
-  renders its `fallback` rather than an empty box.
-  [windows-embedding.md](windows-embedding.md) works out which primitive it
-  should use — a DirectComposition surface handle, which is the same shape as
-  the Cocoa path — and what the rest of that costs.
+- **Windows** — the same shape as Cocoa with a **DirectComposition surface
+  handle** in the IOSurface's place: the pane makes the handle, draws into it
+  through a composition swapchain, and duplicates it into the host, which
+  gives it to a visual in its own window. The pane has no HWND.
+  [windows-embedding.md](windows-embedding.md) has the reasoning; the one
+  thing worth knowing from here is that the handle is named **once**, not per
+  frame — after that the compositor scans out of whatever the pane last
+  presented, so a pane frame costs no message, no fence and no copy.
 
 Either way the host owns layout and hit testing and the pane owns its
 drawing, which is the line that makes this **CPU offloading, not
