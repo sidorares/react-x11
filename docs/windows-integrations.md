@@ -43,6 +43,7 @@ API's existence. "Works" means a test asserts it or it was driven and seen.
 | recent documents         | `useRecentDocument`                                           | `SHAddToRecentDocs` — **Windows only**                                                         |
 | input methods            | `onCompositionStart`/`Update`/`End`, `<textinput>`            | IMM32: the preedit is drawn in the field, the candidate list follows the caret                 |
 | screen readers           | `role`, `aria-*`, `announce()`                                | a UI Automation provider over a pushed mirror of the tree                                      |
+| window identity          | `<window appId>`                                              | the AppUserModelID on the window's property store — taskbar grouping, pinning, the jump list   |
 
 ## Built, with limits worth knowing
 

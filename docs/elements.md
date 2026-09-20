@@ -893,8 +893,8 @@ tooltips, dropdowns. May appear anywhere in the JSX tree (its position in
 the tree does not affect its position on screen); it is its own paint and
 event root. Give it an `anchor` and it places itself against a node
 ([below](#anchor--a-popup-that-places-itself)); `x`/`y` are there for the
-placements that are nobody's node — `ev.nativeEvent.rootx/rooty`, the
-pointer in screen coordinates. Same props as `<window>` — **including
+placements that are nobody's node — `ev.screenX`/`screenY`, the pointer on
+the virtual screen, in the logical pixels `x`/`y` are themselves in. Same props as `<window>` — **including
 [natural size](#natural-size)**, which is what a menu sized by its own rows
 is — and conditional rendering controls its lifetime.
 

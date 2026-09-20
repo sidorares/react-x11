@@ -39,6 +39,22 @@ export interface SyntheticEvent<T = DrawnNode> {
    * what a node's `abs` is in (docs/scale.md). */
   x: number;
   y: number;
+  /**
+   * Where the pointer is on the **virtual screen**, in the same logical
+   * pixels `x`/`y` are in — what to reach for when placing something outside
+   * the window, such as a context menu at the pointer.
+   *
+   * Present exactly where the backend reported a position. That is most
+   * events, including keys on X11, whose KeyPress carries where the pointer
+   * was; it is undefined rather than `0` where a backend reported none, since
+   * zero is the screen's top-left corner and not an absence.
+   *
+   * `nativeEvent.rootx`/`rooty` is X11's name for the same point and is still
+   * there, in *device* pixels — the same split as `x` against
+   * `nativeEvent.x`.
+   */
+  screenX?: number;
+  screenY?: number;
   /** Coordinates relative to `target`'s box. */
   localX: number;
   localY: number;

@@ -385,11 +385,11 @@ export interface WindowProps
    * accepted and passed through on that backend; every other backend takes
    * the class, which is the part naming the application.
    *
-   * Honoured on X11 and, for windows opened after it is set, on Wayland —
-   * `app_id` is fixed when the surface is created. The cocoa and win32
-   * backends accept it and do nothing with it yet: macOS identity is the
-   * bundle's, and the AppUserModelID is not bound (docs/windows.md
-   * §"Packaging and identity").
+   * Honoured on X11, on Windows — where it is the window's AppUserModelID,
+   * and where the jump list is attached to the same id — and, for windows
+   * opened after it is set, on Wayland, whose `app_id` is fixed when the
+   * surface is created. The cocoa backend accepts it and does nothing with
+   * it: macOS identity is the bundle's, decided at build time.
    */
   appId?: string | [string, string] | { instance: string; class?: string };
   /** @deprecated Renamed to {@link WindowProps.appId} — `wmClass` is X11's

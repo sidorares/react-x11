@@ -120,6 +120,10 @@ export class Win32Window {
     // this the first push would have had nowhere to go and a screen reader
     // attaching to an idle application would find an empty window.
     this.app._a11y?.windowReady(this);
+    // The identity goes on **before `show`** below: the taskbar reads the
+    // window's AppUserModelID when it makes the button, so an id arriving
+    // afterwards leaves that button grouped where it already was.
+    if (this.attributes?.appId != null) this.setClass(this.attributes.appId);
     if (Number.isFinite(originX)) this._noteOrigin(originX, originY);
     if (!this._composed) {
       this._native.compose(this.id);
@@ -189,11 +193,29 @@ export class Win32Window {
     this._native.setSizeHints?.(this.id, hints);
   }
 
-  // Window identity on Windows is the AppUserModelID, which decides taskbar
-  // grouping and what pinning pins. Not bound yet; the X11 names are accepted
-  // and dropped rather than throwing, because every one of these is optional
-  // decoration and an app that sets them should not fail to open a window.
-  setClass() {}
+  /**
+   * `<window appId>`: the AppUserModelID, which is what Windows means by
+   * "which application is this" — the taskbar groups buttons by it, pinning
+   * pins it, and a jump list belongs to it.
+   *
+   * X11 carries an instance and a class; this takes the **class**, the half
+   * that names the application rather than the window, which is the same
+   * choice `windowAttributes` makes for every single-id backend
+   * (src/nodes/window/hints.js).
+   *
+   * Set per window rather than per process:
+   * `SetCurrentProcessExplicitAppUserModelID` has to be called before the
+   * process creates any UI, which a library cannot promise of an embedder. A
+   * window's own id overrides the process's anyway, so this is both the more
+   * flexible form and the only one that can be guaranteed.
+   */
+  setClass(instance, className) {
+    const id = className ?? instance;
+    this._native.windowAppId?.(this.id, id == null ? null : String(id));
+  }
+
+  // Still X11's names, still accepted and dropped: each is optional
+  // decoration, and an app that sets one should not fail to open a window.
   setWindowType() {}
   setActions() {}
   setTransientFor() {}
