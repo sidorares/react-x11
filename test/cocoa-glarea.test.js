@@ -56,17 +56,26 @@ const findGLArea = (node) =>
  * surface created and a frame run. `area` and `box` are extra props for the
  * surface and the box around it, `children` the surface's own, `sibling` one
  * more child of the box, after the surface.
+ *
+ * `period` puts a real display period on both clocks — the runtime's, which
+ * the swap gate holds for, and the window's, which paces the frames — where
+ * the default leaves the window's off, the way most of these tests want it.
  */
 async function mountGLArea({
   area = {},
   box = {},
   children = null,
   sibling = null,
+  period = null,
 } = {}) {
   const { native, app } = fakeCocoaApp();
   // the runtime chooseGLConfig resolves, settled before anything asks: no
   // x11-dri and no CGL context, so this runs on any OS
   const runtime = fakeGLRuntime();
+  if (period != null) {
+    runtime.frameInterval = period;
+    app._frameInterval = period;
+  }
   app._cocoaGL = runtime;
   app._cocoaGLPromise = Promise.resolve(runtime);
   const root = await createRoot({ app });
@@ -85,15 +94,16 @@ async function mountGLArea({
   );
   await tick();
   const wnd = [...app._windows.values()][0];
+  wnd._refreshFrameInterval();
   const node = findGLArea(wnd._reactX11Node);
   for (let i = 0; i < 10 && !node.window; i++) await tick();
   assert.ok(node.window, 'the surface was created');
-  const frame = () => {
-    app._tickFrames();
+  const frame = (now) => {
+    app._tickFrames(now);
     app._presentAll();
   };
   frame();
-  return { native, app, root, wnd, node, frame };
+  return { native, app, root, wnd, node, frame, runtime };
 }
 
 /** A box at a corner of the surface, 20x10 points, half transparent. */
@@ -357,4 +367,70 @@ test('a still surface is not drawn again when the display hands its buffer back'
   assert.equal(drawn, still + 1, 'refused while it is closed');
   await periods();
   assert.equal(drawn, still + 2, 'drawn once it opens, and then left alone');
+});
+
+// A 120Hz panel: the period the runtime holds its gate for and the period
+// the window's clock paces frames at are one and the same display's.
+const HZ120 = 1000 / 120;
+
+test('the swap gate opens on the window clock’s grid, not a period after the swap', async () => {
+  // The two gates used to be in series. The surface reopened one display
+  // period after the *swap* — i.e. after the frame's draw cost had already
+  // been spent — so it opened at `slot + cost + period`, past the clock's
+  // next slot at `slot + period`, and the clock rounded it up to the one
+  // after. Two periods for a frame that cost three milliseconds: a 120Hz
+  // panel pinned at 60fps (issue #631).
+  const { node, wnd, frame } = await mountGLArea({
+    period: HZ120,
+    area: {
+      onDraw: () => {
+        // a frame with a real cost, to pin that the gate no longer counts it
+        const until = performance.now() + 3;
+        while (performance.now() < until);
+      },
+    },
+  });
+  frame();
+  const slot = wnd.nextFrameAt();
+  assert.ok(
+    node.gl.canRender(slot),
+    'open by the moment the clock hands out the next frame',
+  );
+  assert.equal(
+    node.gl.canRender(slot - 0.001),
+    false,
+    'and not a moment before it — still one frame per period',
+  );
+});
+
+test("a frameLoop 'always' scene draws every display period, not every other one", async () => {
+  // The gap the issue measures: median one period, not two. The clock is
+  // driven by hand at the display's rate (`_tickFrames(now)`), which is
+  // every moment it would offer a frame on a 120Hz panel.
+  let drawn = 0;
+  const { wnd, frame } = await mountGLArea({
+    period: HZ120,
+    area: {
+      frameLoop: 'always',
+      onDraw: () => {
+        drawn += 1;
+      },
+    },
+  });
+  const at = [];
+  const start = wnd._rafLast;
+  for (let i = 1; i <= 60; i++) {
+    const now = start + i * HZ120;
+    const before = drawn;
+    frame(now);
+    if (drawn > before) at.push(now);
+  }
+  assert.equal(at.length, 60, 'a frame at every refresh the clock offered');
+  const gaps = at.slice(1).map((t, i) => t - at[i]);
+  gaps.sort((a, b) => a - b);
+  const median = gaps[Math.floor(gaps.length / 2)];
+  assert.ok(
+    Math.abs(median - HZ120) < 0.01,
+    `median gap ${median.toFixed(2)}ms is one period, not two`,
+  );
 });

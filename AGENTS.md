@@ -1432,6 +1432,34 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   the scheduler would have run. `test/dirty-rect.test.js` and
   `scripts/check-stress.jsx` both do this.
 
+- **A display period is a fraction and `setTimeout` is not.** Refresh rates
+  give periods with a tail — 120Hz is 8.333ms, 75Hz is 13.333 — and
+  `setTimeout` counts whole milliseconds, so a wait built from one is
+  always a little wrong, and the direction matters. Rounding down fires
+  before the gate it was arming for, which costs a second timer per frame
+  at best and a whole refresh at worst; rounding to the nearest does it
+  half the time. **Round a frame wait up** (`Math.ceil`), and let the
+  _clock_, not the timer, decide whether the frame is due: anchor the next
+  slot to the last slot (`anchor + period`) rather than to the moment the
+  frame ran, so the rounding never accumulates into drift.
+
+  This has bitten three times now, each time as a rate quantized to a
+  submultiple of the panel's: an 8ms pump turned 75Hz into 62.5fps (#442),
+  `_frameDue`'s gate landing on the pump tick after the one it wanted did
+  the same, and a swap gate armed at `setTimeout(period)` from the swap put
+  a 120Hz `<glarea>` at 60fps (#631). The tell is always a **plateau** —
+  two different workloads reporting the same frame rate — so read the
+  median gap against the display period before reading a profile: a p50 of
+  exactly _2p_ is a scheduling bug, not a cost.
+
+  Two gates in series are how it gets there: each is honest alone, and the
+  second rounds the first up. If something must hold a frame back on top of
+  a frame clock, express it on **that clock's grid** — ask the clock where
+  its next slot is (`CocoaWindow.nextFrameAt`) instead of starting an
+  independent timer — and compare against a timestamp rather than a boolean
+  a timer flipped, so a frame that arrives a fraction early still reads the
+  true state.
+
 - **Request count is not a proxy for cost here; pixel work is.** ntk brackets
   every glyph run under a clip with a `SetPictureClipRectangles` pair, which is
   379 requests a scroll notch — 37% of all of them. Deleting every one of them

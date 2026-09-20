@@ -376,18 +376,21 @@ export class GlAreaNode extends Node {
       typeof this.window.requestAnimationFrame === 'function'
         ? (cb) => this.window.requestAnimationFrame(cb)
         : (cb) => setImmediate(cb);
-    schedule(() => {
+    // the frame clock's own timestamp, not a fresh reading: a gate that
+    // composes with that clock is answered from the same moment it is
+    // (`canRender` on the Cocoa surface, issue #631)
+    schedule((now) => {
       this._frameScheduled = false;
-      this._drawFrame();
+      this._drawFrame(now);
     });
   }
 
-  _drawFrame() {
+  _drawFrame(now) {
     const pacer = this._pacer;
     pacer.began();
     let drawn = false;
     try {
-      drawn = this._drawFrameNow();
+      drawn = this._drawFrameNow(now);
     } finally {
       pacer.ended(undefined, drawn);
     }
@@ -397,14 +400,14 @@ export class GlAreaNode extends Node {
   }
 
   /** The frame itself; true when it drew. */
-  _drawFrameNow() {
+  _drawFrameNow(now) {
     const gl = this.gl;
     if (!gl || this.destroyed) return false;
     const direct = gl.backend === 'direct';
     // On the direct backend every buffer may still be held by the display,
     // and drawing into one before it comes back would paint what is on
     // screen. `onFrameAvailable` asks for this frame again when one frees.
-    if (direct && gl.canRender && !gl.canRender()) {
+    if (direct && gl.canRender && !gl.canRender(now)) {
       this._frameRefused = true;
       return false;
     }
