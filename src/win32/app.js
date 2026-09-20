@@ -54,7 +54,7 @@ function rootOf(wnd, event) {
   return { rootx: event.a + origin.x, rooty: event.b + origin.y };
 }
 
-class Win32App {
+export class Win32App {
   constructor(native, options = {}) {
     this._native = native;
     this.options = options;
@@ -73,6 +73,10 @@ class Win32App {
      *  than of a window, so there is one of these and it follows whichever
      *  field is focused (src/win32/ime.js). */
     this.inputMethod = new Win32InputMethod(this);
+    /** Popups that asked for a pointer grab. Windows has none to give, so
+     *  what the grab was for is watched for instead — see `grabPointer` in
+     *  src/win32/window.js and `_dismissOutsidePopups` below. */
+    this._dismissOnOutside = new Set();
     /** GL surfaces by the bridge's id, so a 'gl-ready' event finds its own. */
     this._glWindows = new Map();
     /** The native open/save panels. Its *presence* is what puts the top rung
@@ -228,6 +232,34 @@ class Win32App {
 
   /** A tray icon. `useTray()` finds this by name, not by platform — the rule
    * AGENTS.md sets for every ladder. */
+  /**
+   * Close every open `<popup grab>` that this press did not land in.
+   *
+   * `pressed` is the window the press was delivered to, or null when the
+   * application lost activation and there is no window of ours to exclude.
+   * Everything else open hears the press as an outside one and answers with
+   * `onDismiss` (src/win32/window.js `_dismissFromOutside`).
+   *
+   * Excluding the pressed window is what makes a submenu work: clicking the
+   * menu that opened it closes the submenu and keeps the menu, which is what
+   * an X11 grab does by handing the press to the innermost holder.
+   *
+   * A copy of the set is walked because `onDismiss` is what unmounts the
+   * popup, and unmounting runs `ungrabPointer` — which deletes from the set
+   * this loop would otherwise still be reading.
+   */
+  _dismissOutsidePopups(pressed) {
+    if (this._dismissOnOutside.size === 0) return;
+    for (const wnd of [...this._dismissOnOutside]) {
+      if (wnd === pressed) continue;
+      if (wnd.destroyed) {
+        this._dismissOnOutside.delete(wnd);
+        continue;
+      }
+      wnd._dismissFromOutside();
+    }
+  }
+
   /**
    * A drag session's point, as the tree's own units.
    *
@@ -443,6 +475,10 @@ class Win32App {
           buttons: modifierMask(event.d),
           ...rootOf(wnd, event),
         });
+        // A press in one window is a press *outside* every open menu but the
+        // one it landed in — which on X11 the grab would have delivered to
+        // the menu instead of to this window.
+        if (event.type === 'mousedown') this._dismissOutsidePopups(wnd);
         break;
       case 'keydown':
       case 'keyup': {
@@ -511,6 +547,13 @@ class Win32App {
         // that is not in front, and a composition left open is one the user
         // comes back to, which is what every other application does.
         if (event.type === 'window-focus') this.inputMethod.sync(wnd);
+        // Losing activation is the other half of the grab this platform does
+        // not have: the press went to another application or to the desktop.
+        // A popup never takes activation (`WS_EX_NOACTIVATE`), so opening one
+        // raises no blur and this cannot fire on the menu's own appearance.
+        if (event.type === 'window-blur' && !this._dismissOnOutside.has(wnd)) {
+          this._dismissOutsidePopups(null);
+        }
         return;
       case 'ime-start':
       case 'ime-preedit':

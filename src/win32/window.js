@@ -295,14 +295,72 @@ export class Win32Window {
     this._native.setCursor?.(this.id, name);
   }
 
-  // No cross-application pointer grab exists on Windows: SetCapture holds only
-  // while a button is down. `<popup grab>` dismissal watches activation
-  // instead (docs/windows.md §"Windowing semantics"), which is not built yet —
-  // so these accept and do nothing rather than pretending to have grabbed.
+  /**
+   * What `<popup grab>` asks for, by the effect rather than the mechanism.
+   *
+   * There is no cross-application pointer grab on Windows: `SetCapture` sends
+   * a window the mouse only while a button is already down, so a *press* that
+   * starts over another window never arrives here. What the grab is actually
+   * for is one thing — "tell me when the user pressed somewhere else, so the
+   * menu can close" — and that is observable without it:
+   *
+   *   - a press delivered to **another window of this application**, which is
+   *     a click in the owner behind the menu, or in a second window, or in a
+   *     menu this one opened from;
+   *   - this application **losing activation**, which is a press in another
+   *     application or on the desktop. A popup is `WS_EX_NOACTIVATE`, so it
+   *     never takes activation itself and opening one raises no blur —
+   *     measured, because the whole rule rests on it.
+   *
+   * The app watches both and answers with the press the tree expects
+   * (src/win32/app.js `_dismissOutsidePopups`), the way the Wayland backend
+   * answers `xdg_popup.popup_done` with one (wayland/backendwindow.js).
+   *
+   * **What it does not catch**: a press on the *non-client* area of one of our
+   * own windows — a title bar, a resize border. The bridge does not report
+   * those, so a menu left open while the user drags the window behind it stays
+   * open. X11's grab covers that case and this does not; it is the one gap,
+   * and it is narrower than the one it replaces.
+   *
+   * The callback reports success because the behaviour it stands for is here
+   * now. It used to say the same thing while nothing was watching, which is
+   * the worst of both: a caller that checked was told a grab it did not have
+   * had been taken.
+   */
   grabPointer(options, cb) {
+    this.app._dismissOnOutside?.add(this);
     cb?.(null, 0);
   }
-  ungrabPointer() {}
+
+  ungrabPointer() {
+    this.app._dismissOnOutside?.delete(this);
+  }
+
+  /**
+   * A press that landed outside this window, as the tree hears it.
+   *
+   * Negative coordinates are what make it a dismissal rather than a click:
+   * `_pressOutside` in src/events.js compares against the window's own bounds,
+   * and answers anything outside them with `onDismiss`. The same made-up press
+   * the Wayland backend sends for `popup_done`, for the same reason — the
+   * platform kept the real one.
+   */
+  _dismissFromOutside() {
+    if (this.destroyed) return;
+    this.emit('mousedown', {
+      x: -1,
+      y: -1,
+      rootx: -1,
+      rooty: -1,
+      keycode: 1,
+      buttons: 0,
+      dismissed: true,
+    });
+  }
+
+  // The keyboard's half has no Windows mechanism at all and nothing in the
+  // tree reads its result, so it stays honest about doing nothing: a popup
+  // that asked for keys gets them only while it is the foreground window.
   grabKeyboard(options, cb) {
     cb?.(null, 0);
   }

@@ -128,12 +128,37 @@ own error is the answer.
 `useGlobalMenu` is a menu bar owned by the desktop. Windows has none; a
 `<MenuBar>` drawn in the window is the whole story here, and that works.
 
-### Pointer and keyboard grabs
+### Keyboard grabs
 
-`grabPointer`/`grabKeyboard` accept and do nothing. `SetCapture` holds only
-while a button is down, so a `<popup grab>` cannot be dismissed by a click
-outside it the way it is on X11 — the replacement is watching activation, which
-is not built.
+`grabKeyboard` accepts and does nothing: there is no Windows mechanism for it,
+and nothing in the tree reads its result. A popup that asked for keys gets them
+only while it is the foreground window.
+
+`grabPointer` is a different story — see below.
+
+## Built, with limits worth knowing: `<popup grab>`
+
+A menu closing when you click beside it is what the pointer grab is _for_, and
+Windows has no grab to give: `SetCapture` sends a window the mouse only while a
+button is already down, so a press that starts elsewhere never arrives. The
+effect is reproduced from two signals instead, and `<Select>`, `<Menu>` and any
+`<popup grab>` dismiss the way they do everywhere else:
+
+- a press delivered to **another window of this application** — a click in the
+  owner behind the menu, in a second window, or in the menu a submenu came
+  from;
+- the application **losing activation** — a press in another application or on
+  the desktop. A popup is `WS_EX_NOACTIVATE`, so it never takes activation
+  itself and opening one raises no blur.
+
+Both end in the same made-up outside press the Wayland backend sends for
+`xdg_popup.popup_done`, so all three backends answer a dismissal through one
+path (`_dismissOutside` in src/events.js).
+
+**The gap**: a press on the _non-client_ area of one of our own windows — a
+title bar, a resize border. The bridge does not report those, so a menu left
+open while the user drags the window behind it stays open. X11's grab covers
+that and this does not.
 
 ## What Windows has that nothing else does
 
