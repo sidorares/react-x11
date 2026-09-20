@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.17.1](https://github.com/sidorares/react-x11/compare/v2.17.0...v2.17.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **cocoa:** phase-lock a &lt;glarea&gt;'s swap gate to the window's frame clock ([#632](https://github.com/sidorares/react-x11/issues/632)) ([dd1cdab](https://github.com/sidorares/react-x11/commit/dd1cdab55fb2edb94800c1f348eb0198ed5281da)), closes [#631](https://github.com/sidorares/react-x11/issues/631)
+
 ## [2.17.0](https://github.com/sidorares/react-x11/compare/v2.16.1...v2.17.0) (2026-09-20)
 
 
