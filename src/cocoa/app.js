@@ -41,7 +41,7 @@ import { CocoaFontManager } from './fonts.js';
 import { releaseImageUpload } from '../backend/context2d.js';
 import { CocoaSurface } from './surface.js';
 import { CocoaSymbols } from './symbols.js';
-import { CocoaWindow } from './window.js';
+import { CocoaWindow, FRAME_SLACK_MS } from './window.js';
 import { decodeKey, modifierMask } from './keymap.js';
 import { loadNative } from './native.js';
 import { requestAppKit, threadedChannel } from './threaded.js';
@@ -55,9 +55,6 @@ import { requestAppKit, threadedChannel } from './threaded.js';
 // bridge that does not report it: a 60Hz floor every Mac clears.
 const RAF_INTERVAL_MS = 16;
 const PUMP_INTERVAL_MS = 8;
-// How early a pump tick may take a frame that is not quite due, in ms — the
-// drift of a timer, not a fraction of the pump (`_frameDue`).
-const FRAME_SLACK_MS = 1;
 // Threaded mode's live-resize handshake (windowkit/appkit#53): how long
 // AppKit may hold a resize tick for a frame painted at the new size, in ms.
 // The edge moves when the delegate returns, so the budget is how long a
@@ -906,6 +903,13 @@ export class CocoaApp {
    * tick alone still does is pump AppKit's events, which is what
    * `pumpInterval` stays the cadence of. With no pump at all — threaded
    * mode, where `_pumpInterval` is Infinity — every frame is one of these.
+   *
+   * The wait is rounded **up** to whole milliseconds, because `setTimeout`
+   * only counts those: a 120Hz panel's 8.333ms gate rounded to 8 fired
+   * before the clock would take the frame, which cost a second timer per
+   * frame to cover the last third of a millisecond. Rounding up costs the
+   * grid nothing — `_frameDue` anchors the next slot to the last one, not
+   * to when the frame ran — and lands on the first tick the clock accepts.
    */
   _armFrameTimer(wait, now) {
     if (!(wait > 0 && wait < this._pumpInterval)) return;
@@ -922,7 +926,7 @@ export class CocoaApp {
         this._tickFrames();
         this._presentAll();
       },
-      Math.max(1, Math.round(wait)),
+      Math.max(1, Math.ceil(wait)),
     );
   }
 

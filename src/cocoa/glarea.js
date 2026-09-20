@@ -231,6 +231,16 @@ export class CocoaGLArea {
     return this.parent.requestAnimationFrame(cb);
   }
 
+  /**
+   * The owning window's clock, asked where a gate of `interval` ms lands
+   * on its grid (`CocoaWindow.nextFrameAt`) — the swap gate phase-locks to
+   * it so the two do not stack. A parent with no clock (a bare stub in a
+   * test) answers one interval from now, the old swap-relative wait.
+   */
+  nextFrameAt(interval) {
+    return this.parent.nextFrameAt?.(interval) ?? performance.now() + interval;
+  }
+
   getContext(kind, config) {
     if (kind !== 'opengl' || this.destroyed) return null;
     if (!this._context) {
@@ -262,7 +272,10 @@ function createGLAreaContext(runtime, area, config) {
   let back = null;
   let width = 0;
   let height = 0;
-  let gateClosed = false;
+  // The moment the swap gate reopens, on the window clock's grid — not a
+  // boolean a timer flips, so a frame that arrives a fraction of a
+  // millisecond before its own timer still reads the true state.
+  let gateOpenAt = -Infinity;
   let gateTimer = null;
   let destroyed = false;
 
@@ -289,7 +302,17 @@ function createGLAreaContext(runtime, area, config) {
   // one, so the honest gate is one display period per swap — the same
   // timer-reopened gate the XQuartz CGL flavor uses (no backpressure
   // exists on either).
-  ctx.canRender = () => !destroyed && !gateClosed;
+  //
+  // One period *per frame*, though, not per swap: timed from the swap the
+  // gate reopened at `slot + drawCost + period`, which overshoots the
+  // window clock's next slot however cheap the frame, and the clock then
+  // rounded it up to the slot after — two display periods, a 120Hz panel
+  // pinned at 60fps whatever the scene cost (issue #631). Anchored to the
+  // slot the frame was due at (`CocoaWindow.nextFrameAt`) the two gates
+  // are on one grid: the clock cannot take a frame the gate would refuse,
+  // because both are the same instant, and the gate still never lets two
+  // frames into one period.
+  ctx.canRender = (now = performance.now()) => !destroyed && now >= gateOpenAt;
 
   ctx.makeCurrent = () => {
     if (destroyed) return;
@@ -305,6 +328,26 @@ function createGLAreaContext(runtime, area, config) {
     runtime.gl.bindFramebuffer(target, fb == null ? (back?.fbo ?? 0) : fb);
   };
 
+  // A frame refused by the gate has nothing else to wake it, so the gate
+  // says when it opens. `setTimeout` counts whole milliseconds and a
+  // display period is rarely one (8.333 at 120Hz), so a timer that lands
+  // early re-arms rather than announcing a gate that is still shut.
+  const armGate = () => {
+    if (gateTimer || destroyed) return;
+    const wait = gateOpenAt - performance.now();
+    gateTimer = setTimeout(
+      () => {
+        gateTimer = null;
+        if (destroyed) return;
+        if (performance.now() < gateOpenAt) armGate();
+        else ctx.onFrameAvailable?.();
+      },
+      Math.max(1, Math.ceil(wait)),
+    );
+    // the timer must not hold the process open for an idle scene
+    gateTimer.unref?.();
+  };
+
   ctx.SwapBuffers = () => {
     if (destroyed || !back) return;
     runtime.gl.flush();
@@ -312,14 +355,9 @@ function createGLAreaContext(runtime, area, config) {
     const shown = back;
     back = front;
     front = shown;
-    gateClosed = true;
-    gateTimer = setTimeout(() => {
-      gateTimer = null;
-      gateClosed = false;
-      ctx.onFrameAvailable?.();
-    }, runtime.frameInterval);
-    // the timer must not hold the process open for an idle scene
-    gateTimer.unref?.();
+    // one display period from the frame's slot, not from this moment
+    gateOpenAt = area.nextFrameAt(runtime.frameInterval);
+    armGate();
   };
 
   ctx._resized = () => {

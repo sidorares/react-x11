@@ -12,6 +12,11 @@ import { CocoaLayerPresenter } from './presenter.js';
 import { CocoaPromotion } from './promotion.js';
 
 let nextWindowId = 1;
+// The slack a frame clock allows under its interval, in ms: a timer's drift
+// and no more (`CocoaApp._frameDue`, `_frameWait`, `nextFrameAt`). It lives
+// here because the window is the clock — `_rafLast` and `_frameInterval`
+// are its fields — and the app imports it from this side.
+export const FRAME_SLACK_MS = 1;
 // How long a worker's flip may hold its window's next frame (`_armFence`).
 // The release is reported once the replacing frame has committed, a
 // fraction of a millisecond later, and a window must not freeze on a report
@@ -908,6 +913,22 @@ export class CocoaWindow {
 
   requestAnimationFrame(cb) {
     return this.app._requestFrame(cb, this);
+  }
+
+  /**
+   * The earliest moment this window's clock will hand out another frame,
+   * for a gate of `interval` ms — the display's period by default, which
+   * is the clock's own.
+   *
+   * It is the grid `_frameDue` decides on, not the wall clock: the anchor
+   * is the slot the running frame was *due* at, so the answer does not
+   * move with how long that frame took or how late its timer fired. A
+   * second gate that wants to compose with this clock rather than be
+   * rounded up by it has to land on this grid — which is what a
+   * `<glarea>`'s swap gate reads it for (src/cocoa/glarea.js).
+   */
+  nextFrameAt(interval = this._frameInterval) {
+    return this._rafLast + interval - FRAME_SLACK_MS;
   }
 
   /**
