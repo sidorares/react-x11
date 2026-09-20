@@ -138,8 +138,8 @@ export function flushWindowRestacks() {
  * issue #4).
  */
 export class WindowNode extends Scrollable(Node) {
-  constructor(app, attributes, props) {
-    super('window', props, app, { yoga: true });
+  constructor(app, attributes, props, { awaitsRootScope = false } = {}) {
+    super('window', props, app, { yoga: true, awaitsRootScope });
     assertWindowSize(props, this.kind);
     this.root = this;
     this.attributes = attributes;

@@ -70,7 +70,12 @@ export class Node {
     return DEVTOOLS_FAKE_DOCUMENT;
   }
 
-  constructor(kind, props, app, { yoga = true } = {}) {
+  constructor(kind, props, app, { yoga = true, awaitsRootScope = false } = {}) {
+    // Set before anything resolves a style: a `<window>`'s own style is
+    // resolved by this constructor, and whether its ancestry is complete
+    // decides whether an unresolved `$token` is reported (cascade.js
+    // `placed`). A window under a root `<ThemeProvider>` has no palette yet.
+    this._awaitsRootScope = awaitsRootScope;
     this.kind = kind;
     this.props = props;
     this.app = app;

@@ -113,6 +113,27 @@ class SyntheticEvent {
     this.ctrlKey = Boolean(native?.buttons & MOD.Control);
     this.altKey = Boolean(native?.buttons & MOD.Alt);
     this.metaKey = Boolean(native?.buttons & MOD.Super);
+    // Where the pointer is on the **virtual screen**, in the same logical
+    // pixels `x`/`y` are in — the DOM's name for the DOM's quantity, and the
+    // one an app should reach for when it places something outside the
+    // window (a context menu at the pointer, a drag preview).
+    //
+    // `nativeEvent.rootx`/`rooty` is X11's name for it, is still there, and
+    // is still in *device* pixels: the same split as `ev.x` against
+    // `nativeEvent.x`. Defined exactly where the backend reported a position
+    // — an X11 KeyPress carries one too, so this is not pointer-events-only —
+    // and absent otherwise, because a made-up 0 would read as the screen's
+    // top-left corner rather than as "no answer".
+    if (native?.rootx !== undefined && native?.rootx !== null) {
+      // The **window's** scale, not the target's. `x`/`y` are in the target's
+      // unit on purpose, so a subtree zoomed by a `scale` prop reads its own
+      // — but a screen coordinate is not in that subtree's space at all, and
+      // dividing it by a zoom factor would put it somewhere nobody is. The
+      // drag events have always computed it this way (src/dnd.js).
+      const screen = manager.scale;
+      this.screenX = native.rootx / screen;
+      this.screenY = (native.rooty ?? 0) / screen;
+    }
     this.defaultPrevented = false;
     this.propagationStopped = false;
     if (extra) Object.assign(this, extra);

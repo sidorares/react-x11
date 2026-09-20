@@ -1,9 +1,23 @@
-// A canvas-shaped 2d context over a @windowkit/appkit CoreGraphics surface.
+// A canvas-shaped 2d context over a **verb table** — the drawing dialect
+// every native backend answers, and the one place it is written down.
 //
-// This is the raster half of the Cocoa backend: on the surface presenter it
-// is the whole drawing path, and on the layer presenter it stays as the
-// fallback every painted-code node (<canvas>, <svg>, registered elements)
-// rasters through — docs/macos.md §"Custom drawing on a layer tree".
+// This is macos.md §"The split" step 4, taken when a second native backend
+// started: the class takes its `native` as a constructor argument and calls
+// nothing else, so one wrapper drives @windowkit/appkit's CoreGraphics verbs
+// and @windowkit/win32's Direct2D verbs alike. A bridge that lacks an
+// optional verb is feature-detected (`ctxSetBlendMode`, `blitSurface`,
+// `ctxDrawSymbol`) and degrades rather than throwing.
+//
+// **Wayland is deliberately not here.** src/wayland/context2d.js is not
+// another copy of this file — it is a GLES rasterizer, wayland.md's Tier D,
+// which implements the same dialect by drawing it rather than by forwarding
+// it. The two are different layers, not duplicates, and folding one into the
+// other would lose that.
+//
+// On the surface presenter this is the whole drawing path; on the layer
+// presenter it stays as the fallback every painted-code node (<canvas>,
+// <svg>, registered elements) rasters through — docs/macos.md §"Custom
+// drawing on a layer tree".
 //
 // The native surface holds the real graphics state (paths, CTM, clip); this
 // class keeps the JS-visible state (fillStyle strings, gradient objects,
@@ -265,7 +279,7 @@ class SolidPicture {
   }
 }
 
-export class CocoaContext2D {
+export class BackendContext2D {
   /**
    * @param native the @windowkit/appkit module
    * @param surfaceOf () => current surface handle — the owner replaces the
@@ -1425,9 +1439,15 @@ export class CocoaContext2D {
     const family = m ? m[4] : 'sans-serif';
     const weight = m?.[2] === 'bold' ? 700 : m?.[2] ? Number(m[2]) : 400;
     const style = m?.[1] ? 'italic' : 'normal';
+    // No colour unless the caller named one, which is what `_contextInk`
+    // above is waiting for: a layout with no ink of its own is drawn with the
+    // context's fill, the way `fillText` is defined to be. Defaulting the
+    // base to black instead made every layout carry an ink, so `fillStyle`
+    // was read, found to be irrelevant, and never applied — a `fillText`
+    // under a white fill came out black on both backends.
     return fonts.layout(
       [{ text: String(text), family, size, weight, style, color }],
-      { family, size, weight, style, color: color ?? '#000' },
+      { family, size, weight, style, color },
       {},
     );
   }

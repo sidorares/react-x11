@@ -13,7 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
-import { createRoot } from '../src/index.js';
+import { createRoot, ThemeProvider } from '../src/index.js';
 import { appearanceChanged } from '../src/nodes/cascade.js';
 import { createMockApp } from './helpers/mock-app.js';
 import { runScript } from './helpers/run-script.js';
@@ -84,6 +84,84 @@ test('a misspelled token drops one property and leaves the app standing', async 
     errors.exitCode,
     1,
     'a run that painted something wrong must not exit 0 — CI still fails',
+  );
+  await x11Root.unmount();
+});
+
+test('a token a root provider defines is not a misspelling', async () => {
+  // The regression this pins: a `<ThemeProvider>` written *above* a
+  // `<window>` hands the window its palette when the scope inserts it — which
+  // is after the window's constructor has already resolved the window's own
+  // style, and after its subtree was built, both against the desktop's
+  // palette. Reporting from that first pass called every token the provider
+  // adds a misspelling: a warning for styles that resolve correctly a moment
+  // later, on every run of any app with a palette of its own.
+  const app = createMockApp();
+  const uncaught = [];
+  const x11Root = await createRoot({
+    app,
+    onUncaughtError: (err) => uncaught.push(String(err?.message ?? err)),
+  });
+  const errors = await captured(async () => {
+    x11Root.render(
+      h(
+        ThemeProvider,
+        { value: { page: '#00ff00' }, colorScheme: 'light' },
+        h(
+          'window',
+          { width: 100, height: 100, style: { backgroundColor: '$page' } },
+          h('box', { style: { backgroundColor: '$page', flexGrow: 1 } }),
+        ),
+      ),
+    );
+    await tick();
+  });
+
+  assert.deepStrictEqual(uncaught, []);
+  assert.deepStrictEqual(
+    errors.filter((e) => /unknown theme token/.test(e)),
+    [],
+    'a token the palette in force defines was reported as unknown',
+  );
+  const win = nodeOf(app);
+  assert.strictEqual(win.theme.page, '#00ff00');
+  assert.strictEqual(
+    win.children[0].style.backgroundColor,
+    '#00ff00',
+    'and it resolved, which is what made the report wrong',
+  );
+  assert.notStrictEqual(
+    errors.exitCode,
+    1,
+    'a correct app must not be made to fail CI',
+  );
+  await x11Root.unmount();
+});
+
+test('a real misspelling under a root provider is still reported', async () => {
+  // The other half: the wait for the palette must not become a way to miss a
+  // typo once it has arrived.
+  const app = createMockApp();
+  const x11Root = await createRoot({ app, onUncaughtError: () => {} });
+  const errors = await captured(async () => {
+    x11Root.render(
+      h(
+        ThemeProvider,
+        { value: { page: '#00ff00' }, colorScheme: 'light' },
+        h(
+          'window',
+          { width: 100, height: 100 },
+          h('box', { style: { backgroundColor: '$paige', flexGrow: 1 } }),
+        ),
+      ),
+    );
+    await tick();
+  });
+  assert.match(errors.join('\n'), /unknown theme token "\$paige"/);
+  assert.strictEqual(
+    nodeOf(app).children[0].style.backgroundColor,
+    undefined,
+    'and the property nobody could resolve is still dropped',
   );
   await x11Root.unmount();
 });

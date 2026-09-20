@@ -70,6 +70,25 @@ export function decodeData(data, target) {
  * URIs that are actually local — a remote `file://host/...` has no local
  * path and must not pretend to.
  */
+/**
+ * A `file:` URL's pathname as a path this machine can open.
+ *
+ * On a POSIX path the two are the same string. A Windows one is not: the URL
+ * form of `C:\Users\a` is `file:///C:/Users/a`, whose pathname is
+ * `/C:/Users/a` — a leading slash that no Windows API accepts, and forward
+ * slashes that most of them tolerate and no user recognises. A drive letter
+ * after the slash is the tell, and it is unambiguous: no POSIX path begins
+ * `/C:`.
+ *
+ * Decided by the shape of the path rather than by `process.platform`, so a
+ * uri-list that arrived from another machine reads the same way on both.
+ */
+function pathOfFileUrl(pathname) {
+  const drive = /^\/([A-Za-z]:)(\/.*)?$/.exec(pathname);
+  if (!drive) return pathname;
+  return (drive[1] + (drive[2] ?? '\\')).replace(/\//g, '\\');
+}
+
 export function parseUriList(text) {
   const files = [];
   for (const line of String(text).split(/\r?\n/)) {
@@ -82,7 +101,7 @@ export function parseUriList(text) {
         url.protocol === 'file:' &&
         (url.hostname === '' || url.hostname === 'localhost')
       ) {
-        entry.path = decodeURIComponent(url.pathname);
+        entry.path = pathOfFileUrl(decodeURIComponent(url.pathname));
       }
     } catch {
       // not a parseable URI — keep the raw line, claim no path

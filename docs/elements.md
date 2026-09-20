@@ -233,7 +233,7 @@ separate one to negotiate with, and the honest list is short:
 | `states: ['demands_attention']`                                          | the Dock bounce, held until the state is removed                                                                                           |
 | every other `_NET_WM_STATE`, and `fullscreen`                            | inert — the bridge has no zoom/miniaturize/fullscreen verbs yet (windowkit/appkit#15)                                                      |
 | `onStatesChange`, and `useWindowState()`'s `states`/`desktop`/`obscured` | never fire — they read `_NET_WM_STATE` and friends off the window, and there is none. `focused` does work                                  |
-| `wmClass`, `windowType`, `gravity`, the increment and aspect hints       | inert. They are messages to a window manager, and there is not one                                                                         |
+| `appId`, `windowType`, `gravity`, the increment and aspect hints         | inert. They are messages to a window manager, and there is not one                                                                         |
 | `transientFor`                                                           | inert today — a stub waiting on `addChildWindow`; a managed `<Dialog>` already floats on its own window                                    |
 | `onClientMessage`                                                        | never fires — X11's ClientMessage has no counterpart                                                                                       |
 | `embeddable`                                                             | means a `<Frame>` pane, and works — but through shared surfaces rather than reparenting ([frame.md](frame.md))                             |
@@ -546,7 +546,7 @@ are free, so no `sizeHints` object is needed.
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `resizable`   | `false` pins min and max size to the current size                                                                                         |
 | size hints    | `minWidth`, `minHeight`, `maxWidth`, `maxHeight`, `widthInc`, `heightInc`, `baseWidth`, `baseHeight`, `minAspect`, `maxAspect`, `gravity` |
-| `wmClass`     | `'instance'`, `['instance', 'Class']` or `{instance, class}`                                                                              |
+| `appId`       | `'instance'`, `['instance', 'Class']` or `{instance, class}`                                                                              |
 | `windowType`  | `'dialog'`, `'utility'`, `'tooltip'`… or an array of fallbacks                                                                            |
 | `decorations` | `false` asks for no titlebar or border                                                                                                    |
 
@@ -893,8 +893,8 @@ tooltips, dropdowns. May appear anywhere in the JSX tree (its position in
 the tree does not affect its position on screen); it is its own paint and
 event root. Give it an `anchor` and it places itself against a node
 ([below](#anchor--a-popup-that-places-itself)); `x`/`y` are there for the
-placements that are nobody's node — `ev.nativeEvent.rootx/rooty`, the
-pointer in screen coordinates. Same props as `<window>` — **including
+placements that are nobody's node — `ev.screenX`/`screenY`, the pointer on
+the virtual screen, in the logical pixels `x`/`y` are themselves in. Same props as `<window>` — **including
 [natural size](#natural-size)**, which is what a menu sized by its own rows
 is — and conditional rendering controls its lifetime.
 

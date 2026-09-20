@@ -6,7 +6,7 @@
 // desktops, two mechanisms, one call each:
 //
 //   1. **the app's own tile** — the cocoa backend's `NSDockTile`, reached
-//      through the app object (`setDockBadge`, `setDockMenu`, src/cocoa/
+//      through the app object (`setDockBadge`, `setLauncherMenu`, src/cocoa/
 //      app.js).
 //   2. **`com.canonical.Unity.LauncherEntry`** over the session bus — the
 //      protocol Unity defined and the KDE, elementary, Cairo-Dock and
@@ -34,13 +34,13 @@
 // is runtime, it follows state, and Dash-to-Dock/ubuntu-dock, Plank and the
 // Unity heritage launchers all render it.
 //
-// So `useDockMenu()` has a Linux rung after all, and the three menus an app
+// So `useLauncherMenu()` has a Linux rung after all, and the three menus an app
 // puts on the desktop — panel, tray, launcher — are now one authoring model
 // on both backends. `.desktop` actions are still the right place for entries
 // that must work *while the app is not running*; they are a different feature
 // wearing a similar hat.
 //
-// Nothing here imports react: `useBadge`/`useDockMenu` (launcherhooks.js) are
+// Nothing here imports react: `useBadge`/`useLauncherMenu` (launcherhooks.js) are
 // the hooks, and these are the functions under them, callable from host-side
 // code with no tree. The entry on the bus is held for as long as anything is
 // shown and released when the last of it is cleared — a held bus ref is a
@@ -300,7 +300,8 @@ export async function setUrgent(urgent, { app } = {}) {
 }
 
 /**
- * The menu behind a right-click on the app's launcher icon — the quicklist.
+ * The menu behind a right-click on the app's launcher icon — the Dock menu on
+ * macOS, the quicklist on Linux.
  *
  * Takes `MenuBar`'s item vocabulary and exports it as a `com.canonical.dbusmenu`
  * tree, exactly as the tray and the global menu do. `null` takes it down.
@@ -310,12 +311,12 @@ export async function setUrgent(urgent, { app } = {}) {
  * launcher that builds its client the instant it sees `quicklist` finds an
  * object there.
  */
-export async function setQuicklist(items, { app } = {}) {
+export async function setLauncherMenu(items, { app } = {}) {
   const target = app ?? soleApp();
 
-  // Rung 1: the app's own tile menu.
-  if (typeof target?.setDockMenu === 'function') {
-    target.setDockMenu(items ?? null);
+  // Rung 1: the app's own icon menu.
+  if (typeof target?.setLauncherMenu === 'function') {
+    target.setLauncherMenu(items ?? null);
     return true;
   }
 
@@ -366,6 +367,14 @@ export async function setQuicklist(items, { app } = {}) {
   emit(held);
   return true;
 }
+
+/**
+ * @deprecated Renamed to {@link setLauncherMenu}. "Quicklist" is the Unity
+ * launcher's word for the menu macOS calls the Dock menu; this function
+ * always drove both, and the name only ever named one of them. Kept working
+ * and kept quiet.
+ */
+export const setQuicklist = setLauncherMenu;
 
 /** Test seam, not public: drop the exported entry without emitting. */
 export async function _resetLauncher() {

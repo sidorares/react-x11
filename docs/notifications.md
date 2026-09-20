@@ -30,12 +30,12 @@ to whoever wants it; this page is about the desktop's own banners.
 
 The [file dialog](filedialog.md)'s shape again, four rungs:
 
-|     |                                     |                                                                                                                                                                                                      |
-| --- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **the app's notification centre**   | The [cocoa backend](macos.md): `UNUserNotificationCenter`, the system's own banners, list and action buttons. Delivers only for a **code-signed app bundle** with a bundle id — see below.           |
-| 2   | **`org.freedesktop.Notifications`** | The desktop's daemon over D-Bus: updating in place, the daemon's capabilities, and the two signals that say what the user did. What a Linux desktop should get.                                      |
-| 3   | **`osascript`**                     | `display notification`, on a Mac with neither of the above — the X11 backend under XQuartz, or an unbundled cocoa app. Posted under Script Editor's identity; no actions, no update, no report back. |
-| 4   | **`notify-send`**                   | libnotify's CLI, for a Linux box where the bus transport is missing (Node 20) but a daemon runs. The same limits, though a new enough one prints an id, which gives `update()` back.                 |
+|     |                                       |                                                                                                                                                                                                                                                                                                                  |
+| --- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **the backend's notification centre** | The [cocoa backend](macos.md): `UNUserNotificationCenter`, the system's own banners, list and action buttons. Delivers only for a **code-signed app bundle** with a bundle id — see below. On [win32](windows-integrations.md): a tray balloon, which the shell shows as a toast and keeps in the action centre. |
+| 2   | **`org.freedesktop.Notifications`**   | The desktop's daemon over D-Bus: updating in place, the daemon's capabilities, and the two signals that say what the user did. What a Linux desktop should get.                                                                                                                                                  |
+| 3   | **`osascript`**                       | `display notification`, on a Mac with neither of the above — the X11 backend under XQuartz, or an unbundled cocoa app. Posted under Script Editor's identity; no actions, no update, no report back.                                                                                                             |
+| 4   | **`notify-send`**                     | libnotify's CLI, for a Linux box where the bus transport is missing (Node 20) but a daemon runs. The same limits, though a new enough one prints an id, which gives `update()` back.                                                                                                                             |
 
 `notificationBackend()` reports which one this machine lands on without
 posting anything. Where none answers, `notify()` rejects with a **typed**
@@ -81,9 +81,19 @@ is nothing to pass.
 | rung          | update in place     | close   | actions           | what the user did    |
 | ------------- | ------------------- | ------- | ----------------- | -------------------- |
 | cocoa         | yes                 | yes     | yes               | action, dismissal    |
+| win32         | no                  | no      | no                | nothing              |
 | dbus          | yes (`replaces_id`) | yes     | if the daemon can | action, close reason |
 | `osascript`   | posts anew          | nothing | no                | nothing              |
 | `notify-send` | with an id, yes     | nothing | no                | nothing              |
+
+`win32` sits with the shell-out rungs on everything but where it is shown:
+a `Shell_NotifyIcon` balloon is a real toast in a real action centre, and
+also a fire-and-forget one. Buttons, replies and a lifetime the app controls
+want the Windows App SDK's notification manager, which will not show anything
+at all until the system knows an AppUserModelID for the process — a
+Start-menu shortcut carrying one, or a registry registration. That is a
+packaging question ([windows.md](windows.md) §"Packaging and identity"), and
+a balloon is what can be shown without asking the user to install anything.
 
 The shell-out rungs are the crude floor: they show a banner and know nothing
 afterwards. `handle.backend` says which rung answered, so an app that cares

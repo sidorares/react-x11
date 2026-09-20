@@ -11,7 +11,7 @@ One namespace per kind of thing, and no name in both:
 - **`style`** — everything CSS has a concept for: layout, paint, text,
   `cursor`, `overflow`, `zIndex`, `pointerEvents`, `container`.
 - **props** — everything else: `title`, window geometry and size hints,
-  `resizable`, `wmClass`, `windowType`, `grab`, `value`, `src`, `focusable`,
+  `resizable`, `appId`, `windowType`, `grab`, `value`, `src`, `focusable`,
   `tabIndex`, `disabled`, handlers. The 3D elements keep flat property props
   (`position`, `material`) — those are object properties, not CSS.
 

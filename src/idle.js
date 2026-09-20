@@ -186,6 +186,17 @@ class IdleWatcher {
  */
 async function armIdle(watcher) {
   const session = watcher.session;
+
+  // The Windows rung, first because it is the only one there: everything
+  // below this reaches into `app.X`, and a tree that is not on an X server
+  // has none. `GetLastInputInfo` answers for the whole session, which is what
+  // an idle timeout means, so the shape is the polling rung's — with the
+  // answer arriving synchronously instead of over a connection.
+  if (typeof session.app?.lastInputMs === 'function') {
+    pollLastInput(watcher);
+    return;
+  }
+
   const counter = await session.counter();
   if (watcher.stopped) return;
 
@@ -281,6 +292,31 @@ function poll(watcher, saver) {
   });
 }
 
+/**
+ * The same adaptive wait as {@link poll}, over a counter this process can read
+ * without asking anybody: `GetLastInputInfo` is a call, not a round trip.
+ *
+ * The two directions are still asymmetric for the same reason. Not idle yet:
+ * sleep for exactly the remainder. Idle: nothing says when the user will come
+ * back, and no input reaches this process while they are typing in another
+ * window, so poll on an interval scaled to the timeout.
+ */
+function pollLastInput(watcher) {
+  if (watcher.stopped) return;
+  const elapsed = watcher.session.app.lastInputMs?.();
+  if (typeof elapsed !== 'number') return;
+  const idle = elapsed >= watcher.timeout;
+  watcher.set(idle);
+  clearTimeout(watcher._timer);
+  watcher._timer = setTimeout(
+    () => pollLastInput(watcher),
+    idle
+      ? Math.min(30_000, Math.max(1_000, watcher.timeout / 4))
+      : Math.max(250, watcher.timeout - elapsed),
+  );
+  watcher._timer.unref?.();
+}
+
 function schedule(watcher, saver, delay) {
   clearTimeout(watcher._timer);
   watcher._timer = setTimeout(() => poll(watcher, saver), delay);
@@ -364,7 +400,12 @@ export function setIdleForTests(app, timeout, idle) {
  * code and for tests.
  */
 export async function keepAwake({ reason = 'Busy', app = null } = {}) {
-  for (const rung of [portalInhibit, screenSaverInhibit, xInhibit]) {
+  for (const rung of [
+    windowsInhibit,
+    portalInhibit,
+    screenSaverInhibit,
+    xInhibit,
+  ]) {
     try {
       const release = await rung(reason, app);
       if (release) return once(release);
@@ -373,6 +414,23 @@ export async function keepAwake({ reason = 'Busy', app = null } = {}) {
     }
   }
   return () => {};
+}
+
+/**
+ * Rung 0: `SetThreadExecutionState`, on Windows.
+ *
+ * Above the portal rungs because it is the only one a Windows session has,
+ * and below nothing: on a desktop with a portal this returns null on the
+ * first line and costs a property read.
+ *
+ * `reason` is dropped rather than passed. Windows takes no string with the
+ * call — `powercfg /requests` names the process, not a reason — and inventing
+ * somewhere to put it would be pretending the system shows it.
+ */
+async function windowsInhibit(reason, app) {
+  const hold = app?.keepAwake;
+  if (typeof hold !== 'function') return null;
+  return hold.call(app, true);
 }
 
 /** A release that runs once however many times it is called — a double

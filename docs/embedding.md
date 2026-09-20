@@ -36,6 +36,16 @@ with `<window embeddable>`: created **unmapped** — a window waiting to be
 embedded is unmapped, that is what waiting looks like — and mapped by the
 embedder once reparented.
 
+**Being the guest yourself** — a react-x11 app embedded in somebody else's UI
+— is that same prop plus one accessor: `windowHandleOf(ref)` (or
+`useWindowHandle(ref)`) is the number you hand the host, out of band, the way
+`xterm -into` is handed one. On X11 it is the window's XID and the host
+reparents it. On Windows it is a composition surface handle and the host
+binds it to a visual of its own, because a window there stops presenting the
+moment it becomes a child ([windows-embedding.md](windows-embedding.md) has
+the measurements). `null` means this backend has no way to be a guest — the
+capability, not a failure.
+
 The protocol underneath is [XEmbed](http://specifications.freedesktop.org/xembed/0.5/),
 implemented in ntk (`XEmbedSocket`, ntk ≥ 7.4.0). This page is the React half:
 what the element does, what it promises about a window it does not own, and

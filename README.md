@@ -18,9 +18,10 @@ Build GUI programs for a Linux desktop, for a display at the other end of an
 ssh connection, or as a native Mac app, with your React / React Native
 experience — flexbox layout, components, hooks, synthetic events.
 
-### Two backends, one tree
+### Four backends, one tree
 
-The same components, the same hooks and the same `style` objects run on both:
+The same components, the same hooks and the same `style` objects run on all
+of them. The two that are mature:
 
 - **X11** ([the flagship](docs/remote.md)) — a Linux desktop, a display
   forwarded over `ssh -X`, `Xvfb` in CI, a thin client, or macOS through
@@ -35,20 +36,25 @@ The same components, the same hooks and the same `style` objects run on both:
   thin mechanism-only Objective-C++ bridge — an optional dependency shipping
   prebuilds, absent on Linux installs.
 
-`createRoot()` picks for you: **Cocoa on macOS** when the bridge is
-installed, X11 via `$DISPLAY` everywhere else, and X11 on a Mac without the
-bridge so an XQuartz setup keeps working. `createRoot({ backend: 'x11' })`
-or `REACT_X11_BACKEND=x11` pins it. On macOS the app's JS runs on a worker
+`createRoot()` picks for you: **Cocoa on macOS** and **win32 on Windows**
+when the matching bridge is installed, X11 via `$DISPLAY` everywhere else —
+and X11 on either of those without its bridge, so an XQuartz or WSLg setup
+keeps working. `createRoot({ backend: 'x11' })` or `REACT_X11_BACKEND=x11`
+pins it. On macOS the app's JS runs on a worker
 while AppKit keeps the main thread, so a menu, a drag or a live resize never
 stops it — `node app.js` is enough, and `REACT_X11_THREADED=0` keeps the
 main thread ([docs/macos.md](docs/macos.md#js-on-a-worker-a-ui-thread-of-the-bridges-own)).
 
-Two more backends are on the way, and the goal they serve is **full
-cross-platform support**: **Windows** — Win32 windows, Direct2D and
-DirectWrite, DWM compositing — with [docs/windows.md](docs/windows.md) as
-its PRD, and **native Wayland**, with [docs/wayland.md](docs/wayland.md)
-as its RFC. Both arrive as backends beside these two, not replacements for
-either: the same tree, the same components, the same `style` objects.
+Two more backends exist beside these, serving the goal of **full
+cross-platform support**, and both are younger than the two above.
+**native Wayland** ([docs/wayland.md](docs/wayland.md)) is opt-in rather than
+automatic, because X11 stays the default on Linux — the remote case is the
+flagship reason this project exists and Wayland has no network transparency.
+**Windows** ([docs/windows.md](docs/windows.md)) — Win32 windows, Direct2D
+and DirectWrite, DWM compositing through DirectComposition — renders and
+takes mouse input, with the desktop integrations still to come. Each is a
+backend beside the others rather than a replacement for any of them: the
+same tree, the same components, the same `style` objects.
 
 Layout is [yoga-layout](https://www.npmjs.com/package/yoga-layout) (WASM) on
 both, and text shaping is [fontkit](https://github.com/foliojs/fontkit) on
@@ -125,17 +131,26 @@ That is the shape of the problem this is good at:
 And the shape it is not good at, so you can stop here rather than in week
 three:
 
-- **Windows — today.** There is no Windows backend yet, so an app that has
-  to ship on Windows now wants Electron or Tauri. One is coming: a native
-  backend over Win32 windows, Direct2D and DirectWrite, composited by DWM
-  through DirectComposition, on a mechanism-only bridge shaped like the
-  Cocoa one. [docs/windows.md](docs/windows.md) is the PRD, from the
-  threading model up to what each desktop integration becomes. Two targets
-  ship meanwhile — X11 and Cocoa — and they are not the same app: the
-  desktop-shell half of X11 (`<foreign>` embedding, panel struts,
-  substructure redirect, the window-manager example below) has no macOS
-  equivalent, and `react-x11/test` drives the X11 backend only.
-  [docs/macos.md](docs/macos.md) says which is which.
+- **Windows — today.** The Windows backend is young, and further along than
+  that sounds. Win32 windows composited by DWM through DirectComposition,
+  Direct2D and DirectWrite behind the same contracts the Cocoa backend
+  proved, OpenGL, the keyboard and all five mouse buttons, popups, the
+  clipboard, file dialogs, the tray, the taskbar, global hotkeys,
+  notifications and window states — on a mechanism-only bridge shaped like
+  the Cocoa one, with a test suite and CI of its own. The examples run.
+  Drag and drop works both ways with the desktop, and the taskbar's own
+  surfaces — a thumbnail toolbar, a jump list, recent documents — are there
+  behind a capability, so an app that also runs elsewhere asks
+  `useSupports()` rather than the platform. What it does not have is **IME
+  and screen-reader support**: an app is unusable with a screen reader and
+  in CJK input. So an app that needs either on Windows _this month_ still
+  wants Electron or Tauri.
+  [docs/windows-integrations.md](docs/windows-integrations.md) is the
+  measured status and [docs/windows.md](docs/windows.md) the design. The three
+  targets are not the same app: the desktop-shell half of X11 (`<foreign>`
+  embedding, panel struts, substructure redirect, the window-manager example
+  below) has no macOS or Windows equivalent, and `react-x11/test` drives the
+  X11 backend only. [docs/macos.md](docs/macos.md) says which is which.
 - **native Wayland — today.** There is no Wayland backend yet. Ordinary
   application windows work fine on a Wayland desktop through Xwayland, which
   is not going away — but the desktop-shell half of X11 (panel struts,

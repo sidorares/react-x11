@@ -116,8 +116,14 @@ const root = await createRoot({
 }
 ```
 
-`nativeEvent.rootx/rooty` are screen coordinates — useful for anchoring a
-`<popup>` at the pointer.
+`ev.screenX`/`screenY` are where the pointer is on the virtual screen, in the
+same logical pixels `ev.x`/`y` are in — what to anchor a `<popup>` at, since
+`<popup x y>` are logical too. Undefined on an event with no pointer position.
+
+`nativeEvent.rootx/rooty` is the same point in **device** pixels, which is the
+unit a node's `abs` is in — reach for it when doing geometry against `abs`,
+and for nothing else. The split is the same one `ev.x` and `nativeEvent.x`
+have (docs/scale.md).
 
 On the Wayland backend a finger or a tablet tool drives the same mouse
 events, and those events alone carry `nativeEvent.pointerType` (`'touch'`,

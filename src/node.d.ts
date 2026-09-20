@@ -40,7 +40,7 @@ export interface ImageDataLike {
 /**
  * The 2d context a node paints into — the canvas-shaped subset **both**
  * backends implement: ntk's `RenderingContext2D` over XRender on X11, and
- * `CocoaContext2D` over CoreGraphics on macOS. Declared as the contract an
+ * `BackendContext2D` over CoreGraphics on macOS. Declared as the contract an
  * element may rely on rather than as either class: what is here is on
  * both, and a member one backend has and the other does not is optional
  * here or absent. Coordinates are device pixels in the owning window's

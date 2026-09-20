@@ -206,7 +206,7 @@ function scaleOf(m) {
 
 /**
  * The Render ops a `drawGlyphs` call can name, numbered as XRender numbers
- * them — the same table the Cocoa backend answers (`src/cocoa/context2d.js`),
+ * them — the same table the native backends answer (`src/backend/context2d.js`),
  * so `ctx.Render.PictOp.Over` reads the same on every backend. The op is
  * ignored here: text composites Over, and for the opaque inks text uses Src
  * and Over agree.

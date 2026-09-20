@@ -5,7 +5,7 @@ Guidance for AI agents (and new contributors) working on react-x11.
 ## What this project is
 
 A custom React renderer for desktop applications, with react-like
-ergonomics over **two backends**:
+ergonomics over **four backends**:
 
 - **X11** — [ntk](https://github.com/sidorares/ntk) /
   [node-x11](https://github.com/sidorares/node-x11), pure JavaScript
@@ -18,6 +18,25 @@ ergonomics over **two backends**:
   on darwin**, so `npm test`, the benches and the examples all behave
   differently there than they did before it existed — check which backend
   you are measuring. `docs/macos.md` is the design record.
+- **Wayland** — `src/wayland/`, the wire protocol in pure JavaScript with a
+  GLES rasterizer of its own (wayland.md's Tier D). **Opt-in only**, never
+  through `'auto'`: X11 stays the default on Linux because the remote case
+  is the flagship reason this project exists and Wayland has no network
+  transparency.
+- **win32** — `src/win32/`, over the `@windowkit/win32` bridge (an
+  `optionalDependency`, prebuilt). HWNDs on a UI thread of the bridge's own,
+  a DirectComposition surface per window, Direct2D drawing and DirectWrite
+  text. **The default on win32**, falling back to X11 when the bridge is
+  absent so a WSLg or Cygwin setup with `DISPLAY` keeps working.
+  `docs/windows.md` is the design record. Young: the examples render and
+  respond to the mouse, and the desktop services are not built.
+
+The 2d drawing dialect lives in **`src/backend/context2d.js`** and is shared
+by the two native bridges: the class takes its `native` as a constructor
+argument and calls nothing else, so one wrapper drives CoreGraphics verbs and
+Direct2D verbs alike. Wayland is deliberately not in that family — its
+context is a rasterizer that _draws_ the dialect rather than forwarding it,
+which is a different layer and not a duplicate.
 
 `createRoot()` resolves the backend (`src/Reconciler.js`, `resolveBackend`);
 everything above the node tree is shared, and a backend difference belongs
@@ -829,6 +848,48 @@ first and upgrade** — upgrading is invisible, and downgrading a feature the
 user has already reached for is not. Never latch a `false`: a panel restarts,
 an extension is enabled, a daemon is installed, and an app that cached the
 first answer outlives every one of those fixes.
+
+### Vocabulary: name the thing, not the desktop that has it
+
+**A public name is cross-platform or it is a bug.** Every desktop has its own
+word for the same thing — the Dock, the taskbar, the panel, the dash, the
+launcher — and picking one of them as the API name makes the other backends
+read like afterthoughts. Worse, it misdescribes: `useDockMenu` drove the Linux
+launcher's quicklist for a year while its name said macOS, and
+`<window wmClass>` was ICCCM's word for an identity every desktop has, so the
+Wayland backend — which had been reading `attributes.appId` all along — never
+saw the prop at all.
+
+The rule, in order:
+
+1. **Prefer the name the ecosystem already converged on.** `appId` is
+   Wayland's `app_id`, is what `registerApplication({ appId })` already
+   establishes, and reads correctly beside Windows' AppUserModelID and X11's
+   `WM_CLASS`.
+2. **Otherwise name the role, not one implementation of it.** `launcher` is
+   the icon every desktop shows for a running app, whatever that desktop calls
+   the strip it sits in — hence `useLauncherMenu`, and
+   `desktopCapability('launcher')` to ask whether there is one.
+3. **Keep the platform's own word where the thing is the platform's own.**
+   `useJumpList` and `useThumbnailToolbar` are Windows features with Windows
+   names; a portable-sounding name for something only one desktop has promises
+   more than it delivers. The same inward: AppKit's `setDockMenu` stays
+   `setDockMenu` on the native bridge, because that is the selector being
+   called.
+4. **`backend` names the mechanism, never the platform** — `taskbar`,
+   `shellnotifyicon`, `launcherentry`, `cocoa` — so a second mechanism on the
+   same OS needs no second name for the OS.
+
+Renaming a public name is a **rename plus an alias**, never a break:
+`export const useDockMenu = useLauncherMenu;` with `@deprecated` naming which
+word replaced which, and a test asserting the two are the same binding rather
+than two functions free to drift. The alias does not warn — an app on the old
+name is early, not wrong.
+
+X11 vocabulary is the standing offender, because this library started there.
+`rootWindow()`, `grabPointer`, `selectXI2`, `_NET_WM_*` and `queryPointer` are
+fine on the **backend seam**, which is one shared shape by design. They are not
+fine in a hook, a prop, or an event field an app reads.
 
 ## Protocol efficiency
 

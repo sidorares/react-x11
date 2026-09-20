@@ -116,6 +116,9 @@ const ROOT_CONTEXT = Object.freeze({
   isInsideText: false,
   isInsideSvg: false,
   atRoot: true,
+  // Nothing is above the root, so a window written straight into it waits for
+  // no palette — unlike one under a `<ThemeProvider>` there.
+  underRootScope: false,
   inWindow: false,
 });
 
@@ -191,6 +194,11 @@ const HostConfig = {
       // Still at the root under a `<ThemeProvider>` written there, which
       // draws nothing; under anything else, inside a window.
       atRoot: parentHostContext.atRoot && type === THEME_SCOPE,
+      // *Below* one of those providers, which is a different fact: a window
+      // here is handed its palette when the scope inserts it, after it was
+      // built. `atRoot` is true at the root itself, where no provider is
+      // waiting to hand anything over, so the two cannot be one flag.
+      underRootScope: parentHostContext.atRoot && type === THEME_SCOPE,
       // Directly inside a window, where a provider can hand a nested window
       // on to it.
       inWindow: type === 'window' || type === 'popup',
@@ -255,10 +263,19 @@ const HostConfig = {
       case 'window':
         // No X11 calls here: the render phase may be discarded. The real
         // window is created top-down in the commit phase (realize).
+        // `underRootScope` goes in at construction, not after it: this
+        // constructor resolves the window's own style, and a window under a
+        // root `<ThemeProvider>` is handed that palette only when the scope
+        // inserts it (nodes/scope.js). Until then its ancestry is incomplete
+        // and every `$token` the provider defines would be reported as
+        // unknown — a warning for a style that resolves correctly a moment
+        // later, and under `REACT_X11_STRICT_TOKENS=1` a throw that killed an
+        // app whose palette was fine.
         node = new WindowNode(
           rootContainer,
           windowAttributes(props, scaleOf(rootContainer)),
           props,
+          { awaitsRootScope: hostContext.underRootScope },
         );
         break;
       case 'popup':
@@ -641,11 +658,18 @@ const isNtkApp = (v) =>
  */
 function resolveBackend(options) {
   const asked = options.backend ?? process.env.REACT_X11_BACKEND ?? 'auto';
-  if (asked === 'x11' || asked === 'cocoa' || asked === 'wayland') return asked;
+  if (
+    asked === 'x11' ||
+    asked === 'cocoa' ||
+    asked === 'wayland' ||
+    asked === 'win32'
+  ) {
+    return asked;
+  }
   if (asked !== 'auto') {
     throw new Error(
       `react-x11: unknown backend ${JSON.stringify(asked)} — expected ` +
-        "'x11', 'cocoa', 'wayland' or 'auto'.",
+        "'x11', 'cocoa', 'wayland', 'win32' or 'auto'.",
     );
   }
   // Naming an X endpoint is choosing X11: a `display` or a `stream` (the
@@ -655,7 +679,13 @@ function resolveBackend(options) {
   if (options.display !== undefined || options.stream !== undefined) {
     return 'x11';
   }
-  return process.platform === 'darwin' ? 'cocoa' : 'x11';
+  if (process.platform === 'darwin') return 'cocoa';
+  // Windows has no X server to fall back to in the ordinary case, so 'auto'
+  // reaches for the native backend the way it does on a mac — and falls back
+  // to X11 below if the bridge is not installed, which is what keeps a Cygwin
+  // or WSLg setup with DISPLAY set working.
+  if (process.platform === 'win32') return 'win32';
+  return 'x11';
 }
 
 // What a root that opens its own connection forwards to ntk. `stream` is
@@ -769,17 +799,27 @@ export async function createRoot(options = {}) {
   // synchronous block, and only where the handshake takes longer than it. It
   // is not measurable on a Unix socket, and it is lost in the noise on a link
   // slow enough to matter. This is the right order, not a fast one.
-  const connectX11 = () =>
-    connect(
-      Object.fromEntries(
-        CONNECT_OPTIONS.filter((k) => rest[k] !== undefined).map((k) => [
-          k,
-          rest[k],
-        ]),
-      ),
+  // `REACT_X11_FONT_SOURCE` is the companion to `REACT_X11_BACKEND` above:
+  // an A/B run without touching code. ntk finds its fonts through fontconfig,
+  // and a machine with no `fc-match` — a slim container, or Windows, where
+  // the X11 backend is only ever run to compare it against the native one —
+  // has to be told where the fonts are instead. An explicit `fontSource`
+  // wins; this only fills the gap.
+  const connectX11 = () => {
+    const options = Object.fromEntries(
+      CONNECT_OPTIONS.filter((k) => rest[k] !== undefined).map((k) => [
+        k,
+        rest[k],
+      ]),
     );
+    options.fontSource ??= process.env.REACT_X11_FONT_SOURCE || undefined;
+    if (options.fontSource === undefined) delete options.fontSource;
+    return connect(options);
+  };
   const cocoaAsked =
     rest.backend === 'cocoa' || process.env.REACT_X11_BACKEND === 'cocoa';
+  const win32Asked =
+    rest.backend === 'win32' || process.env.REACT_X11_BACKEND === 'win32';
   const connecting = !owned
     ? Promise.resolve(borrowed)
     : backend === 'wayland'
@@ -791,25 +831,44 @@ export async function createRoot(options = {}) {
         import('./wayland/app.js').then(({ createWaylandApp }) =>
           createWaylandApp(rest),
         )
-      : backend === 'cocoa'
-        ? import('./cocoa/app.js')
-            .then(({ createCocoaApp }) => createCocoaApp(rest))
+      : backend === 'win32'
+        ? import('./win32/app.js')
+            .then(({ createWin32App }) => createWin32App(rest))
             .catch((err) => {
-              // Asked for by name, the bridge is required and its absence is
-              // the error (it says how to install). Reached by 'auto', a mac
-              // without it falls back to X11 so an XQuartz setup keeps
-              // working — said once, because a silent fallback would look
-              // like the native backend being broken rather than absent.
-              if (cocoaAsked) throw err;
+              // Same bargain as cocoa's below: asked for by name the bridge is
+              // required and its absence is the error, reached by 'auto' a
+              // machine without it falls back to X11 so a WSLg or Cygwin setup
+              // with DISPLAY set keeps working — said once, because a silent
+              // fallback reads as the native backend being broken rather than
+              // absent.
+              if (win32Asked) throw err;
               if (process.env.NODE_ENV !== 'production') {
                 console.warn(
-                  'react-x11: no @windowkit/appkit bridge — falling back to the ' +
+                  'react-x11: no @windowkit/win32 bridge — falling back to the ' +
                     `X11 backend. (${err.message.split('\n')[0]})`,
                 );
               }
               return connectX11();
             })
-        : connectX11();
+        : backend === 'cocoa'
+          ? import('./cocoa/app.js')
+              .then(({ createCocoaApp }) => createCocoaApp(rest))
+              .catch((err) => {
+                // Asked for by name, the bridge is required and its absence is
+                // the error (it says how to install). Reached by 'auto', a mac
+                // without it falls back to X11 so an XQuartz setup keeps
+                // working — said once, because a silent fallback would look
+                // like the native backend being broken rather than absent.
+                if (cocoaAsked) throw err;
+                if (process.env.NODE_ENV !== 'production') {
+                  console.warn(
+                    'react-x11: no @windowkit/appkit bridge — falling back to the ' +
+                      `X11 backend. (${err.message.split('\n')[0]})`,
+                  );
+                }
+                return connectX11();
+              })
+          : connectX11();
   const layout = loadLayout();
   const integrations = loadIntegrations(); // null when there is nothing to install
   const [app] = await Promise.all([connecting, layout, integrations]);
@@ -843,7 +902,7 @@ export async function createRoot(options = {}) {
   // critical path — every rung that fails is a normal, silent "off"
   // (docs/accessibility.md). Deliberately not awaited: a root must not
   // wait on a bus that is not there.
-  startA11y();
+  startA11y(app);
 
   // Before anything renders: the launch id has to be on the first toplevel
   // before it maps, and the environment variable has to be consumed whether

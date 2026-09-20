@@ -6,7 +6,7 @@
 // buffer the same way on both backends and names neither:
 //
 //   const surface = new Surface(app, { width, height });   // device pixels
-//   const ctx = surface.getContext('2d');                    // a CocoaContext2D
+//   const ctx = surface.getContext('2d');                    // a BackendContext2D
 //   ctx.fillRect(0, 0, width, height);
 //   surface.copyWithin({ x: 0, y: 0, width, height }, 0, -rowHeight);
 //   windowCtx.drawImage(surface, x, y);                      // one composite
@@ -43,7 +43,7 @@
 // one from `contentBox()` numbers, which are device pixels already
 // (docs/scale.md). The bridge is told the app's scale so the bitmap carries
 // it — inert for a `drawImage` source, right for a layer's contents.
-import { CocoaContext2D } from './context2d.js';
+import { BackendContext2D } from '../backend/context2d.js';
 
 export class CocoaSurface {
   constructor(app, { width, height, format = 'argb32' } = {}) {
@@ -113,7 +113,7 @@ export class CocoaSurface {
 
   _context() {
     if (!this._ctx) {
-      this._ctx = new CocoaContext2D(
+      this._ctx = new BackendContext2D(
         this._native,
         () => this._handle(),
         () => 1,

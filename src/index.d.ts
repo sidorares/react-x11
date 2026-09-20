@@ -27,6 +27,7 @@ export * from './types/fonts.js';
 export * from './types/system.js';
 export * from './types/capabilities.js';
 export * from './types/launcher.js';
+export * from './types/taskbar.js';
 export * from './types/tray.js';
 export * from './types/permissions.js';
 export * from './types/notifications.js';
@@ -59,6 +60,46 @@ export function windowIdOf(
  * render that matters.
  */
 export function useWindowId(
+  ref: RefObject<NtkWindow | DrawnNode | null>,
+): () => number | null;
+
+/**
+ * The handle **another process** embeds to show this window, or `null` where
+ * this backend cannot hand one out.
+ *
+ * The companion to `<window embeddable>`, and deliberately not
+ * {@link windowIdOf}: on X11 the two are the same number, and everywhere
+ * else they are not.
+ *
+ * - **X11** — the window's XID, which means the same thing in every process
+ *   on the display.
+ * - **Windows** — a composition surface handle, already valid in the host
+ *   process. A window cannot be embedded here (a composition target stops
+ *   presenting once its window is a child), so the *buffer* crosses instead
+ *   and the host binds it to a visual of its own. The host is the parent
+ *   process unless `createRoot({ win32: { paneHostPid } })` says otherwise.
+ * - **Anything else** — `null`, which is the capability rather than a
+ *   failure.
+ *
+ * Pass it to the host out of band, as an XID is passed: argv, an environment
+ * variable, a message. What the host does with it differs per platform; what
+ * an app writes to get it does not.
+ */
+export function windowHandleOf(
+  target:
+    | NtkWindow
+    | DrawnNode
+    | RefObject<NtkWindow | DrawnNode | null>
+    | null
+    | undefined,
+): number | null;
+
+/**
+ * `windowHandleOf` bound to a ref. A **getter**, stable across renders, for
+ * {@link useWindowId}'s reason: the window is not realized on the render
+ * that declares it.
+ */
+export function useWindowHandle(
   ref: RefObject<NtkWindow | DrawnNode | null>,
 ): () => number | null;
 

@@ -305,7 +305,7 @@ export default function App({ source }) {
       height={480}
       title="Downloads"
       minWidth={340}
-      wmClass="com.example.x11downloads"
+      appId="com.example.x11downloads"
       style={{ backgroundColor: SURFACE }}
     >
       <box style={{ flexGrow: 1, padding: 16, gap: 12 }}>

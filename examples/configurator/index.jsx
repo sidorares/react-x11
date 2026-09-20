@@ -1479,7 +1479,7 @@ export function App(props) {
       height={840}
       minWidth={680}
       minHeight={540}
-      wmClass="com.example.x11configurator"
+      appId="com.example.x11configurator"
       style={{ backgroundColor: PAPER, flexDirection: 'column' }}
     >
       <Configurator {...props} />

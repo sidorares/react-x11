@@ -232,6 +232,23 @@ export function windowAttributes(props, scale = 1) {
         : props[key];
   }
   if (Object.keys(hints).length > 0) attributes.sizeHints = hints;
+  // The desktop identity of this window, under the one name every desktop's
+  // own word maps onto: `WM_CLASS` on X11, `app_id` on Wayland,
+  // AppUserModelID on Windows. `wmClass` was X11's word for it and is still
+  // accepted, so both are normalised here and a backend reads one key.
+  //
+  // X11 carries a *pair* — an instance naming this window and a class naming
+  // the application — and everything since carries one string. The class is
+  // the application's, so the class is what a single-id backend is given; the
+  // pair itself still reaches `setClass` from the props (`applyWindowHints`).
+  const identity = attributes.appId ?? attributes.wmClass;
+  if (identity !== undefined) {
+    attributes.appId = Array.isArray(identity)
+      ? (identity[1] ?? identity[0])
+      : identity && typeof identity === 'object'
+        ? (identity.class ?? identity.instance)
+        : identity;
+  }
   if (props.style !== undefined) {
     const style = flattenStyle(props.style);
     if (style.backgroundColor !== undefined) {
@@ -325,8 +342,10 @@ export class WindowHints {
         this._sendSizeHints(next);
       }
     }
-    if (!shallowEqual(next.wmClass, prev.wmClass) && next.wmClass) {
-      const c = next.wmClass;
+    const identity = next.appId ?? next.wmClass;
+    const wasIdentity = prev.appId ?? prev.wmClass;
+    if (!shallowEqual(identity, wasIdentity) && identity) {
+      const c = identity;
       if (Array.isArray(c)) wnd.setClass?.(c[0], c[1]);
       else if (typeof c === 'object') wnd.setClass?.(c.instance, c.class);
       else wnd.setClass?.(c);

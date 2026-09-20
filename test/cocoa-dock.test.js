@@ -14,7 +14,11 @@ import React from 'react';
 import { createRoot } from '../src/index.js';
 import { CocoaApp } from '../src/cocoa/app.js';
 import { setBadge } from '../src/launcher.js';
-import { useBadge, useDockMenu } from '../src/launcherhooks.js';
+import {
+  useBadge,
+  useDockMenu,
+  useLauncherMenu,
+} from '../src/launcherhooks.js';
 import { setScaleForTests } from '../src/scale.js';
 import { setScreensForTests } from '../src/screens.js';
 import { setCompositingForTests } from '../src/compositing.js';
@@ -208,7 +212,14 @@ test('a window destroyed mid-bounce takes its request with it', async () => {
   assert.deepEqual(native.of('cancelUserAttention'), [[1]]);
 });
 
-test('useDockMenu installs the items and a pick runs the item’s own onSelect', async () => {
+test('the old hook name is the new one, not a copy of it', () => {
+  // "Dock" is one desktop's word for the icon every desktop has, and this
+  // hook drove the Linux launcher's quicklist long before the name caught up.
+  // Identity rather than a wrapper: a caller cannot hold two that drift.
+  assert.equal(useDockMenu, useLauncherMenu);
+});
+
+test('useLauncherMenu installs the items and a pick runs the item’s own onSelect', async () => {
   const native = fakeNative();
   const app = appOver(native);
   const root = await createRoot({ app });
@@ -223,7 +234,7 @@ test('useDockMenu installs the items and a pick runs the item’s own onSelect',
     },
   ];
   function Menu() {
-    useDockMenu(items);
+    useLauncherMenu(items);
     return h('box');
   }
   root.render(h('window', { width: 200, height: 100 }, h(Menu)));

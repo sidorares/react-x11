@@ -8,6 +8,7 @@
 import { useCallback, useMemo } from 'react';
 
 import { useAppOrNull } from './appcontext.js';
+import { canEmbed } from './embedding.js';
 
 /**
  * The XID of the X11 window a ref points at, or `null` if there is not one
@@ -60,6 +61,71 @@ export function windowOf(target) {
   if (typeof target.root?.window?.id === 'number') return target.root.window;
   if (typeof target.id === 'number') return target;
   return null;
+}
+
+/**
+ * The handle **another process** embeds to show this window, or `null` if
+ * this backend cannot hand one out.
+ *
+ * `<window embeddable>` is how a window says "created, not shown; somebody
+ * else will place me" — the guest half of embedding, on every backend. This
+ * is the number that goes with it, and it is deliberately not `windowIdOf`:
+ * on X11 the two are the same, and everywhere else they are not.
+ *
+ * - **X11** — the window's XID. The same number in every process on the
+ *   display, which is why one function answered both questions there and
+ *   why nobody noticed they were two questions.
+ * - **Windows** — a **composition surface handle**, already valid in the
+ *   host process. A window cannot be embedded here at all: a composition
+ *   target stops presenting the moment its window becomes a child, measured
+ *   in docs/windows-embedding.md. So what crosses is the buffer, and the
+ *   host binds it to a visual of its own instead of reparenting. The host is
+ *   the parent process by default — `createRoot({ win32: { paneHostPid } })`
+ *   when it is not.
+ * - **Anything else** — `null`. Not an error: it is the capability, and the
+ *   honest answer for a backend with no way to be a guest.
+ *
+ * The handle is a number to be passed out of band, exactly as an XID is —
+ * argv, an environment variable, a message on a pipe. What the host does
+ * with it is the host's business and differs per platform; what an app
+ * writes to *get* it does not.
+ *
+ * ```jsx
+ * const guest = useRef(null);
+ * useEffect(() => {
+ *   const handle = windowHandleOf(guest);
+ *   if (handle !== null) process.send?.({ type: 'embed-me', handle });
+ * }, []);
+ * return <window ref={guest} embeddable />;
+ * ```
+ */
+export function windowHandleOf(target) {
+  const wnd = windowOf(target);
+  if (!wnd) return null;
+  // A backend that publishes something other than its window says so with a
+  // method, because only it knows what that something is.
+  if (typeof wnd.embedHandle === 'function') return wnd.embedHandle();
+  // …and where windows themselves are embeddable, the window id is it. The
+  // same question `<foreign>` asks before it builds a socket, so the two
+  // halves of embedding cannot disagree about whether this one works.
+  if (canEmbed(wnd.app ?? null)) return windowIdOf(wnd);
+  return null;
+}
+
+/**
+ * `windowHandleOf` bound to a ref: a **getter**, stable across renders — the
+ * shape `useWindowId` has, and for the same reason. A window is not realized
+ * on the render that declares it, so a value read then would be null on the
+ * render that matters.
+ *
+ * ```js
+ * const handle = useWindowHandle(guestRef);
+ * // …later, in an effect, once the tree is mounted:
+ * const forTheHost = handle();
+ * ```
+ */
+export function useWindowHandle(ref) {
+  return useCallback(() => windowHandleOf(ref), [ref]);
 }
 
 /**

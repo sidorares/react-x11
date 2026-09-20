@@ -58,9 +58,20 @@ export function glxConfig(app, spec) {
         .chooseGLXConfig(spec)
         .then((config) => ({ backend: 'indirect', ...config }));
     } else {
+      // Which backend is asking decides what the honest answer is. Telling a
+      // Windows user to upgrade ntk sends them after a package that backend
+      // does not use, and an error a developer cannot act on is worse than
+      // the feature simply being absent (AGENTS.md, "An error you hit is an
+      // error an app developer will hit").
       promise = Promise.reject(
         new Error(
-          'react-x11: <glarea> needs ntk >= 3.6.0 (app.chooseGLConfig)',
+          process.platform === 'win32'
+            ? 'react-x11: <glarea> is not built on the win32 backend yet — it ' +
+                'needs ANGLE (EGL and GLES over Direct3D 11), which ' +
+                'docs/windows.md plans as an optional dependency the way ' +
+                'x11-dri is on X11. Everything else on this backend works ' +
+                'without it; for GL content today, use the X11 backend.'
+            : 'react-x11: <glarea> needs ntk >= 3.6.0 (app.chooseGLConfig)',
         ),
       );
     }

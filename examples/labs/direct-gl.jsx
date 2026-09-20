@@ -331,7 +331,7 @@ function App() {
       width={560}
       height={520}
       title="Direct GL — shaders"
-      wmClass="com.example.x11directgl"
+      appId="com.example.x11directgl"
       style={{ flexGrow: 1, backgroundColor: '#171922' }}
     >
       <Lab />

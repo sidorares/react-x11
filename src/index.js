@@ -4,7 +4,13 @@ import './bootstrap.js';
 
 export { createRoot, Renderer } from './Reconciler.js';
 export { createStyles, flattenStyle } from './styles.js';
-export { windowIdOf, useWindowId, useTopLevelWindow } from './windowid.js';
+export {
+  windowIdOf,
+  useWindowId,
+  windowHandleOf,
+  useWindowHandle,
+  useTopLevelWindow,
+} from './windowid.js';
 export { launchTimestamp, notifyStartupComplete } from './startup.js';
 export { activateWindow } from './activate.js';
 export { lastInputTime, serverTime } from './inputtime.js';
@@ -14,9 +20,30 @@ export {
   registerApplication,
 } from './application.js';
 export { useAppActivate, useAppOpen } from './apphooks.js';
-export { setBadge, setProgress, setQuicklist, setUrgent } from './launcher.js';
-export { useBadge, useDockMenu, useProgress } from './launcherhooks.js';
+export {
+  setBadge,
+  setLauncherMenu,
+  setProgress,
+  setQuicklist,
+  setUrgent,
+} from './launcher.js';
+export {
+  useBadge,
+  useDockMenu,
+  useLauncherMenu,
+  useProgress,
+} from './launcherhooks.js';
 export { useTray } from './trayhooks.js';
+// The Windows taskbar's own surfaces. Exported unconditionally and inert
+// where the backend has none — `useDesktopCapability('launcher').features`
+// carries `tasks`, `thumbnailToolbar` and `recentDocuments`, so an app
+// branches on what this desktop has rather than on the platform.
+export {
+  noteRecentDocument,
+  useJumpList,
+  useRecentDocument,
+  useThumbnailToolbar,
+} from './taskbarhooks.js';
 export {
   CAPABILITIES,
   NO_CAPABILITY,

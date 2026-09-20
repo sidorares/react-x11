@@ -1,16 +1,41 @@
 # A native Windows backend
 
-**Status: research PRD.** No code. Written 2026-09-11 against react-x11
-2.11.0 (`13ffb34`) and `@windowkit/appkit` 0.9 — and, unlike
-[wayland.md](wayland.md) and [macos.md](macos.md), written **on a Mac**:
-nothing below has been run on Windows yet. The line counts are measurements
-from that date. Every claim about Windows comes from Microsoft's
-documentation or from shipping source code — Chromium, Firefox, Electron,
-Flutter, winit, Qt, SDL — and the sources are listed in §References. Where
-the sources left a question open it is marked unverified rather than
-guessed, and the claims the design leans on hardest are gathered in
-§"What to probe first", the checklist for the first session on a Windows
-machine.
+**Status: phases 0–2 are built, on hardware.** Written 2026-09-11 as a
+research PRD against react-x11 2.11.0 (`13ffb34`) — on a Mac, with nothing
+run on Windows — and first built against 2.16.1 on 2026-09-18, on Windows 11
+build 26200 with a GTX 1080 Ti. What that first session settled:
+
+- **The threading model holds.** A `setInterval` kept its cadence through a
+  twelve-second run with a live window: 46 ticks against ~48 due. §"Threads
+  and the event loop" shape 3 is the design, and it is no longer a claim.
+- **The surface model holds.** `BeginDraw` per damage rect, `Commit` per
+  frame, over a virtual surface, with `src/backend/context2d.js` driving the
+  Direct2D verb table unchanged — macos.md's split paying for itself.
+- **DirectWrite answers the engine contract**, `DetermineMinWidth` included.
+- `examples/simple.jsx`, `widgets.jsx`, `tasks.jsx`, `form/` and
+  `dashboard.jsx` render, and synthetic input reaches React handlers.
+
+Since then: the desktop services (clipboard — text only —, drag and drop
+both ways, dialogs, tray, notifications), `<popup>`, input methods on IMM32,
+and the headless suite under `test/win32/` against a fake bridge.
+
+Since then also: `<Frame>` panes over a shared composition surface, and the
+**compositor frame clock**, which was the last thing pacing frames off a JS
+timer — on a 180Hz display that timer delivered 34.8 frames a second in an
+alternating 16/31ms rhythm, and nothing else about a frame mattered until it
+was gone (§"The frame clock").
+
+Still open: **live per-window scale** (the renderer cannot re-scale a window
+that is already up), and UI Automation's **text ranges**, without which a
+screen reader reads a field but cannot move through it. §"The plan" tracks
+it.
+
+The line counts below are measurements from 2026-09-11. Every claim about
+Windows not marked as measured comes from Microsoft's documentation or from
+shipping source code — Chromium, Firefox, Electron, Flutter, winit, Qt, SDL
+— and the sources are listed in §References. Where the sources left a
+question open it is marked unverified rather than guessed, and the claims
+the design leans on hardest are gathered in §"What to probe first".
 
 It started from an architecture brief for "a modern Win32 toolkit
 backend": Win32 windows, Direct3D 11 with a flip-model swapchain under
@@ -24,10 +49,10 @@ cross-checked" goes through it point by point.
 
 ## What this is, and is not
 
-This is the plan for the **third backend family**, and the step that makes
-react-x11 cross-platform rather than a Linux-and-Mac project: X11 and Cocoa
-ship, Wayland is researched ([wayland.md](wayland.md)), and this is
-Windows. Like both of those it is **a backend beside the others, not a
+This is the plan for the **fourth backend family**, and the step that makes
+react-x11 cross-platform rather than a Linux-and-Mac project: X11, Cocoa and
+Wayland ship — Wayland landed in #548 three days after this document was
+written, which is what made `src/backend/` due — and this is Windows. Like both of those it is **a backend beside the others, not a
 migration**. X11 stays the remote answer ([remote.md](remote.md)) and the
 window-manager story; the Cocoa path is untouched; nothing below changes
 how either works — except to lift the pieces of `src/cocoa/` that were
@@ -554,13 +579,34 @@ tree allows.
 
 ### The frame clock
 
-A thread of the addon's blocks on the display's clock and ticks JS through
-the threadsafe function: the compositor clock on Windows 11
-(`DCompositionWaitForCompositorClock`, which is not tied to the primary
-monitor and wants a timeout — Chromium gives it 100 ms, because the wait
-hangs if the adapter goes away), and before it `IDXGIOutput::WaitForVBlank`
-on the output under the window, where Chromium's default vsync thread waits
-on the primary's. The frame queue above it is the Cocoa one: per-window
+**Built** (windows/src/frameclock.cc). A thread of the addon's blocks on
+`DCompositionWaitForCompositorClock` and ticks JS through the threadsafe
+function; JS asks one tick at a time through an auto-reset event, so an idle
+application parks that thread and there is no polling anywhere in it.
+
+Why it was worth building first, measured through one harness on a 180Hz
+display:
+
+|                  | fps   | gap p50 | what arrived                    |
+| ---------------- | ----- | ------- | ------------------------------- |
+| `setTimeout(16)` | 34.0  | 31.0ms  | 31ms x233 · 16ms x30 · 32ms x24 |
+| compositor clock | 180.2 | 5.6ms   | 6ms x245 · 5ms x54              |
+
+Node rounds a timer up to the next system tick, the default tick is 15.6ms,
+and a 16.67ms request therefore lands on the **second** one. So the old clock
+was not a slow 60Hz — it was 34Hz alternating between one tick and two, which
+is the rhythm the eye reads as judder. No amount of making frames cheaper
+touched it: the frames that led here cost 0.9ms each.
+
+Two details from shipping practice, and what this does about each. The wait
+is not tied to the primary monitor, which is why it is preferred over
+`IDXGIOutput::WaitForVBlank` on the output under the window (where Chromium's
+default vsync thread waits on the primary's anyway). And it can hang if the
+adapter goes away — Chromium answers that with a 100ms timeout; here the
+quit event is passed into the wait, so shutdown never blocks on it, and the
+_frame_ hazard is answered one level up: JS watches a promised tick for 250ms
+and falls back to the timer for the rest of the session if it does not come.
+That watchdog covers a tick lost for any reason, not only this one. The frame queue above it is the Cocoa one: per-window
 intervals from the refresh rate of the monitor under the window
 (`frameIntervalFor`), a discrete input answered on the spot
 (`flushPendingFrames`), a window nobody can see owing nothing, and
@@ -860,13 +906,44 @@ swappable; the default is DirectWrite.
 
 ### IME
 
-Input methods are where this backend can be ahead of both shipped ones:
-X11 has none ([#272](https://github.com/sidorares/react-x11/issues/272)) and
-Cocoa's `NSTextInputClient` is unbuilt. The surface they arrive on exists
-already — the composition state machine in `events.js`
-(`CompositionStart`, `Update`, `End`, each defaultable) and the preedit
-model in `src/nodes/preedit.js`, which keeps a composition out of the value
-and the undo history. Two Windows APIs can feed it:
+**Built, on IMM32** — `windows/src/ime.cc` and `src/win32/ime.js`. Input
+methods are where this backend is ahead of both shipped ones: X11 has none
+([#272](https://github.com/sidorares/react-x11/issues/272)) and Cocoa's
+`NSTextInputClient` is unbuilt. The surface they arrive on existed already —
+the composition state machine in `events.js` (`CompositionStart`, `Update`,
+`End`, each defaultable) and the preedit model in `src/nodes/preedit.js`,
+which keeps a composition out of the value and the undo history — so what was
+written is a transport and nothing else.
+
+What it does:
+
+- The composition **string** is the application's and the composition
+  **window** is suppressed (`WM_IME_SETCONTEXT` minus
+  `ISC_SHOWUICOMPOSITIONWINDOW`), because the preedit belongs in the field,
+  where it is laid out and styled with the rest of the text. The **candidate
+  list** is not suppressed: choosing among homophones is the input method's
+  own interface and its vocabulary, not this application's.
+- The order is the one `src/wayland/textinput.js` `_apply` fixes — **the
+  commit first, then the new preedit** — because that is the order the
+  renderer's events are defined in rather than a detail of either protocol.
+  One `WM_IME_COMPOSITION` can carry both.
+- `GCS_COMPATTR`'s target clause becomes the preedit cursor
+  (`cursorBegin`/`cursorEnd`), which is the same fact Wayland's text-input
+  carries under that name, so the field's existing preedit styling draws it.
+- Offsets cross the bridge as UTF-16 code units and are converted to code
+  points in JS, where the string is.
+- `ImmSetCompositionWindow` and `ImmSetCandidateWindow` are fed from the
+  caret rect, pushed after each frame — the layout the rect is read off is
+  the one just painted.
+- A `sensitive` field is not offered to an input method at all: its context
+  is disassociated, so the text never reaches a word history. Windows does
+  the same for its own password boxes.
+- `VK_PROCESSKEY` is forwarded and **not** decoded, or every keystroke of a
+  composition would also type its Latin letter into the field; `WM_IME_CHAR`
+  is swallowed, since the committed text has already arrived as
+  `GCS_RESULTSTR`.
+
+Two Windows APIs can feed this, and the second is still ahead:
 
 | toolkit                    | IME API                                                         |
 | -------------------------- | --------------------------------------------------------------- |
@@ -875,7 +952,7 @@ and the undo history. Two Windows APIs can feed it:
 | Qt 6, winit, Flutter, SDL3 | IMM32                                                           |
 | GLFW                       | no composition at all                                           |
 
-- **IMM32** — `WM_IME_STARTCOMPOSITION`; `WM_IME_COMPOSITION`, with
+- **IMM32** (built) — `WM_IME_STARTCOMPOSITION`; `WM_IME_COMPOSITION`, with
   `ImmGetCompositionString` for the preedit, its cursor, its clause
   attributes and the committed result; `WM_IME_ENDCOMPOSITION`; and
   `ImmSetCompositionWindow`/`ImmSetCandidateWindow` fed from the caret rect
@@ -898,42 +975,45 @@ and the undo history. Two Windows APIs can feed it:
   flowing out when JS rewrites the field under an open composition.
 
 **IMM32 first, TSF as the target.** IMM32 fits the threading rules with no
-mirror and carries CJK composition and candidate lists; TSF is Phase 5,
-with a mirror scoped to the focused field and nothing else. The touch
+mirror and carries CJK composition and candidate lists, and is what is built;
+TSF is Phase 5, with a mirror scoped to the focused field and nothing else.
+The compatibility-layer gaps above — voice typing, handwriting,
+shape-writing — are the price of the first rung and the reason there is a
+second one. The touch
 keyboard, separately, appears for a focused text field because UI
 Automation says it is one — not because of either API (§Accessibility).
 
 ## Windowing semantics: what maps, what bends, what breaks
 
-| react-x11 today                                    | Windows                                                                                                                                                                                                                                                         | verdict                                                                                            |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `<window>`, WM-managed                             | a top-level HWND; geometry, activation and close requests arrive as messages on the UI thread                                                                                                                                                                   | maps; the app places itself, unlike on Wayland                                                     |
-| `<window x y>`                                     | `SetWindowPos` in virtual-screen coordinates, which go negative left of and above the primary monitor                                                                                                                                                           | maps                                                                                               |
-| auto-sizing                                        | measure, then size before the first show — the `realize()` order                                                                                                                                                                                                | maps                                                                                               |
-| `<popup>`                                          | an owned `WS_POPUP` with `WS_EX_NOACTIVATE` and `WS_EX_TOOLWINDOW` (no taskbar button, no Alt+Tab entry), placed by `anchor.js` against the monitor's work area; rounded and shadowed on Windows 11 by asking DWM, which treats the corner preference as a hint | maps — client-side placement survives, as on macOS                                                 |
-| `<popup grab>` dismissal                           | no cross-application pointer grab: `SetCapture` holds only while a button is down, so dismissal watches the owner's activation and presses in the app's other windows                                                                                           | bends — the same behaviour by another mechanism                                                    |
-| `decorations: false`, a drawn titlebar             | `WM_NCCALCSIZE` returns 0, `DwmExtendFrameIntoClientArea` keeps the shadow and snapping, `WM_NCHITTEST` answers from pushed regions — `HTMAXBUTTON` for Snap Layouts — and caption buttons route through `DwmDefWindowProc`                                     | maps, given a region API (open question 7)                                                         |
-| maximized, minimized, fullscreen, attention        | `ShowWindow`; a borderless monitor-sized window; `FlashWindowEx`                                                                                                                                                                                                | maps                                                                                               |
-| `alwaysOnTop`, `skipTaskbar`, `below`              | `HWND_TOPMOST`; `WS_EX_TOOLWINDOW` or `ITaskbarList::DeleteTab`; `HWND_BOTTOM`, which is not kept                                                                                                                                                               | maps — more of `_NET_WM_STATE` than macOS keeps; `sticky` and `shaded` have no public equivalent   |
-| `transientFor`                                     | the owner window, set at creation                                                                                                                                                                                                                               | maps — an owned window stays above its owner and minimizes with it                                 |
-| `wmClass`                                          | the window's AppUserModelID and relaunch properties, which decide taskbar grouping and what pinning pins                                                                                                                                                        | bends — the identity exists, under another name                                                    |
-| `transparent`                                      | `WS_EX_NOREDIRECTIONBITMAP` and premultiplied DirectComposition content                                                                                                                                                                                         | maps better — always composited; `useSupports('transparency')` is constant-true                    |
-| frame clock (Present, fence, estimator)            | the compositor clock or the vblank, and on Windows 11 the compositor's statistics                                                                                                                                                                               | simpler, and on Windows 11 photon time is measurable                                               |
-| the scale ladder                                   | per-monitor-v2 on the UI thread; `WM_DPICHANGED` with the suggested rect taken as given                                                                                                                                                                         | collapses to one live answer, fractional most of the time — and live means re-scaling (§Layout)    |
-| `useScreens()`                                     | `EnumDisplayMonitors`; `GetMonitorInfo`, whose work area is `available` exactly where X11's is an approximation; names and refresh rates from the display-configuration API; `WM_DISPLAYCHANGE` — queried on the UI thread, which is DPI-aware, and published   | maps                                                                                               |
-| clipboard                                          | `CF_UNICODETEXT`, `CF_HDROP`, `HTML Format`, PNG; delayed rendering for lazy payloads, answered on the owner window's thread; `AddClipboardFormatListener` for `watch()`; no `PRIMARY`                                                                          | maps; `transfer.js`'s MIME plumbing is reusable                                                    |
-| drag and drop                                      | OLE — `RegisterDragDrop` and `IDropTarget`, `DoDragDrop` and `IDropSource`, shell drag images; virtual files for a drag out that makes its file on demand. Windows' integrity levels refuse a drop from Explorer into an elevated app                           | maps — the `dropAccept`/`onDrag*`/`dragData` contract holds, and JS keeps running through the drag |
-| global menu                                        | none: the drawn `MenuBar`, the fallback path anyway; a native `HMENU` bar as an opt-in rung; `ContextMenu` over `TrackPopupMenuEx` as its native rung, as `NSMenu` is on Cocoa                                                                                  | bends                                                                                              |
-| `<foreign>`                                        | a cross-process child window is allowed, and costly in a known way: the two programs' input queues are attached, so a hung child hangs the parent; no XEmbed focus protocol                                                                                     | bends                                                                                              |
-| `<Frame>`                                          | the host makes a composition surface handle and hands it to the pane, which presents into it through a swapchain made for it — the IOSurface design, with the host's visual tree showing what the pane draws                                                    | maps                                                                                               |
-| `examples/wm.jsx`, framing other programs' windows | —                                                                                                                                                                                                                                                               | **gone by design**                                                                                 |
-| startup notification, `activateWindow`             | Windows' own launch feedback; `SetForegroundWindow` under the foreground rules, where the second instance forwarding a URI first grants the running one the right to come forward (`AllowSetForegroundWindow`)                                                  | dissolves; the raise maps, with its own version of the X11 timestamp lesson                        |
-| URI schemes, single instance                       | the scheme registered under `HKCU\Software\Classes` (no admin — the `.desktop` file's job), a named pipe or `WM_COPYDATA` to the running instance                                                                                                               | maps — the two-copies shape `application.js` already handles                                       |
-| tray                                               | `Shell_NotifyIcon`, its menu through `TrackPopupMenuEx`                                                                                                                                                                                                         | **gained**; the freedesktop rung is StatusNotifierItem (#353)                                      |
-| `<glarea>`                                         | ANGLE into a composition swapchain                                                                                                                                                                                                                              | bends — two DLLs to ship                                                                           |
-| eyedropper                                         | no system sampler: a rung of our own, reading the screen without a permission prompt; windows that exclude themselves from capture read as absent                                                                                                               | maps — the X11 rung's shape                                                                        |
-| global key grabs                                   | `RegisterHotKey`, system-wide, no admin — registered against a window on the UI thread, because a thread hotkey's message is eaten by modal loops; a combination another app holds fails, and the Windows-key combinations are reserved                         | maps — which macOS allows only behind a permission                                                 |
-| `ssh -X` remoting                                  | —                                                                                                                                                                                                                                                               | the X11 backend remains the remote answer                                                          |
+| react-x11 today                                    | Windows                                                                                                                                                                                                                                                                                                | verdict                                                                                            |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| `<window>`, WM-managed                             | a top-level HWND; geometry, activation and close requests arrive as messages on the UI thread                                                                                                                                                                                                          | maps; the app places itself, unlike on Wayland                                                     |
+| `<window x y>`                                     | `SetWindowPos` in virtual-screen coordinates, which go negative left of and above the primary monitor                                                                                                                                                                                                  | maps                                                                                               |
+| auto-sizing                                        | measure, then size before the first show — the `realize()` order                                                                                                                                                                                                                                       | maps                                                                                               |
+| `<popup>`                                          | an owned `WS_POPUP` with `WS_EX_NOACTIVATE` and `WS_EX_TOOLWINDOW` (no taskbar button, no Alt+Tab entry), placed by `anchor.js` against the monitor's work area; rounded and shadowed on Windows 11 by asking DWM, which treats the corner preference as a hint                                        | maps — client-side placement survives, as on macOS                                                 |
+| `<popup grab>` dismissal                           | **built**: no cross-application pointer grab exists (`SetCapture` holds only while a button is down), so dismissal watches presses in the app's other windows and the loss of activation. A press on our own non-client area is the one case it misses                                                 | bends — the same behaviour by another mechanism                                                    |
+| `decorations: false`, a drawn titlebar             | `WM_NCCALCSIZE` returns 0, `DwmExtendFrameIntoClientArea` keeps the shadow and snapping, `WM_NCHITTEST` answers from pushed regions — `HTMAXBUTTON` for Snap Layouts — and caption buttons route through `DwmDefWindowProc`                                                                            | maps, given a region API (open question 7)                                                         |
+| maximized, minimized, fullscreen, attention        | `ShowWindow`; a borderless monitor-sized window; `FlashWindowEx`                                                                                                                                                                                                                                       | maps                                                                                               |
+| `alwaysOnTop`, `skipTaskbar`, `below`              | `HWND_TOPMOST`; `WS_EX_TOOLWINDOW` or `ITaskbarList::DeleteTab`; `HWND_BOTTOM`, which is not kept                                                                                                                                                                                                      | maps — more of `_NET_WM_STATE` than macOS keeps; `sticky` and `shaded` have no public equivalent   |
+| `transientFor`                                     | the owner window, set at creation                                                                                                                                                                                                                                                                      | maps — an owned window stays above its owner and minimizes with it                                 |
+| `appId`                                            | **built**: the window's AppUserModelID, set on its property store before it is shown, and the id the jump list is attached to. The relaunch properties (`PKEY_AppUserModel_Relaunch*`), which decide what a pinned tile starts, are still open                                                         | maps — the identity exists, under another name                                                     |
+| `transparent`                                      | `WS_EX_NOREDIRECTIONBITMAP` and premultiplied DirectComposition content                                                                                                                                                                                                                                | maps better — always composited; `useSupports('transparency')` is constant-true                    |
+| frame clock (Present, fence, estimator)            | the compositor clock or the vblank, and on Windows 11 the compositor's statistics                                                                                                                                                                                                                      | simpler, and on Windows 11 photon time is measurable                                               |
+| the scale ladder                                   | per-monitor-v2 on the UI thread; `WM_DPICHANGED` with the suggested rect taken as given                                                                                                                                                                                                                | collapses to one live answer, fractional most of the time — and live means re-scaling (§Layout)    |
+| `useScreens()`                                     | `EnumDisplayMonitors`; `GetMonitorInfo`, whose work area is `available` exactly where X11's is an approximation; names and refresh rates from the display-configuration API; `WM_DISPLAYCHANGE` — queried on the UI thread, which is DPI-aware, and published                                          | maps                                                                                               |
+| clipboard                                          | `CF_UNICODETEXT`, `CF_HDROP`, `HTML Format`, PNG; delayed rendering for lazy payloads, answered on the owner window's thread; `AddClipboardFormatListener` for `watch()`; no `PRIMARY`                                                                                                                 | maps; `transfer.js`'s MIME plumbing is reusable                                                    |
+| drag and drop                                      | OLE — `RegisterDragDrop` and `IDropTarget`, `DoDragDrop` and `IDropSource`, shell drag images; virtual files for a drag out that makes its file on demand. Windows' integrity levels refuse a drop from Explorer into an elevated app                                                                  | maps — the `dropAccept`/`onDrag*`/`dragData` contract holds, and JS keeps running through the drag |
+| global menu                                        | none: the drawn `MenuBar`, the fallback path anyway; a native `HMENU` bar as an opt-in rung; `ContextMenu` over `TrackPopupMenuEx` as its native rung, as `NSMenu` is on Cocoa                                                                                                                         | bends                                                                                              |
+| `<foreign>`                                        | a cross-process child window is allowed, and costly in a known way: the two programs' input queues are attached, so a hung child hangs the parent; no XEmbed focus protocol                                                                                                                            | bends                                                                                              |
+| `<Frame>`                                          | the **pane** makes a composition surface handle, presents into it through a swapchain made for it, and duplicates it into the host, whose visual tree shows what the pane draws — the IOSurface design, with the handle named once instead of per frame ([windows-embedding.md](windows-embedding.md)) | maps                                                                                               |
+| `examples/wm.jsx`, framing other programs' windows | —                                                                                                                                                                                                                                                                                                      | **gone by design**                                                                                 |
+| startup notification, `activateWindow`             | Windows' own launch feedback; `SetForegroundWindow` under the foreground rules, where the second instance forwarding a URI first grants the running one the right to come forward (`AllowSetForegroundWindow`)                                                                                         | dissolves; the raise maps, with its own version of the X11 timestamp lesson                        |
+| URI schemes, single instance                       | the scheme registered under `HKCU\Software\Classes` (no admin — the `.desktop` file's job), a named pipe or `WM_COPYDATA` to the running instance                                                                                                                                                      | maps — the two-copies shape `application.js` already handles                                       |
+| tray                                               | `Shell_NotifyIcon`, its menu through `TrackPopupMenuEx`                                                                                                                                                                                                                                                | **gained**; the freedesktop rung is StatusNotifierItem (#353)                                      |
+| `<glarea>`                                         | ANGLE into a composition swapchain                                                                                                                                                                                                                                                                     | bends — two DLLs to ship                                                                           |
+| eyedropper                                         | no system sampler: a rung of our own, reading the screen without a permission prompt; windows that exclude themselves from capture read as absent                                                                                                                                                      | maps — the X11 rung's shape                                                                        |
+| global key grabs                                   | `RegisterHotKey`, system-wide, no admin — registered against a window on the UI thread, because a thread hotkey's message is eaten by modal loops; a combination another app holds fails, and the Windows-key combinations are reserved                                                                | maps — which macOS allows only behind a permission                                                 |
+| `ssh -X` remoting                                  | —                                                                                                                                                                                                                                                                                                      | the X11 backend remains the remote answer                                                          |
 
 The `<popup>` row is macOS's conclusion, not Wayland's: Windows keeps
 client-side placement, so `anchor.js` stays the single source of truth,
@@ -949,6 +1029,10 @@ Every ladder in the README gets a Windows rung or an honest floor. The
 D-Bus and portal rungs are absent (§"What already carries over"); the
 shell-out rungs have Windows equivalents only where they are worth having.
 
+This table is the design. For what is built,
+[windows-integrations.md](windows-integrations.md) is the measured status —
+every row of it driven on hardware rather than inferred from an API existing.
+
 | what                                           | the Windows rung                                                                                                                                                                                                                                                                                                                                                                          | below it                                                                 |
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | open/save panels, `useFileDialog()`            | the Common Item Dialog (`IFileOpenDialog`, `IFileSaveDialog`), parented to the window, its modal loop on the UI thread                                                                                                                                                                                                                                                                    | the dialog react-x11 draws                                               |
@@ -958,9 +1042,9 @@ shell-out rungs have Windows equivalents only where they are worth having.
 | the user's calendar                            | the appointments API wants package identity                                                                                                                                                                                                                                                                                                                                               | `supported: false` unless packaged                                       |
 | sampling a screen colour, `useEyedropper()`    | our own: the screen read through GDI — no consent, no capture border — plus a drawn loupe                                                                                                                                                                                                                                                                                                 | —                                                                        |
 | a badge on the icon, `setBadge()`              | a taskbar overlay icon (`ITaskbarList3::SetOverlayIcon`) with the count drawn into it, once the taskbar button exists                                                                                                                                                                                                                                                                     | —                                                                        |
-| the Dock menu, `useDockMenu()`                 | a jump list, whose tasks relaunch the app with arguments that arrive through the single-instance path                                                                                                                                                                                                                                                                                     | —                                                                        |
+| the launcher menu, `useLauncherMenu()`         | a jump list, whose tasks relaunch the app with arguments that arrive through the single-instance path                                                                                                                                                                                                                                                                                     | —                                                                        |
 | a tray icon, `useTray()`                       | `Shell_NotifyIcon`                                                                                                                                                                                                                                                                                                                                                                        | —                                                                        |
-| progress on the icon                           | `ITaskbarList3::SetProgressValue`                                                                                                                                                                                                                                                                                                                                                         | **gained** — no hook exists yet                                          |
+| progress on the icon, `useProgress()`          | `ITaskbarList3::SetProgressValue`                                                                                                                                                                                                                                                                                                                                                         | —                                                                        |
 
 ## Accessibility: UI Automation
 
@@ -985,8 +1069,25 @@ idle — through a React commit, a layout, a paint. It is legal — a client
 waits 20 seconds by default — but it paces the screen reader by the app's
 busiest moment.
 
+**Built: the mirror, with a provider of this project's own.**
+`windows/src/uia.cc` serves UIA from a tree `src/win32/a11y.js` pushes —
+roles, names, descriptions, states, bounding rectangles, focus, hit testing,
+and the Invoke, Toggle, Value and RangeValue patterns, with `announce()` as a
+UIA notification. `ProviderOptions_ServerSideProvider` without
+`UseComThreading`, so every call arrives on a UIA thread, reads the mirror
+under one lock and returns, and nothing ever waits on JS. A provider holds a
+window id and a node id and nothing else, so a client keeping an element
+across a re-render cannot make it read freed memory. `ITextProvider` and its
+ranges are the piece that is not there; a `<textinput>` exposes its value
+through `IValueProvider` instead.
+
+The alternative considered for the same shape was AccessKit, and the reason
+it was not taken is the build rather than the design: its C bindings put Rust
+in the release pipeline, for x64 and arm64 prebuilds both. The paragraph
+below is the argument that chose the mirror, and it stands either way.
+
 **So the lean on this backend is the mirror, deliberately, and AccessKit
-is the one to use.** Its Windows adapter serves UIA from a tree the app
+would have been the other way to get one.** Its Windows adapter serves UIA from a tree the app
 pushes and answers from its own copy on UIA's threads, with text ranges for
 single- and multi-line inputs (rich text not yet), and it links into a C++
 addon through its C bindings. The push is what the AT-SPI bridge already
@@ -1072,40 +1173,54 @@ focused text field because UIA says it is one.
 
 Each phase has an exit that makes the next one safe to start.
 
-- **Phase 0 — the spike (days).** A minimal addon, before anything in this
-  repository changes, proving the three risky mechanisms: the UI thread
-  inside stock `node.exe` and `bun.exe`, with events through a threadsafe
-  function and the input-to-JS latency measured; a DirectComposition
-  surface driven from the JS thread — `BeginDraw` per rect, `Scroll`,
-  `Commit` — while the UI thread sits in a live-resize loop, with the
-  bounded resize handshake and the background plate; and `WM_NCHITTEST`
-  from pushed regions, the Snap Layouts flyout included. _Exit: during a
-  live resize a JS-driven relayout tracks the drag, and a JS timer keeps
-  animating while a `TrackPopupMenuEx` menu is open and while a
-  `DoDragDrop` is in flight._
-- **Phase 1 — the shared floor.** Move the context wrapper, `surface.js`,
-  the frame queue and the promotion policy out of `src/cocoa/` into
-  `src/backend/` (macos.md §"The split", step 4), with the Cocoa backend
-  byte-identical — its fake-bridge tests and `bench:presenters -- --check`
-  pin it. _Exit: Cocoa unchanged; the verb table written down as the bridge
-  contract._
-- **Phase 2 — the surface backend.** `src/win32/` — app, window, context,
-  text engine — over `@windowkit/win32` 0.1: windows, the event channel,
-  the Direct2D verb table, DirectWrite; `createRoot({ backend: 'win32' })`,
-  and `'auto'` choosing it on Windows when the bridge is installed.
-  _Exit: `examples:widgets`, `tasks` and `form` fully interactive on
-  Windows; the fake-bridge suite green on every OS; bench-twin baselines
-  recorded._
-- **Phase 3 — input, scale and the desktop.** IMM32 composition; the
-  clipboard and drag and drop over OLE; live per-window scale (§Layout),
-  monitors, appearance and window state; file dialogs, notifications, the
-  tray and the taskbar; single instance and URI schemes. _Exit: a window
-  dragged between a 100% and a 150% monitor re-lays out at each; every
-  ladder in the README has a Windows rung or an honest floor, each verified
-  on hardware._
+- **Phase 0 — the spike (days). Done, 2026-09-18.** A minimal addon proving
+  the risky mechanisms: the UI thread inside stock `node.exe` — and
+  `bun.exe`, which loads the addon and runs the event path — with events
+  through a threadsafe function; a DirectComposition surface driven from the
+  JS thread, `BeginDraw` per rect and `Commit`. _Measured: a JS timer kept
+  its cadence, 46 ticks against ~48 due over twelve seconds._ **Not yet
+  probed**: the bounded resize handshake, the background plate,
+  `WM_NCHITTEST` from pushed regions, and the cadence specifically through
+  `TrackPopupMenuEx` and `DoDragDrop`, which are what the claim rests on
+  hardest and which need a menu and a drag to exist first.
+- **Phase 1 — the shared floor. Done.** `src/backend/context2d.js`, moved
+  out of `src/cocoa/` with the class renamed and Cocoa behaviourally
+  unchanged — 303 passing before and after. `surface.js`, the frame queue
+  and the promotion policy have **not** moved: the context was what a second
+  native backend actually needed, and moving the rest before anything
+  consumes it would be renaming for its own sake.
+- **Phase 2 — the surface backend. Done.** `src/win32/` — app, window,
+  fonts, surfaces, bezels — over `@windowkit/win32`, with
+  `createRoot({ backend: 'win32' })` and `'auto'` choosing it on Windows.
+  41 of the 43 examples open; the two that do not (`wm`, `xeyes`) are X11
+  window-manager demos that do not run on Cocoa either. The keyboard decodes
+  through `ToUnicodeEx` without consuming dead keys, all five mouse buttons
+  and the wheel route, and `<popup>` places menus against the monitor's work
+  area. **Outstanding against the original exit criteria**: the fake-bridge
+  suite under `test/win32/`, which every other backend has and this one does
+  not, and the bench twin with its baselines. The bridge has a suite of its
+  own against the real thing, which is not the same test and does not
+  replace it.
+- **Phase 3 — input, scale and the desktop. Mostly done.** Built and
+  verified on hardware: the clipboard, per-monitor-v2 scale and
+  `WM_DPICHANGED`, monitors, appearance (light/dark, accent, the frame
+  through `DWMWA_USE_IMMERSIVE_DARK_MODE`), window states, file dialogs, the
+  tray, the taskbar's progress, badge and flash, global hotkeys,
+  notifications as a balloon, idle time and keeping the screen awake.
+  **Not built**: IMM32 composition, drag and drop over OLE, single instance
+  and URI schemes — and the jump list, which waits on the last of those.
+  [windows-integrations.md](windows-integrations.md) is the row-by-row
+  status. _Exit: a window dragged between a 100% and a 150% monitor
+  re-lays out at each; every ladder in the README has a Windows rung or an
+  honest floor, each verified on hardware._
 - **Phase 4 — the compositor tier.** Promotion onto composition visuals,
   with the classic-or-visual-layer question settled by its probe;
-  element-owned surfaces; `<glarea>` over ANGLE. _Exit:
+  element-owned surfaces. `<glarea>` is **done**, and not over ANGLE: a WGL
+  context on the vendor driver, with `WGL_NV_DX_interop2` lending its
+  texture to the composed surface, because a child HWND cannot composite
+  over a window presenting through DirectComposition. ANGLE stays the rung
+  below for a machine with no vendor driver, where the probe reports no core
+  context and `useSupports('shaders')` is false. _Exit:
   `examples/animation.jsx`'s loops keep running through its deliberate JS
   block, as they do on Cocoa._
 - **Phase 5 — the deep integrations.** UI Automation; TSF; Direct

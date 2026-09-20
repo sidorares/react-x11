@@ -73,7 +73,7 @@ import { StatusNotifierItem, allocateItemSlot } from './statusnotifier.js';
  * ```
  *
  * With `menu`, a click opens it — the same `items` vocabulary `MenuBar` and
- * `useDockMenu` take, an item's `onSelect` firing when picked. Without one,
+ * `useLauncherMenu` take, an item's `onSelect` firing when picked. Without one,
  * `onClick` is called with the button and where the click was, in logical
  * screen pixels — with the item's rect, where the backend knows it. `null`
  * means no item. Every field follows its value while mounted; the item is

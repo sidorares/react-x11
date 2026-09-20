@@ -786,7 +786,10 @@ test('<foreign> refuses where there is no embedding: one onError, no onReady, an
       `onReady was called with windowId ${ready.map((r) => r.windowId)}`,
     );
     assert.equal(errors.length, 1, 'one onError');
-    assert.match(errors[0].message, /<foreign> needs the X11 backend/);
+    assert.match(
+      errors[0].message,
+      /<foreign> needs a backend with cross-process window embedding/,
+    );
     assert.match(errors[0].message, /useSupports\('embedding'\)/);
 
     const node = foreignNode(wnd);
@@ -920,7 +923,7 @@ test('with no onError, a backend that cannot embed warns once, however many pane
     console.warn = original;
   }
   const refusals = warnings.filter((w) =>
-    w.includes('<foreign> needs the X11 backend'),
+    w.includes('needs a backend with cross-process window embedding'),
   );
   assert.equal(refusals.length, 1, refusals.join('\n'));
 });

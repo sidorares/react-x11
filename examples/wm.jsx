@@ -514,6 +514,31 @@ export default Desktop;
 
 if (!process.env.REACT_X11_NO_AUTORUN) {
   const root = await createRoot();
+  // The one example that cannot be portable, and the check that says so
+  // rather than crashing. A window manager claims the X root window,
+  // reparents other applications' windows into frames of its own, and answers
+  // their map and configure requests — three things that exist only in X11.
+  // macOS and Windows each already have one window manager and it is not
+  // ours; Wayland moves the job into the compositor.
+  //
+  // Asked by capability rather than by platform, like everything else here:
+  // `rootWindow()` is the door, and a backend without one has no root window
+  // to claim.
+  if (typeof root.app.rootWindow !== 'function') {
+    console.error(
+      'examples/wm: this example is a window manager, and only the X11 backend\n' +
+        'can be one. It claims the X root window, reparents other applications\n' +
+        'into its frames and answers their map and configure requests; the\n' +
+        'backend running here has no root window to claim.\n' +
+        '\n' +
+        'Run it against a nested X server, which is what it wants anyway — it\n' +
+        'would otherwise fight the window manager already running your desktop:\n' +
+        '\n' +
+        '    Xephyr :10 -screen 1200x800 &\n' +
+        '    DISPLAY=:10 npm run examples:wm\n',
+    );
+    process.exit(1);
+  }
   const wm = new WindowManager(root.app);
   await wm.start();
   root.render(<Desktop wm={wm} />);

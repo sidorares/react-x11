@@ -430,6 +430,19 @@ function centreFor(options) {
 }
 
 /**
+ * Which rung a backend's own notification centre is.
+ *
+ * The seam is the backend's, not macOS's: a centre answers `available()` and
+ * `post()`, and the cocoa one was simply the first. `kind` is how a centre
+ * says which rung it is, so `notificationBackend()` reports the truth rather
+ * than the name of whoever got here first. Cocoa's predates the field and is
+ * the default.
+ */
+function kindOf(centre) {
+  return centre?.kind ?? 'cocoa';
+}
+
+/**
  * Which rung this machine lands on, without posting anything.
  *
  * `'cocoa'` needs the app's centre to be *available* — a bundle id, see
@@ -442,10 +455,11 @@ function centreFor(options) {
 export async function notificationBackend(options = {}) {
   const backend = options.backend;
   const want = (rung) => !backend || backend === rung;
-  if (want('cocoa')) {
-    const centre = centreFor(options);
-    if (centre && (await centre.available())) return 'cocoa';
-    if (backend === 'cocoa') return null;
+  const centre = centreFor(options);
+  const kind = kindOf(centre);
+  if (want(kind)) {
+    if (centre && (await centre.available())) return kind;
+    if (backend === kind) return null;
   }
   if (want('dbus')) {
     const ref = await sessionBus();
@@ -461,7 +475,14 @@ export async function notificationBackend(options = {}) {
   if (want('osascript') && (process.platform === 'darwin' || backend)) {
     return 'osascript';
   }
-  if (want('notify-send') && (process.platform !== 'darwin' || backend)) {
+  // `notify-send` is a freedesktop tool. Windows has neither it nor a shell
+  // command that shows a notification, so the rung above is the floor there
+  // and `null` is the honest answer when the tree is not on the win32
+  // backend — a spawn that would fail with ENOENT is not a rung.
+  if (
+    want('notify-send') &&
+    (backend || (process.platform !== 'darwin' && process.platform !== 'win32'))
+  ) {
     return 'notify-send';
   }
   return null;
@@ -497,26 +518,28 @@ export async function notify(options = {}) {
   const backend = options.backend;
   const want = (rung) => !backend || backend === rung;
 
-  if (want('cocoa')) {
-    const centre = centreFor(options);
+  const centre = centreFor(options);
+  const kind = kindOf(centre);
+  if (want(kind)) {
     if (centre && (await centre.available())) {
       const handle = await centre.post(options);
       if (handle) return handle;
       // The bundle is right and the centre is there, but the system never
       // put the prompt in front of anybody, so nobody declined: not the
       // refusal above, and no reason to stop. The ladder moves on.
-      if (backend === 'cocoa') {
+      if (backend === kind) {
         throw new NoNotificationServiceError(
-          "backend: 'cocoa' — the centre could not ask for authorization " +
+          `backend: '${kind}' — the centre could not ask for authorization ` +
             '(the status is still notDetermined). A bundle macOS has not ' +
             'registered never gets the prompt (docs/notifications.md).',
         );
       }
-    } else if (backend === 'cocoa') {
+    } else if (backend === kind) {
       throw new NoNotificationServiceError(
-        "backend: 'cocoa' — no notification centre here: the tree is not " +
-          'on the cocoa backend, the bridge is older than 0.5, or this ' +
-          'process is not an app bundle (docs/notifications.md).',
+        `backend: '${kind}' — no notification centre here: the tree is not ` +
+          'on a backend that has one, the bridge is older than the version ' +
+          'that added it, or on macOS this process is not an app bundle ' +
+          '(docs/notifications.md).',
       );
     }
   }
@@ -534,7 +557,9 @@ export async function notify(options = {}) {
   const shell =
     want('osascript') && (process.platform === 'darwin' || backend)
       ? 'osascript'
-      : want('notify-send') && (process.platform !== 'darwin' || backend)
+      : want('notify-send') &&
+          (backend ||
+            (process.platform !== 'darwin' && process.platform !== 'win32'))
         ? 'notify-send'
         : null;
   if (shell) {

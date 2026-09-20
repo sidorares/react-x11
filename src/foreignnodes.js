@@ -192,10 +192,15 @@ export class ForeignNode extends Node {
    */
   _refuse() {
     this._refused = true;
+    // Named by the capability, not by the backend that happens to have it.
+    // An app cannot act on "use X11", and a second backend growing embedding
+    // would make that wording wrong as well as unhelpful; what an app *can*
+    // act on is the question the last sentence names (AGENTS.md,
+    // "Vocabulary").
     const err = new Error(
-      'react-x11: <foreign> needs the X11 backend — this one has no ' +
-        'cross-process window embedding, so nothing can be put in it. Ask ' +
-        "useSupports('embedding') before rendering one.",
+      'react-x11: <foreign> needs a backend with cross-process window ' +
+        'embedding, and this one has none — so nothing can be put in it. ' +
+        "Ask useSupports('embedding') before rendering one.",
     );
     this.error = err;
     // The client is the whole reason this node is a Tab stop by default, and

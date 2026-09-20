@@ -10,7 +10,7 @@
 import assert from 'node:assert';
 import { describe, test } from 'node:test';
 
-import { CocoaContext2D } from '../src/cocoa/context2d.js';
+import { BackendContext2D } from '../src/backend/context2d.js';
 import { loadNative } from '../src/cocoa/native.js';
 
 /**
@@ -90,7 +90,7 @@ function context(options) {
   const native = fakeNative(options);
   const dst = native.createSurface(200, 100, 1);
   const src = native.createSurface(40, 20, 1);
-  const ctx = new CocoaContext2D(
+  const ctx = new BackendContext2D(
     native,
     () => dst,
     () => 1,
@@ -172,7 +172,7 @@ test('save/restore carries the op, and a replaced surface is re-synced', () => {
 
   let gen = 1;
   const surface = native.createSurface(8, 8, 1);
-  const fresh = new CocoaContext2D(
+  const fresh = new BackendContext2D(
     native,
     () => surface,
     () => gen,
@@ -337,7 +337,7 @@ describe('the clip a memcpy cannot see', () => {
     const native = fakeNative();
     let gen = 1;
     let surface = native.createSurface(200, 100, 1);
-    const ctx = new CocoaContext2D(
+    const ctx = new BackendContext2D(
       native,
       () => surface,
       () => gen,
@@ -460,7 +460,7 @@ describe(
         : new Proxy(bridge, {
             get: (t, k) => (k === 'blitSurface' ? undefined : t[k]),
           });
-      const ctx = new CocoaContext2D(
+      const ctx = new BackendContext2D(
         native,
         () => dst,
         () => 1,

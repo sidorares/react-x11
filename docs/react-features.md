@@ -282,9 +282,7 @@ and can extend past the window edge.
 
 ```jsx
 <box>
-  <Button
-    onClick={(e) => setAt({ x: e.nativeEvent.rootx, y: e.nativeEvent.rooty })}
-  >
+  <Button onClick={(e) => setAt({ x: e.screenX, y: e.screenY })}>
     Options…
   </Button>
   {at && (

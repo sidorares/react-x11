@@ -14,7 +14,7 @@
 // `map`, `unmap`, `getContext`, `destroy` — plus `present`, which puts what
 // was painted on the layer: ntk blits an X window's backing store on its
 // own, where a layer's contents are a copy the bitmap has to be pushed to.
-import { CocoaContext2D } from './context2d.js';
+import { BackendContext2D } from '../backend/context2d.js';
 
 export const OVERLAY_Z = 1e7 + 1;
 
@@ -115,7 +115,7 @@ export class CocoaOverlayPane {
 
   getContext() {
     if (!this._ctx) {
-      this._ctx = new CocoaContext2D(
+      this._ctx = new BackendContext2D(
         this._native,
         () => this._ensureSurface(),
         () => {

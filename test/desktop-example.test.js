@@ -6,7 +6,7 @@
 //
 // Rendered on the mock backend (its fonts lay text out) with the three things
 // the mock does not have added as spies — `createStatusItem`, `setDockBadge`,
-// `setDockMenu`, plus a notification centre — so every rung is observable and
+// `setLauncherMenu`, plus a notification centre — so every rung is observable and
 // nothing shells out to the developer's real desktop. That the calls then
 // reach `NSStatusItem`/`NSDockTile` is `test/cocoa-tray.test.js` and
 // `test/cocoa-dock.test.js`; that they reach StatusNotifierItem over a bus is
@@ -80,7 +80,7 @@ function desktopApp() {
     return item;
   };
   app.setDockBadge = (label) => app.badges.push(label);
-  app.setDockMenu = (items) => app.dockMenus.push(items);
+  app.setLauncherMenu = (items) => app.dockMenus.push(items);
   app.notifications = {
     available: async () => true,
     async post(options) {

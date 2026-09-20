@@ -80,6 +80,14 @@ const FEATURES = {
   },
   embedding: { watch: NEVER_CHANGES, read: canEmbed },
   glOverlay: { watch: NEVER_CHANGES, read: canOverlay },
+  // Everything here is a property of the **display**: what the server, the
+  // compositor and the drawing pipeline can do. A desktop's own surfaces --
+  // a tray, a launcher icon and what hangs off it, a notification daemon --
+  // are a different question with a different shape, because they can appear
+  // and vanish while the process runs and because "available" alone is a lie
+  // about them. They go through `desktopCapability()` (src/capabilities.js),
+  // which answers `{ available, backend, features }`. Adding one here would
+  // flatten that to a boolean and lose the mechanism with it.
 };
 
 /**

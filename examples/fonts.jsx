@@ -440,6 +440,47 @@ const AXIS_NAMES = {
  */
 const idOf = (m) => `${m.path}\u0000${m.postscriptName ?? ''}`;
 
+/**
+ * The designer's named instances — `{ Light: { wght: 300 }, … }`.
+ *
+ * fontkit's own `namedVariations` getter is one expression over every
+ * instance in `fvar`, and it reads each one's name without checking there is
+ * one. Bahnschrift, which ships with Windows, has fifteen instances and one
+ * of them resolves to no name record: the getter throws
+ * `reading 'en'` and the whole panel — axes, metrics, coverage, all of it —
+ * collapses to that message, for a font whose two axes are perfectly
+ * readable.
+ *
+ * So the getter is asked first — it is the face's own answer and the one that
+ * knows about shapes this does not — and the map is rebuilt here only when it
+ * throws, skipping the instance with no name rather than losing all of them.
+ * A face that names none is a face with no named instances, which is a true
+ * answer; a face that names fourteen out of fifteen shows fourteen.
+ */
+function namedInstancesOf(fk) {
+  try {
+    const named = fk?.namedVariations;
+    if (named && typeof named === 'object') return named;
+  } catch {
+    // one unnamed instance takes the whole getter down with it — rebuild
+  }
+  const instances = fk?.fvar?.instance;
+  if (!Array.isArray(instances)) return {};
+  const axes = fk?.fvar?.axis ?? [];
+  const named = {};
+  for (const instance of instances) {
+    const name = instance?.name?.en;
+    if (typeof name !== 'string' || !name) continue;
+    const settings = {};
+    instance.coord?.forEach?.((value, index) => {
+      const tag = axes[index]?.axisTag;
+      if (tag) settings[tag] = value;
+    });
+    named[name] = settings;
+  }
+  return named;
+}
+
 function describe(catalogue, match, size, app) {
   try {
     const font = catalogue.open(match.path, app, {
@@ -453,7 +494,7 @@ function describe(catalogue, match, size, app) {
       metrics: font.metrics(size),
       axes: font.variationAxes ?? {},
       // the designer's chosen points, which fontkit keeps beside the axes
-      named: font.fk?.namedVariations ?? {},
+      named: namedInstancesOf(font.fk),
     };
   } catch (err) {
     return { error: String(err?.message ?? err) };
@@ -1239,7 +1280,7 @@ function App(props) {
       width={980}
       height={640}
       title="Fonts"
-      wmClass="com.example.x11fonts"
+      appId="com.example.x11fonts"
       style={{ flexGrow: 1 }}
     >
       <FontsPanel {...props} />

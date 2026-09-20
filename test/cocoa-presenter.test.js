@@ -21,7 +21,7 @@ import {
   screen,
   withFrameClock,
 } from '../src/testing/index.js';
-import { CocoaContext2D } from '../src/cocoa/context2d.js';
+import { BackendContext2D } from '../src/backend/context2d.js';
 import {
   animatingPresenterFor,
   presenterFor,
@@ -48,7 +48,7 @@ class SceneNode extends Node {
 
   paint(ctx) {
     super.paint(ctx);
-    if (ctx instanceof CocoaContext2D) {
+    if (ctx instanceof BackendContext2D) {
       this.rasters++;
       this.damages.push(this.paintDamage());
     } else {
@@ -60,7 +60,7 @@ class SceneNode extends Node {
     // claim is made while the presenter is inside its frame
     if (
       this.props.claimOnPaint &&
-      ctx instanceof CocoaContext2D &&
+      ctx instanceof BackendContext2D &&
       !this._claimedFromPaint
     ) {
       this._claimedFromPaint = true;

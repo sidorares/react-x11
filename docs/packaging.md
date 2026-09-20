@@ -186,7 +186,7 @@ metadata rather than anything about JavaScript.
 
 - A **`.desktop` file** — without one, the app has no launcher entry, no
   icon in the dock, and no association with its own windows. Its `StartupWMClass`
-  must match the `wmClass` prop on your `<window>`
+  must match the `appId` prop on your `<window>`
   ([elements.md](elements.md)), or the desktop groups your window under the
   wrong icon.
 - **Icons** at 48, 128 and 256 px under
@@ -548,7 +548,7 @@ would run again what the entry has already done.
 - With `esm`, alias the banner's `createRequire`.
 - Do not ship `.Xauthority`, and do not bake `DISPLAY` into an image —
   [security.md](security.md).
-- Set `wmClass` and match it in `StartupWMClass`.
+- Set `appId` and match it in `StartupWMClass`.
 - On macOS, ship a `.app` (tier 5) rather than a bare executable, and sign it
   with a real identity if you want the notification centre.
 - For the Mac App Store, build tier 3 — a node SEA — and sandbox it: bun does

@@ -6,7 +6,7 @@
 // an X window — attributes, reported width/height, event coordinates,
 // _screenOrigin. The divide-by-scale into Cocoa points happens against the
 // native layer and nowhere above it.
-import { CocoaContext2D } from './context2d.js';
+import { BackendContext2D } from '../backend/context2d.js';
 import { CocoaDropTransport, dragSpec } from './dnd.js';
 import { CocoaLayerPresenter } from './presenter.js';
 import { CocoaPromotion } from './promotion.js';
@@ -794,7 +794,7 @@ export class CocoaWindow {
 
   getContext() {
     if (!this._ctx) {
-      this._ctx = new CocoaContext2D(
+      this._ctx = new BackendContext2D(
         this._native,
         () => this._ensureSurface(),
         () => {
