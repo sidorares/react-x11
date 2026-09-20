@@ -43,7 +43,8 @@ export function createFakeBridge() {
 
     // --- windows -----------------------------------------------------------
 
-    createWindow({ title, width, height }) {
+    createWindow(options) {
+      const { title, width, height } = options;
       const id = bridge.windows.size + 1;
       bridge.windows.set(id, {
         id,
@@ -52,6 +53,11 @@ export function createFakeBridge() {
         height,
         shown: false,
         composed: false,
+        // What the window was asked for, kept whole: `popup`, `transparent`
+        // and `clickThrough` are decided once at creation and never appear
+        // again, so a test that wants to know what a `<popup dragPreview>`
+        // asked for has nowhere else to look.
+        options: { ...options },
       });
       record('createWindow', id, width, height);
       return id;

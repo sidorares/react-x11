@@ -226,3 +226,34 @@ describe('win32 window: what it refuses honestly', () => {
     assert.deepEqual(applied, [['maximized', false]]);
   });
 });
+
+describe('win32 window: a drag preview is transparent to hit testing', () => {
+  it('asks for click-through, so the shell looks past it for a drop target', () => {
+    const bridge = createFakeBridge();
+    const app = createFakeApp(bridge);
+    const preview = new Win32Window(app, {
+      width: 240,
+      height: 37,
+      overrideRedirect: true,
+      dragPreview: true,
+    });
+    // A `<popup dragPreview>` follows the pointer, so it is the window under
+    // the pointer for the whole gesture — and on Windows that is the window
+    // the shell asks when it looks for somewhere to drop. Answering for
+    // itself, it is not a drop target, and the list underneath never sees
+    // the drop: `drag-leave` and no `drag-drop`, which reads as "this list
+    // refuses drops".
+    assert.equal(bridge.windows.get(preview.id).options.clickThrough, true);
+  });
+
+  it('leaves every other popup alone — a menu is meant to be clicked', () => {
+    const bridge = createFakeBridge();
+    const app = createFakeApp(bridge);
+    const menu = new Win32Window(app, {
+      width: 160,
+      height: 200,
+      overrideRedirect: true,
+    });
+    assert.equal(bridge.windows.get(menu.id).options.clickThrough, false);
+  });
+});

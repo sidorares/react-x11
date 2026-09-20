@@ -74,6 +74,13 @@ export class Win32Window {
       // outside its shape composite as a dark fringe — which on a rounded
       // popup is a dark edge along every corner.
       transparent: attributes.transparent === true,
+      // A `<popup dragPreview>` follows the pointer, so it is **under** the
+      // pointer for the whole gesture — and the window under the pointer is
+      // the one the shell asks about when it looks for somewhere to drop.
+      // Unanswered, the preview answers for itself, and it is not a drop
+      // target: the list underneath never sees the drop. Cocoa spells the
+      // same thing `ignoresMouseEvents` (src/cocoa/window.js).
+      clickThrough: attributes.dragPreview === true,
     });
     app._register(this);
   }
