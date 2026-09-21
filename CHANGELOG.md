@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.18.1](https://github.com/sidorares/react-x11/compare/v2.18.0...v2.18.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* **cocoa:** add and remove standalone layers with implicit actions off ([#639](https://github.com/sidorares/react-x11/issues/639)) ([7ad5bdd](https://github.com/sidorares/react-x11/commit/7ad5bdd72aa2905d88b801d4cb8840525d7cd787)), closes [#638](https://github.com/sidorares/react-x11/issues/638)
+
 ## [2.18.0](https://github.com/sidorares/react-x11/compare/v2.17.1...v2.18.0) (2026-09-21)
 
 
