@@ -357,6 +357,51 @@ test('the layer goes with the last child', async () => {
   ]);
 });
 
+test('a GL frame goes out after the overlay painted in the same tick (#641)', async () => {
+  // The GL frame is asked for first, then a change that costs the children
+  // layout. Both land in one tick of the window's clock; the GL frame used
+  // to run first and reach the screen under the previous frame's overlay
+  // for as long as the flush took to lay out and paint the new one.
+  const tree = (width) =>
+    h(
+      'window',
+      { width: 200, height: 120 },
+      h(
+        'box',
+        { style: { flexGrow: 1, padding: 10 } },
+        h(
+          'glarea',
+          { key: 'gl', style: { flexGrow: 1 } },
+          legend({ style: { position: 'absolute', left: 5, top: 5, width } }),
+        ),
+      ),
+    );
+  const { native, root, wnd, node, frame } = await mountGLArea({
+    children: legend(),
+  });
+  root.render(tree(20));
+  await tick();
+  frame();
+  const gl = node.window.layer;
+  const overlay = wnd._layer.sublayers.find((l) => l.props.zPosition > 1e7);
+  assert.ok(overlay);
+  node.requestFrame();
+  root.render(tree(40));
+  await tick();
+  const from = native.calls.length;
+  // past the swap gate the mount's frame closed
+  frame(performance.now() + 1000);
+  const order = native.calls
+    .slice(from)
+    .filter(
+      ({ name, args }) =>
+        (name === 'surfaceToLayer' && args[1] === overlay) ||
+        (name === 'setLayerContentsIOSurface' && args[0] === gl),
+    )
+    .map(({ name }) => (name === 'surfaceToLayer' ? 'overlay' : 'gl'));
+  assert.deepEqual(order, ['overlay', 'gl']);
+});
+
 test('the surface comes and goes without an implicit animation', async () => {
   const { native, root, node } = await mountGLArea();
   const layer = node.window.layer;

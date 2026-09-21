@@ -99,6 +99,11 @@ export class CocoaPaneWindow {
     return this.app._requestFrame(cb);
   }
 
+  /** A `<glarea>`'s frame, after this pane's own (`CocoaWindow`'s). */
+  requestSurfaceFrame(cb) {
+    return this.app._requestFrame(cb, null, true);
+  }
+
   /**
    * Whether the host may still be showing the frame before the last one —
    * the gate `flushPendingFrames` (src/frames.js) is written around: a
