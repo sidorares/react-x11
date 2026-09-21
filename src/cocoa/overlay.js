@@ -15,6 +15,7 @@
 // was painted on the layer: ntk blits an X window's backing store on its
 // own, where a layer's contents are a copy the bitmap has to be pushed to.
 import { BackendContext2D } from '../backend/context2d.js';
+import { withoutActions } from './quiet.js';
 
 export const OVERLAY_Z = 1e7 + 1;
 
@@ -25,8 +26,11 @@ export class CocoaOverlayPane {
     this._native = app._native;
     this.scale = this.parent.scale ?? app.scale ?? 1;
     this.destroyed = false;
-    this.layer = this._native.createLayer();
-    this._native.addSublayer(this.parent._layer, this.layer);
+    this.layer = withoutActions(this._native, () => {
+      const layer = this._native.createLayer();
+      this._native.addSublayer(this.parent._layer, layer);
+      return layer;
+    });
     this.rect = null;
     this._surface = null;
     this._surfaceSize = null;
@@ -154,6 +158,11 @@ export class CocoaOverlayPane {
     this.destroyed = true;
     this._release();
     this._ctx = null;
-    this._native.removeFromSuperlayer(this.layer);
+    // Actions off, or the layer fades out over a quarter of a second, what
+    // the children last painted going translucent over a surface still
+    // drawing (#638).
+    withoutActions(this._native, () =>
+      this._native.removeFromSuperlayer(this.layer),
+    );
   }
 }

@@ -28,6 +28,8 @@
 // so the ladder is visible before it is built. Policy decides, the machine
 // answers — the same rule the GL policy follows everywhere else.
 
+import { withoutActions } from './quiet.js';
+
 const RUNGS = ['auto', 'gl'];
 const KNOWN_RUNGS = ['auto', 'gl', 'gles', 'webgpu'];
 
@@ -145,8 +147,11 @@ export class CocoaGLArea {
     this.scale = this.parent.scale ?? app.scale ?? 1;
     this.destroyed = false;
     this._reactX11Node = null;
-    this.layer = this._native.createLayer();
-    this._native.addSublayer(this.parent._layer, this.layer);
+    this.layer = withoutActions(this._native, () => {
+      const layer = this._native.createLayer();
+      this._native.addSublayer(this.parent._layer, layer);
+      return layer;
+    });
     this.rect = null;
     this.setState({
       x: options.x ?? 0,
@@ -254,7 +259,9 @@ export class CocoaGLArea {
     this.destroyed = true;
     this._context?._destroy();
     this._context = null;
-    this._native.removeFromSuperlayer(this.layer);
+    withoutActions(this._native, () =>
+      this._native.removeFromSuperlayer(this.layer),
+    );
   }
 }
 
