@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.18.2](https://github.com/sidorares/react-x11/compare/v2.18.1...v2.18.2) (2026-09-21)
+
+
+### Bug Fixes
+
+* **cocoa:** draw a &lt;glarea&gt;'s frame after the window's flush in the same tick ([#642](https://github.com/sidorares/react-x11/issues/642)) ([7d1f28f](https://github.com/sidorares/react-x11/commit/7d1f28f33dbed71470c02451ca7eb0092c0cdc63)), closes [#641](https://github.com/sidorares/react-x11/issues/641)
+
 ## [2.18.1](https://github.com/sidorares/react-x11/compare/v2.18.0...v2.18.1) (2026-09-21)
 
 
