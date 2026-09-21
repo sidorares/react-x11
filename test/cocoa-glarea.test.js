@@ -369,6 +369,20 @@ test('a still surface is not drawn again when the display hands its buffer back'
   assert.equal(drawn, still + 2, 'drawn once it opens, and then left alone');
 });
 
+test("onDraw's info carries the display scale, as DrawInfo declares", async () => {
+  // width/height are device pixels; an onDraw that places anything in
+  // logical pixels divides by `scale`. Without it that came out NaN and
+  // the scene drew nothing, silently.
+  const infos = [];
+  await mountGLArea({ area: { onDraw: (gl, info) => infos.push(info) } });
+  assert.ok(infos.length > 0, 'a frame was drawn');
+  const { width, height, scale } = infos[0];
+  assert.deepEqual(
+    { width, height, scale },
+    { width: 360, height: 200, scale: 2 },
+  );
+});
+
 // A 120Hz panel: the period the runtime holds its gate for and the period
 // the window's clock paces frames at are one and the same display's.
 const HZ120 = 1000 / 120;
