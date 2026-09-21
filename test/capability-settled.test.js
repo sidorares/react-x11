@@ -21,6 +21,19 @@ import { withNoBus } from './helpers/with-bus.js';
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
+/**
+ * Until the last state is settled, or two seconds. Where dbus-native is not
+ * installed (Node < 22.12) the "no" comes from a failed dynamic import, whose
+ * turn count varies with the runner's load — a fixed number of ticks
+ * flaked on Node 20 CI.
+ */
+async function untilSettled(seen, timeout = 2000) {
+  const deadline = Date.now() + timeout;
+  while (!seen.at(-1).settled && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 const roots = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await root.unmount();
@@ -53,7 +66,7 @@ test('a capability is pending until the probe answers, and settled by a "no"', a
     const { seen } = await renders(() => useDesktopCapability('tray'));
     assert.equal(seen[0].settled, false, 'the first frame has no answer');
     assert.equal(seen[0].available, false);
-    for (let i = 0; i < 5 && !seen.at(-1).settled; i++) await tick();
+    await untilSettled(seen);
     assert.equal(seen.at(-1).settled, true, 'and then it does');
     assert.equal(seen.at(-1).available, false, 'no bus is a real "no"');
   });
@@ -90,7 +103,7 @@ test('useTray on the freedesktop rung settles once the host answers — or nothi
   await withNoBus(async () => {
     const { seen } = await renders(() => useTray({ icon: 'bell' }));
     assert.equal(seen[0].settled, false, 'the fallback can wait');
-    for (let i = 0; i < 10 && !seen.at(-1).settled; i++) await tick();
+    await untilSettled(seen);
     assert.equal(seen.at(-1).settled, true);
     assert.equal(seen.at(-1).available, false, 'no tray, and it is sure');
   });

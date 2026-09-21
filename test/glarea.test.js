@@ -144,6 +144,7 @@ test('<glarea> gets a GL child window and draws a frame', async () => {
       // node at 20,20 in the parent
       x: 0,
       y: 0,
+      scale: 1,
       node: area,
     });
 

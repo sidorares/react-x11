@@ -418,8 +418,9 @@ export class GlAreaNode extends Node {
     const { width, height } = this.rect;
     // x/y are where the node's origin sits in the drawable being drawn
     // into (DrawInfo's contract) — a <glarea> draws into its own X window,
-    // so that is the origin.
-    const info = { width, height, x: 0, y: 0, node: this };
+    // so that is the origin. width/height are device pixels; `scale` takes
+    // them back to logical ones.
+    const info = { width, height, x: 0, y: 0, scale: this.scale, node: this };
     if (!this._created) {
       this._created = true;
       this.props.onCreated?.(gl, info);
