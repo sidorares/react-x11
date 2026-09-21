@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.18.0](https://github.com/sidorares/react-x11/compare/v2.17.1...v2.18.0) (2026-09-21)
+
+
+### Features
+
+* **style:** pointerEvents 'box-none' — the node is not a target, its children are ([#637](https://github.com/sidorares/react-x11/issues/637)) ([11dbdef](https://github.com/sidorares/react-x11/commit/11dbdef0f80d906546e5b1f21e324d3c3d8be743))
+
+
+### Bug Fixes
+
+* **glarea:** pass the display scale in onDraw's info ([#635](https://github.com/sidorares/react-x11/issues/635)) ([e61b272](https://github.com/sidorares/react-x11/commit/e61b272c77e5adada2f540c4b73f5c11fd122d76))
+
 ## [2.17.1](https://github.com/sidorares/react-x11/compare/v2.17.0...v2.17.1) (2026-09-20)
 
 
