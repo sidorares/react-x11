@@ -170,16 +170,19 @@ export class NodeHitTest {
       return null;
     }
     const inside = this.containsPoint(x, y);
+    // `box-none`: the children are targets and this node is not — a point
+    // over its own area goes to whatever is behind it
+    const self = this.style.pointerEvents !== 'box-none';
     // the children are culled on the strict rect — slop grows this node's
     // target, not the region its clip lets through
     if (!inside && this.clipsChildren()) {
-      return this.containsPointWithSlop(x, y) ? this : null;
+      return self && this.containsPointWithSlop(x, y) ? this : null;
     }
     const order = this.paintOrder();
     for (let i = order.length - 1; i >= 0; i--) {
       const hit = order[i].hitTest(x, y);
       if (hit) return hit;
     }
-    return inside || this.containsPointWithSlop(x, y) ? this : null;
+    return self && (inside || this.containsPointWithSlop(x, y)) ? this : null;
   }
 }

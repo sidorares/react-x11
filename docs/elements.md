@@ -131,9 +131,14 @@ content. `flex: 'auto'` grows and shrinks from the content's own size, and
 - `opacity` is not implemented yet (see NEXT_STEPS.md)
 
 `cursor` (`'pointer'`, `'text'`, `'wait'`, `'move'`, `'crosshair'`, resize
-arrows, … — the ntk cursor name map) and `pointerEvents: 'none'` are style
-too: CSS has both, and React Native has been moving `pointerEvents` the same
-way. So is `hitSlop`:
+arrows, … — the ntk cursor name map) and `pointerEvents` are style too: CSS
+has both, and React Native has been moving `pointerEvents` the same way.
+`pointerEvents: 'none'` takes a node and its subtree out of hit testing;
+`'box-none'`, React Native's, takes out only the node itself — its children
+still take the pointer, and a press on its own area goes to what is behind
+it. That is the value for an overlay of controls that must not swallow the
+clicks between them, a `<glarea>`'s children over a scene whose input lives
+on the element behind the surface included. So is `hitSlop`:
 
 ```jsx
 <box style={{ height: 16, hitSlop: { top: 4, bottom: 4 } }} /> // 24px target

@@ -1270,7 +1270,9 @@ export class EventManager {
       // arrive
       if (!rect?.width || !rect.height) continue;
       if (node.hidden || node.style.display === 'none') continue;
-      if (node.style.pointerEvents === 'none') continue;
+      // neither value lets the pointer arrive at the node itself
+      const pe = node.style.pointerEvents;
+      if (pe === 'none' || pe === 'box-none') continue;
       const eta =
         speed < ATTENTION_MIN_SPEED
           ? attentionEta(native.x, native.y, 0, 0, rect)

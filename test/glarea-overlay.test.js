@@ -482,6 +482,68 @@ test('the pointer over a child is the child’s; between the children, the surfa
   }
 });
 
+test("pointerEvents: 'box-none' on the surface: a child is the pointer's, and between the children, what is behind", async () => {
+  // The shape an overlay of controls over a GL scene wants: the controls
+  // take the pointer, and a press between them reaches whatever owns the
+  // scene's input — here, the box the surface sits in — instead of the
+  // surface, which has no handlers of its own to give it.
+  const seen = [];
+  const log = (who) => (ev) => seen.push({ who, target: ev.target });
+  const s = await mount(
+    () =>
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          'box',
+          { style: { flexGrow: 1 }, onMouseDown: log('behind') },
+          h(
+            'glarea',
+            {
+              style: { flexGrow: 1, pointerEvents: 'box-none' },
+              onDraw: () => {},
+              onMouseDown: log('area'),
+            },
+            h('box', {
+              style: {
+                position: 'absolute',
+                left: 10,
+                top: 10,
+                width: 60,
+                height: 30,
+                backgroundColor: '#ff0000',
+              },
+              onMouseDown: log('legend'),
+            }),
+          ),
+        ),
+      ),
+    { panes: 1 },
+  );
+  try {
+    const area = s.area();
+    const [legend] = area.children;
+    s.at(40, 25);
+    s.server.injectButton(1, true);
+    s.server.injectButton(1, false);
+    await waitFor(() => seen.some((e) => e.who === 'legend'), 'the press');
+    same(seen.find((e) => e.who === 'legend').target, legend, 'the child');
+
+    seen.length = 0;
+    s.at(150, 150);
+    s.server.injectButton(1, true);
+    s.server.injectButton(1, false);
+    await waitFor(() => seen.length > 0, 'a press beside it');
+    same(seen[0].target, area.parent, 'the box behind took it');
+    assert.ok(
+      !seen.some((e) => e.who === 'area'),
+      'the surface was not the target, and nothing bubbled out of it',
+    );
+  } finally {
+    await s.close();
+  }
+});
+
 test('the children are drawn where GL is not, and are still the pointer’s', async () => {
   const seen = [];
   const s = await mount(
