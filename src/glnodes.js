@@ -482,7 +482,9 @@ export class GlAreaNode extends Node {
    * by those. With no GL surface — not made yet, or given up after
    * `onError` — only the children answer, and a point between them is the
    * tree's. Hidden, or `pointerEvents: 'none'` here or above, lets the
-   * pointer through to what the tree has behind, as it does for any node.
+   * pointer through to what the tree has behind, as it does for any node;
+   * `'box-none'` here does the same for the surface alone and still lets
+   * its children take the pointer.
    */
   hitSurface(x, y) {
     const panes = this._overlay?.panes.length ?? 0;
@@ -511,6 +513,10 @@ export class GlAreaNode extends Node {
         if (hit) return hit;
       }
     }
+    // `box-none`: the children above answered for themselves, and the
+    // surface between them is not a target — the point goes on to the tree
+    // behind, as it does for any node with that value
+    if (this.style?.pointerEvents === 'box-none') return null;
     return this.window ? this : null;
   }
 

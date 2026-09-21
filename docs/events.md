@@ -7,10 +7,14 @@ events dispatched over the drawn node tree with DOM-like semantics.
 
 1. **Hit test**: front-to-back walk of the stacking-ordered tree (zIndex,
    then document order), respecting `overflow` clipping and
-   `pointerEvents="none"`. A `<glarea>` is asked first: its surface is
-   stacked above everything 2D in the window, and its children above the
-   surface, so a point over one lands on the child under it or on the
-   `<glarea>` ([elements.md](elements.md#glarea)).
+   `pointerEvents` — `'none'` takes a node and everything in it out of the
+   test, `'box-none'` only the node itself, so its children are still
+   targets and a point over its own area lands on what is behind it. A
+   `<glarea>` is asked first: its surface is stacked above everything 2D in
+   the window, and its children above the surface, so a point over one lands
+   on the child under it or on the `<glarea>` — or, with `'box-none'`, on
+   whatever the tree has behind the surface
+   ([elements.md](elements.md#glarea)).
 2. **Capture phase**: `on<Event>Capture` handlers from the window down to
    the target.
 3. **Target + bubble phase**: `on<Event>` handlers from the target up.

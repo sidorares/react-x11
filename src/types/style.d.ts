@@ -72,7 +72,14 @@ export type JustifyItems = 'flex-start' | 'center' | 'flex-end' | 'stretch';
 export type JustifySelf = 'auto' | JustifyItems;
 export type Overflow = 'visible' | 'hidden' | 'scroll';
 export type BorderStyle = 'solid' | 'dashed';
-export type PointerEvents = 'auto' | 'none';
+/**
+ * Whether the pointer can land on a node. `'none'`: not on it nor anything
+ * inside it. `'box-none'` (React Native's): not on the node itself, but on
+ * its children — a press on the node's own area goes through to what is
+ * behind it. The shape an overlay wants when it holds controls but must not
+ * swallow the clicks between them, `<glarea>` included.
+ */
+export type PointerEvents = 'auto' | 'none' | 'box-none';
 export type TextAlign = 'left' | 'right' | 'center' | 'start' | 'end';
 export type FontStyle = 'normal' | 'italic' | 'oblique';
 export type FontWeight = number | 'normal' | 'bold';

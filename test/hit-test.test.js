@@ -307,6 +307,54 @@ test('display: none removes a node from hits, and its lifting restores it', asyn
   }
 });
 
+test("pointerEvents: 'box-none' keeps its children targets and passes its own area through", async () => {
+  // React Native's value: the node is not a target, its children are. A
+  // point over the node's own area lands on what is behind it.
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const under = React.createRef();
+    const over = React.createRef();
+    const child = React.createRef();
+    const full = {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      width: 100,
+      height: 100,
+    };
+    await mountStateful(x11Root, () => [
+      React.createElement('box', { key: 'under', ref: under, style: full }),
+      React.createElement(
+        'box',
+        {
+          key: 'over',
+          ref: over,
+          style: { ...full, pointerEvents: 'box-none' },
+        },
+        React.createElement('box', {
+          ref: child,
+          style: {
+            position: 'absolute',
+            left: 10,
+            top: 10,
+            width: 20,
+            height: 20,
+          },
+        }),
+      ),
+    ]);
+    const root = over.current.root;
+    assert.ok(root.hitTest(15, 15) === child.current, 'the child is hit');
+    assert.ok(
+      root.hitTest(60, 60) === under.current,
+      'the box-none node is not: what is behind it is',
+    );
+  } finally {
+    await x11Root.unmount();
+  }
+});
+
 test('the cull skips subtrees the pointer is nowhere near', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });
