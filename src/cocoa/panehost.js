@@ -3,13 +3,18 @@
 // contents are whatever IOSurface the pane process last presented. The pane
 // owns its buffers and its drawing; this side owns the layer, the layout
 // and the input — CPU offloading, not isolation (docs/frame.md).
+import { withoutActions } from './quiet.js';
+
 export class CocoaPaneHost {
   constructor(app, wnd) {
     this.app = app;
     this.wnd = wnd;
     this._native = app._native;
-    this.layer = this._native.createLayer();
-    this._native.addSublayer(wnd._layer, this.layer);
+    this.layer = withoutActions(this._native, () => {
+      const layer = this._native.createLayer();
+      this._native.addSublayer(wnd._layer, layer);
+      return layer;
+    });
     this.destroyed = false;
     this._rect = null;
   }
@@ -73,6 +78,8 @@ export class CocoaPaneHost {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
-    this._native.removeFromSuperlayer(this.layer);
+    withoutActions(this._native, () =>
+      this._native.removeFromSuperlayer(this.layer),
+    );
   }
 }

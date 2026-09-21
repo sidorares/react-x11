@@ -137,6 +137,27 @@ function layerSets(native, layer) {
   return sets;
 }
 
+/**
+ * Every `addSublayer` and `removeFromSuperlayer` of `layer`, in order, each
+ * with whether a disabled-actions transaction was open around it. A bare
+ * one takes Core Animation's order-in or order-out fade (#638).
+ */
+function layerMoves(native, layer) {
+  const open = [];
+  const moves = [];
+  for (const { name, args } of native.calls) {
+    if (name === 'txBegin') open.push(args[0]?.disableActions === true);
+    else if (name === 'txCommit') open.pop();
+    else if (
+      (name === 'addSublayer' && args[1] === layer) ||
+      (name === 'removeFromSuperlayer' && args[0] === layer)
+    ) {
+      moves.push({ name, still: open.includes(true) });
+    }
+  }
+  return moves;
+}
+
 test('the surface is placed at mount without an implicit animation', async () => {
   const { native, node } = await mountGLArea();
   const layer = node.window.layer;
@@ -307,7 +328,7 @@ test('a child of the surface is never promoted onto a layer of its own', async (
 });
 
 test('the layer goes with the last child', async () => {
-  const { root, wnd, node, frame } = await mountGLArea({
+  const { native, root, wnd, node, frame } = await mountGLArea({
     children: legend(),
   });
   frame();
@@ -328,6 +349,24 @@ test('the layer goes with the last child', async () => {
   frame();
   assert.equal(overlay.parent, null, 'off the root layer');
   assert.ok(node._overlay === null, 'no overlay left');
+  // and it goes at once: a bare removal fades what the children last
+  // painted out over a quarter of a second, over a surface still drawing
+  assert.deepEqual(layerMoves(native, overlay), [
+    { name: 'addSublayer', still: true },
+    { name: 'removeFromSuperlayer', still: true },
+  ]);
+});
+
+test('the surface comes and goes without an implicit animation', async () => {
+  const { native, root, node } = await mountGLArea();
+  const layer = node.window.layer;
+  root.render(h('window', { width: 200, height: 120 }, h('box')));
+  await tick();
+  assert.equal(layer.parent, null, 'off the root layer');
+  assert.deepEqual(layerMoves(native, layer), [
+    { name: 'addSublayer', still: true },
+    { name: 'removeFromSuperlayer', still: true },
+  ]);
 });
 
 test('a still surface is not drawn again when the display hands its buffer back', async () => {

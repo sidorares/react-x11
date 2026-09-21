@@ -176,11 +176,15 @@ function fakeBridge({ screens } = {}) {
       onGlass.set(layer.root, id);
     },
     createLayer: () => ({ layer: ++seq }),
-    addSublayer() {},
+    addSublayer(parent, layer) {
+      calls.push(['addSublayer', parent, layer]);
+    },
     setLayerProps(layer, props) {
       calls.push(['setLayerProps', layer, props]);
     },
-    removeFromSuperlayer() {},
+    removeFromSuperlayer(layer) {
+      calls.push(['removeFromSuperlayer', layer]);
+    },
     txBegin(options) {
       calls.push(['txBegin', options]);
     },
@@ -1218,7 +1222,7 @@ test('the host drops a present of a buffer the pane has since retired, and shows
   wnd.destroy();
 });
 
-test('the host places the pane with implicit animations off', () => {
+test('the host adds, places and removes the pane with implicit animations off', () => {
   // The layer is the host's, not a presenter's, so no frame's transaction
   // covers it: each set opens its own with actions off, or Core Animation
   // tweens the pane into place at mount and after every resize.
@@ -1229,18 +1233,37 @@ test('the host places the pane with implicit animations off', () => {
   );
   host.setRect({ x: 20, y: 20, width: 360, height: 200 });
   host.setRect({ x: 20, y: 20, width: 560, height: 320 });
-  const place = (frame) => [
+  host.destroy();
+  // the layer's arrival and departure too: a bare add or remove takes the
+  // default order-in or order-out fade (#638)
+  const quiet = (call) => [
     ['txBegin', { disableActions: true }],
-    ['setLayerProps', host.layer, { frame, zPosition: 1e7, hidden: false }],
+    call,
     ['txCommit'],
   ];
+  const place = (frame) =>
+    quiet([
+      'setLayerProps',
+      host.layer,
+      { frame, zPosition: 1e7, hidden: false },
+    ]);
   assert.deepEqual(
     native.calls.filter(([name]) =>
-      ['txBegin', 'setLayerProps', 'txCommit'].includes(name),
+      [
+        'txBegin',
+        'addSublayer',
+        'setLayerProps',
+        'removeFromSuperlayer',
+        'txCommit',
+      ].includes(name),
     ),
-    [...place([10, 10, 180, 100]), ...place([10, 10, 280, 160])],
+    [
+      ...quiet(['addSublayer', { root: 1 }, host.layer]),
+      ...place([10, 10, 180, 100]),
+      ...place([10, 10, 280, 160]),
+      ...quiet(['removeFromSuperlayer', host.layer]),
+    ],
   );
-  host.destroy();
 });
 
 // --- the wheel ----------------------------------------------------------------------
