@@ -85,6 +85,17 @@ const SCREEN_POLL_MS = 500;
 // have finished moving the window (`_recheckScreens`).
 const SCREEN_RECHECK_MS = 1000;
 
+/** One frame callback; a throw is reported, not allowed to end the tick. */
+function runFrame(entry, now) {
+  try {
+    entry.cb(now);
+  } catch (err) {
+    queueMicrotask(() => {
+      throw err;
+    });
+  }
+}
+
 export class CocoaApp {
   constructor(native, options = {}) {
     this._native = native;
@@ -92,7 +103,7 @@ export class CocoaApp {
     // CocoaWindow._key -> CocoaWindow: the number, or on a worker the handle
     this._windows = new Map();
     this._grabWindow = null;
-    this._rafQueue = []; // [{ cb, wnd }]
+    this._rafQueue = []; // [{ cb, wnd, surface }]
     // the app's own frame clock, for a frame no window owns (a pane's)
     this._rafLast = 0;
     // an explicit interval applies to every window; null means each
@@ -843,8 +854,8 @@ export class CocoaApp {
    * paced claim (src/pacing.js) land at its wait rather than at its wait
    * rounded up to the pump.
    */
-  _requestFrame(cb, wnd = null) {
-    this._rafQueue.push({ cb, wnd });
+  _requestFrame(cb, wnd = null, surface = false) {
+    this._rafQueue.push({ cb, wnd, surface });
     if ((this._pump || this._threaded) && this._rafQueue.length === 1) {
       const now = performance.now();
       this._armFrameTimer(Math.max(1, this._frameWait(wnd ?? this, now)), now);
@@ -947,6 +958,14 @@ export class CocoaApp {
     const queue = this._rafQueue;
     this._rafQueue = [];
     let soonest = Infinity;
+    // A `<glarea>`'s frames, due in this tick, run after every window's
+    // own: its children are laid out, painted and presented in the window's
+    // flush, so a GL frame drawn ahead of that flush reached the screen
+    // under the overlay of the frame before — for as long as the flush took,
+    // which is more than a display frame when the change costs layout
+    // (issue #641). The Wayland backend orders them the same way
+    // (`requestSurfaceFrame`).
+    const surfaces = [];
     for (const entry of queue) {
       // A window whose last flip has not reached its layer yet (threaded
       // mode's fence, `CocoaWindow.frameInFlight`) waits before
@@ -974,14 +993,10 @@ export class CocoaApp {
         this._rafQueue.push(entry);
         continue;
       }
-      try {
-        entry.cb(now);
-      } catch (err) {
-        queueMicrotask(() => {
-          throw err;
-        });
-      }
+      if (entry.surface) surfaces.push(entry);
+      else runFrame(entry, now);
     }
+    for (const entry of surfaces) runFrame(entry, now);
     this._armFrameTimer(soonest, now);
   }
 

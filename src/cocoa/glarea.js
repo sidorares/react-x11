@@ -232,8 +232,9 @@ export class CocoaGLArea {
     for (const fn of this._listeners.get(name) ?? []) fn(ev);
   }
 
+  // on the owning window's clock, after its flush in the same tick (#641)
   requestAnimationFrame(cb) {
-    return this.parent.requestAnimationFrame(cb);
+    return this.parent.requestSurfaceFrame(cb);
   }
 
   /**

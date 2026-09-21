@@ -916,6 +916,15 @@ export class CocoaWindow {
   }
 
   /**
+   * A `<glarea>`'s frame: on this window's clock, and after this window's
+   * own frame in the tick that runs both, so the GL frame goes out after
+   * the overlay its children were painted on (src/cocoa/glarea.js).
+   */
+  requestSurfaceFrame(cb) {
+    return this.app._requestFrame(cb, this, true);
+  }
+
+  /**
    * The earliest moment this window's clock will hand out another frame,
    * for a gate of `interval` ms — the display's period by default, which
    * is the clock's own.
