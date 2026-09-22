@@ -109,6 +109,13 @@ const NO_AUTO_START = 2;
 const menuPathFor = (xid) => `/com/react_x11/menus/${xid}`;
 
 /**
+ * Per window, the moment it is free: settles once every exporter that has
+ * published on it so far has stopped. The next one to publish there waits for
+ * it — see `GlobalMenuExport.takeTurn()`.
+ */
+const vacancies = new Map();
+
+/**
  * The feature's off switch.
  *
  * An embedder that owns the toplevel, or an app that exports its own menu on
@@ -167,6 +174,20 @@ export class GlobalMenuExport extends DbusMenuExport {
     this.path = null;
     this.xid = null;
     this.window = null;
+    /** The windows this exporter has queued for, by xid. Each is held until
+     *  `stop()`, so publishing on one again does not queue behind itself —
+     *  see `takeTurn()`. */
+    this.claimed = new Set();
+    /** Settles when `stop()` is called, `stopped` as a promise, so a publish
+     *  still waiting for its window stops waiting. */
+    this.halted = new Promise((resolve) => {
+      this.halt = resolve;
+    });
+    /** Settles once `stop()` has finished, which is what the next exporter on
+     *  a window this one claimed waits for — see `takeTurn()`. */
+    this.gone = new Promise((resolve) => {
+      this.markGone = resolve;
+    });
   }
 
   // ------------------------------------------------------------------ setup
@@ -281,6 +302,21 @@ export class GlobalMenuExport extends DbusMenuExport {
     // call" case rather than the "too early" one.
     if (!xid) return;
 
+    // One menu per window at a time — see `takeTurn()`.
+    const before = this.takeTurn(xid);
+    if (before) {
+      // Given up if this one is stopped meanwhile. That frees the window no
+      // sooner: whoever is next in line waits for `before` as well.
+      await Promise.race([before, this.halted]);
+      // How long that took is up to the menu ahead, and for a second bar in
+      // the window it is that bar's whole mount. So what `_sync()` decided
+      // before it is stale, and it decides again. A panel that went meanwhile
+      // would otherwise get a RegisterWindow sent to nobody, and the error
+      // ends `start()` in a teardown: a menu that never reaches the next
+      // panel either.
+      return this._sync();
+    }
+
     const dbus = await loadTransport();
     const path = menuPathFor(xid);
     if (!dbus.isValidObjectPath(path)) return;
@@ -318,6 +354,49 @@ export class GlobalMenuExport extends DbusMenuExport {
     if (this.stopped) return void (await this.unpublish());
     this.exported = true;
     this.onChange(true);
+  }
+
+  /**
+   * Queue for a window, the first time this exporter publishes on it, and
+   * hand back what to wait for: the moment every exporter that published
+   * there before this one has stopped, or `null` when there is nothing to
+   * wait for.
+   *
+   * **One menu per window at a time.** Everything a menu holds is per window:
+   * the object at `menuPathFor(xid)`, the registrar's entry for the xid, and
+   * the two X properties. A `<MenuBar>` remounted in its window, or one with
+   * `globalMenu` switched off and on, puts a new exporter on all three while
+   * the old one is still leaving — its teardown asks `ListNames` and waits
+   * for `UnregisterWindow` before it unexports. That unexport is
+   * dbus-native's `registration.remove()`, which removes whatever is at the
+   * path when it runs, whoever exported it. So the new menu lost its object
+   * while the registrar and the properties still named it, and its bar,
+   * told `exported`, drew nothing: no menu anywhere. The old one's
+   * unregistration and property deletes race the new one's registration and
+   * property writes the same way. They happened to land first, which is
+   * harmless, but nothing made them, so the whole publish waits and not only
+   * the export. A second bar in a window that already has one waits too: it
+   * stays drawn in the window until the first one goes, rather than
+   * displacing it.
+   *
+   * Every one before it, not only the last: a menu stopped while it was
+   * still waiting is gone at once, and the one it was waiting for may not
+   * be.
+   *
+   * A window is held until this exporter stops, not only while it is
+   * published, so a panel that restarts gets the menu back from the same
+   * exporter without it queueing behind itself.
+   */
+  takeTurn(xid) {
+    if (this.claimed.has(xid)) return null;
+    this.claimed.add(xid);
+    const before = vacancies.get(xid);
+    const vacated = Promise.all([before, this.gone]);
+    vacancies.set(xid, vacated);
+    void vacated.then(() => {
+      if (vacancies.get(xid) === vacated) vacancies.delete(xid);
+    });
+    return before ?? null;
   }
 
   /**
@@ -390,15 +469,24 @@ export class GlobalMenuExport extends DbusMenuExport {
   async stop() {
     if (this.stopped) return;
     // Set first, so a publish already in flight sees it and undoes itself at
-    // its next checkpoint rather than finishing.
+    // its next checkpoint rather than finishing, and one still waiting for
+    // its window stops waiting.
     this.stopped = true;
-    // Then wait for it. `teardown()` reads `registration`, `xid` and `window`
-    // across several awaits of its own, so running it *beside* a publish lets
-    // each undo the other's work: the classic end state is `exported === true`
-    // with the object unexported and the window unregistered — no bar in the
-    // window, nothing in the panel, and no event left that could recover it.
-    await this.syncing?.catch(() => {});
-    await this.teardown();
+    this.halt();
+    try {
+      // Then wait for it. `teardown()` reads `registration`, `xid` and
+      // `window` across several awaits of its own, so running it *beside* a
+      // publish lets each undo the other's work: the classic end state is
+      // `exported === true` with the object unexported and the window
+      // unregistered — no bar in the window, nothing in the panel, and no
+      // event left that could recover it.
+      await this.syncing?.catch(() => {});
+      await this.teardown();
+    } finally {
+      // Whatever happened, the window is free: the next menu on it would
+      // otherwise wait for good, and never reach the panel.
+      this.markGone();
+    }
   }
 
   async teardown() {
@@ -425,6 +513,14 @@ export class GlobalMenuExport extends DbusMenuExport {
     await this.ref?.release();
     this.ref = null;
   }
+}
+
+/** Test seam, not public: forget which windows are held. A previous test's
+ *  menus are on a bus it has closed, so there is nothing to wait for, and one
+ *  a failed test never stopped would otherwise hold its window for the rest
+ *  of the run — every mock app numbers its first window alike. */
+export function _resetGlobalMenuState() {
+  vacancies.clear();
 }
 
 /**

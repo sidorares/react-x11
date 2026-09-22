@@ -218,6 +218,12 @@ function Bar({ menus }) {
   extensions that add one do own it, and then this works.
 - **`ContextMenu` is not exported**, and should not be. The registrar's unit is
   a window's menu _bar_; a right-click menu belongs where the pointer is.
+- **One menu per window.** The registrar's entry, the object path and the KDE
+  properties all belong to the window, so a second `MenuBar` in a window that
+  already has one stays drawn in the window until the first unmounts or turns
+  `globalMenu` off, and only then takes the panel. A bar remounted with a new
+  `key`, or switched off and on again, waits the same way for the one it
+  replaces to finish leaving, which takes a round trip or two.
 - **`AboutToShow` cannot be answered honestly.** dbusmenu wants a synchronous
   "do you need to rebuild this submenu", and a React `setState` has not
   rendered by the time the reply must go out. react-x11 answers `false`, runs
