@@ -216,7 +216,10 @@ export function useClipboard(): Clipboard;
  * before it. Both backends draw them; translucency is the difference,
  * composited by Core Animation on Cocoa and opaque on X11, where what a
  * child leaves unpainted shows the surface's `clearColor` (docs/elements.md).
- * Ask it before handing a surface its HUD. A property of the backend.
+ * False on XQuartz, whose GL surfaces the macOS window server composites
+ * above everything the X server draws: nothing can be drawn over one there.
+ * Ask it before handing a surface its HUD. A property of the backend and the
+ * display, settled before the first render.
  */
 export type SupportsFeature =
   'transparency' | 'shaders' | 'nativeControls' | 'embedding' | 'glOverlay';

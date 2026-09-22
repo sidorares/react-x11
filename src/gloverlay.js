@@ -35,6 +35,15 @@
 //   node-x11's in-process server, where this is tested, has none — and a
 //   window as big as the surface would keep a backing pixmap the size of a
 //   map to show a legend in its corner.
+// - **XQuartz: no, and not opaquely either.** Every GL surface there, the
+//   direct ones Apple-DRI exports and indirect GLX's alike, is a surface of
+//   the macOS window server, composited above everything the X server draws
+//   in the window (hw/xquartz/xpr/dri.c makes it `XP_MAPPED_ABOVE`). X's
+//   stacking never reaches it: a pane stacked over the surface's window is
+//   drawn under the frame, cutting that window down with SHAPE leaves the
+//   frame covering all of it, and only a pane over the whole surface shows —
+//   by hiding the frame (issue #653). So no pane is made there, and
+//   `canOverlay` says so from the first render on (`beginGlOverlay`).
 //
 // A pane selects no input, so the pointer over one reaches the owning window
 // by the same propagation that brings it the pointer over the surface
@@ -75,18 +84,73 @@ const MOVE_BLIT_MAX_REPAINT = 0.75;
 // one variable away from the plain repaint (docs/debugging.md).
 const NO_BLIT = process.env.REACT_X11_NO_SCROLL_BLIT === '1';
 
+// Connections on which nothing can be drawn over a GL surface, each with the
+// reason (`beginGlOverlay`), and the probe that finds out, once per app.
+const refusals = new WeakMap();
+const probes = new WeakMap();
+
+const XQUARTZ =
+  'this display is XQuartz, where the macOS window server composites every ' +
+  'GL surface above everything the X server draws in its window. Draw the ' +
+  'overlay beside the surface or in GL instead, or run on the Cocoa backend ' +
+  '(the default on macOS), which composites it';
+
 /**
  * Whether the children of a `<glarea>` can be drawn over its surface on this
  * connection: a backend that composites a pane itself, or one that can make
- * the plain child window a pane is on X11. One function for the element and
- * for `useSupports('glOverlay')`, which have to agree — the rule `canEmbed`
- * follows for `<foreign>`.
+ * the plain child window a pane is on X11 — on any server but XQuartz, where
+ * nothing can be drawn over a GL surface (`beginGlOverlay`). One function
+ * for the element and for `useSupports('glOverlay')`, which have to agree —
+ * the rule `canEmbed` follows for `<foreign>`.
  */
 export function canOverlay(app) {
-  return (
-    typeof app?.createOverlayPane === 'function' ||
-    typeof app?.createWindow === 'function'
-  );
+  if (typeof app?.createOverlayPane === 'function') return true;
+  return typeof app?.createWindow === 'function' && !refusals.has(app);
+}
+
+/** Why nothing is drawn over a GL surface on this connection, for the
+ * warning a `<glarea>` with children gives there — or null. */
+export function overlayRefusal(app) {
+  return (app && refusals.get(app)) ?? null;
+}
+
+/**
+ * Is this an X server where nothing can be drawn over a GL surface? Asked
+ * in `createRoot`, with the other startup probes and before the first
+ * render, so that `canOverlay` answers the same from the first frame on —
+ * a component choosing how to draw by it would otherwise build one way and
+ * tear that down a frame later.
+ *
+ * The server is XQuartz, and the question is its Apple-DRI extension, which
+ * no other server has: every GL surface XQuartz makes comes from the
+ * machinery that extension exports, direct and indirect alike. Asked of the
+ * server rather than of `app.glCapabilities()`, because the default policy
+ * never probes direct rendering and XQuartz's indirect GLX hides the panes
+ * all the same. One QueryExtension; where ntk's direct-rendering probe has
+ * asked already, node-x11 answers it from the reply it kept.
+ */
+export function beginGlOverlay(app) {
+  if (!app) return Promise.resolve();
+  let pending = probes.get(app);
+  if (pending) return pending;
+  const X = app.X;
+  pending =
+    typeof app.createOverlayPane === 'function' ||
+    typeof X?.QueryExtension !== 'function'
+      ? Promise.resolve()
+      : new Promise((resolve) => {
+          try {
+            X.QueryExtension('Apple-DRI', (err, reply) => {
+              if (!err && reply?.present) refusals.set(app, XQUARTZ);
+              resolve();
+            });
+          } catch {
+            // a connection that cannot ask is one this cannot find out about
+            resolve();
+          }
+        });
+  probes.set(app, pending);
+  return pending;
 }
 
 /** A rect grown out to whole device pixels. */

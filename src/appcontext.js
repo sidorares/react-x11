@@ -60,9 +60,10 @@ export function useApp() {
 }
 
 // 'nativeControls', 'embedding' and 'glOverlay' are properties of the
-// backend, decided before the first render and never changing after — so
-// their subscription has nothing to deliver and their snapshot is a property
-// test.
+// backend — and 'glOverlay' of the X server too, which `createRoot` asks
+// before the first render (src/gloverlay.js) — decided before anything
+// renders and never changing after, so their subscription has nothing to
+// deliver and their snapshot is a property test.
 const NEVER_CHANGES = () => () => {};
 
 // What `useSupports` watches and reads, per feature. `read` answers a
@@ -169,7 +170,10 @@ const FEATURES = {
  * GL surface on this connection — laid out in its box, painted on panes over
  * the surface, hit before it. Both backends draw them; what differs is
  * translucency, composited by Core Animation on the Cocoa backend and opaque
- * on X11 (docs/elements.md says exactly how). It is the question to ask
+ * on X11 (docs/elements.md says exactly how). The exception is XQuartz,
+ * where it is false: the macOS window server composites every GL surface
+ * above everything the X server draws, so nothing can be drawn over one, and
+ * the children are laid out but never drawn. It is the question to ask
  * before handing a surface its HUD rather than drawing that some other way:
  *
  * ```jsx
@@ -177,7 +181,8 @@ const FEATURES = {
  * <glarea onDraw={drawMap}>{overlay && <Legend />}</glarea>
  * ```
  *
- * A property of the backend too, and it never changes.
+ * A property of the backend and the display, settled before the first
+ * render, and it never changes.
  */
 export function useSupports(feature) {
   const app = useApp();

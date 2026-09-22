@@ -2182,7 +2182,20 @@ top-level windows, not the children inside one. A region per child, rather
 than one window cut to shape with the SHAPE extension, keeps each pane as
 small as what it holds and works on servers without SHAPE.
 `useSupports('glOverlay')` says whether a connection draws a surface's
-children at all (both backends do).
+children at all. Both backends do, on every display but one.
+
+**XQuartz draws nothing over a GL surface.** There every surface, direct
+(Apple-DRI) or indirect, is composited by the macOS window server above
+everything the X server draws in the window. A pane stacked over the
+surface in X is drawn under it on screen, and nothing on the X side changes
+that: cutting the surface's window down with SHAPE still leaves the frame
+covering all of it. A pane over the _whole_ surface does show, but only
+because the frame then disappears. So on XQuartz the children are laid out
+and not drawn, the pointer over them is the surface's,
+`useSupports('glOverlay')` is false, and a development build says so once.
+Ask the hook and draw the overlay another way there, beside the surface or
+in GL, or run on the Cocoa backend (the default on macOS), which composites
+it.
 
 **A child that only moves is not repainted.** A pane keeps what it drew
 between frames, so when all that changed about one of the surface's children
@@ -2253,7 +2266,7 @@ without rendering), and is the switch for dropping such a listener.
 `onDraw` is the raw escape hatch, and a scene graph over it is
 `@react-x11/components/three`. See `examples/viewer3d.jsx` for the raw
 form, and `examples/labs/gl-overlay.jsx` for a surface with a HUD over it on
-both backends.
+both backends, and beside it on XQuartz.
 
 ---
 

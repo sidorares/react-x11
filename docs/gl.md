@@ -124,6 +124,12 @@ child window, so what a child leaves unpainted shows the surface's
 `useSupports('glOverlay')` asks whether a connection draws them;
 `examples/labs/gl-overlay.jsx` runs one on both backends.
 
+The answer is no on XQuartz. The macOS window server composites every GL
+surface there above everything the X server draws, so nothing can be drawn
+over one. The children are laid out and not drawn, and a development build
+warns once. On macOS the Cocoa backend is the one that composites a HUD
+over GL.
+
 So a HUD is not GL's business: its text is set by the app's own text
 engine, its controls take their own input, and nothing is rasterized into a
 texture.
