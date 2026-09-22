@@ -122,7 +122,9 @@ replays the same protocol onto WebGL2.
   top of the parent's drawing, so the surface's own children are drawn on
   windows of their own stacked above it — opaque ones, one per region they
   reach, since a child window cannot be translucent without a compositor
-  (`src/gloverlay.js`, [elements.md](elements.md#glarea)).
+  (`src/gloverlay.js`, [elements.md](elements.md#glarea)). Except on
+  XQuartz, where the window server composites the surface above every X
+  window, those included, and the children are not drawn at all.
 
 ## Scope discipline
 

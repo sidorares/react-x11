@@ -10,9 +10,10 @@ import { cssColorStraight } from 'ntk';
 // re-exported so the GL element layer stays one import for consumers
 export { directGLFailure, hasDirectGL } from './glbackend.js';
 
-import { GlOverlay, canOverlay } from './gloverlay.js';
+import { GlOverlay, canOverlay, overlayRefusal } from './gloverlay.js';
 import { layoutDiff } from './nodes/damage.js';
 import { Node } from './nodes/node.js';
+import { DEV } from './nodes/util.js';
 import { FramePacer, resolveFrameRate } from './pacing.js';
 
 // One visual query per (app, spec): GetFBConfigs is a round trip and every
@@ -35,6 +36,27 @@ export function glxFailure(app) {
 
 function recordGlxFailure(app, err) {
   if (app && err && !glxFailures.has(app)) glxFailures.set(app, err);
+}
+
+// Apps already told that a <glarea>'s children are not drawn on their
+// display. Once per app, as for a <foreign> that cannot embed: the answer
+// belongs to the server, so the next surface to find out carries no news.
+const warnedNoOverlay = new WeakSet();
+
+/**
+ * Say, once per app and in development only, that the children of a
+ * `<glarea>` are not drawn here. They lay out and render like anyone's and
+ * nothing fails, so without this a HUD that never shows looks like a bug in
+ * the HUD.
+ */
+function warnNoOverlay(app) {
+  if (!DEV || !app || warnedNoOverlay.has(app)) return;
+  warnedNoOverlay.add(app);
+  const why = overlayRefusal(app);
+  console.warn(
+    'react-x11: the children of a <glarea> are not drawn on this connection, ' +
+      `and useSupports('glOverlay') is false${why ? ` — ${why}` : ''}.`,
+  );
 }
 
 /**
@@ -121,7 +143,9 @@ const px = (v) => Math.max(1, Math.round(v || 0));
  * The X child window is stacked above everything drawn in the parent, so the
  * parent's 2D content cannot overlap it — but this node's own children do:
  * they are laid out in its box like a `<box>`'s and drawn above the surface,
- * on panes of their own (src/gloverlay.js).
+ * on panes of their own (src/gloverlay.js). Everywhere but XQuartz, where
+ * nothing can be drawn over a GL surface: there they are laid out and not
+ * drawn (`canOverlay`).
  *
  * Pointer input over the surface is the tree's, on both backends: a press,
  * a drag or a wheel over it is a synthetic event at the child under the
@@ -636,7 +660,14 @@ export class GlAreaNode extends Node {
    */
   _syncOverlay() {
     if (!this._overlay) {
-      if (this.children.length === 0 || !canOverlay(this.app)) {
+      // Where nothing can be drawn over the surface the children get no
+      // panes at all, rather than panes nobody sees: on XQuartz a pane over
+      // the whole surface is what hides the GL frame (src/gloverlay.js). So
+      // they are laid out and never drawn, and the pointer over them is the
+      // surface's.
+      const refused = this.children.length !== 0 && !canOverlay(this.app);
+      if (refused) warnNoOverlay(this.app);
+      if (this.children.length === 0 || refused) {
         this.root?._overlaid?.delete(this);
         return false;
       }

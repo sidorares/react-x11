@@ -27,7 +27,7 @@ const POINTER_INPUT =
   x11.eventMask.ButtonRelease |
   x11.eventMask.PointerMotion;
 
-async function createGlApp({ indirectContexts = true } = {}) {
+async function createGlApp({ indirectContexts = true, appleDri = false } = {}) {
   const server = xserver.createServer({ width: 640, height: 480 });
   server.registerExtension(
     'GLX',
@@ -37,6 +37,10 @@ async function createGlApp({ indirectContexts = true } = {}) {
       getDrawableSurface: () => null,
     }),
   );
+  // XQuartz, as far as the question core asks goes: the extension every GL
+  // surface there comes from (src/gloverlay.js, `beginGlOverlay`). Present,
+  // with no requests behind it — core never sends it one.
+  if (appleDri) server.registerExtension('Apple-DRI', { handleRequest() {} });
   const [serverEnd, clientEnd] = xserver.createStreamPair();
   server.addClientStream(serverEnd);
   const app = await createClient({
@@ -133,8 +137,11 @@ const whole = (r) => {
  * `build()` mounted in a 320x240 window and settled: the surface made (or
  * given up), its children laid out and their panes painted.
  */
-async function mount(build, { indirectContexts = true, panes = null } = {}) {
-  const { app, server } = await createGlApp({ indirectContexts });
+async function mount(
+  build,
+  { indirectContexts = true, panes = null, appleDri = false } = {},
+) {
+  const { app, server } = await createGlApp({ indirectContexts, appleDri });
   const root = await createRoot({ app });
   const close = async () => {
     await root.unmount();
@@ -594,22 +601,149 @@ test('a hidden surface drops its panes, and a revealed one paints new ones', asy
   }
 });
 
-test("useSupports('glOverlay') is true on X11", async () => {
-  let answer = null;
+/** Every answer `useSupports('glOverlay')` gave, first render first. */
+function overlayAnswers() {
+  const answers = [];
   function Probe() {
-    answer = useSupports('glOverlay');
+    answers.push(useSupports('glOverlay'));
     return null;
   }
-  const s = await mount(() =>
+  const tree = () =>
     h(
       'window',
       { width: 320, height: 240 },
       h('glarea', { style: { flexGrow: 1 }, onDraw: () => {} }),
       h(Probe),
-    ),
+    );
+  return { answers, tree };
+}
+
+test("useSupports('glOverlay') is true on an X server that is not XQuartz", async () => {
+  const { answers, tree } = overlayAnswers();
+  const s = await mount(tree);
+  try {
+    assert.deepEqual(answers, [true]);
+  } finally {
+    await s.close();
+  }
+});
+
+// --- XQuartz (issue #653) ----------------------------------------------------
+//
+// XQuartz composites every GL surface in the macOS window server, above
+// everything the X server draws in the window, so no pane can show over one
+// (src/gloverlay.js). The in-process server stands in for it by carrying the
+// extension core asks about, beside the same GLX emulator: the surface is a
+// real GL window and panes would be real windows, and what is under test is
+// that there are none, and that the element and the hook agree about it.
+
+/** Console warnings that say a `<glarea>`'s children are not drawn. */
+function noOverlayWarnings(t) {
+  const warnings = [];
+  t.mock.method(console, 'warn', (...args) => {
+    const text = args.join(' ');
+    if (text.includes('children of a <glarea> are not drawn')) {
+      warnings.push(text);
+    }
+  });
+  return warnings;
+}
+
+test("useSupports('glOverlay') is false on XQuartz, from the first render", async () => {
+  // First, and not only eventually: the hook never changes its answer, and a
+  // component choosing a renderer by it would build one way and tear that
+  // down — so createRoot has to know before anything renders
+  const { answers, tree } = overlayAnswers();
+  const s = await mount(tree, { appleDri: true });
+  try {
+    assert.deepEqual(answers, [false]);
+  } finally {
+    await s.close();
+  }
+});
+
+test('on XQuartz the children of a <glarea> get no panes, and the pointer over them is the surface’s', async (t) => {
+  const warnings = noOverlayWarnings(t);
+  const seen = [];
+  const s = await mount(
+    () =>
+      legendAndPanel({
+        onMouseDown: (ev) => seen.push(ev.target),
+      }),
+    { appleDri: true },
   );
   try {
-    assert.equal(answer, true);
+    const area = s.area();
+    assert.ok(area.window, 'the GL surface was made');
+    // the frame that would have made the panes has run: it is where the
+    // development warning comes from
+    await waitFor(() => warnings.length === 1, 'the frame that lays them out');
+    await settle(s.app);
+    const [legend, panel] = area.children;
+    // laid out in the surface's box, like anyone's…
+    assert.deepEqual(legend.abs, { x: 10, y: 10, width: 60, height: 30 });
+    assert.deepEqual(panel.abs, { x: 230, y: 190, width: 80, height: 40 });
+    // …and given no pane: a pane over the whole surface is what hides the
+    // GL frame there, and a smaller one is never seen. (Counted, not
+    // compared: the overlay reaches the whole tree — see `same`.)
+    assert.equal(area._overlay?.panes.length ?? 0, 0, 'no pane');
+    assert.deepEqual(
+      await stacking(s.app, s.windowNode.window.id),
+      [area.window.id],
+      'the owning window holds the surface and nothing over it',
+    );
+    // what is not drawn is not hit: the surface answers over the legend
+    same(area.hitSurface(40, 25), area, 'over the legend');
+    s.at(40, 25);
+    s.server.injectButton(1, true);
+    s.server.injectButton(1, false);
+    await waitFor(() => seen.length > 0, 'the press');
+    same(seen[0], area, 'the press over the legend');
+  } finally {
+    await s.close();
+  }
+});
+
+test('on XQuartz a <glarea> with children says so once per app, in development', async (t) => {
+  const warnings = noOverlayWarnings(t);
+  const tree = (second) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      legendAndPanel().props.children,
+      second &&
+        h(
+          'glarea',
+          { key: 'second', style: { height: 60 }, onDraw: () => {} },
+          h('box', { style: { width: 20, height: 20 } }),
+        ),
+    );
+  const s = await mount(() => tree(false), { appleDri: true });
+  try {
+    await waitFor(() => warnings.length === 1, 'the warning');
+    // a second surface with children, and a child coming back to the first:
+    // the answer is the server's, so neither is news
+    await s.render(tree(true));
+    await s.render(legendAndPanel({ panel: false }));
+    await s.render(legendAndPanel());
+    await waitFor(() => s.area().children.length === 2, 'the panel back');
+    await settle(s.app);
+    assert.equal(warnings.length, 1, warnings.join('\n'));
+    // says where, and what to ask instead of finding out this way
+    assert.match(warnings[0], /this display is XQuartz/);
+    assert.match(warnings[0], /useSupports\('glOverlay'\) is false/);
+  } finally {
+    await s.close();
+  }
+});
+
+test('on XQuartz a <glarea> with no children says nothing', async (t) => {
+  const warnings = noOverlayWarnings(t);
+  const { tree } = overlayAnswers();
+  const s = await mount(tree, { appleDri: true });
+  try {
+    await settle(s.app);
+    assert.deepEqual(warnings, []);
   } finally {
     await s.close();
   }

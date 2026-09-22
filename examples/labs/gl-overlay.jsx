@@ -31,6 +31,12 @@
 // The readout changes once a second, and repaints its own pane and nothing
 // else.
 //
+// **On XQuartz there is no HUD over the bars**, and the lab asks rather than
+// finds out: the macOS window server composites every GL surface there above
+// everything the X server draws, so nothing can go over one, and
+// `useSupports('glOverlay')` is false. The controls and the readout then sit
+// in a strip below the surface — the other path an app takes on that answer.
+//
 // ## LAB_SHOT
 //
 // One frame, reconstructed rather than captured: the GL frame read back with
@@ -42,7 +48,13 @@
 // -root` captures the real composite instead.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
-import { Button, createRoot, createStyles, useApp } from '../../src/index.js';
+import {
+  Button,
+  createRoot,
+  createStyles,
+  useApp,
+  useSupports,
+} from '../../src/index.js';
 
 const BARS = 18;
 const shot = process.env.LAB_SHOT || null;
@@ -219,6 +231,23 @@ const s = createStyles({
     backgroundColor: '#101420',
   },
   readoutText: { fontSize: 11, color: '#e8ecf6' },
+  // where nothing can be drawn over the surface: the HUD below it instead
+  column: { flexGrow: 1 },
+  strip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 8,
+    backgroundColor: '#f4f5f8',
+  },
+  stripNote: { flexGrow: 1, flexShrink: 1, fontSize: 11, color: '#1d2438' },
+  stripControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+    gap: 8,
+  },
+  stripReadout: { padding: 6, borderRadius: 6, backgroundColor: '#101420' },
 });
 
 function Stage() {
@@ -235,6 +264,8 @@ function Stage() {
   // The backend composites the overlay itself: the Cocoa backend's pane is a
   // layer Core Animation blends with the frame (src/cocoa/overlay.js).
   const composited = typeof app.createOverlayPane === 'function';
+  // …and whether there is an overlay at all: not on XQuartz
+  const overlay = useSupports('glOverlay');
 
   const onDraw = useCallback(
     (gl, { width, height }) => {
@@ -310,7 +341,16 @@ function Stage() {
     setPaused((v) => !v);
   }, []);
 
-  return (
+  const buttons = (
+    <>
+      <Button onPress={togglePause}>{paused ? 'Play' : 'Pause'}</Button>
+      <Button onPress={() => setSpeed((v) => (v >= 4 ? 1 : v * 2))}>
+        {`Speed ×${speed}`}
+      </Button>
+    </>
+  );
+  const readout = <text style={s.readoutText}>{`${fps} fps`}</text>;
+  const surface = (children) => (
     <glarea
       ref={area}
       style={s.stage}
@@ -321,6 +361,30 @@ function Stage() {
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
     >
+      {children}
+    </glarea>
+  );
+
+  if (!overlay) {
+    return (
+      <box style={s.column}>
+        {surface(null)}
+        <box style={s.strip}>
+          <text style={s.stripNote}>
+            Nothing can be drawn over a GL surface on this display, so the
+            controls sit below it. Drag the bars to scrub them.
+          </text>
+          <box style={s.stripControls}>
+            {buttons}
+            <box style={s.stripReadout}>{readout}</box>
+          </box>
+        </box>
+      </box>
+    );
+  }
+
+  return surface(
+    <>
       <box style={s.card}>
         <text style={s.title}>2D over a GL surface</text>
         <text style={s.note}>
@@ -343,18 +407,13 @@ function Stage() {
         </box>
       )}
       <box style={s.controls}>
-        <Button onPress={togglePause}>{paused ? 'Play' : 'Pause'}</Button>
-        <Button onPress={() => setSpeed((v) => (v >= 4 ? 1 : v * 2))}>
-          {`Speed ×${speed}`}
-        </Button>
+        {buttons}
         <Button onPress={() => setLegend((v) => !v)}>
           {legend ? 'Hide legend' : 'Show legend'}
         </Button>
       </box>
-      <box style={s.readout}>
-        <text style={s.readoutText}>{`${fps} fps`}</text>
-      </box>
-    </glarea>
+      <box style={s.readout}>{readout}</box>
+    </>,
   );
 }
 

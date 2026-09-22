@@ -67,6 +67,7 @@ import { watchAppearance } from './appearance.js';
 import { setDesktopIntegration } from './desktopintegration.js';
 import { ForeignNode } from './foreignnodes.js';
 import { GlAreaNode } from './glnodes.js';
+import { beginGlOverlay } from './gloverlay.js';
 import {
   createRegisteredNode,
   elementDefinition,
@@ -954,11 +955,17 @@ export async function createRoot(options = {}) {
   // extension; the scale ladder; the monitor layout and the work-area
   // property), so they run concurrently: each is internally a chain of one
   // to three round trips, and awaiting them in sequence made every app pay
-  // the sum where the slowest chain is the true floor.
+  // the sum where the slowest chain is the true floor. The fourth is a
+  // single extension query, too short to set that floor: whether this is
+  // XQuartz, the X server nothing can be drawn over a GL surface on, which
+  // decides whether a `<glarea>`'s children get panes and what
+  // `useSupports('glOverlay')` answers on the first render
+  // (src/gloverlay.js).
   await Promise.all([
     beginCompositing(app),
     beginScale(app, rest.scale),
     beginScreens(app),
+    beginGlOverlay(app),
   ]);
 
   // How fast a caret blinks, how long a double click has, how far a press

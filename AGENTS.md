@@ -100,10 +100,13 @@ no override-redirect staging (issue #4).
   `src/cocoa/overlay.js`), which Core Animation composites with the frame,
   and one opaque child window per region the children reach on X11: no
   SHAPE, which the in-process server lacks, and no pixmap the size of the
-  surface to show a legend in its corner. Two traps. A pane selects no input,
-  because the pointer reaches the tree by propagation the way it does over
-  the surface. And a child of a surface must never be promoted on Cocoa
-  (`promotableNode`): its layer would land under the GL layer.
+  surface to show a legend in its corner. Three traps. A pane selects no
+  input, because the pointer reaches the tree by propagation the way it does
+  over the surface. A child of a surface must never be promoted on Cocoa
+  (`promotableNode`): its layer would land under the GL layer. And XQuartz
+  gets no panes at all: the window server composites every GL surface there
+  above the whole X window, so `canOverlay` is false wherever the server has
+  Apple-DRI (`beginGlOverlay`, asked in `createRoot`).
 - `src/foreignnodes.js` — `<foreign>`: another process's window, embedded.
   A second `drawn: false` node, over ntk's `XEmbedSocket` (docs/embedding.md).
   Three things here are not obvious and are commented at length. **Teardown is
