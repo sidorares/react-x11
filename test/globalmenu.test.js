@@ -7,18 +7,40 @@
 // the panel exits.
 
 import assert from 'node:assert';
-import { describe, test } from 'node:test';
+import { beforeEach, describe, test } from 'node:test';
 import React from 'react';
 
 import { _resetBusState, busRefs, sessionBus } from '../src/bus.js';
 import { createRoot } from '../src/index.js';
-import { GlobalMenuExport, REGISTRAR_NAME } from '../src/globalmenu.js';
+import {
+  _resetGlobalMenuState,
+  GlobalMenuExport,
+  REGISTRAR_NAME,
+} from '../src/globalmenu.js';
 import { createMockApp } from './helpers/mock-app.js';
 import { fakeRegistrar } from './helpers/fake-registrar.js';
 import { transportAvailable, until, withBus } from './helpers/with-bus.js';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const h = React.createElement;
+
+/**
+ * Run `fn` as one commit, effects and all, before the next line. A `tick()`
+ * is not that: it is queued ahead of React's render task, so two renders a
+ * tick apart can be committed as one, and a prop switched off and on again
+ * never reaches the effect at all.
+ */
+async function committed(fn) {
+  const previous = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  try {
+    await React.act(async () => {
+      await fn();
+    });
+  } finally {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = previous;
+  }
+}
 
 const haveTransport = await transportAvailable();
 const needsBroker = haveTransport
@@ -109,7 +131,88 @@ async function mountBar(props = {}, menus = MENUS(), { dialsBus = true } = {}) {
   };
 }
 
+/** The last word on each of the two properties: its value, or null once it
+ *  has been deleted. */
+function propertiesOf(calls) {
+  const now = {};
+  for (const [call, name, value] of calls) {
+    if (!String(name).startsWith('_KDE_NET_WM_APPMENU')) continue;
+    now[name] = call === 'setProperty' ? value : null;
+  }
+  return now;
+}
+
+const registrations = (panel) =>
+  panel.calls.filter((c) => c[0] === 'RegisterWindow').length;
+
+/**
+ * The bar's menu is in the panel, from every side a desktop reads it: the
+ * registrar's entry, an object behind the path it names, the two properties
+ * Plasma reads instead, and no bar left drawn in the window.
+ */
+async function assertInPanel(panel, bar) {
+  await until(() => !bar.barIsDrawn(), 'the bar to be handed over');
+  const entry = panel.windows.get(bar.xid);
+  assert.ok(entry, 'the registrar has the window');
+  const menu = await panel.readMenu(entry);
+  assert.deepEqual(
+    menu.children.map((c) => c.props.label),
+    ['File', 'View'],
+  );
+  assert.deepEqual(propertiesOf(bar.wnd.calls), {
+    _KDE_NET_WM_APPMENU_SERVICE_NAME: entry.service,
+    _KDE_NET_WM_APPMENU_OBJECT_PATH: entry.path,
+  });
+}
+
+/** A window as far as a menu is concerned: an id, and the property calls. */
+function fakeWindow(id) {
+  const wnd = {
+    id,
+    calls: [],
+    async setProperty(name, value) {
+      wnd.calls.push(['setProperty', name, value]);
+    },
+    async deleteProperty(name) {
+      wnd.calls.push(['deleteProperty', name]);
+    },
+  };
+  return wnd;
+}
+
+/**
+ * An exporter straight on `wnd`, for the tests that need several on one
+ * window and every step in a known order.
+ *
+ * `joined` turns true when it looks its window up, which it does right
+ * before it queues for it, so from then on it is in the queue. `shown` is
+ * what it last told its bar: `true` means the bar would draw nothing.
+ */
+function menuOn(wnd, label) {
+  const menu = { joined: false, shown: false };
+  menu.owner = new GlobalMenuExport({
+    getMenus: () => [{ label, items: [{ label: 'Open' }] }],
+    target: {
+      get current() {
+        menu.joined = true;
+        return wnd;
+      },
+    },
+    onChange: (on) => {
+      menu.shown = on;
+    },
+  });
+  return menu;
+}
+
+const labels = async (panel) =>
+  (await panel.readMenu()).children.map((c) => c.props.label);
+
 describe('the global menu', { concurrency: 1, ...needsBroker }, () => {
+  // Every mock app's first window has the same id, so a menu a failed test
+  // never stopped would otherwise hold that window for every test after it.
+  beforeEach(() => _resetGlobalMenuState());
+
   test('with no panel running, the bar draws itself', async () => {
     await withBus(async () => {
       const bar = await mountBar();
@@ -441,6 +544,27 @@ describe('the global menu', { concurrency: 1, ...needsBroker }, () => {
     });
   });
 
+  test('a panel that restarts takes the menu back', async () => {
+    await withBus(async (address) => {
+      const first = await fakeRegistrar(address);
+      const bar = await mountBar();
+      await until(() => !bar.barIsDrawn(), 'the bar to be handed over');
+      await first.stop();
+      await until(() => bar.barIsDrawn(), 'the bar to come back');
+
+      // The same exporter publishing on the same window again. It holds the
+      // window until it stops, so it must not queue for it a second time:
+      // that would be waiting for itself.
+      const second = await fakeRegistrar(address);
+      await until(() => second.windows.size === 1, 'the window to register');
+      await until(() => !bar.barIsDrawn(), 'the bar to be handed over again');
+      assert.deepEqual(await labels(second), ['File', 'View']);
+
+      await second.stop();
+      await bar.unmount();
+    });
+  });
+
   test('unmounting unregisters and clears the window properties', async () => {
     await withBus(async (address) => {
       const panel = await fakeRegistrar(address);
@@ -468,6 +592,146 @@ describe('the global menu', { concurrency: 1, ...needsBroker }, () => {
       );
 
       await panel.stop();
+    });
+  });
+
+  test('a bar remounted in its window keeps its menu in the panel', async () => {
+    await withBus(async (address) => {
+      const panel = await fakeRegistrar(address);
+      const bar = await mountBar({ key: 1 });
+      await until(() => bar.propertyCalls().length >= 2, 'the X properties');
+
+      // A new `key` is a new bar in the same window, so its menu goes to the
+      // same path, registrar entry and properties as the one it replaces,
+      // which is still tearing all three down. Twice, because the second
+      // remount queues behind a bar that itself had to wait its turn.
+      for (const key of [2, 3]) {
+        const before = registrations(panel);
+        bar.render(MENUS(), { key });
+        await until(
+          () => registrations(panel) === before + 1,
+          'the new bar to register',
+        );
+        // Letting go of the bus is the last thing the old bar's teardown
+        // does, so this is the moment it could have taken the menu with it.
+        await until(
+          () => busRefs('session') === 1,
+          'the old bar to let go of the bus',
+        );
+        await assertInPanel(panel, bar);
+      }
+
+      await panel.stop();
+      await bar.unmount();
+    });
+  });
+
+  test('a bar switched off and on again keeps its menu in the panel', async () => {
+    await withBus(async (address) => {
+      const panel = await fakeRegistrar(address);
+      const bar = await mountBar();
+      await until(() => bar.propertyCalls().length >= 2, 'the X properties');
+
+      // One commit each, so the effect really runs its cleanup and then runs
+      // again: a new exporter on the window the old one is still leaving.
+      await committed(() => bar.render(MENUS(), { globalMenu: false }));
+      await committed(() => bar.render(MENUS(), { globalMenu: true }));
+
+      await until(
+        () => registrations(panel) === 2,
+        'the bar to register again',
+      );
+      await until(
+        () => busRefs('session') === 1,
+        'the old export to let go of the bus',
+      );
+      await assertInPanel(panel, bar);
+
+      await panel.stop();
+      await bar.unmount();
+    });
+  });
+
+  test('a second menu on a window waits for the first, even behind one that gave up', async () => {
+    await withBus(async (address) => {
+      const panel = await fakeRegistrar(address);
+      const wnd = fakeWindow(0x77);
+      const first = menuOn(wnd, 'First');
+      await first.owner.start();
+      assert.equal(first.shown, true);
+
+      // Two menus in one window: the second waits, drawn in the window, for
+      // as long as the first holds it.
+      const second = menuOn(wnd, 'Second');
+      const secondStarted = second.owner.start();
+      await until(() => second.joined, 'the second menu to queue');
+      assert.equal(second.shown, false);
+
+      // Stopped while it waits, it lets go at once: there is nothing on the
+      // window it has to wait out, since it never put anything there. And it
+      // must not take any of the first one's with it.
+      const secondStopped = second.owner.stop();
+      await until(
+        () => busRefs('session') === 1,
+        'the stopped menu to let go of the bus',
+      );
+      await Promise.all([secondStarted, secondStopped]);
+      assert.deepEqual(await labels(panel), ['First']);
+      assert.equal(registrations(panel), 1);
+
+      // A third comes after the one that gave up, which is gone. The first
+      // is not, and is what it has to wait for.
+      const third = menuOn(wnd, 'Third');
+      const thirdStarted = third.owner.start();
+      await until(() => third.joined, 'the third menu to queue');
+      await first.owner.stop();
+      // Polled before `start()` is awaited: a menu that never gets its turn
+      // would hold that await past the test's timeout, and a test that times
+      // out never closes its broker, so the file would never exit either.
+      await until(() => third.shown, 'the third menu to be handed over');
+      await thirdStarted;
+
+      assert.deepEqual(await labels(panel), ['Third']);
+      const entry = panel.windows.get(wnd.id);
+      assert.ok(entry, 'the registrar has the window');
+      assert.deepEqual(propertiesOf(wnd.calls), {
+        _KDE_NET_WM_APPMENU_SERVICE_NAME: entry.service,
+        _KDE_NET_WM_APPMENU_OBJECT_PATH: entry.path,
+      });
+
+      await third.owner.stop();
+      await panel.stop();
+      await until(() => busRefs('session') === 0, 'the bus to be released');
+    });
+  });
+
+  test('a menu still waiting when the panel exits reaches the next one', async () => {
+    await withBus(async (address) => {
+      const first = await fakeRegistrar(address);
+      const wnd = fakeWindow(0x78);
+      const held = menuOn(wnd, 'First');
+      await held.owner.start();
+      const waiting = menuOn(wnd, 'Second');
+      const waitingStarted = waiting.owner.start();
+      await until(() => waiting.joined, 'the second menu to queue');
+
+      // The panel goes while the second menu waits, and the window comes free
+      // while there is no panel at all. It decided to publish before the wait,
+      // and that answer is out of date by the end of it.
+      await first.stop();
+      await until(() => !held.shown, 'the first menu to come back');
+      await held.owner.stop();
+      await waitingStarted;
+      assert.equal(waiting.shown, false, 'there is nowhere to hand it to');
+
+      // It is still following the registrar, so the next panel gets it.
+      const second = await fakeRegistrar(address);
+      await until(() => waiting.shown, 'the menu to be handed over');
+      assert.deepEqual(await labels(second), ['Second']);
+
+      await waiting.owner.stop();
+      await second.stop();
+      await until(() => busRefs('session') === 0, 'the bus to be released');
     });
   });
 
