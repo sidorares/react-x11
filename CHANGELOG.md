@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.18.3](https://github.com/sidorares/react-x11/compare/v2.18.2...v2.18.3) (2026-09-22)
+
+
+### Bug Fixes
+
+* **nodes:** a new ref callback is not a paint change ([#647](https://github.com/sidorares/react-x11/issues/647)) ([09108d4](https://github.com/sidorares/react-x11/commit/09108d415839ed8b5287c63f0ac3b2b838784269))
+
+
+### Performance Improvements
+
+* **glarea:** a child that only moved is moved on its pane, not repainted ([#645](https://github.com/sidorares/react-x11/issues/645)) ([036f0fd](https://github.com/sidorares/react-x11/commit/036f0fdc67502ae50a2cd8bef0e4c407f1164ec9)), closes [#644](https://github.com/sidorares/react-x11/issues/644)
+
 ## [2.18.2](https://github.com/sidorares/react-x11/compare/v2.18.1...v2.18.2) (2026-09-21)
 
 
