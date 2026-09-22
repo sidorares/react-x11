@@ -11,6 +11,7 @@ import assert from 'node:assert';
 import { describe, test } from 'node:test';
 import React from 'react';
 
+import { busRefs } from '../src/bus.js';
 import { createRoot } from '../src/index.js';
 import { useTray } from '../src/trayhooks.js';
 import {
@@ -35,6 +36,24 @@ offTheDesktopBus();
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const h = React.createElement;
+
+/**
+ * Run `fn` as one commit, effects and all, before the next line. A `tick()`
+ * is not that: it is queued ahead of React's render task, so two updates a
+ * tick apart are rendered together, and a `null` between two option objects
+ * never reaches the tray at all.
+ */
+async function committed(fn) {
+  const previous = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  try {
+    await React.act(async () => {
+      await fn();
+    });
+  } finally {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = previous;
+  }
+}
 
 const haveTransport = await transportAvailable();
 const needsBroker = haveTransport
@@ -513,6 +532,14 @@ describe('the freedesktop tray', () => {
         const tray = await mountTray({ icon: 'mail-unread', menu: MENU() });
         await until(() => host.items.length === 1, 'the item to register');
         const firstPath = host.calls[0][1];
+        // The bus refs the app holds with its icon up. Read once `backend` is
+        // named, since the capability probe behind it holds a ref of its own
+        // until it has answered.
+        await until(
+          () => tray.state()?.backend === 'statusnotifier',
+          'the tray to settle',
+        );
+        const settled = busRefs('session');
 
         const watch = await host.watchSignals();
 
@@ -545,7 +572,70 @@ describe('the freedesktop tray', () => {
         );
         assert.equal(await host.property('Status', host.items[1]), 'Active');
 
+        // And still there once the item it replaced has finished going. That
+        // one holds its object open for a moment on the way out — see
+        // `announcePassive()` — and tears down after, on this same path.
+        // Letting go of the bus is the last thing it does, so the ref count
+        // getting back to what it was before the switch is the moment to look.
+        await until(
+          () => busRefs('session') === settled,
+          'the old item to let go of the bus',
+        );
+        assert.equal(await host.property('Status', host.items[1]), 'Active');
+        const menu = await host.readMenu(host.items[1]);
+        assert.deepEqual(
+          menu.children.map((c) => c.props.label ?? c.props.type),
+          ['Open', 'separator', 'Wrap', 'Recent', 'Quit'],
+        );
+
         await watch.stop();
+        await tray.unmount();
+        await host.stop();
+      });
+    },
+  );
+
+  test(
+    'switched off and on twice in quick succession, it is still one icon',
+    needsBroker,
+    async () => {
+      await withBus(async (address) => {
+        _resetItemIndex();
+        _resetApplicationState();
+        await registerApplication({ appId: 'com.example.traytwice' });
+        const host = await fakeWatcher(address);
+        const tray = await mountTray({ icon: 'mail-unread', menu: MENU() });
+        await until(
+          () => tray.state()?.backend === 'statusnotifier',
+          'the tray to settle',
+        );
+        const settled = busRefs('session');
+
+        // Off, on, off, on, inside the first item's goodbye. The second item
+        // is stopped while it is still waiting for the first, so it is gone
+        // at once, and the third has to wait for the first all the same: that
+        // one is still holding its object open on the path they all share.
+        const on = { icon: 'mail-unread', menu: MENU() };
+        await committed(() => tray.setOptions(null));
+        await committed(() => tray.setOptions(on));
+        await committed(() => tray.setOptions(null));
+        await committed(() => tray.setOptions(on));
+
+        await until(() => host.calls.length === 2, 'the last item to register');
+        await until(
+          () => busRefs('session') === settled,
+          'the earlier items to let go of the bus',
+        );
+        // The one in the middle never got as far as registering.
+        assert.equal(host.calls.length, 2);
+        assert.equal(host.calls[1][1], host.calls[0][1], 'the same path');
+        assert.equal(await host.property('Status', host.items[1]), 'Active');
+        const menu = await host.readMenu(host.items[1]);
+        assert.deepEqual(
+          menu.children.map((c) => c.props.label ?? c.props.type),
+          ['Open', 'separator', 'Wrap', 'Recent', 'Quit'],
+        );
+
         await tray.unmount();
         await host.stop();
       });
