@@ -101,6 +101,13 @@ const PIXMAP_SIGNATURE = 'a(iiay)';
  *  the *same* tray icon and must come back on the same path — see `stop()`. */
 let nextItemIndex = 1;
 
+/**
+ * Per slot, the moment it is free: settles once every item that has started
+ * on it so far has stopped. The next item to start on the slot waits for it —
+ * see `start()`.
+ */
+const vacancies = new Map();
+
 /** Claim a tray slot. `useTray()` takes one per hook instance, for its life. */
 export function allocateItemSlot() {
   return nextItemIndex++;
@@ -232,6 +239,11 @@ export class StatusNotifierItem {
     /** Set while withdrawing, so `Status` reads `Passive` on the way out —
      *  see `announcePassive()`. */
     this.withdrawing = false;
+    /** Settles once `stop()` has finished, which is what the next item on
+     *  this slot waits for — see `start()`. */
+    this.gone = new Promise((resolve) => {
+      this.markGone = resolve;
+    });
 
     this.ref = null;
     this.dbus = null;
@@ -252,6 +264,24 @@ export class StatusNotifierItem {
   // ------------------------------------------------------------------ setup
 
   async start() {
+    // **One item per slot at a time.** A hook switched off and on again puts
+    // its new item on the old one's path while the old one is still leaving:
+    // `announcePassive()` holds its object open for a moment, and its
+    // teardown comes after that. dbus-native's `registration.remove()`
+    // unexports whatever is at the path when it runs, whoever exported it,
+    // so a successor already there would lose its object — and its menu —
+    // while the watcher kept its registration: a dead icon. So an item starts
+    // once every item before it on the slot has stopped. Every one, not only
+    // the last: an item stopped while it was still waiting is gone at once,
+    // and the one it was waiting for may not be.
+    const before = vacancies.get(this.index);
+    const vacated = Promise.all([before, this.gone]);
+    vacancies.set(this.index, vacated);
+    void vacated.then(() => {
+      if (vacancies.get(this.index) === vacated) vacancies.delete(this.index);
+    });
+    await before;
+
     const ref = await sessionBus();
     // No bus is a first-class configuration, not a degraded one: ssh, a bare
     // startx, CI, Node 20 without the transport. There is simply no tray.
@@ -450,6 +480,8 @@ export class StatusNotifierItem {
    *
    * The pair to this is the **stable path** (`slot`): coming back re-registers
    * the same id, which a host dedupes to a reset rather than a second icon.
+   * The same path is why the item coming back waits for this hold, and the
+   * teardown after it, to finish — see `start()`.
    */
   async announcePassive() {
     if (!this.exported || !this.iface) return;
@@ -479,12 +511,18 @@ export class StatusNotifierItem {
   }
 
   async stop() {
-    // Announced **before** `stopped`, which gates `_sync()` and every other
-    // path that could tear the export out from under the signal.
-    await this.announcePassive();
-    this.stopped = true;
-    await this.syncing;
-    await this.teardown();
+    try {
+      // Announced **before** `stopped`, which gates `_sync()` and every other
+      // path that could tear the export out from under the signal.
+      await this.announcePassive();
+      this.stopped = true;
+      await this.syncing;
+      await this.teardown();
+    } finally {
+      // Whatever happened, the slot is free: the next item on it would
+      // otherwise wait for good, and the icon never come back.
+      this.markGone();
+    }
   }
 
   async teardown() {
@@ -746,7 +784,11 @@ export class StatusNotifierItem {
   }
 }
 
-/** Test seam, not public: make paths predictable across test files. */
+/** Test seam, not public: make paths predictable across test files, and
+ *  forget who held them. A previous test's items are on a bus it has closed,
+ *  so there is nothing to wait for, and one it never stopped would otherwise
+ *  hold its slot for the rest of the run. */
 export function _resetItemIndex() {
   nextItemIndex = 1;
+  vacancies.clear();
 }
