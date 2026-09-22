@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.18.4](https://github.com/sidorares/react-x11/compare/v2.18.3...v2.18.4) (2026-09-22)
+
+
+### Bug Fixes
+
+* **glarea:** on XQuartz a surface's children get no panes, and glOverlay is false ([#654](https://github.com/sidorares/react-x11/issues/654)) ([bea06f2](https://github.com/sidorares/react-x11/commit/bea06f2c86dd9a6c331f695e53e5cb2b4d758859))
+* **globalmenu:** a menu bar remounted in its window keeps its menu in the panel ([#652](https://github.com/sidorares/react-x11/issues/652)) ([de0749c](https://github.com/sidorares/react-x11/commit/de0749c6fca5853d23ea40823f95fa80b5012eb3))
+* **svg:** an unchanged commit does not rebuild the document ([#650](https://github.com/sidorares/react-x11/issues/650)) ([eb407ef](https://github.com/sidorares/react-x11/commit/eb407ef68810db5bbfe2210bf752a61aa65b1a4c))
+* **tray:** an icon switched off and on again keeps its object ([#649](https://github.com/sidorares/react-x11/issues/649)) ([3af149a](https://github.com/sidorares/react-x11/commit/3af149ae437622e0bac01ddfcd8d56760b0f7d4e))
+
 ## [2.18.3](https://github.com/sidorares/react-x11/compare/v2.18.2...v2.18.3) (2026-09-22)
 
 
