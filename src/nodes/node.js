@@ -647,12 +647,16 @@ export class Node {
    * safe without knowing about subclasses: `<image src>`, `<canvas onDraw>`,
    * a `value`, a `placeholder`, a `caretColor` — any prop a subclass paints
    * from is a prop, so a change to it lands here as an inequality and damages
-   * the node. Three kinds are skipped because they cannot affect this node's
+   * the node. Four kinds are skipped because they cannot affect this node's
    * own drawing:
    *
    *  - `children`, which the reconciler mutates through appendChild /
    *    removeChild / commitTextUpdate, each of which invalidates on its own;
    *  - event handlers, rebuilt every render and never painted;
+   *  - `ref`, which is React's rather than the element's. Since React 19 it
+   *    arrives as an ordinary prop, so an inline callback is a new function
+   *    every render, like a handler. `key` would be the same if React ever
+   *    passed it on; today React strips it;
    *  - `style`, compared by value by the caller — so a style object React
    *    rebuilt with the same contents costs nothing, which is the whole
    *    point, since React rebuilds sibling styles on every render and a
@@ -684,6 +688,7 @@ export class Node {
     const keys = new Set([...Object.keys(newProps), ...Object.keys(prev)]);
     for (const key of keys) {
       if (key === 'children' || key === 'style' || isEventProp(key)) continue;
+      if (key === 'ref' || key === 'key') continue;
       if (claimed.has(key)) continue;
       if (newProps[key] !== prev[key]) return true;
     }

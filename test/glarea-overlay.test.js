@@ -642,7 +642,8 @@ const TINTS = [
  * bigger than the surface holding a grid of tiles, moved by `left`/`top`
  * alone on a pan, and a panel pinned over it (the minimap) that the pan must
  * not drag along. `tint` recolours one tile, `panel` the panel, `extra`
- * goes on the box of tiles, and `inside` is one more child of it.
+ * goes on the style of the box of tiles and `props` on the box itself, and
+ * `inside` is one more child of it.
  */
 function panScene({
   left,
@@ -650,6 +651,7 @@ function panScene({
   tint = null,
   panel = '#ffffff',
   extra = {},
+  props = {},
   inside = null,
 }) {
   const tiles = [];
@@ -681,6 +683,7 @@ function panScene({
         'box',
         {
           key: 'bodies',
+          ...props,
           style: {
             position: 'absolute',
             left,
@@ -843,6 +846,26 @@ test('a child that only moved is moved on its pane, and the frame repaints only 
         t.counts.painted < area / 4,
         `(${dx}, ${dy}): painted ${t.counts.painted} of ${area} pixels`,
       );
+    }
+  } finally {
+    await t.close();
+  }
+});
+
+test('a child that only moved is moved on its pane whatever its ref', async () => {
+  // A ref is an ordinary prop since React 19, and an inline callback is a
+  // new one every render. It is nothing the child draws, so a pan written
+  // that way is still a move.
+  let left = -100;
+  const top = -80;
+  const scene = () => panScene({ left, top, props: { ref: () => {} } });
+  const t = await twins(scene);
+  try {
+    for (const dx of [5, -13, 48]) {
+      left += dx;
+      await t.step(scene());
+      await t.check(`panned by ${dx} with a new ref`);
+      assert.equal(t.counts.blits, 1, `${dx}: one move on the pane`);
     }
   } finally {
     await t.close();
@@ -1230,8 +1253,6 @@ test('a surface child changing mid-scroll is no repair for the window’s blit',
   // (issue #398) — but a surface's child is on a pane of its own, and the
   // window has nothing of it to repair.
   let list = null;
-  // one ref and one `onDraw` for every render: a new function is a new
-  // prop, and a claim of its own
   const listRef = (n) => (list = n ?? list);
   const noDraw = () => {};
   const tree = (legend) =>
