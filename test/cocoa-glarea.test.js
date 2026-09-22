@@ -532,3 +532,170 @@ test("a frameLoop 'always' scene draws every display period, not every other one
     `median gap ${median.toFixed(2)}ms is one period, not two`,
   );
 });
+
+/**
+ * `<Flow>`'s node bodies over its GL graph, small: one box bigger than the
+ * surface holding a few tiles, placed by `left`/`top` alone, so a pan moves
+ * it and changes nothing else (issue #644).
+ */
+const bodies = (left, top) =>
+  h(
+    'box',
+    {
+      key: 'bodies',
+      style: { position: 'absolute', left, top, width: 400, height: 300 },
+    },
+    [0, 1, 2, 3].map((i) =>
+      h('box', {
+        key: i,
+        style: {
+          position: 'absolute',
+          left: 20 + i * 45,
+          top: 30 + i * 15,
+          width: 40,
+          height: 25,
+          backgroundColor: ['#e03131', '#2f9e44', '#1971c2', '#f08c00'][i],
+        },
+      }),
+    ),
+  );
+
+/** Rects as a set: the order a damage list keeps them in is its own. */
+const rectSet = (rects) =>
+  rects.map((r) => `${r.x},${r.y} ${r.width}x${r.height}`).sort();
+
+/** The passes the surface's pane paints from now on, in window pixels. */
+function panePasses(node) {
+  const overlay = node._overlay;
+  const passes = [];
+  const paintPane = overlay._paintPane.bind(overlay);
+  overlay._paintPane = (pane, list) => {
+    passes.push(...list.map((r) => ({ ...r })));
+    return paintPane(pane, list);
+  };
+  return passes;
+}
+
+const panned = (left, top) =>
+  h(
+    'window',
+    { width: 200, height: 120 },
+    h(
+      'box',
+      { style: { flexGrow: 1, padding: 10 } },
+      h('glarea', { key: 'gl', style: { flexGrow: 1 } }, bodies(left, top)),
+    ),
+  );
+
+test('a child of the surface that only moved is moved on the pane’s bitmap, then presented', async () => {
+  const { native, root, wnd, node, frame } = await mountGLArea({
+    children: bodies(-50, -40),
+  });
+  frame();
+  const [pane] = node._overlay.panes;
+  const surface = pane.wnd._surface;
+  const overlay = wnd._layer.sublayers.find((l) => l.props.zPosition > 1e7);
+  native.calls.length = 0;
+  const passes = panePasses(node);
+  // five points right and three down: ten and six device pixels
+  root.render(panned(-45, -37));
+  await tick();
+  frame();
+  // In the pane's own corner: the surface is inset ten points in the
+  // window, and the pane is exactly over it. The child covers the surface,
+  // so the band is all of it, and what survives is the copy.
+  assert.deepEqual(native.of('scrollSurface'), [
+    [surface, 0, 0, 360, 200, 10, 6],
+  ]);
+  // what the copy cannot supply: the strips down the left edge and along
+  // the top, in window coordinates, and nothing else
+  assert.deepEqual(rectSet(passes), ['20,20 360x6', '20,26 10x194']);
+  // …and the window paints nothing: a surface's children are not its
+  assert.deepEqual(wnd._reactX11Node._lastDamageRects, []);
+  // …and the moved bitmap goes out, after the strips are painted into it
+  const order = native.calls
+    .filter(
+      (c) =>
+        (c.name === 'scrollSurface' && c.args[0] === surface) ||
+        (c.name === 'ctxClearRect' && c.args[0] === surface) ||
+        (c.name === 'surfaceToLayer' && c.args[1] === overlay),
+    )
+    .map((c) => c.name);
+  assert.equal(order[0], 'scrollSurface');
+  assert.equal(order.at(-1), 'surfaceToLayer');
+  assert.ok(order.includes('ctxClearRect'), 'the strips were painted');
+});
+
+test('a pane whose bitmap cannot move repaints the move', async () => {
+  const { native, root, node, frame } = await mountGLArea({
+    children: bodies(-50, -40),
+  });
+  frame();
+  native.scrollSurface = () => false;
+  const passes = panePasses(node);
+  root.render(panned(-45, -37));
+  await tick();
+  frame();
+  // where the child was and where it is: all of the surface it covers
+  assert.deepEqual(rectSet(passes), ['20,20 360x200']);
+  const [pane] = node._overlay.panes;
+  assert.equal(pane.blitted, false);
+});
+
+/** One tile, 40x30 points: small next to the surface it is the child of. */
+const tile = (left, top) =>
+  h('box', {
+    key: 'tile',
+    style: {
+      position: 'absolute',
+      left,
+      top,
+      width: 40,
+      height: 30,
+      backgroundColor: '#e03131',
+    },
+  });
+
+/** …as the whole tree `mountGLArea` builds, for a re-render. */
+const tiled = (left, top) =>
+  h(
+    'window',
+    { width: 200, height: 120 },
+    h(
+      'box',
+      { style: { flexGrow: 1, padding: 10 } },
+      h('glarea', { key: 'gl', style: { flexGrow: 1 } }, tile(left, top)),
+    ),
+  );
+
+test('a small child moving on the surface: its old place is repainted, and nothing under the copy', async () => {
+  const { native, root, node, frame } = await mountGLArea({
+    children: tile(40, 30),
+  });
+  frame();
+  const passes = panePasses(node);
+  // seven points right: fourteen device pixels. The tile sits at (100, 80)
+  // in the window, 80x60, and its reach is a pixel of slop around that
+  root.render(tiled(47, 30));
+  await tick();
+  frame();
+  assert.equal(native.of('scrollSurface').length, 1, 'moved on the pane');
+  // the copy lands exactly where the tile went: the strip it left is all
+  assert.deepEqual(rectSet(passes), ['99,79 14x62']);
+});
+
+test('a child moving into view past a clipped corner: what it brings in is repainted too', async () => {
+  // Half off the surface's top-left corner, moving right and down: the copy
+  // carries what was on show, and the tile's new reach runs past it along
+  // both clipped edges — the strips the move uncovered are not all of it.
+  const { native, root, node, frame } = await mountGLArea({
+    children: tile(-20, -15),
+  });
+  frame();
+  const passes = panePasses(node);
+  root.render(tiled(-15, -11));
+  await tick();
+  frame();
+  assert.equal(native.of('scrollSurface').length, 1, 'moved on the pane');
+  assert.deepEqual(rectSet(passes), ['20,20 51x8', '20,28 10x31']);
+});

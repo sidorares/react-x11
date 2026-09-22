@@ -101,8 +101,8 @@ export class WindowFlush {
     return changed;
   }
 
-  /** …and their paint, with the frame's own damage: a claim inside a
-   * `<glarea>`'s children is in that list like any other. */
+  /** …and their paint, with the damage the panes are owed — their own
+   * list, which the claims that can reach them go to (`_paneReach`). */
   _paintOverlays(damage) {
     for (const area of this._overlaid) area._paintOverlay(damage);
   }
@@ -195,13 +195,21 @@ export class WindowFlush {
       // A bounded frame watches the walk: whatever this pass actually moved
       // claims its old and new rects through the sink, and the frame stays
       // a few rects instead of the whole window. An unbounded frame skips
-      // the bookkeeping — it repaints everything anyway.
-      if (this._damage !== FULL_DAMAGE) {
+      // the bookkeeping — it repaints everything anyway — unless the panes
+      // over a `<glarea>` are still bounded: they paint from a list of
+      // their own, and a move of the children they hold is theirs to claim.
+      const panes = this._overlaid.size !== 0;
+      if (
+        this._damage !== FULL_DAMAGE ||
+        (panes && this._paneDamage !== FULL_DAMAGE)
+      ) {
         const cap = this._damageRectCap();
         layoutDiff.sink = (rect) => {
-          if (this._damage === FULL_DAMAGE) return;
-          layoutMoved = true;
-          this._damage = addDamageRect(this._damage, rect, cap);
+          if (this._damage !== FULL_DAMAGE) {
+            layoutMoved = true;
+            this._damage = addDamageRect(this._damage, rect, cap);
+          }
+          if (panes) this._addPaneDamage(rect);
         };
       }
       try {
@@ -233,7 +241,13 @@ export class WindowFlush {
       for (const node of this._reflowed) {
         // …and the pre-mutation walk this frame reused goes with it
         node._reflowBefore = null;
-        if (node.destroyed || this._damage === FULL_DAMAGE) continue;
+        if (
+          node.destroyed ||
+          (this._damage === FULL_DAMAGE &&
+            (!panes || this._paneDamage === FULL_DAMAGE))
+        ) {
+          continue;
+        }
         // clipped to a blitting viewport above it, like every other claim
         // this frame, and written to that viewport's ledger too (issue
         // #398): the claim would otherwise coalesce into the scroll's own
@@ -245,11 +259,14 @@ export class WindowFlush {
         if (sv && !sv._recordBlitClaim(after)) {
           sv._pendingBlitFrom = BLIT_POISONED;
         }
-        this._damage = addDamageRect(
-          this._damage,
-          after,
-          this._damageRectCap(),
-        );
+        if (this._damage !== FULL_DAMAGE) {
+          this._damage = addDamageRect(
+            this._damage,
+            after,
+            this._damageRectCap(),
+          );
+        }
+        if (panes) this._addPaneDamage(after);
       }
       this._reflowed.clear();
     } else if (this._reflowed.size) {
@@ -286,6 +303,10 @@ export class WindowFlush {
     if (!this.needsPaint) return false;
     this.needsPaint = false;
     const damage = this._takeDamage(width, height);
+    // …and the panes' own, which they paint instead of the window's
+    const paneDamage =
+      this._overlaid.size !== 0 ? this._takePaneDamage(width, height) : null;
+    this._paneDamage = null;
     if (debugPaint === 'full' && !damage && width > 0 && height > 0) {
       // Silent full-window repaints are the perf bug class this renderer
       // actually has (see AGENTS.md); this is what surfaces them. The stack
@@ -305,8 +326,8 @@ export class WindowFlush {
     // list was still taken (its bookkeeping is what keeps the two paths one
     // code) and is simply not consumed; the presenter diffs at the layer.
     if (typeof this.window.presentFrame === 'function') {
-      // the panes are no presenter's: they paint from the damage either way
-      if (this._overlaid.size !== 0) this._paintOverlays(damage);
+      // the panes are no presenter's: they paint from their damage either way
+      if (this._overlaid.size !== 0) this._paintOverlays(paneDamage);
       this.window.presentFrame(this, damage);
       this.app._reactX11Startup?.painted();
       return true;
@@ -328,10 +349,11 @@ export class WindowFlush {
     for (const rect of damage ?? [null]) {
       this._paintRegion(ctx, rect, width, height);
     }
-    // …and the panes over the surfaces, with the same damage: a claim from
+    // …and the panes over the surfaces, with their own damage: a claim from
     // a `<glarea>`'s children is theirs to repaint — the window's pass under
-    // the surface is one nobody sees. Inside the cache's frame, like a pass.
-    if (this._overlaid.size !== 0) this._paintOverlays(damage);
+    // the surface is one nobody sees — and one from a node that cannot reach
+    // them is not. Inside the cache's frame, like a pass.
+    if (this._overlaid.size !== 0) this._paintOverlays(paneDamage);
     // after every region: an entry drawn in one damage rect must not be
     // evicted before the next rect of the same frame asks for it
     this._paintCache?.endFrame();

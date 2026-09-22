@@ -40,12 +40,40 @@
 // by the same propagation that brings it the pointer over the surface
 // (src/glnodes.js, `_create`), and lands on the child it is over.
 //
+// A pane keeps what it holds between frames, so a child that only moved is
+// already painted, one shift away (issue #644). The layout pass reports such
+// a child instead of claiming it (`GlAreaNode._absolutizeChild`), and the
+// frame moves its pixels inside the pane — `scrollRegion`, the verb the
+// scroll blit uses on a window — and repaints only what the move uncovered
+// and what it now overlaps differently (`settleMoves`). A pan over a
+// graph's mounted node bodies is that frame, sixty times a second.
+//
 // A leaf module, like src/embedding.js: `appcontext.js` asks `canOverlay`
-// for `useSupports('glOverlay')`, and it imports nothing of ours.
+// for `useSupports('glOverlay')`, and it imports nothing of ours but the
+// damage model's arithmetic, which imports nothing at all.
 import { cssColorStraight } from 'ntk';
+
+import { FULL_DAMAGE, addDamageRect } from './nodes/damage.js';
+import {
+  innerPixels,
+  intersectRects,
+  rectArea,
+  rectContains,
+  unionRect,
+} from './nodes/rects.js';
 
 // ConfigureWindow's stack mode: directly above the sibling it names
 const STACK_ABOVE = 0;
+
+// Past this share of the pixels a move carries, the frame would repaint
+// most of them anyway — around what it claims itself, or around the other
+// children the copy reached — and the copy only adds to the bill.
+const MOVE_BLIT_MAX_REPAINT = 0.75;
+
+// The scroll blit's escape hatch (src/nodes/scrollblit.js), read the same
+// way: every path that moves retained pixels instead of repainting them is
+// one variable away from the plain repaint (docs/debugging.md).
+const NO_BLIT = process.env.REACT_X11_NO_SCROLL_BLIT === '1';
 
 /**
  * Whether the children of a `<glarea>` can be drawn over its surface on this
@@ -73,16 +101,6 @@ function whole(r) {
   };
 }
 
-function intersect(a, b) {
-  const x = Math.max(a.x, b.x);
-  const y = Math.max(a.y, b.y);
-  const right = Math.min(a.x + a.width, b.x + b.width);
-  const bottom = Math.min(a.y + a.height, b.y + b.height);
-  return right > x && bottom > y
-    ? { x, y, width: right - x, height: bottom - y }
-    : null;
-}
-
 const overlaps = (a, b) =>
   a.x < b.x + b.width &&
   b.x < a.x + a.width &&
@@ -102,6 +120,48 @@ function around(a, b) {
 
 const sameRect = (a, b) =>
   a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+
+const shifted = (r, dx, dy) => ({
+  x: r.x + dx,
+  y: r.y + dy,
+  width: r.width,
+  height: r.height,
+});
+
+/** `a` with `b` taken out of it: up to four rects — the full-width bands
+ * above and below `b`, and the pieces either side of it between them. */
+function subtractRect(a, b) {
+  const cut = intersectRects(a, b);
+  if (!cut) return [a];
+  const out = [];
+  const right = a.x + a.width;
+  const bottom = a.y + a.height;
+  const cutRight = cut.x + cut.width;
+  const cutBottom = cut.y + cut.height;
+  if (cut.y > a.y) {
+    out.push({ x: a.x, y: a.y, width: a.width, height: cut.y - a.y });
+  }
+  if (cutBottom < bottom) {
+    out.push({
+      x: a.x,
+      y: cutBottom,
+      width: a.width,
+      height: bottom - cutBottom,
+    });
+  }
+  if (cut.x > a.x) {
+    out.push({ x: a.x, y: cut.y, width: cut.x - a.x, height: cut.height });
+  }
+  if (cutRight < right) {
+    out.push({
+      x: cutRight,
+      y: cut.y,
+      width: right - cutRight,
+      height: cut.height,
+    });
+  }
+  return out;
+}
 
 /** On screen: nothing from here to the window hidden or `display: 'none'`. */
 function shown(node) {
@@ -125,7 +185,7 @@ function shown(node) {
 export function overlayRegions(area, surface) {
   const rects = [];
   for (const child of area.paintOrder()) {
-    const reach = intersect(whole(child._subtreeBounds()), surface);
+    const reach = intersectRects(whole(child._subtreeBounds()), surface);
     if (reach) rects.push(reach);
   }
   for (let merged = true; merged;) {
@@ -172,6 +232,13 @@ class Pane {
     this.transparent = transparent;
     this.full = true;
     this.ctx = null;
+    // placed this frame: what the pane holds is where the children were in
+    // the pane's own corner, not in the window, so nothing in it is a known
+    // shift away from where it goes
+    this.placed = false;
+    // moved pixels this frame, which has to reach the screen even when no
+    // pass follows it (`GlOverlay.paint`)
+    this.blitted = false;
   }
 
   context() {
@@ -188,12 +255,48 @@ class Pane {
     if (rect.width !== this.rect.width || rect.height !== this.rect.height) {
       this.full = true;
     }
+    // pixels a scroll blit moved this frame (nodes/scrollblit.js, which runs
+    // before `sync`) were moved in the pane's own corner, and the pane has
+    // since gone somewhere else
+    if (this.blitted) this.full = true;
     this.rect = rect;
+    this.placed = true;
     if (typeof this.wnd.setState === 'function') this.wnd.setState(rect);
     else {
       this.wnd.move?.(rect.x, rect.y);
       this.wnd.resize?.(rect.width, rect.height);
     }
+  }
+
+  /** Can the pixels of `rect`, in window coordinates, move inside this
+   * pane? Not when it is owed a paint whole or was placed this frame, and
+   * not where the backend has no verb for it. */
+  canBlit(rect) {
+    return (
+      !this.full &&
+      !this.placed &&
+      typeof this.wnd.scrollRegion === 'function' &&
+      rectContains(this.rect, rect)
+    );
+  }
+
+  /**
+   * Move the pixels of `rect` — window coordinates — by (dx, dy) inside the
+   * pane, with the window verb's contract (ntk `Window.scrollRegion`, and
+   * the Cocoa pane's own): the band that survives inside `rect` moves, the
+   * rest of it is left as it was. False when the backend could not, which
+   * leaves the pane exactly as it was.
+   */
+  blit(rect, dx, dy) {
+    const local = {
+      x: rect.x - this.rect.x,
+      y: rect.y - this.rect.y,
+      width: rect.width,
+      height: rect.height,
+    };
+    if (!this.wnd.scrollRegion(local, dx, dy)) return false;
+    this.blitted = true;
+    return true;
   }
 
   show(on) {
@@ -215,6 +318,10 @@ export class GlOverlay {
     // one pane over the whole surface, where the backend composites it
     this.composited = typeof this.app?.createOverlayPane === 'function';
     this.panes = [];
+    // the children this frame's layout moved and nothing else, reported
+    // rather than claimed (`GlAreaNode._absolutizeChild`) and settled after
+    // the panes are (`settleMoves`)
+    this.moves = [];
   }
 
   /**
@@ -229,6 +336,7 @@ export class GlOverlay {
   sync() {
     const area = this.area;
     const abs = area.abs;
+    for (const pane of this.panes) pane.placed = false;
     let rects = [];
     if (shown(area) && abs.width > 0 && abs.height > 0) {
       // the surface's own rect, rounded the way its window's is
@@ -279,7 +387,7 @@ export class GlOverlay {
     pane.full = true;
     const root = this.area.root;
     if (root && !root.destroyed)
-      root.invalidate(false, { ...pane.rect }, 'expose');
+      root.invalidate(false, { ...pane.rect }, 'expose', this.area);
   }
 
   /**
@@ -306,6 +414,145 @@ export class GlOverlay {
   }
 
   /**
+   * A child the layout pass moved and nothing else — every descendant
+   * landed where it was plus (dx, dy) or claimed where it did not — and
+   * claimed nothing for (`GlAreaNode._absolutizeChild`). `reach` is its
+   * `paintBounds()` from before the move: every pixel of it the panes hold.
+   */
+  noteMove(node, reach, dx, dy) {
+    this.moves.push({ node, reach, dx, dy });
+  }
+
+  /**
+   * The frame's moves, settled after `sync` has put the panes where the
+   * children are and before the frame takes its damage
+   * (`WindowNode._syncOverlays`). The one covering the most of the surface
+   * moves its pixels on its pane where that is safe and saves the repaint
+   * (`_blitMove`); every other one, and that one when not, is claimed where
+   * it was and where it is — the pixels the layout diff would have claimed
+   * for it and every descendant. True when there was anything to settle.
+   *
+   * The claims go to the panes' damage alone (`WindowNode._paneDamage`):
+   * the window paints none of a surface's children, and its pass under the
+   * surface is one nobody sees.
+   */
+  settleMoves(root) {
+    const moves = this.moves;
+    if (moves.length === 0) return false;
+    this.moves = [];
+    // the panes repaint whole this frame: nothing is owed
+    if (!root || root.destroyed || root._paneDamage === FULL_DAMAGE) {
+      return true;
+    }
+    const surface = this.area._geometry();
+    let best = null;
+    let most = 0;
+    for (const move of moves) {
+      const shown = intersectRects(whole(move.reach), surface);
+      const size = shown ? rectArea(shown) : 0;
+      if (size > most) {
+        best = move;
+        most = size;
+      }
+    }
+    // the others first: the pixels they claim are ones the copy may carry,
+    // and `_blitMove` repairs whatever the frame claims by then
+    for (const move of moves) if (move !== best) this._claimMove(root, move);
+    if (best && !this._blitMove(root, best)) this._claimMove(root, best);
+    return true;
+  }
+
+  /** Where a move's child was and where it is, claimed the ordinary way —
+   * cut to the surface's box, which clips the children (`clipsChildren`). */
+  _claimMove(root, { node, reach }) {
+    const box = this.area.abs;
+    for (const rect of [reach, node.paintBounds()]) {
+      const claim = intersectRects(rect, box);
+      if (claim) root._addPaneDamage(claim);
+    }
+  }
+
+  /**
+   * Move a child's pixels on its pane, and narrow what the frame owes the
+   * move to what the copy cannot supply. True when it did; false leaves
+   * the pane and the frame's damage as they were, for `_claimMove`.
+   *
+   * The copy is of what the child showed, moved as far as the child moved
+   * and kept where it is still on show (`dest`). That is right wherever
+   * the child's own drawing is the only thing that changed — and the frame
+   * repaints the rest:
+   *
+   * - what the child uncovered, and whatever of its new reach the copy did
+   *   not land on: its reach before and after, less `dest`;
+   * - the other children: the pixels of theirs the copy carried off with
+   *   the child's, and theirs that the copy covered — over the child or
+   *   under it, their own pixels are not a shift away;
+   * - what the panes are owed already, where the copy would carry it: a
+   *   claim is often a rect named before layout ran, and when it was
+   *   inside the child its content went with the copy. Repainted shifted
+   *   as well as where it stands, which is right whichever it was. A
+   *   claim that cannot reach the panes is not in their list
+   *   (`WindowNode._paneReach`) — a graph pane under the surface that
+   *   claims itself whole on every step of the pan this copy is.
+   *
+   * Past `MOVE_BLIT_MAX_REPAINT` of `dest` those repaint most of what the
+   * copy saves, and the plain claims have the frame.
+   */
+  _blitMove(root, { node, reach, dx, dy }) {
+    if (NO_BLIT || !Number.isInteger(dx) || !Number.isInteger(dy)) {
+      return false;
+    }
+    const area = this.area;
+    // a rounded surface clips its children to an arc, and the arc stays put
+    if ((area.style?.borderRadius ?? 0) > 0) return false;
+    // the whole pixels of the surface's box: a fractional edge is an
+    // antialiased clip, and that does not move either
+    const box = innerPixels(area.abs);
+    if (!box) return false;
+    const was = intersectRects(whole(reach), box);
+    const now = intersectRects(whole(node.paintBounds()), box);
+    // nothing of it was on show, so there is nothing to carry
+    if (!was) return false;
+    const pane = this.panes.find(
+      (p) => p.canBlit(was) && (!now || p.canBlit(now)),
+    );
+    if (!pane) return false;
+    const view = intersectRects(pane.rect, box);
+    const dest = intersectRects(shifted(was, dx, dy), view);
+    if (!dest) return false;
+    const cap = root._damageRectCap();
+    const claimed = root._paneDamage ?? [];
+    let rects = claimed;
+    const add = (rect) => {
+      if (rect) rects = addDamageRect(rects, rect, cap);
+    };
+    for (const claim of claimed)
+      add(intersectRects(shifted(claim, dx, dy), dest));
+    for (const piece of subtractRect(was, dest)) add(piece);
+    if (now) for (const piece of subtractRect(now, dest)) add(piece);
+    for (const other of area.paintOrder()) {
+      if (other === node) continue;
+      const theirs = whole(other.paintBounds());
+      add(intersectRects(theirs, dest));
+      add(intersectRects(shifted(theirs, dx, dy), dest));
+    }
+    // the list is disjoint, so the sum is the area it covers
+    let repainted = 0;
+    for (const rect of rects) {
+      const inside = intersectRects(rect, dest);
+      if (inside) repainted += rectArea(inside);
+    }
+    if (repainted > rectArea(dest) * MOVE_BLIT_MAX_REPAINT) return false;
+    // the verb moves the band that survives inside the rect it is handed,
+    // so handed where the pixels are and where they go, that band is `dest`
+    if (!pane.blit(unionRect(shifted(dest, -dx, -dy), dest), dx, dy)) {
+      return false;
+    }
+    root._paneDamage = rects;
+    return true;
+  }
+
+  /**
    * Paint what the frame owes: every pane whole after it was made, resized
    * or lost its pixels, and otherwise the frame's damage cut to each pane —
    * `null` damage meaning the whole window, as it does for the paint walk.
@@ -323,10 +570,17 @@ export class GlOverlay {
       } else {
         passes = [];
         for (const rect of damage) {
-          const hit = intersect(rect, pane.rect);
+          const hit = intersectRects(rect, pane.rect);
           if (hit) passes.push(hit);
         }
-        if (passes.length === 0) continue;
+      }
+      const blitted = pane.blitted;
+      pane.blitted = false;
+      pane.placed = false;
+      if (passes.length === 0) {
+        // pixels moved and nothing else owed: they still go out
+        if (blitted) pane.wnd.present?.();
+        continue;
       }
       pane.full = false;
       this._paintPane(pane, passes);

@@ -2184,6 +2184,20 @@ small as what it holds and works on servers without SHAPE.
 `useSupports('glOverlay')` says whether a connection draws a surface's
 children at all (both backends do).
 
+**A child that only moves is not repainted.** A pane keeps what it drew
+between frames, so when all that changed about one of the surface's children
+is where it sits — its `left` or `top`, and nothing inside it — the frame
+moves that child's pixels on the pane and repaints only what the copy cannot
+supply: the strips the move uncovered, and the other children's pixels it
+passed over or under. A layer of mounted content panned across a scene,
+such as a graph's node bodies over its GL edges, then costs a copy and a few
+strips a frame rather than a repaint of everything on show. A scroll pane
+among the children scrolls the same way, moving the pane's pixels. A child
+that also changed size, or drew anything differently in the same commit, is
+repainted as before, and
+[`REACT_X11_NO_SCROLL_BLIT=1`](debugging.md#react_x11_no_scroll_blit1) turns
+every such copy off.
+
 Limits worth knowing:
 
 - **Overlapping surfaces:** where two surfaces overlap, both overlays are

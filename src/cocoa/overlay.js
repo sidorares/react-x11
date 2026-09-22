@@ -11,9 +11,10 @@
 // so where two surfaces overlap, both overlays are above both frames.
 //
 // It speaks the verbs of a window the overlay drives on X11 — `setState`,
-// `map`, `unmap`, `getContext`, `destroy` — plus `present`, which puts what
-// was painted on the layer: ntk blits an X window's backing store on its
-// own, where a layer's contents are a copy the bitmap has to be pushed to.
+// `map`, `unmap`, `getContext`, `scrollRegion`, `destroy` — plus `present`,
+// which puts what was painted on the layer: ntk blits an X window's backing
+// store on its own, where a layer's contents are a copy the bitmap has to be
+// pushed to.
 import { BackendContext2D } from '../backend/context2d.js';
 import { withoutActions } from './quiet.js';
 
@@ -133,6 +134,42 @@ export class CocoaOverlayPane {
       };
     }
     return this._ctx;
+  }
+
+  /**
+   * Move the pixels of `rect` (pane coordinates, device px) by (dx, dy)
+   * inside the bitmap — ntk `Window.scrollRegion`'s contract, which the
+   * overlay speaks to either backend: the band that survives the shift
+   * inside `rect` moves, the rest of it is left as it was, and false means
+   * nothing moved, so the caller repaints instead. A child that only moved
+   * is one of these rather than a repaint (src/gloverlay.js, issue #644).
+   *
+   * The bitmap is the pane's own and the layer holds a copy of it, so the
+   * move lands on screen with the frame's `present`, after the strips it
+   * uncovered are painted — never halfway.
+   */
+  scrollRegion(rect, dx, dy) {
+    if (this.destroyed || !this._surface) return false;
+    if (!Number.isInteger(dx) || !Number.isInteger(dy)) return false;
+    // a bitmap of another size is one the next paint replaces, whole
+    const size = this._surfaceSize;
+    if (
+      size.width !== Math.max(1, this.rect.width) ||
+      size.height !== Math.max(1, this.rect.height)
+    ) {
+      return false;
+    }
+    const moved = this._native.scrollSurface(
+      this._surface,
+      Math.round(rect.x),
+      Math.round(rect.y),
+      Math.round(rect.width),
+      Math.round(rect.height),
+      dx,
+      dy,
+    );
+    if (moved) this._dirty = true;
+    return Boolean(moved);
   }
 
   /** What was painted, onto the layer — a copy, so the bitmap is free to be

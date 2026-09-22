@@ -18,6 +18,20 @@ import { BLIT_POISONED } from './scrollblit.js';
 import { DEV } from './util.js';
 import { debugPaint } from './window/debugpaint.js';
 
+// Which damage lists a claim belongs in (`WindowInvalidate._paneReach`).
+const WINDOW_ONLY = 0;
+const BOTH = 1;
+const PANES_ONLY = 2;
+
+/** Is `node` inside a `<glarea>` below `root` — drawn on its panes, and
+ * never by the window's own paint walk? */
+function insideSurface(node, root) {
+  for (let n = node.parent; n && n !== root; n = n.parent) {
+    if (n.isGlArea) return true;
+  }
+  return false;
+}
+
 /** Node's half of invalidation, installed onto `Node.prototype` by node.js. */
 export class NodeInvalidate {
   /**
@@ -40,7 +54,10 @@ export class NodeInvalidate {
     // reaches — a shadow, an outline, a scene element's ink — so its cached
     // paint reach goes with the claim
     if (damage === this || damage === null) this._clearPaintBounds();
-    this.root?.invalidate(layoutChanged, damage, reason);
+    // …and names itself, so a rect it claims goes to the damage lists it can
+    // reach — the window's, a `<glarea>`'s panes', or both
+    // (`WindowNode._paneReach`)
+    this.root?.invalidate(layoutChanged, damage, reason, this);
   }
 
   /**
@@ -112,7 +129,7 @@ export class NodeInvalidate {
     // Same walk, same frame, same answer — see `_childListBefore`, whose
     // record this shares so that a reflow and a child-list change on one
     // node in one frame walk the subtree once between them.
-    root.invalidate(true, this._childListBefore(), reason);
+    root.invalidate(true, this._childListBefore(), reason, this);
     root._reflowed.add(this);
   }
 
@@ -235,8 +252,14 @@ export class WindowInvalidate {
    * diagnostic, collected per frame into `_lastReasons` so the frame log,
    * REACT_X11_DEBUG_PAINT=full and the tracer can attribute a repaint.
    * Omitting it costs nothing but attribution.
+   *
+   * `source` is the node making a claim that names a rect rather than a
+   * node — `Node.invalidate` passes itself — and is what decides which of
+   * the frame's two lists the claim goes to: the window's, the one the
+   * panes over its `<glarea>`s paint from, or both (`_paneReach`). Left
+   * out, both.
    */
-  invalidate(layoutChanged, damage = null, reason = null) {
+  invalidate(layoutChanged, damage = null, reason = null, source = null) {
     if (this.destroyed || !this.window) return;
     if (!layoutChanged && damage === NO_DAMAGE) {
       // Nothing this node draws changed, so it contributes no region — and
@@ -274,6 +297,16 @@ export class WindowInvalidate {
       this._scheduleFrame();
       return;
     }
+    // The panes over this window's `<glarea>`s paint from a list of their
+    // own (`_paneDamage`): a claim goes to the window's list, the panes',
+    // or both, by what its source can reach (`_paneReach`). One `size`
+    // read for a window with no surface children.
+    const reach =
+      this._overlaid.size !== 0
+        ? this._paneReach(damage?.kind ? damage : source)
+        : WINDOW_ONLY;
+    const panes = reach !== WINDOW_ONLY;
+    const windowToo = reach !== PANES_ONLY;
     if (layoutChanged) {
       this.needsLayout = true;
       // The content floors are measured from the tree, so anything that
@@ -314,8 +347,11 @@ export class WindowInvalidate {
     // where nothing can be seen, so it owes no pixels), and null on a frame
     // that is already unbounded, which owes neither a rect nor the subtree
     // walk that measures one — a blit cannot fire there either.
+    const bounded =
+      (windowToo && this._damage !== FULL_DAMAGE) ||
+      (panes && this._paneDamage !== FULL_DAMAGE);
     const bounds =
-      damage && damage !== NO_DAMAGE && this._damage !== FULL_DAMAGE
+      damage && damage !== NO_DAMAGE && bounded
         ? damage._claimBounds
           ? damage._claimBounds()
           : damage
@@ -324,6 +360,9 @@ export class WindowInvalidate {
     if (pendingScrolls?.size && bounds && this._scrollClaim !== damage) {
       const rect = bounds;
       for (const sv of pendingScrolls) {
+        // A claim the window's list never sees is no change to the pixels
+        // a blit of the window's moves: a surface's children are on panes
+        if (!windowToo && !insideSurface(sv, this)) continue;
         // An element blitting a region of its own drawing (issue #303) is
         // waiting on that region, not on the whole node it lives in — and
         // it is waiting on it *exactly* (issue #309). Its claim is the rect
@@ -363,23 +402,100 @@ export class WindowInvalidate {
         }
       }
     }
-    if (layoutChanged && !damage) this._damage = FULL_DAMAGE;
-    else if (!layoutChanged && !damage) this._damage = FULL_DAMAGE;
-    else if (!bounds) {
+    if (!damage) {
+      // "something, somewhere" — in the panes alone, for a node whose
+      // pixels are only ever on one; everywhere, for anything else
+      if (windowToo) this._damage = FULL_DAMAGE;
+      else this._damage ??= [];
+      if (panes) this._paneDamage = FULL_DAMAGE;
+    } else if (!bounds) {
       // A layout change that names no region: either NO_DAMAGE, from a
       // caller with a finer claim already in flight, or a node whose reach
       // a clipping ancestor left nothing of (issue #398). Unlike `!damage`
-      // neither is "something, somewhere", so neither costs a full repaint.
-    } else if (this._damage !== FULL_DAMAGE) {
+      // neither is "something, somewhere", so neither costs a full repaint
+      // — which a frame with no list at all would be, however little its
+      // layout pass goes on to claim (`_takeDamage`). A child of a
+      // `<glarea>` that only moved is this claim (issue #644), and a frame
+      // whose move is settled on a pane claims only the strips it uncovered.
+      this._damage ??= [];
+    } else {
       // a node, or a bare rect for a caller that has a region rather than a
       // node — a subtree that is about to be removed, say. Claims accumulate
       // as a list of rects rather than one box around them all, so two changes
       // at opposite corners of the window no longer repaint everything
       // between them.
-      this._damage = addDamageRect(this._damage, bounds, this._damageRectCap());
+      if (!windowToo) {
+        // the window owes nothing, and a frame with no list is unbounded
+        this._damage ??= [];
+      } else if (this._damage !== FULL_DAMAGE) {
+        this._damage = addDamageRect(
+          this._damage,
+          bounds,
+          this._damageRectCap(),
+        );
+      }
+      if (panes) this._addPaneDamage(bounds);
     }
     this.needsPaint = true;
     this._scheduleFrame();
+  }
+
+  /**
+   * Which damage lists a claim from `node` belongs in: the window's, the
+   * panes' over its `<glarea>`s, or both. The panes hold the surfaces'
+   * children and nothing else (src/gloverlay.js), and the window paints
+   * none of those, so:
+   *
+   * - a node inside a surface is the panes' alone — the window's pass under
+   *   the surface would repaint pixels no child of it ever had;
+   * - a node above a surface is both: its colour or font is what the
+   *   children below it paint with. So is a surface itself, whose
+   *   `clearColor` an X11 pane's ground is, and so is a claim with no
+   *   source to go by;
+   * - anything else is the window's alone. It draws only into the window,
+   *   where the surface covers it: a graph pane under the surface that its
+   *   own pan claims whole every frame (issue #644) is the claim this keeps
+   *   out of the panes' repaint.
+   */
+  _paneReach(node) {
+    if (!node || node === this) return BOTH;
+    if (insideSurface(node, this)) return PANES_ONLY;
+    if (node.isGlArea) return BOTH;
+    for (const area of this._overlaid) {
+      for (let n = area.parent; n && n !== this; n = n.parent) {
+        if (n === node) return BOTH;
+      }
+    }
+    return WINDOW_ONLY;
+  }
+
+  /** One rect more for the panes, unless they repaint whole already. */
+  _addPaneDamage(rect) {
+    if (this._paneDamage === FULL_DAMAGE) return;
+    this._paneDamage = addDamageRect(
+      this._paneDamage,
+      rect,
+      this._damageRectCap(),
+    );
+  }
+
+  /**
+   * What the panes repaint this frame: null for all of them, and — unlike
+   * the window's list — an empty list when nothing reached them, which is
+   * most frames of a window whose surface children hold still.
+   */
+  _takePaneDamage(width, height) {
+    const damage = this._paneDamage;
+    this._paneDamage = null;
+    if (damage === FULL_DAMAGE) return null;
+    if (!damage || damage.length === 0) return [];
+    const rects = [];
+    for (const claimed of damage) {
+      const clamped = this._clampDamage(claimed, width, height);
+      if (clamped === FULL_DAMAGE) return null;
+      if (clamped) rects.push(clamped);
+    }
+    return damageToPaint(rects);
   }
 
   /**

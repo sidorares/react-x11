@@ -13,6 +13,7 @@ import {
   applyLayoutStyle,
   applyLayoutDefaults,
   createLayoutNode,
+  onlyInsetsChanged,
   paintPropsChanged,
   isEventProp,
 } from '../styles.js';
@@ -473,10 +474,10 @@ export class Node {
     // `_reflowed` would undo both — its post-layout claim is this node's
     // box, the whole band the blit is about to move.
     if (this._blitLedgerOpen()) {
-      root.invalidate(true, before ?? NO_DAMAGE, 'child-list');
+      root.invalidate(true, before ?? NO_DAMAGE, 'child-list', this);
       return;
     }
-    root.invalidate(true, before, 'child-list');
+    root.invalidate(true, before, 'child-list', this);
     root._reflowed.add(this);
   }
 
@@ -604,7 +605,21 @@ export class Node {
     // which is what keeps a commit from widening the region to every node
     // it touched.
     if (layoutChanged) {
-      this._invalidateLayout('props');
+      // A child of a `<glarea>` that only moved (issue #644): its pixels are
+      // on a pane, one shift away, and the layout pass reports the move to
+      // the overlay rather than claiming it (src/glnodes.js). A claim of the
+      // subtree here, before and after, would be the repaint the overlay
+      // exists to skip — and the pass claims both ends of the move itself
+      // whenever the overlay cannot move the pixels.
+      if (
+        this.parent?.isGlArea &&
+        onlyInsetsChanged(style, prevStyle) &&
+        !this.paintChanged(newProps, prev)
+      ) {
+        this.invalidate(true, NO_DAMAGE, 'props');
+      } else {
+        this._invalidateLayout('props');
+      }
     } else {
       // The style half is asked here rather than inside `paintChanged`, and
       // stays core's answer: what a style change moves is the background,
