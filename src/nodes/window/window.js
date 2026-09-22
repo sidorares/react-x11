@@ -205,6 +205,10 @@ export class WindowNode extends Scrollable(Node) {
     // and paints with its damage (nodes/window/flush.js, src/gloverlay.js).
     // Empty is one `size` read a frame.
     this._overlaid = new Set();
+    // …and the damage their panes repaint, a list beside the window's:
+    // each claim goes to one or both by what it can reach (`_paneReach`).
+    // Null with nothing owed.
+    this._paneDamage = null;
     this.events = new EventManager(this);
     // ids of the child windows in the order the *server* stacks them,
     // bottom to top — see _restackWindowChildren

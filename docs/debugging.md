@@ -139,6 +139,10 @@ It covers the element-owned form of the same shift as well —
 [`scrollContents`](extending.md#panning-a-scene-you-drew), which a pane
 that pans a scene it drew itself calls — so a scene that misrenders while
 panning is one variable away from being told apart from one that misdraws.
+And it covers the `<glarea>` overlay's copy: a child of a surface that only
+moved is moved on its pane rather than repainted
+([elements.md](elements.md#glarea)), and with this set it is repainted
+there instead.
 
 ## `REACT_X11_STRICT_TOKENS=1`
 

@@ -614,3 +614,847 @@ test("useSupports('glOverlay') is true on X11", async () => {
     await s.close();
   }
 });
+
+// --- a child that only moved (issue #644) -----------------------------------
+//
+// A pane keeps what it holds between frames, so a child whose only change is
+// where it sits is already painted, one shift away: the frame moves its
+// pixels on the pane (`scrollRegion`, the verb the scroll blit uses on a
+// window) and repaints only what that cannot supply. The proof obligation is
+// the scroll blit's: the pane must hold the picture a pane that repaints
+// would — so each of these renders the same tree twice, on two servers, the
+// second with its panes' `scrollRegion` taken away (the overlay feature-
+// detects it, as the scroll blit does the window's), and compares every
+// pixel of the two after every step.
+
+const TINTS = [
+  '#e03131',
+  '#2f9e44',
+  '#1971c2',
+  '#f08c00',
+  '#9c36b5',
+  '#0c8599',
+  '#495057',
+];
+
+/**
+ * The shape `<Flow>`'s mounted node bodies take over its GL graph: one box
+ * bigger than the surface holding a grid of tiles, moved by `left`/`top`
+ * alone on a pan, and a panel pinned over it (the minimap) that the pan must
+ * not drag along. `tint` recolours one tile, `panel` the panel, `extra`
+ * goes on the box of tiles, and `inside` is one more child of it.
+ */
+function panScene({
+  left,
+  top,
+  tint = null,
+  panel = '#ffffff',
+  extra = {},
+  inside = null,
+}) {
+  const tiles = [];
+  for (let r = 0; r < 12; r++) {
+    for (let c = 0; c < 16; c++) {
+      const i = r * 16 + c;
+      tiles.push(
+        h('box', {
+          key: i,
+          style: {
+            position: 'absolute',
+            left: c * 50 + 3,
+            top: r * 50 + 5,
+            width: 40,
+            height: 30,
+            backgroundColor: i === 37 && tint ? tint : TINTS[i % TINTS.length],
+          },
+        }),
+      );
+    }
+  }
+  return h(
+    'window',
+    { width: 320, height: 240 },
+    h(
+      'glarea',
+      { style: { flexGrow: 1 }, clearColor: '#102030', onDraw: () => {} },
+      h(
+        'box',
+        {
+          key: 'bodies',
+          style: {
+            position: 'absolute',
+            left,
+            top,
+            width: 800,
+            height: 600,
+            ...extra,
+          },
+        },
+        tiles,
+        inside,
+      ),
+      h('box', {
+        key: 'panel',
+        style: {
+          position: 'absolute',
+          right: 10,
+          bottom: 10,
+          width: 80,
+          height: 40,
+          backgroundColor: panel,
+        },
+      }),
+    ),
+  );
+}
+
+const rectsOverlap = (a, b) =>
+  a.x < b.x + b.width &&
+  b.x < a.x + a.width &&
+  a.y < b.y + b.height &&
+  b.y < a.y + a.height;
+
+/** Every pixel of a pane, through the context the overlay paints with. */
+function pixelsOf(pane) {
+  const { width, height } = pane.rect;
+  return new Promise((resolve, reject) =>
+    pane
+      .context()
+      .getImageData(0, 0, width, height, (err, image) =>
+        err ? reject(err) : resolve(Buffer.from(image.data)),
+      ),
+  );
+}
+
+/** The pixels two panes disagree on, as a count and the box around them. */
+function paneDiff(a, b, width) {
+  let count = 0;
+  let box = null;
+  for (let i = 0; i < a.length; i += 4) {
+    if (a[i] === b[i] && a[i + 1] === b[i + 1] && a[i + 2] === b[i + 2]) {
+      continue;
+    }
+    count += 1;
+    const x = (i / 4) % width;
+    const y = Math.floor(i / 4 / width);
+    box = box
+      ? {
+          x0: Math.min(box.x0, x),
+          y0: Math.min(box.y0, y),
+          x1: Math.max(box.x1, x),
+          y1: Math.max(box.y1, y),
+        }
+      : { x0: x, y0: y, x1: x, y1: y };
+  }
+  return { count, box };
+}
+
+/**
+ * `build()` twice, on two servers: the first as it ships, the second with no
+ * pane able to move pixels — the reference, which repaints. `step(element)`
+ * renders an element into both and runs each frame at once, and `check`
+ * compares their panes pixel for pixel. `blits` counts the first one's
+ * pane moves and `painted` the pixels its passes cover, since the last
+ * `step`.
+ */
+async function twins(build) {
+  const a = await mount(build, { panes: 1 });
+  const b = await mount(build, { panes: 1 });
+  const overlayA = a.area()._overlay;
+  const overlayB = b.area()._overlay;
+  const [paneA] = overlayA.panes;
+  const [paneB] = overlayB.panes;
+  paneB.wnd.scrollRegion = undefined;
+  const counts = { blits: 0, painted: 0 };
+  const scrollRegion = paneA.wnd.scrollRegion.bind(paneA.wnd);
+  paneA.wnd.scrollRegion = (...args) => {
+    counts.blits += 1;
+    return scrollRegion(...args);
+  };
+  const paintPane = overlayA._paintPane.bind(overlayA);
+  overlayA._paintPane = (pane, passes) => {
+    for (const pass of passes) counts.painted += pass.width * pass.height;
+    return paintPane(pane, passes);
+  };
+  const frame = async (s, element) => {
+    await new Promise((resolve) => s.root.render(element, resolve));
+    s.windowNode.flush();
+    await settle(s.app);
+  };
+  return {
+    a,
+    b,
+    paneA,
+    counts,
+    async step(element) {
+      counts.blits = 0;
+      counts.painted = 0;
+      await frame(a, element);
+      await frame(b, element);
+      // the same panes all along: a new one would be painted whole
+      same(overlayA.panes[0], paneA, 'the pane');
+      same(overlayB.panes[0], paneB, 'the reference’s pane');
+    },
+    async check(what) {
+      const diff = paneDiff(
+        await pixelsOf(paneA),
+        await pixelsOf(paneB),
+        paneA.rect.width,
+      );
+      assert.equal(
+        diff.count,
+        0,
+        `${what}: ${diff.count} pixels differ from a repaint, in ` +
+          JSON.stringify(diff.box),
+      );
+    },
+    async close() {
+      await a.close();
+      await b.close();
+    },
+  };
+}
+
+test('a child that only moved is moved on its pane, and the frame repaints only what that uncovered', async () => {
+  let left = -100;
+  let top = -80;
+  const t = await twins(() => panScene({ left, top }));
+  try {
+    await t.check('mounted');
+    const area = t.paneA.rect.width * t.paneA.rect.height;
+    // one axis, the other, both, back, and a step bigger than a tile
+    for (const [dx, dy] of [
+      [5, 0],
+      [0, 7],
+      [-13, 4],
+      [21, -9],
+      [-1, -1],
+      [48, 0],
+      [0, -30],
+    ]) {
+      left += dx;
+      top += dy;
+      await t.step(panScene({ left, top }));
+      await t.check(`panned by (${dx}, ${dy})`);
+      assert.equal(t.counts.blits, 1, `(${dx}, ${dy}): one move on the pane`);
+      // the strips the move uncovered and the panel's two rects: a fraction
+      // of the pane, where a repaint of the move was every pixel of it
+      assert.ok(
+        t.counts.painted < area / 4,
+        `(${dx}, ${dy}): painted ${t.counts.painted} of ${area} pixels`,
+      );
+    }
+  } finally {
+    await t.close();
+  }
+});
+
+test('what else a moving frame changes is repainted where it lands', async () => {
+  let left = -100;
+  let top = -80;
+  const t = await twins(() => panScene({ left, top }));
+  try {
+    // a tile inside the moving child, recoloured in the same commit: claimed
+    // where it was before layout ran, and the copy carried it on
+    left += 17;
+    top -= 6;
+    await t.step(panScene({ left, top, tint: '#ffff00' }));
+    await t.check('a tile recoloured as it moved');
+    assert.equal(t.counts.blits, 1);
+    // the panel over it, recoloured as the child under it moves: its own
+    // claim, and the copy of its old pixels the move dragged along
+    left -= 9;
+    await t.step(panScene({ left, top, tint: '#ffff00', panel: '#00ffff' }));
+    await t.check('the panel recoloured as the child under it moved');
+    assert.equal(t.counts.blits, 1);
+  } finally {
+    await t.close();
+  }
+});
+
+test('a child that moved and changed anything else is repainted, not moved', async () => {
+  let left = -100;
+  let top = -80;
+  const t = await twins(() => panScene({ left, top }));
+  try {
+    // a background behind the tiles, in the same commit as the move: the
+    // child drew differently, so its old pixels are not a shift away
+    left += 11;
+    await t.step(
+      panScene({ left, top, extra: { backgroundColor: '#333333' } }),
+    );
+    await t.check('moved and given a background');
+    assert.equal(t.counts.blits, 0, 'nothing moved on the pane');
+    // …and a move that changes its size is not a move of its pixels either
+    left += 7;
+    await t.step(
+      panScene({
+        left,
+        top,
+        extra: { backgroundColor: '#333333', width: 790 },
+      }),
+    );
+    await t.check('moved and resized');
+    assert.equal(t.counts.blits, 0, 'nothing moved on the pane');
+  } finally {
+    await t.close();
+  }
+});
+
+test('a scroll pane inside a moved child, laid out again as it moves, is repainted', async () => {
+  // The one node that drops the layout diff under a shift: a scroll pane
+  // whose content was laid out again claims its box and trusts that to cover
+  // its rows. Riding a move its box claims nothing, so it claims itself —
+  // without that, the rows a taller first row pushed down were carried by
+  // the copy to where they were.
+  const list = (first) =>
+    h(
+      'box',
+      {
+        key: 'list',
+        scrollbarColor: 'transparent',
+        style: {
+          position: 'absolute',
+          left: 160,
+          top: 120,
+          width: 90,
+          height: 80,
+          overflow: 'scroll',
+          backgroundColor: '#000000',
+        },
+      },
+      ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff'].map((c, i) =>
+        h('box', {
+          key: i,
+          style: {
+            height: i === 0 ? first : 20,
+            flexShrink: 0,
+            backgroundColor: c,
+          },
+        }),
+      ),
+    );
+  let left = -100;
+  let top = -80;
+  const t = await twins(() => panScene({ left, top, inside: list(20) }));
+  try {
+    left += 5;
+    top += 3;
+    await t.step(panScene({ left, top, inside: list(35) }));
+    await t.check('the first row grew as the list moved');
+  } finally {
+    await t.close();
+  }
+});
+
+test('children that move together move their pane, and are repainted', async () => {
+  // On X11 a pane is as big as what it holds, so two children moving as one
+  // take their pane with them — and what a pane holds is in its own corner,
+  // not the window's: nothing in it is a shift away, and both are claimed.
+  const pair = (left) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(
+        'glarea',
+        { style: { flexGrow: 1 }, clearColor: '#102030', onDraw: () => {} },
+        ['#ff0000', '#0000ff'].map((backgroundColor, i) =>
+          h('box', {
+            key: i,
+            style: {
+              position: 'absolute',
+              left: left + i * 30,
+              top: 40 + i * 20,
+              width: 60,
+              height: 40,
+              backgroundColor,
+            },
+          }),
+        ),
+      ),
+    );
+  const t = await twins(() => pair(20));
+  try {
+    await t.step(pair(26));
+    assert.equal(t.counts.blits, 0, 'nothing moved inside the pane');
+    await t.check('moved together');
+  } finally {
+    await t.close();
+  }
+});
+
+test('a child whose inset changed and who stayed put paints nothing', async () => {
+  // `right` beside a `left` and a `width` is ignored: layout puts the child
+  // where it was, and the change claims no pixels. The claim that asked for
+  // the layout pass names no region, and a frame with none is not a
+  // full-window repaint.
+  const legend = (right) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(
+        'glarea',
+        { style: { flexGrow: 1 }, clearColor: '#102030', onDraw: () => {} },
+        h('box', {
+          style: {
+            position: 'absolute',
+            left: 10,
+            top: 10,
+            right,
+            width: 60,
+            height: 30,
+            backgroundColor: '#ff0000',
+          },
+        }),
+      ),
+    );
+  const s = await mount(() => legend(undefined), { panes: 1 });
+  try {
+    const overlay = s.area()._overlay;
+    let passes = 0;
+    const paintPane = overlay._paintPane.bind(overlay);
+    overlay._paintPane = (pane, list) => {
+      passes += list.length;
+      return paintPane(pane, list);
+    };
+    await new Promise((resolve) => s.root.render(legend(5), resolve));
+    s.windowNode.flush();
+    await settle(s.app);
+    assert.deepEqual(s.windowNode._lastDamageRects, [], 'the window: nothing');
+    assert.equal(passes, 0, 'the pane: nothing');
+  } finally {
+    await s.close();
+  }
+});
+
+test('a scroll inside a child of the surface moves the pane’s pixels, not the window’s', async () => {
+  // The window paints none of a surface's children: a band of theirs is
+  // only ever on a pane. Shifted in the window's backing store instead, the
+  // scroll moved nothing on screen, and the strip it repainted left the pane
+  // holding the old frame around it.
+  let pane = null;
+  const scroller = () =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(
+        'glarea',
+        { style: { flexGrow: 1 }, clearColor: '#000000', onDraw: () => {} },
+        h(
+          'box',
+          {
+            ref: (n) => (pane = n ?? pane),
+            scrollbarColor: 'transparent',
+            style: {
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: 300,
+              height: 200,
+              overflow: 'scroll',
+            },
+          },
+          [
+            '#ff0000',
+            '#00ff00',
+            '#0000ff',
+            '#ffff00',
+            '#ff00ff',
+            '#00ffff',
+          ].map((backgroundColor, i) =>
+            h('box', {
+              key: i,
+              style: { height: 50, flexShrink: 0, backgroundColor },
+            }),
+          ),
+        ),
+      ),
+    );
+  const s = await mount(scroller, { panes: 1 });
+  try {
+    const [overlayPane] = s.area()._overlay.panes;
+    const wnd = s.windowNode.window;
+    let windowBlits = 0;
+    const scrollRegion = wnd.scrollRegion.bind(wnd);
+    wnd.scrollRegion = (...args) => {
+      windowBlits += 1;
+      return scrollRegion(...args);
+    };
+    let paneBlits = 0;
+    const paneScroll = overlayPane.wnd.scrollRegion.bind(overlayPane.wnd);
+    overlayPane.wnd.scrollRegion = (...args) => {
+      paneBlits += 1;
+      return paneScroll(...args);
+    };
+    pane.scrollTo(20);
+    s.windowNode.flush();
+    await settle(s.app);
+    assert.equal(windowBlits, 0, 'the window’s pixels stayed put');
+    assert.equal(paneBlits, 1, 'the pane’s moved');
+    // the rows moved up by 20: the second one now starts at 30
+    near(await rgbOf(overlayPane.wnd, 10, 10), RED, 'the first row, rising');
+    near(await rgbOf(overlayPane.wnd, 10, 40), [0, 255, 0], 'the second row');
+    near(await rgbOf(overlayPane.wnd, 10, 190), [255, 0, 255], 'the strip');
+  } finally {
+    await s.close();
+  }
+});
+
+// --- whose damage is it -----------------------------------------------------
+//
+// The panes paint from a list of their own: the window's claims, less the
+// ones that cannot reach a pane — and the window's list goes without the
+// claims only a pane can show. A graph pane under the surface claims itself
+// whole on every step of a pan (issue #644), and with one list between them
+// the overlay repainted everything it holds on every step of it.
+
+/** Count the passes an overlay's panes paint from now on. */
+function countPasses(overlay) {
+  const seen = { passes: 0 };
+  const paintPane = overlay._paintPane.bind(overlay);
+  overlay._paintPane = (pane, list) => {
+    seen.passes += list.length;
+    return paintPane(pane, list);
+  };
+  return seen;
+}
+
+/** A frame, run now: the commit, then the flush it scheduled. */
+async function frameOf(s, element) {
+  await new Promise((resolve) => s.root.render(element, resolve));
+  s.windowNode.flush();
+  await settle(s.app);
+}
+
+test('a change inside the overlay costs the window nothing', async () => {
+  const s = await mount(() => legendAndPanel(), { panes: 2 });
+  try {
+    const seen = countPasses(s.area()._overlay);
+    await frameOf(s, legendAndPanel({ legend: '#008000' }));
+    assert.equal(seen.passes, 1, 'the legend’s pane repainted it');
+    assert.deepEqual(
+      s.windowNode._lastDamageRects,
+      [],
+      'and the window, which paints none of the surface’s children, nothing',
+    );
+    near(
+      await rgbOf(s.area()._overlay.panes[0].wnd, 30, 15),
+      GREEN,
+      'recoloured',
+    );
+  } finally {
+    await s.close();
+  }
+});
+
+test('a node under the surface costs the panes nothing, and one above it reaches them', async () => {
+  // The shape `<Flow renderer="gl">` has: a pane of its own under the
+  // surface, laid over it and filling the same box, and a wrapper above
+  // both whose colour the surface's children inherit. One `onDraw` for
+  // every render: a new one is new content, and a claim of its own.
+  const ink = (ctx) => ctx.fillRect(0, 0, 40, 20);
+  const noDraw = () => {};
+  const tree = ({ under = '#202020', color = '#ffffff' } = {}) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(
+        'box',
+        { style: { flexGrow: 1, color } },
+        h('box', {
+          key: 'under',
+          style: {
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: under,
+          },
+        }),
+        h(
+          'glarea',
+          {
+            key: 'gl',
+            style: {
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              right: 0,
+              bottom: 0,
+            },
+            clearColor: '#102030',
+            onDraw: noDraw,
+          },
+          // drawn in the ink it inherits, as a label would be
+          h('canvas', {
+            mono: true,
+            style: {
+              position: 'absolute',
+              left: 10,
+              top: 10,
+              width: 40,
+              height: 20,
+            },
+            onDraw: ink,
+          }),
+        ),
+      ),
+    );
+  const s = await mount(() => tree(), { panes: 1 });
+  try {
+    const [pane] = s.area()._overlay.panes;
+    near(await rgbOf(pane.wnd, 10, 10), [255, 255, 255], 'the ink, white');
+    const seen = countPasses(s.area()._overlay);
+    await frameOf(s, tree({ under: '#404040' }));
+    assert.ok(
+      s.windowNode._lastDamageRects === null ||
+        s.windowNode._lastDamageRects.length > 0,
+      'the window repainted the node under the surface',
+    );
+    assert.equal(seen.passes, 0, 'which no pane shows');
+    await frameOf(s, tree({ under: '#404040', color: '#ffff00' }));
+    near(
+      await rgbOf(pane.wnd, 10, 10),
+      [255, 255, 0],
+      'the ink inherited from above the surface reached its pane',
+    );
+  } finally {
+    await s.close();
+  }
+});
+
+test('a surface child changing mid-scroll is no repair for the window’s blit', async () => {
+  // A scroll pane holding a surface: the scroll blits the window, and what
+  // changed inside the pane while it was armed is repaired after the blit
+  // (issue #398) — but a surface's child is on a pane of its own, and the
+  // window has nothing of it to repair.
+  let list = null;
+  // one ref and one `onDraw` for every render: a new function is a new
+  // prop, and a claim of its own
+  const listRef = (n) => (list = n ?? list);
+  const noDraw = () => {};
+  const tree = (legend) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(
+        'box',
+        {
+          ref: listRef,
+          scrollbarColor: 'transparent',
+          style: { flexGrow: 1, overflow: 'scroll' },
+        },
+        ['#ff0000', '#00ff00', '#0000ff', '#ffff00'].map((backgroundColor, i) =>
+          h('box', {
+            key: i,
+            style: { height: 120, flexShrink: 0, backgroundColor },
+          }),
+        ),
+        h(
+          'glarea',
+          {
+            key: 'gl',
+            style: {
+              position: 'absolute',
+              left: 180,
+              top: 40,
+              width: 120,
+              height: 100,
+            },
+            clearColor: '#102030',
+            onDraw: noDraw,
+          },
+          h('box', {
+            style: {
+              position: 'absolute',
+              left: 10,
+              top: 10,
+              width: 40,
+              height: 20,
+              backgroundColor: legend,
+            },
+          }),
+        ),
+      ),
+    );
+  const s = await mount(() => tree('#ffffff'), { panes: 1 });
+  try {
+    const wnd = s.windowNode.window;
+    let blits = 0;
+    const scrollRegion = wnd.scrollRegion.bind(wnd);
+    wnd.scrollRegion = (...args) => {
+      blits += 1;
+      return scrollRegion(...args);
+    };
+    // armed first, so the legend's claim arrives while the blit waits
+    list.scrollTo(12);
+    await new Promise((resolve) => s.root.render(tree('#ff00ff'), resolve));
+    s.windowNode.flush();
+    await settle(s.app);
+    assert.equal(blits, 1, 'the window blitted the scroll');
+    // the strip the scroll exposed and the bars, and nothing where the
+    // legend went — its pane repainted it
+    const legend = s.area().children[0].abs;
+    for (const rect of s.windowNode._lastDamageRects) {
+      assert.ok(
+        !rectsOverlap(rect, legend),
+        `the window repaired ${JSON.stringify(rect)} over the legend`,
+      );
+    }
+    near(
+      await rgbOf(s.area()._overlay.panes[0].wnd, 20, 15),
+      [255, 0, 255],
+      'the legend, recoloured on its pane',
+    );
+  } finally {
+    await s.close();
+  }
+});
+
+test('on X11 a pane’s ground follows the surface’s clearColor', async () => {
+  // The surface's own claim is the panes' too: their ground is its colour.
+  const noDraw = () => {};
+  const tree = (clearColor) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(
+        'glarea',
+        { style: { flexGrow: 1 }, clearColor, onDraw: noDraw },
+        h('box', {
+          style: {
+            position: 'absolute',
+            left: 10,
+            top: 10,
+            width: 40,
+            height: 40,
+            backgroundColor: 'rgba(255, 0, 0, 0.5)',
+          },
+        }),
+      ),
+    );
+  const s = await mount(() => tree('#102030'), { panes: 1 });
+  try {
+    const [pane] = s.area()._overlay.panes;
+    await frameOf(s, tree('#000000'));
+    // 50% red over black
+    near(await rgbOf(pane.wnd, 20, 20), [128, 0, 0], 'the new ground');
+  } finally {
+    await s.close();
+  }
+});
+
+test('a child pushed along by another’s growth is repainted where it went', async () => {
+  // Only the layout diff claims the one that was pushed: nothing about it
+  // changed but where it sits, and it is no rigid move of a child of its
+  // own — the two are in the flow of a box the surface holds. The box keeps
+  // its size, so its pane does too and paints only what was claimed.
+  const noDraw = () => {};
+  const tree = (grow) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(
+        'glarea',
+        { style: { flexGrow: 1 }, clearColor: '#000000', onDraw: noDraw },
+        h(
+          'box',
+          {
+            style: {
+              position: 'absolute',
+              left: 10,
+              top: 10,
+              width: 60,
+              height: 100,
+            },
+          },
+          h('box', {
+            key: 'a',
+            style: { height: grow, backgroundColor: '#ff0000' },
+          }),
+          h('box', {
+            key: 'b',
+            style: { height: 20, backgroundColor: '#0000ff' },
+          }),
+        ),
+      ),
+    );
+  const s = await mount(() => tree(20), { panes: 1 });
+  try {
+    await frameOf(s, tree(40));
+    const [pane] = s.area()._overlay.panes;
+    const at = (x, y) => rgbOf(pane.wnd, x - pane.rect.x, y - pane.rect.y);
+    near(await at(40, 45), RED, 'the grown one, where the other was');
+    near(await at(40, 65), BLUE, 'the pushed one, where it went');
+    near(await at(40, 75), [0, 0, 0], 'and the ground below it');
+  } finally {
+    await s.close();
+  }
+});
+
+test('a sticky header in a scroll pane over the surface stays put on the pane', async () => {
+  // The pane's own scroll blit carries the header along with the rows, and
+  // the header's re-placement claims it back — both on the pane.
+  let list = null;
+  const listRef = (n) => (list = n ?? list);
+  const noDraw = () => {};
+  const s = await mount(
+    () =>
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          'glarea',
+          { style: { flexGrow: 1 }, clearColor: '#000000', onDraw: noDraw },
+          h(
+            'box',
+            {
+              ref: listRef,
+              scrollbarColor: 'transparent',
+              style: {
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                width: 300,
+                height: 200,
+                overflow: 'scroll',
+              },
+            },
+            h('box', {
+              key: 'header',
+              style: {
+                position: 'sticky',
+                top: 0,
+                height: 20,
+                flexShrink: 0,
+                backgroundColor: '#ffffff',
+              },
+            }),
+            ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff'].map(
+              (backgroundColor, i) =>
+                h('box', {
+                  key: i,
+                  style: { height: 50, flexShrink: 0, backgroundColor },
+                }),
+            ),
+          ),
+        ),
+      ),
+    { panes: 1 },
+  );
+  try {
+    const [pane] = s.area()._overlay.panes;
+    for (const y of [7, 19, 33]) {
+      list.scrollTo(y);
+      s.windowNode.flush();
+      await settle(s.app);
+      near(await rgbOf(pane.wnd, 10, 5), [255, 255, 255], `the header at ${y}`);
+    }
+    // rows under it moved up by 33: the first ends at 20 + 50 - 33 = 37
+    near(await rgbOf(pane.wnd, 10, 30), RED, 'the first row, under it');
+    near(await rgbOf(pane.wnd, 10, 45), [0, 255, 0], 'the second row');
+  } finally {
+    await s.close();
+  }
+});

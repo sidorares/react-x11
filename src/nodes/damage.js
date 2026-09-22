@@ -49,6 +49,14 @@ export const layoutDiff = {
   // diff reports only the children that landed somewhere else. Null everywhere
   // else, and restored through `finally` like the sink beside it.
   shift: null,
+
+  // True when `shift` is a `<glarea>` child's own move rather than a scroll
+  // (src/glnodes.js, `_absolutizeChild`, issue #644): the overlay moves the
+  // child's pixels on its pane, and a node that lands where it was plus the
+  // shift is carried by that. A node that turns the diff off under a shift —
+  // a scroll pane laid out again, whose box would have claimed its children
+  // — claims its own box instead, since the move claimed nothing for it.
+  ride: false,
 };
 
 // What an invalidate() may name as its reason — a small closed set, so the

@@ -409,7 +409,7 @@ export class NodeScrollBlit {
     // reason to un-blit it. `state.rect` by identity, so a second call this
     // frame is recognised as the same claim rather than as foreign damage.
     root._scrollClaim = state.rect;
-    root.invalidate(false, state.rect, 'scroll');
+    root.invalidate(false, state.rect, 'scroll', this);
     root._scrollClaim = null;
     return this._pendingBlitFrom !== BLIT_POISONED;
   }
@@ -485,8 +485,10 @@ export class WindowScrollBlit {
     // claim the scroll recorded, like every other declined gate here
     if (from === BLIT_POISONED) return;
     if (NO_SCROLL_BLIT || !from || node.destroyed || node.root !== this) return;
-    const wnd = this.window;
-    if (typeof wnd?.scrollRegion !== 'function') return; // ntk without #139
+    // the window's backing store, or the pane over a `<glarea>` that holds
+    // the pixels of a node inside it — none where neither can move them
+    const target = this._blitTarget(node);
+    if (!target) return;
     // the debug overlays and the DevTools highlight draw over the whole
     // window; a blit would drag shifted copies of them along
     if (
@@ -497,7 +499,8 @@ export class WindowScrollBlit {
     ) {
       return;
     }
-    if (!Array.isArray(this._damage)) return; // unbounded frame already
+    // unbounded already, on the surface the blit would move
+    if (!Array.isArray(target.damage)) return;
     // the layout diff claimed real movement this pass — the frame is not a
     // pure scroll, and a blit under rearranged content would shift stale
     // pixels into place the repaint no longer covers
@@ -506,7 +509,7 @@ export class WindowScrollBlit {
     // region and the shift itself (issue #303), where a scroll container is
     // its whole viewport shifted by the change in its offsets.
     if (contents) {
-      this._applyContentsBlit(node, contents, width, height);
+      this._applyContentsBlit(node, contents, width, height, target);
       return;
     }
     // Back where the frame started: a burst of scrolls that went one way
@@ -518,14 +521,14 @@ export class WindowScrollBlit {
     // (Every pixel-shift gate below is moot for a shift of nothing.)
     if (from.x === node.scrollX && from.y === node.scrollY) {
       const box = node.abs;
-      const kept = this._blitKeptDamage(box);
+      const kept = this._blitKeptDamage(box, false, target.damage);
       if (!kept) return;
       let rects = kept;
       for (const claim of ledger ?? []) {
         const inside = intersectRects(claim, box);
         if (inside) rects = addDamageRect(rects, inside);
       }
-      this._damage = rects;
+      target.damage = rects;
       return;
     }
     // children clip to the border box, so a border ring or rounded corner
@@ -575,7 +578,7 @@ export class WindowScrollBlit {
     ) {
       return;
     }
-    const keep = this._blitKeptDamage(vp);
+    const keep = this._blitKeptDamage(vp, false, target.damage);
     if (!keep) return;
     // What changed inside the viewport while the blit was armed, in the
     // coordinates the frame is about to paint in (issue #398). A claim made
@@ -635,7 +638,7 @@ export class WindowScrollBlit {
       ? unionArea([strip, ...repairs]) - rectArea(strip)
       : 0;
     if (repairArea > area * BLIT_MAX_CLAIM_AREA) return;
-    if (!this._scrollBlitSafe(node, vp)) return;
+    if (!this._scrollBlitSafe(node, vp, target.top)) return;
     // The band the scrolled bar's thumb travels in is repaired on its own.
     // The thumb's rects are thin and run along the viewport's edge, and a
     // rect reaching into the band from inside — a column held down the
@@ -730,8 +733,8 @@ export class WindowScrollBlit {
       if (inside) painted += inside.width * inside.height;
     }
     if (painted > area * SCROLL_BLIT_MAX_REPAINT) return;
-    if (!wnd.scrollRegion({ ...vp }, dx, dy)) return;
-    this._damage = rects;
+    if (!target.blit({ ...vp }, dx, dy)) return;
+    target.damage = rects;
   }
 
   /**
@@ -751,12 +754,15 @@ export class WindowScrollBlit {
    * damage cap merges neighbours on its own, without a claim-time gate to
    * poison first. Requiring the rect back unchanged is what lets the
    * claim-time gate narrow to `vp` itself and let furniture beside it live.
+   *
+   * `damage` is the list the blit's surface paints from: the window's, or
+   * its panes' for a node inside a `<glarea>` (`_blitTarget`).
    */
-  _blitKeptDamage(vp, exact = false) {
+  _blitKeptDamage(vp, exact = false, damage = this._damage) {
     const keep = [];
     let sawClaim = false;
     const slopped = insetRect(vp, -(DAMAGE_SLOP + 1));
-    for (const rect of this._damage) {
+    for (const rect of damage) {
       if (!rectsOverlap(rect, vp)) {
         keep.push(rect);
         continue;
@@ -795,7 +801,7 @@ export class WindowScrollBlit {
    * balloon back towards the whole viewport. With no bars the L is two
    * disjoint rects and stays two.
    */
-  _applyContentsBlit(node, { rect: vp, dx, dy }, width, height) {
+  _applyContentsBlit(node, { rect: vp, dx, dy }, width, height, target) {
     // only a whole-pixel shift of a whole-pixel region is a copy
     if (!isIntegerRect(vp)) return;
     if (!Number.isInteger(dx) || !Number.isInteger(dy)) return;
@@ -840,14 +846,14 @@ export class WindowScrollBlit {
       if (child.style?.display === 'none') continue;
       if (rectsOverlap(child._subtreeBounds(), vp)) return;
     }
-    const keep = this._blitKeptDamage(vp, true);
+    const keep = this._blitKeptDamage(vp, true, target.damage);
     if (!keep) return;
     // An ancestor's rounded corners reach into the top and bottom rows of
     // the region (a graph pane inside a rounded card is the common shape):
     // those rows do not translate, so they leave the blit and get repainted
     // as bands — the same carve the element does for its own furniture —
     // and the band that shifts is what is left between them.
-    const bands = this._cornerBands(node, vp);
+    const bands = this._cornerBands(node, vp, target.top);
     const shifted =
       bands.top || bands.bottom
         ? {
@@ -864,11 +870,11 @@ export class WindowScrollBlit {
     ) {
       return;
     }
-    if (!this._scrollBlitSafe(node, shifted)) return;
+    if (!this._scrollBlitSafe(node, shifted, target.top)) return;
     // the element's deltas are already how far the pixels moved, the sense
     // scrollRegion takes (0 + x rather than x: a caller's -0 would survive
     // into request buffers and test comparisons)
-    if (!this.window.scrollRegion({ ...shifted }, 0 + dx, 0 + dy)) return;
+    if (!target.blit({ ...shifted }, 0 + dx, 0 + dy)) return;
     let rects = keep;
     if (bands.top) {
       rects = addDamageRect(rects, {
@@ -908,7 +914,7 @@ export class WindowScrollBlit {
         height: vp.height - Math.abs(dy),
       });
     }
-    this._damage = rects;
+    target.damage = rects;
   }
 
   /**
@@ -916,11 +922,13 @@ export class WindowScrollBlit {
    * corners reach into — the rows an element blit has to leave behind and
    * repaint, so that what shifts stays clear of every corner square
    * (`_scrollBlitSafe`). Whole pixels, and zero when no corner reaches in.
+   * Ancestors below `upTo`, the node the blit's surface belongs to
+   * (`_blitTarget`): a pane is a rectangle no corner above it clips.
    */
-  _cornerBands(node, vp) {
+  _cornerBands(node, vp, upTo = this) {
     let top = 0;
     let bottom = 0;
-    for (let n = node.parent; n && n !== this; n = n.parent) {
+    for (let n = node.parent; n && n !== upTo; n = n.parent) {
       const radius = n.style?.borderRadius ?? 0;
       if (!(radius > 0) || !n.abs) continue;
       if (!cornerSquaresOverlap(n.abs, radius, vp)) continue;
@@ -940,13 +948,18 @@ export class WindowScrollBlit {
    * the viewport — an overlapping sibling, an ancestor's border ring or
    * rounded corner, an enclosing viewport's scrollbar — would have its
    * pixels dragged along by the blit, so any of them is a no.
+   *
+   * "Outside" is below `top`, the node whose subtree the blit's surface
+   * holds (`_blitTarget`): the window, or a `<glarea>` whose pane holds
+   * only its own children — what the window draws under the surface was
+   * never in the pane's pixels.
    */
-  _scrollBlitSafe(scroller, vp) {
+  _scrollBlitSafe(scroller, vp, top = this) {
     // the window itself scrolls: everything inside it *is* the scrolled
     // content, so there is nothing that could be dragged along
     if (scroller === this) return true;
     const ancestors = new Set();
-    for (let n = scroller.parent; n && n !== this; n = n.parent) {
+    for (let n = scroller.parent; n && n !== top; n = n.parent) {
       ancestors.add(n);
     }
     const check = (parent) => {
@@ -993,7 +1006,60 @@ export class WindowScrollBlit {
       }
       return true;
     };
-    return check(this);
+    return check(top);
+  }
+
+  /**
+   * Where a blit for `node` moves pixels, as `{ top, blit(rect, dx, dy),
+   * damage }` — `blit` with `Window.scrollRegion`'s contract, `top` the node
+   * whose subtree that surface holds, `damage` the list it paints from and
+   * the blit narrows — or null when nothing can.
+   *
+   * The window's backing store, for a node the window paints. A node inside
+   * a `<glarea>` is painted on the pane over the surface instead
+   * (src/gloverlay.js), and the window's pixels under the surface are none
+   * of its: shifting them moved nothing on screen while the strip-only
+   * repaint left the pane holding the scroll's old frame (issue #644). So
+   * the pane that holds the rect moves it, or the frame repaints — a pane
+   * owed a paint whole, or none holding the whole rect, is a refusal like
+   * any other here.
+   */
+  _blitTarget(node) {
+    for (let n = node.parent; n && n !== this; n = n.parent) {
+      if (!n.isGlArea) continue;
+      const overlay = n._overlay;
+      if (!overlay) return null;
+      const root = this;
+      return {
+        top: n,
+        blit: (rect, dx, dy) => {
+          const pane = overlay.panes.find((p) => p.canBlit(rect));
+          return pane ? pane.blit(rect, dx, dy) : false;
+        },
+        // the panes' list: a scroll inside a surface claims nothing in the
+        // window's, which paints none of its children (`_paneReach`)
+        get damage() {
+          return root._paneDamage;
+        },
+        set damage(rects) {
+          root._paneDamage = rects;
+        },
+      };
+    }
+    const wnd = this.window;
+    // an ntk without #139, or a presenter with no bitmap to move
+    if (typeof wnd?.scrollRegion !== 'function') return null;
+    const root = this;
+    return {
+      top: this,
+      blit: (rect, dx, dy) => wnd.scrollRegion(rect, dx, dy),
+      get damage() {
+        return root._damage;
+      },
+      set damage(rects) {
+        root._damage = rects;
+      },
+    };
   }
 
   /**

@@ -297,8 +297,11 @@ export const Scrollable = (Base) =>
             // …which holds for a scroll's shift and not for the clamp's: the
             // content shrank, or the viewport grew, under the offset — a row
             // collapsing at the end of a list scrolled to its end — and
-            // nothing claimed the viewport every child just moved in.
-            if (clamped) outer(vp);
+            // nothing claimed the viewport every child just moved in. Nor
+            // for a `<glarea>` child's move that this pane rides (issue
+            // #644): its box claimed nothing, and a pane laid out again may
+            // have moved rows the move's copy carries where they were.
+            if (clamped || layoutDiff.ride) outer(vp);
           } else {
             layoutDiff.sink = (rect) => {
               const clipped = intersectRects(rect, vp);

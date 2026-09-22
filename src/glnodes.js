@@ -11,6 +11,7 @@ import { cssColorStraight } from 'ntk';
 export { directGLFailure, hasDirectGL } from './glbackend.js';
 
 import { GlOverlay, canOverlay } from './gloverlay.js';
+import { layoutDiff } from './nodes/damage.js';
 import { Node } from './nodes/node.js';
 import { FramePacer, resolveFrameRate } from './pacing.js';
 
@@ -320,9 +321,100 @@ export class GlAreaNode extends Node {
     };
   }
 
+  /**
+   * `Node.absolutize`, with the children walked one at a time where a pane
+   * holds them — the frame's layout diff running (a bounded frame), no
+   * scroll shift riding over this node, no layout algorithm of its own
+   * placing them, and this node's own rect where it was, so the panes are
+   * too. A child that moved and changed nothing else is then reported to
+   * the overlay instead of claimed (`_absolutizeChild`); anywhere else the
+   * walk is the plain one.
+   */
   absolutize(originX, originY) {
-    super.absolutize(originX, originY);
+    const overlay = this._overlay;
+    if (
+      !overlay?.panes.length ||
+      !layoutDiff.sink ||
+      layoutDiff.shift ||
+      this._host !== null ||
+      !this.yoga
+    ) {
+      super.absolutize(originX, originY);
+      this._syncGeometry();
+      return;
+    }
+    this._placed = true;
+    const was = this.abs;
+    this._assignAbs(
+      originX + this.yoga.getComputedLeft(),
+      originY + this.yoga.getComputedTop(),
+      this.yoga.getComputedWidth(),
+      this.yoga.getComputedHeight(),
+    );
+    if (this.props.onLayout) this._reportLayout();
+    // `_assignAbs` keeps the object when nothing changed
+    const still = this.abs === was;
+    const { x, y } = this.abs;
+    for (const child of this.children) {
+      if (child.isWindow) continue;
+      if (still) this._absolutizeChild(child, x, y, overlay);
+      else child.absolutize(x, y);
+    }
     this._syncGeometry();
+  }
+
+  /**
+   * One child, laid out from (originX, originY). When all that changed is
+   * where it sits — the same size, somewhere else, a plain box drawn where
+   * layout put it — it is walked with the layout diff's `shift` set to the
+   * move (issue #644): every descendant that lands where it was plus the
+   * move claims nothing, exactly as under a scroll blit (issue #398), and
+   * one that lands anywhere else claims both ends. The child itself is one
+   * of the first kind, so the move claims nothing at all here; the overlay
+   * is told of it instead, with the reach its pixels had, and settles it
+   * after the panes are placed (`GlOverlay.settleMoves`) — moved on the
+   * pane, or claimed where it was and where it is.
+   *
+   * `layoutDiff.ride` marks the walk as this kind, for the one node that
+   * drops the diff under a shift: a scroll pane laid out again claims its
+   * own box there, since the move claimed nothing for it
+   * (nodes/scrollable.js).
+   */
+  _absolutizeChild(child, originX, originY, overlay) {
+    const y = child.yoga;
+    const old = child.abs;
+    if (
+      !y ||
+      child.hidden ||
+      child.style?.display === 'none' ||
+      child.isScroller?.() ||
+      !(old.width > 0 && old.height > 0) ||
+      this.root?._placedNodes?.has(child)
+    ) {
+      child.absolutize(originX, originY);
+      return;
+    }
+    const dx = originX + y.getComputedLeft() - old.x;
+    const dy = originY + y.getComputedTop() - old.y;
+    if (
+      (dx === 0 && dy === 0) ||
+      y.getComputedWidth() !== old.width ||
+      y.getComputedHeight() !== old.height
+    ) {
+      child.absolutize(originX, originY);
+      return;
+    }
+    // before it moves: every pixel of it a pane holds
+    const reach = child.paintBounds();
+    layoutDiff.shift = { x: dx, y: dy };
+    layoutDiff.ride = true;
+    try {
+      child.absolutize(originX, originY);
+    } finally {
+      layoutDiff.shift = null;
+      layoutDiff.ride = false;
+    }
+    overlay.noteMove(child, reach, dx, dy);
   }
 
   // the scroll fast path moves `abs` without coming through absolutize
@@ -537,8 +629,10 @@ export class GlAreaNode extends Node {
 
   /**
    * The owning window's frame, after layout (`WindowNode._syncOverlays`):
-   * panes for where the children are now. True when a pane was made,
-   * resized or dropped — a paint the frame then owes.
+   * panes for where the children are now, and the moves the layout pass
+   * reported settled against them — moved on a pane, or claimed. True when
+   * a pane was made, resized or dropped, or a move claimed something — a
+   * paint the frame then owes.
    */
   _syncOverlay() {
     if (!this._overlay) {
@@ -548,7 +642,8 @@ export class GlAreaNode extends Node {
       }
       this._overlay = new GlOverlay(this);
     }
-    const changed = this._overlay.sync();
+    let changed = this._overlay.sync();
+    if (this._overlay.settleMoves(this.root)) changed = true;
     if (this._overlay.panes.length) this._joinSurfaces();
     if (this.children.length === 0 && this._overlay.panes.length === 0) {
       this._overlay = null;

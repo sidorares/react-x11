@@ -2008,6 +2008,28 @@ function samePosition(a, b) {
   return true;
 }
 
+/**
+ * Whether the only properties that differ between two resolved styles are
+ * the insets — `left`, `top` and the rest: a box that moved, and drew
+ * nothing differently (issue #644). Every other key counts, whether layout,
+ * paint or text reads it, so a style that also changed anything else
+ * answers false.
+ */
+export function onlyInsetsChanged(props, oldProps = {}) {
+  let moved = false;
+  for (const key of Object.keys(props)) {
+    if (props[key] === oldProps[key]) continue;
+    if (!INSETS.has(key)) return false;
+    moved = true;
+  }
+  for (const key of Object.keys(oldProps)) {
+    if (key in props) continue;
+    if (!INSETS.has(key)) return false;
+    moved = true;
+  }
+  return moved;
+}
+
 /** @returns true if any paint-only prop changed */
 export function paintPropsChanged(props, oldProps = {}) {
   for (const key of PAINT_PROPS) {

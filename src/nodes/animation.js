@@ -215,6 +215,7 @@ export class NodeAnimation {
           false,
           insetRect(this.paintBounds(), -shrank),
           'shadow',
+          this,
         );
       }
     }
@@ -235,6 +236,7 @@ export class NodeAnimation {
           false,
           insetRect(this.paintBounds(), -shrank),
           'outline',
+          this,
         );
       }
     }

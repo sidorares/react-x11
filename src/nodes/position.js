@@ -317,6 +317,7 @@ export class WindowPosition {
       nodes.sort((a, b) => depth.get(a) - depth.get(b));
     }
     const cap = this._damageRectCap();
+    const panes = this._overlaid.size !== 0;
     const t = now();
     let claimed = false;
     for (const node of nodes) {
@@ -330,7 +331,12 @@ export class WindowPosition {
           ? node.paintBounds()
           : null;
       node._placedShown = after;
-      if (this._damage === FULL_DAMAGE) continue;
+      if (
+        this._damage === FULL_DAMAGE &&
+        (!panes || this._paneDamage === FULL_DAMAGE)
+      ) {
+        continue;
+      }
       const sv = node._blitViewport();
       let was = before;
       if (was && sv) {
@@ -354,7 +360,10 @@ export class WindowPosition {
         if (sv && !sv._recordBlitClaim(claim)) {
           sv._pendingBlitFrom = BLIT_POISONED;
         }
-        this._damage = addDamageRect(this._damage, claim, cap);
+        if (this._damage !== FULL_DAMAGE) {
+          this._damage = addDamageRect(this._damage, claim, cap);
+        }
+        if (panes) this._addPaneDamage(claim);
         claimed = true;
       }
     }
