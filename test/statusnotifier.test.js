@@ -395,6 +395,16 @@ describe('the freedesktop tray', () => {
           menu: MENU(),
         });
         await until(() => host.items.length === 1, 'the item to register');
+        // Registered is not announced. The item says all six fields once the
+        // watcher's reply is in — `announceAll` — and a watch that goes in
+        // before that burst has passed the broker counts it as this change's.
+        // A loaded runner puts it there, since the watcher records the item
+        // before its reply is on the wire. So wait for `available`, which
+        // follows the burst, then make one call to the item: the broker
+        // routes one connection's messages in order, so the answer comes
+        // back behind the burst.
+        await until(() => tray.state()?.available === true, 'available');
+        await host.property('Status');
 
         const watch = await host.watchSignals();
         await tray.setOptions({

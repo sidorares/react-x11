@@ -446,6 +446,14 @@ describe('the global menu', { concurrency: 1, ...needsBroker }, () => {
       const panel = await fakeRegistrar(address);
       const bar = await mountBar();
       await until(() => panel.windows.size === 1, 'registration');
+      // The properties, not just the registration. The registrar records the
+      // window before its reply is on the wire, and an unmount that lands
+      // while that reply is in flight stops `publish()` before it writes the
+      // properties — correctly, so there is nothing to clear and the wait for
+      // the delete below could never end. A loaded runner lands it there: the
+      // poll's timer falls due while the process is descheduled, and fires
+      // before the reply is read.
+      await until(() => bar.propertyCalls().length >= 2, 'the X properties');
 
       await bar.unmount();
       await until(() => panel.windows.size === 0, 'the unregistration');

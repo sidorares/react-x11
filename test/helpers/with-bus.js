@@ -200,13 +200,30 @@ export function stopBroker(broker) {
 /**
  * Wait for a condition, or fail with something more useful than a timeout.
  * Bus state settles across ticks and socket events, not synchronously.
+ *
+ * The failure says how many times the condition was asked and the longest
+ * gap between two asks, because that is the first question about any timeout
+ * here: was the runner too loaded to ask, or was the answer never coming? A
+ * starved process shows a gap close to the deadline. A condition that could
+ * not become true shows a couple of hundred asks, none far apart — and a
+ * longer deadline would only make it fail later.
  */
 export async function until(predicate, message, timeout = 2000) {
-  const deadline = Date.now() + timeout;
+  const start = Date.now();
+  let asked = 0;
+  let longest = 0;
+  let last = start;
   for (;;) {
     if (await predicate()) return;
-    if (Date.now() > deadline)
-      throw new Error(`timed out waiting for ${message}`);
+    const now = Date.now();
+    asked++;
+    longest = Math.max(longest, now - last);
+    last = now;
+    if (now - start > timeout)
+      throw new Error(
+        `timed out waiting for ${message} (asked ${asked} times in ` +
+          `${now - start} ms, never more than ${longest} ms apart)`,
+      );
     await new Promise((r) => setTimeout(r, 10));
   }
 }
