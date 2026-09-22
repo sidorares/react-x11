@@ -51,23 +51,57 @@ function svgAttribs(props, skip) {
     const value = props[key];
     if (key === 'children' || value == null) continue;
     if (typeof value === 'function') continue;
+    // React's, not the drawing's. Since React 19 a ref arrives as an
+    // ordinary prop, and an object one — `useRef()` — was written into the
+    // document as `ref="[object Object]"`. `key` would be the same if React
+    // ever passed it on.
+    if (key === 'ref' || key === 'key') continue;
     if (skip && skip(key)) continue;
     attribs[toSvgAttrib(key)] = String(value);
   }
   return attribs;
 }
 
+/** Whether two `svgAttribs` results say the same thing. Order aside: the
+ * document reads an attribute by its name. */
+function sameAttribs(a, b) {
+  const names = Object.keys(a);
+  if (names.length !== Object.keys(b).length) return false;
+  for (const name of names) {
+    if (a[name] !== b[name]) return false;
+  }
+  return true;
+}
+
+// Props of the `<svg>` element that are react-x11's rather than the
+// drawing's: `source`, the other form of the content, and what lays the
+// element out, styles it and takes its input. `style` is one of them, an
+// object that reached the document as "[object Object]".
+const notAnAttribute = (key) =>
+  key === 'source' ||
+  key === 'style' ||
+  isLayoutProp(key) ||
+  isPaintProp(key) ||
+  key === 'cursor' ||
+  key === 'focusable' ||
+  key === 'pointerEvents';
+
 /**
  * An element inside <svg>: no yoga node, no painting of its own — it only
  * carries a tag name and props, and is serialized into the htmlparser2-style
- * DOM that SvgView consumes. Prop/child changes bubble to the owning
- * SvgNode via the _textContentChanged channel (also used by text chunks,
- * so string children of an SVG <text> invalidate the same way).
+ * DOM that SvgView consumes. A change that reaches that DOM — an attribute
+ * that serializes differently, a child added or removed — bubbles to the
+ * owning SvgNode via the _textContentChanged channel (also used by text
+ * chunks, so string children of an SVG <text> invalidate the same way).
  */
 export class SvgChildNode extends Node {
   constructor(tag, props, app) {
     super(tag, props, app, { yoga: false });
     this.isSvgChild = true;
+    /** What this element writes into the document: serialized once per
+     * change rather than once per rebuild, and what a commit is compared
+     * against. */
+    this._attribs = svgAttribs(props);
   }
 
   // <circle cx r fill>… is SVG's vocabulary, not the style channel's
@@ -81,14 +115,34 @@ export class SvgChildNode extends Node {
 
   applyProps(newProps, oldProps) {
     super.applyProps(newProps, oldProps);
+    // React commits every child of an `<svg>` it re-renders, each with a new
+    // props object and almost always with every attribute as it was — and a
+    // rebuild re-parses the whole drawing and re-measures the `<svg>`. So
+    // only a commit that serializes differently is a change.
+    const attribs = svgAttribs(newProps);
+    if (sameAttribs(attribs, this._attribs)) return;
+    this._attribs = attribs;
     this._textContentChanged();
+  }
+
+  /**
+   * Nothing this node draws, whatever changed: the `<svg>` paints the whole
+   * document, and a change to it claims that element's box on the way
+   * (`SvgNode._textContentChanged`). This node has no box — its rect is an
+   * empty one at the window's origin — so core's answer, a claim of that
+   * rect whenever a prop is a new value, repainted a corner nothing here
+   * drew, on every commit that handed over an attribute rebuilt equal: a
+   * `points` or `strokeDasharray` array, say.
+   */
+  paintChanged() {
+    return false;
   }
 
   toDom() {
     return {
       type: 'tag',
       name: this.kind,
-      attribs: svgAttribs(this.props),
+      attribs: this._attribs,
       children: this.children
         .map((c) =>
           c.kind === 'textchunk'
@@ -114,6 +168,9 @@ export class SvgNode extends Node {
     super('svg', props, app);
     this.view = null;
     this._stale = true;
+    /** This element's own attributes in children form, kept like a child's
+     * for the same comparison. */
+    this._attribs = svgAttribs(props, notAnAttribute);
     /** Bumped every time the document is rebuilt, and sampled at paint time,
      * so `paintCachePlan` can tell an animated document from a settled one.
      * See the note there. */
@@ -138,7 +195,9 @@ export class SvgNode extends Node {
     );
   }
 
-  /** Any change to the svg subtree (props, children, text) lands here. */
+  /** Any change to the document — `source`, an attribute, a child, a text
+   * chunk — lands here, and only such a change: a commit that serializes
+   * the same never calls it, so it rebuilds nothing and claims nothing. */
   _textContentChanged() {
     this._stale = true;
     this.invalidateMeasure('props');
@@ -155,17 +214,10 @@ export class SvgNode extends Node {
         (c) => c.isSvgChild || c.kind === 'textchunk',
       );
       if (children.length > 0) {
-        const skip = (key) =>
-          key === 'source' ||
-          isLayoutProp(key) ||
-          isPaintProp(key) ||
-          key === 'cursor' ||
-          key === 'focusable' ||
-          key === 'pointerEvents';
         const dom = {
           type: 'tag',
           name: 'svg',
-          attribs: svgAttribs(this.props, skip),
+          attribs: this._attribs,
           children: children.map((c) =>
             c.kind === 'textchunk' ? { type: 'text', data: c.text } : c.toDom(),
           ),
@@ -190,9 +242,18 @@ export class SvgNode extends Node {
   }
 
   applyProps(newProps, oldProps) {
+    const source = this.props.source;
     super.applyProps(newProps, oldProps);
-    // attributes live in props (children form) or in `source`; either way
-    // the SvgView is cheap to rebuild on the next measure/paint
+    // The document is `source`, or this element's attributes over its
+    // children's, whose changes arrive on their own. A commit that leaves
+    // both as they were — most of them: a parent re-rendering, a new style
+    // object, a new ref — has nothing to re-parse or re-measure. The style
+    // is core's to diff, like any element's.
+    const attribs = svgAttribs(newProps, notAnAttribute);
+    if (newProps.source === source && sameAttribs(attribs, this._attribs)) {
+      return;
+    }
+    this._attribs = attribs;
     this._textContentChanged();
   }
 

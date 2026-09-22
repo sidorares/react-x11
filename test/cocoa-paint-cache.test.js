@@ -199,14 +199,14 @@ test('a mono drawing bakes its colour: one entry per colour, each drawn in it', 
   assert.deepEqual(fills.at(-1).slice(2), [1, 0, 0, 1]);
 
   // recoloured: a second entry, drawn in blue — never the red one tinted.
-  // The first frame after the change paints live (a style change rebuilds
-  // the document, and a rebuilt document opts out for that frame — see
-  // SvgNode.paintCachePlan); the entry lands on the next.
+  // The colour is not in the document, so the commit rebuilds nothing and
+  // the entry lands on the first frame after the change. A rebuilt document
+  // would paint live for that frame instead (see SvgNode.paintCachePlan).
   await frame(wall(SQUARE('currentColor'), 4, '#0000ff'));
-  assert.equal(cache.entries.size, 1, 'the rebuilt document painted live');
-  await repaint();
   assert.equal(cache.entries.size, 2, 'a new entry for the new colour');
   assert.equal(cache.stats.renders, 2);
+  await repaint();
+  assert.equal(cache.stats.renders, 2, 'and a repaint renders nothing');
   const blue = [...cache.entries.values()].at(-1);
   assert.notEqual(blue, entry);
   const blueFills = native

@@ -111,8 +111,8 @@ test('no drawn element counts a new ref as a paint change', async () => {
   // that diff some props themselves: `<image>` its source, `<canvas>` its
   // `onDraw`, the two fields their `value`. A `<glarea>` asks its surface
   // for a new frame on any commit, which is not a claim on the window.
-  // `<svg>` is not here: it rebuilds its document on every commit, whatever
-  // changed.
+  // `<svg>` diffs the serialization of its document
+  // (test/svg-document.test.js).
   const CASES = [
     ['box', { style: SIZED }],
     ['text', {}, 'label'],
@@ -122,6 +122,11 @@ test('no drawn element counts a new ref as a paint change', async () => {
     ['textarea', { value: 'abc', style: FIELD }],
     ['glarea', { style: SIZED }],
     ['foreign', { style: SIZED }],
+    [
+      'svg',
+      { viewBox: '0 0 10 10', style: SIZED },
+      h('circle', { cx: 5, cy: 5, r: 4 }),
+    ],
   ];
   const nodes = new Map();
   const Sweep = () =>
