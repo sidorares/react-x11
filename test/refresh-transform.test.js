@@ -4,7 +4,11 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import * as nodeModule from 'node:module';
-import { createTransformer, registerRefresh } from '../src/refresh/loader.js';
+import {
+  createTransformer,
+  hotIgnoreFor,
+  registerRefresh,
+} from '../src/refresh/loader.js';
 
 // The Node floor check sits in front of option validation, so these
 // registerRefresh assertions only hold where the floor is met.
@@ -178,4 +182,28 @@ describe('registerRefresh guards', () => {
         : /needs module\.registerHooks/,
     );
   });
+});
+
+test('node_modules and react-x11 itself stay out of the hot graph, whichever separators a path has', () => {
+  // On Windows a file path's separators are backslashes, and a
+  // forward-slash test let every package into the hot graph, where the HMR
+  // layer's rewrite could leave a package reading an import before it was
+  // bound: htmlparser2's entities threw and the app never rendered.
+  const hotIgnore = hotIgnoreFor(
+    null,
+    'C:\\app\\node_modules\\react-x11\\src\\',
+  );
+  for (const path of [
+    'C:\\app\\node_modules\\entities\\dist\\generated\\decode-data-html.js',
+    '/home/me/app/node_modules/entities/dist/esm/decode.js',
+    'C:\\app\\node_modules\\react-x11\\src\\index.js',
+  ]) {
+    assert.strictEqual(hotIgnore(path), true, path);
+  }
+  for (const path of ['C:\\app\\src\\App.jsx', '/home/me/app/src/App.jsx']) {
+    assert.strictEqual(hotIgnore(path), false, path);
+  }
+  const custom = hotIgnoreFor((path) => path.endsWith('.generated.jsx'), '/x/');
+  assert.strictEqual(custom('/app/src/table.generated.jsx'), true);
+  assert.strictEqual(custom('/app/src/Table.jsx'), false);
 });
