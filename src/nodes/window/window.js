@@ -267,6 +267,12 @@ export class WindowNode extends Scrollable(Node) {
     this._floorsDirty = true;
     this._floorsWidth = null;
     this._floorsStale = new Set();
+    // the nodes whose changes the next measurement owes, and whether one
+    // came with no node to name (`_floorsScope`)
+    this._floorsSources = new Set();
+    this._floorsUnscoped = false;
+    this._floorsScopeNow = null;
+    this._scopedFloorPasses = 0;
     // whether the first floors pass has run (`collectFloorStale`'s sweep)
     this._floorsSwept = false;
     this._floorsMeasured = 0;

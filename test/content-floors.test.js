@@ -779,3 +779,165 @@ test('an absolutely positioned box of a set size that only moved measures no flo
   await tick();
   assert.strictEqual(measured, 1, 'a new size measures them');
 });
+
+// --- a change inside a box that sizes itself ----------------------------------
+//
+// Every node above a change is dirty in yoga for it, so a label that changed
+// inside a card took every extent from the card up to the window with it, and
+// the measurement that followed laid the whole tree out three times to read
+// them back — at 955 nodes, half of a frame that changed forty cards. A box
+// that is absolutely positioned and names its own width and height holds the
+// change in (`isFloorBoundary`): it is measured laid out alone, and the
+// window's one real pass is all the tree pays. The differential test holds
+// every such frame to what measuring the whole tree from nothing gives.
+
+/** Two cards laid out absolutely over a column, one inside the other's. */
+const cardsTree = ({ a = 50, l1 = 40, l2 = 30, l4 = 20, width1 = 120 } = {}) =>
+  box(
+    { padding: 6, flexGrow: 1 },
+    box(
+      { flexDirection: 'row' },
+      h('label', { length: a }),
+      box({ flexGrow: 1, height: 10 }),
+    ),
+    box(
+      { flexGrow: 1 },
+      box(
+        {
+          position: 'absolute',
+          left: 10,
+          top: 10,
+          width: width1,
+          height: 90,
+          padding: 4,
+        },
+        box(
+          { flexDirection: 'row' },
+          h('label', { length: l1 }),
+          box({ flexGrow: 1, height: 10 }),
+        ),
+        h('paragraph'),
+        box(
+          { flexDirection: 'row', flexWrap: 'wrap' },
+          box({ width: 30, height: 10 }),
+          box({ width: 30, height: 10 }),
+          box({ width: 30, height: 10 }),
+        ),
+      ),
+      box(
+        { position: 'absolute', left: 150, top: 10, width: 120, height: 90 },
+        box(
+          { flexDirection: 'row' },
+          h('label', { length: l2 }),
+          h('label', { length: 25 }),
+        ),
+        box(
+          { position: 'absolute', left: 5, top: 50, width: 60, height: 30 },
+          box({ flexDirection: 'row' }, h('label', { length: l4 })),
+        ),
+      ),
+    ),
+  );
+
+/** Every node's box and extents, in tree order. */
+function layoutOf(win) {
+  const out = [];
+  const walk = (n) => {
+    if (n.yoga) {
+      out.push({
+        kind: n.kind,
+        abs: n.abs && { ...n.abs },
+        floorW: n._floorW,
+        floorH: n._floorH,
+      });
+    }
+    for (const child of n.children) walk(child);
+  };
+  walk(win);
+  return out;
+}
+
+async function withTestElements(body) {
+  registerElement('label', { create: (p, a) => new LabelNode(p, a) });
+  registerElement('paragraph', { create: (p, a) => new ParagraphNode(p, a) });
+  try {
+    await body();
+  } finally {
+    unregisterElement('label');
+    unregisterElement('paragraph');
+  }
+}
+
+test('a change inside a card measures the card alone, and lays the tree out once', async () => {
+  await withTestElements(async () => {
+    const { app, root, node } = await mount(cardsTree());
+    const passes = node._layoutPasses;
+    const scoped = node._scopedFloorPasses;
+    await rerender(app, root, cardsTree({ l1: 70 }));
+    assert.strictEqual(node._layoutPasses - passes, 1, 'the real pass alone');
+    assert.ok(node._scopedFloorPasses > scoped, 'the card was measured');
+    await root.unmount();
+  });
+});
+
+test('a change outside every card, or to a card’s own size, measures the tree', async () => {
+  await withTestElements(async () => {
+    const { app, root, node } = await mount(cardsTree());
+    let passes = node._layoutPasses;
+    await rerender(app, root, cardsTree({ a: 80 }));
+    assert.ok(node._layoutPasses - passes > 1, 'a label in the column');
+    passes = node._layoutPasses;
+    await rerender(app, root, cardsTree({ a: 80, width1: 110 }));
+    assert.ok(node._layoutPasses - passes > 1, 'a card that changed its width');
+    await root.unmount();
+  });
+});
+
+test('a change nobody announced keeps the whole tree’s measurement', async () => {
+  // Yoga's record is the ground truth: a box dirty outside every card, with
+  // no node saying why, is a change a measurement of the cards would miss.
+  await withTestElements(async () => {
+    const { app, root, node } = await mount(cardsTree());
+    const column = node.children[0].children[0];
+    column.yoga.setPadding(0, 3); // behind invalidate's back
+    const passes = node._layoutPasses;
+    await rerender(app, root, cardsTree({ l1: 70 }));
+    assert.ok(node._layoutPasses - passes > 1, 'measured the tree');
+    await root.unmount();
+  });
+});
+
+test('every scoped measurement is the one the whole tree gives', async () => {
+  // Two windows, the same frames: one measures what each change is confined
+  // to, the other is made to measure the whole tree (`_floorsUnscoped`, the
+  // flag a change with no node to name sets), and every box and every
+  // extent has to come out the same.
+  await withTestElements(async () => {
+    const steps = [
+      { l1: 70 }, // one card
+      { l1: 70, l2: 90, l4: 55 }, // two, one inside the other's
+      { l1: 10, l2: 5, l4: 58 }, // everything shrinks
+      { l1: 200, l2: 150 }, // past the card's own width
+      { l1: 200, l2: 150, a: 20 }, // and one outside, in the same frame
+      { l1: 30, l2: 150, a: 20 },
+    ];
+    const scoped = await mount(cardsTree());
+    const whole = await mount(cardsTree());
+    let took = 0;
+    for (const step of steps) {
+      const before = scoped.node._scopedFloorPasses;
+      await rerender(scoped.app, scoped.root, cardsTree(step));
+      if (scoped.node._scopedFloorPasses > before) took++;
+      whole.node._floorsUnscoped = true;
+      await rerender(whole.app, whole.root, cardsTree(step));
+      assert.deepStrictEqual(
+        layoutOf(scoped.node),
+        layoutOf(whole.node),
+        `the frame after ${JSON.stringify(step)}`,
+      );
+    }
+    assert.ok(took >= 3, `${took} of the frames were scoped`);
+    await scoped.root.unmount();
+    await whole.root.unmount();
+  });
+});

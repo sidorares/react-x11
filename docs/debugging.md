@@ -126,6 +126,15 @@ tight outline around what moved can sit over a pane that redrew all of
 itself inside it. Such an element reads the pass's rect and claims its own
 commits ([extending.md](extending.md#drawing-a-scene-into-one-node)).
 
+## `REACT_X11_NO_SCOPED_FLOORS=1`
+
+Measures the content floors over the whole tree on every layout change,
+the way they were measured before a change inside an absolutely positioned
+box with its own width and height was measured in that box alone. For
+measuring the two against each other on the same build, and as first aid if
+a box inside such a card ever comes out the wrong size after its content
+changes. Read once at startup; answers only to `1`.
+
 ## `REACT_X11_NO_SCROLL_BLIT=1`
 
 Disables the scroll-blit fast path (a pure scroll `CopyArea`s the

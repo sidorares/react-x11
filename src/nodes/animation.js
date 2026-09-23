@@ -490,6 +490,7 @@ export class NodeAnimation {
       if (this.root) {
         this.root.needsLayout = true;
         this.root._floorsDirty = true;
+        this.root._floorsSources.add(this);
       }
     }
     // A tick writes `this.style` without going through `_retarget`, so it

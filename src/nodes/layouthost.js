@@ -415,6 +415,7 @@ export class NodeLayoutHost {
       // content floors were measured from, as any style change is
       root._floorsDirty = true;
       root._floorsContentDirty = true;
+      root._floorsUnscoped = true;
     }
   }
 
@@ -944,6 +945,7 @@ export class WindowLayoutHost {
     this._failedHosts.clear();
     this._floorsDirty = true;
     this._floorsContentDirty = true;
+    this._floorsUnscoped = true;
     return true;
   }
 }
