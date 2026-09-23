@@ -45,6 +45,25 @@ const outFile = path.join(websiteDir, 'static', 'demo', 'react-x11-runtime.js');
 
 const x11Dir = path.join(repoRoot, 'node_modules', 'x11');
 const hasGlx = fs.existsSync(path.join(x11Dir, 'browser', 'glx', 'index.js'));
+
+// esbuild's `alias` rewrites a subpath by its package prefix, so one entry
+// for 'ntk' pointing at its index file turned 'ntk/color' into
+// '<…>/lib/index.js/color'. Every entry of ntk's own exports map gets an
+// alias of its own instead, read from the package, so a subpath ntk adds
+// needs no edit here.
+const ntkDir = path.join(repoRoot, 'node_modules', 'ntk');
+const ntkAliases = Object.fromEntries(
+  Object.entries(
+    JSON.parse(fs.readFileSync(path.join(ntkDir, 'package.json'), 'utf8'))
+      .exports,
+  ).map(([subpath, target]) => [
+    subpath === '.' ? 'ntk' : `ntk/${subpath.slice(2)}`,
+    path.join(
+      ntkDir,
+      typeof target === 'string' ? target : (target.import ?? target.default),
+    ),
+  ]),
+);
 const profiling = !!process.env.REACT_X11_DEMO_PROFILE;
 
 // Virtual entry. resolveDir is website/scripts so ./demo-fonts.js and the
@@ -126,7 +145,9 @@ await esbuild.build({
     // `alias` matches whole specifiers, so a subpath needs its own entry —
     // without this, 'react-x11/yoga' is rewritten to '<…>/src/index.js/yoga'
     'react-x11/yoga': path.join(repoRoot, 'src', 'yoga.js'),
-    ntk: path.join(repoRoot, 'node_modules', 'ntk', 'lib', 'index.js'),
+    // ntk and every subpath it exports (react-x11 imports `ntk/color`,
+    // `ntk/svg`, …), each to the one copy in the repo's node_modules
+    ...ntkAliases,
     x11: x11Dir,
     // ONE React. The entry resolves 'react' from website/node_modules
     // (docusaurus' copy) and react-x11 resolves it from the repo root —
