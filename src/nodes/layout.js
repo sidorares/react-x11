@@ -313,17 +313,17 @@ export class NodeLayout {
         ) {
           return;
         }
-        if (had) layoutDiff.sink(insetRect(was, -grow));
+        if (had) layoutDiff.sink(insetRect(was, -grow), this);
         if (width > 0 && height > 0) {
-          layoutDiff.sink(insetRect(this.abs, -grow));
+          layoutDiff.sink(insetRect(this.abs, -grow), this);
         }
         return;
       }
       if (had) {
-        layoutDiff.sink(insetRect(old, -grow));
+        layoutDiff.sink(insetRect(old, -grow), this);
       }
       if (width > 0 && height > 0) {
-        layoutDiff.sink(insetRect(this.abs, -grow));
+        layoutDiff.sink(insetRect(this.abs, -grow), this);
       }
     }
   }

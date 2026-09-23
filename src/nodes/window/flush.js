@@ -6,7 +6,7 @@ import { resolveFramePolicy } from '../../pacing.js';
 import { paintCacheFor } from '../../paintcache.js';
 import { hooks as traceHooks } from '../../trace-registry.js';
 import { now } from '../animation.js';
-import { FULL_DAMAGE, layoutDiff, addDamageRect } from '../damage.js';
+import { FULL_DAMAGE, layoutDiff } from '../damage.js';
 import { BLIT_POISONED } from '../scrollblit.js';
 import { debugPaint } from './debugpaint.js';
 
@@ -204,12 +204,10 @@ export class WindowFlush {
         (panes && this._paneDamage !== FULL_DAMAGE)
       ) {
         const cap = this._damageRectCap();
-        layoutDiff.sink = (rect) => {
-          if (this._damage !== FULL_DAMAGE) {
-            layoutMoved = true;
-            this._damage = addDamageRect(this._damage, rect, cap);
-          }
-          if (panes) this._addPaneDamage(rect);
+        // each to the lists that paint the node that moved
+        // (`_claimLayoutMove`): a move inside a `<glarea>` is its panes'
+        layoutDiff.sink = (rect, node) => {
+          if (this._claimLayoutMove(rect, node, cap)) layoutMoved = true;
         };
       }
       try {
@@ -259,14 +257,8 @@ export class WindowFlush {
         if (sv && !sv._recordBlitClaim(after)) {
           sv._pendingBlitFrom = BLIT_POISONED;
         }
-        if (this._damage !== FULL_DAMAGE) {
-          this._damage = addDamageRect(
-            this._damage,
-            after,
-            this._damageRectCap(),
-          );
-        }
-        if (panes) this._addPaneDamage(after);
+        // to the lists that paint it, as the layout diff's claims go
+        this._claimLayoutMove(after, node, this._damageRectCap());
       }
       this._reflowed.clear();
     } else if (this._reflowed.size) {
