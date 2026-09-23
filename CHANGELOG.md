@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.18.6](https://github.com/sidorares/react-x11/compare/v2.18.5...v2.18.6) (2026-09-23)
+
+
+### Bug Fixes
+
+* **backend:** the Windows and macOS context has a lineDashOffset ([#664](https://github.com/sidorares/react-x11/issues/664)) ([bee17a3](https://github.com/sidorares/react-x11/commit/bee17a3d69c60b5e39a48783cec31273b39f6ee2))
+* **refresh:** node_modules stays out of the hot graph on Windows ([#661](https://github.com/sidorares/react-x11/issues/661)) ([fa6bd88](https://github.com/sidorares/react-x11/commit/fa6bd8854e2a4ee9b8a3ab8ffb2149c714d0d615))
+* **win32:** depend on @windowkit/win32 ^0.0.2, the bridge with layers ([#660](https://github.com/sidorares/react-x11/issues/660)) ([162381c](https://github.com/sidorares/react-x11/commit/162381c9064b1072590f574c2d233283ad27aae7))
+
+
+### Performance Improvements
+
+* **glarea:** a move inside a surface is its panes' to repaint, not the window's ([#659](https://github.com/sidorares/react-x11/issues/659)) ([fed9e30](https://github.com/sidorares/react-x11/commit/fed9e3015bac3b66ad79dc80d63c5b67d415a5ae))
+* load ntk's root only where an X connection is made ([#662](https://github.com/sidorares/react-x11/issues/662)) ([24f9ebf](https://github.com/sidorares/react-x11/commit/24f9ebff861663ac76668c4d928b6c131a9327c0))
+
 ## [2.18.5](https://github.com/sidorares/react-x11/compare/v2.18.4...v2.18.5) (2026-09-23)
 
 
