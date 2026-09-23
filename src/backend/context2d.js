@@ -324,6 +324,17 @@ export class BackendContext2D {
     // chunked stroke leaves only its last chunk behind)
     this._cmds = [];
     this._pathStale = false;
+    // A bridge that takes a whole path in one call (`ctxPath`, the Windows
+    // bridge's) is handed it that way when something paints it: the verbs
+    // below only record. A graph's edges are tens of thousands of `lineTo`s
+    // a frame, and a call across the boundary for each was milliseconds of
+    // every frame spent on the crossing. A bridge without it is handed the
+    // path a point at a time, as it is built, exactly as before.
+    // Asked with `in` as well: a test's bridge that answers every name with
+    // a no-op must not look like one that takes paths whole.
+    this._bulkPaths =
+      'ctxPath' in native && typeof native.ctxPath === 'function';
+    this._pathBuf = null;
     this._strokeChunking = !NO_STROKE_CHUNKING;
   }
 
@@ -670,6 +681,21 @@ export class BackendContext2D {
   _emit(surface, from, to) {
     const c = this._cmds;
     const n = this._native;
+    if (this._bulkPaths) {
+      // one call, through a buffer kept between paths — the record is the
+      // same stream the bridge parses, arguments and all
+      const count = to - from;
+      if (count <= 0) return;
+      let buf = this._pathBuf;
+      if (!buf || buf.length < count) {
+        buf = this._pathBuf = new Float64Array(
+          Math.max(count, (buf?.length ?? 512) * 2),
+        );
+      }
+      for (let i = 0; i < count; i++) buf[i] = c[from + i];
+      n.ctxPath(surface, buf.subarray(0, count));
+      return;
+    }
     for (let i = from; i < to;) {
       const op = c[i];
       const a = i + 1;
@@ -720,26 +746,44 @@ export class BackendContext2D {
 
   beginPath() {
     this._cmds.length = 0;
+    if (this._bulkPaths) {
+      this._s();
+      // uploaded, empty or not, when something paints it
+      this._pathStale = true;
+      return;
+    }
     this._pathStale = false;
     this._native.ctxBeginPath(this._s());
   }
 
+  /**
+   * The surface to add a path command to now, or null where the path is
+   * only recorded and handed over whole when painted (`_bulkPaths`). Either
+   * way a fresh surface drops the path first, as `_s` has always done.
+   */
+  _pathFor() {
+    if (!this._bulkPaths) return this._path();
+    this._s();
+    this._pathStale = true;
+    return null;
+  }
+
   moveTo(x, y) {
-    const surface = this._path();
+    const surface = this._pathFor();
     this._cmds.push(P_MOVE, x, y);
-    this._native.ctxMoveTo(surface, x, y);
+    if (surface !== null) this._native.ctxMoveTo(surface, x, y);
   }
 
   lineTo(x, y) {
-    const surface = this._path();
+    const surface = this._pathFor();
     this._cmds.push(P_LINE, x, y);
-    this._native.ctxLineTo(surface, x, y);
+    if (surface !== null) this._native.ctxLineTo(surface, x, y);
   }
 
   rect(x, y, w, h) {
-    const surface = this._path();
+    const surface = this._pathFor();
     this._cmds.push(P_RECT, x, y, w, h);
-    this._native.ctxRect(surface, x, y, w, h);
+    if (surface !== null) this._native.ctxRect(surface, x, y, w, h);
   }
 
   roundRect(x, y, w, h, radii) {
@@ -750,7 +794,7 @@ export class BackendContext2D {
     else if (r.length === 3) r = [r[0], r[1], r[2], r[1]];
     const cap = Math.min(Math.abs(w) / 2, Math.abs(h) / 2);
     const clamp = (v) => Math.max(0, Math.min(Number(v) || 0, cap));
-    const surface = this._path();
+    const surface = this._pathFor();
     const [r0, r1, r2, r3] = [
       clamp(r[0]),
       clamp(r[1]),
@@ -758,37 +802,40 @@ export class BackendContext2D {
       clamp(r[3]),
     ];
     this._cmds.push(P_ROUND, x, y, w, h, r0, r1, r2, r3);
-    this._native.ctxRoundRect(surface, x, y, w, h, r0, r1, r2, r3);
+    if (surface !== null)
+      this._native.ctxRoundRect(surface, x, y, w, h, r0, r1, r2, r3);
   }
 
   arc(x, y, radius, start, end, anticlockwise = false) {
-    const surface = this._path();
+    const surface = this._pathFor();
     this._cmds.push(P_ARC, x, y, radius, start, end, anticlockwise ? 1 : 0);
-    this._native.ctxArc(surface, x, y, radius, start, end, anticlockwise);
+    if (surface !== null)
+      this._native.ctxArc(surface, x, y, radius, start, end, anticlockwise);
   }
 
   ellipse(x, y, rx, ry) {
-    const surface = this._path();
+    const surface = this._pathFor();
     this._cmds.push(P_ELLIPSE, x, y, rx, ry);
-    this._native.ctxEllipse(surface, x, y, rx, ry);
+    if (surface !== null) this._native.ctxEllipse(surface, x, y, rx, ry);
   }
 
   bezierCurveTo(c1x, c1y, c2x, c2y, x, y) {
-    const surface = this._path();
+    const surface = this._pathFor();
     this._cmds.push(P_CURVE, c1x, c1y, c2x, c2y, x, y);
-    this._native.ctxCurveTo(surface, c1x, c1y, c2x, c2y, x, y);
+    if (surface !== null)
+      this._native.ctxCurveTo(surface, c1x, c1y, c2x, c2y, x, y);
   }
 
   quadraticCurveTo(cx, cy, x, y) {
-    const surface = this._path();
+    const surface = this._pathFor();
     this._cmds.push(P_QUAD, cx, cy, x, y);
-    this._native.ctxQuadTo(surface, cx, cy, x, y);
+    if (surface !== null) this._native.ctxQuadTo(surface, cx, cy, x, y);
   }
 
   closePath() {
-    const surface = this._path();
+    const surface = this._pathFor();
     this._cmds.push(P_CLOSE);
-    this._native.ctxClosePath(surface);
+    if (surface !== null) this._native.ctxClosePath(surface);
   }
 
   // --- painting ------------------------------------------------------------
