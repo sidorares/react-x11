@@ -17,11 +17,13 @@
 // the same bargain a tray icon's name makes — so an app that runs on both
 // picks its names by platform, as it does for the tray.
 
-import { cssColorStraight, decodeImage, SvgView } from 'ntk';
+import { cssColorStraight } from 'ntk/color';
+import { decodeImage } from 'ntk/image';
+import SvgView from 'ntk/svg';
 import * as nodeFs from 'node:fs';
 
 import { IconTheme } from './icontheme.js';
-import { Surface } from './ntk.js';
+import { Surface } from './offscreen.js';
 import { xsettings } from './xsettings.js';
 
 /** A `fontWeight` as the number both icon systems configure with. */

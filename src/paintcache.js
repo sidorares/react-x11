@@ -42,13 +42,13 @@
 // this package pins, and a named import of something absent is a *load-time*
 // SyntaxError — the whole renderer, not just the cache. Same shape as the
 // `typeof wnd?.scrollRegion !== 'function'` guard for ntk without #139.
-import * as ntk from 'ntk';
 
 // The surface this cache draws into is `react-x11/ntk`'s: ntk's pixmap on
 // an X connection, the app's own (`app.createSurface`) on a backend that
 // makes them — the Cocoa backend's CG bitmap. One import, so the cache
 // names neither.
-import { Surface } from './ntk.js';
+import { ntkRoot } from './ntkroot.js';
+import { Surface } from './offscreen.js';
 
 /** Stale pixels are undebuggable, and every other optimization here has an
  * escape hatch — see NO_SCROLL_BLIT. */
@@ -415,15 +415,19 @@ export class PaintCache {
   }
 }
 
-/** Whether the installed ntk can make the surfaces this needs. Older ones
- * cannot, and the answer is simply that nothing is cached. */
-export const paintCacheSupported = () => typeof ntk.Surface === 'function';
+/** Whether the installed ntk can make the surfaces this needs on an X
+ * connection — ntk's root, which only an X connection loads
+ * (src/ntkroot.js). Older ones cannot, and the answer is simply that nothing
+ * is cached there. */
+export const paintCacheSupported = () =>
+  typeof ntkRoot()?.Surface === 'function';
 
 /** Whether `app` can make an offscreen surface at all: an X connection
  * with the Render extension (ntk's pixmap surface), or a backend with a
  * surface of its own — the Cocoa app's `createSurface` (docs/macos.md). */
 const canMakeSurfaces = (app) =>
-  Boolean(app?.display?.Render) || typeof app?.createSurface === 'function';
+  (Boolean(app?.display?.Render) && paintCacheSupported()) ||
+  typeof app?.createSurface === 'function';
 
 /**
  * The cache for an app, created on first use. Null when caching is off, when
@@ -432,6 +436,6 @@ const canMakeSurfaces = (app) =>
  * there must paint live.
  */
 export function paintCacheFor(app) {
-  if (DISABLED || !paintCacheSupported() || !canMakeSurfaces(app)) return null;
+  if (DISABLED || !canMakeSurfaces(app)) return null;
   return (app._paintCache ??= new PaintCache(app));
 }

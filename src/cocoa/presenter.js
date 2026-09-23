@@ -24,7 +24,7 @@
 // named repaints everything" rule the X11 damage model has), and geometry
 // is re-diffed every frame because comparing four numbers is cheaper than
 // knowing.
-import { cssColorStraight } from 'ntk';
+import { cssColorStraight } from 'ntk/color';
 
 import { Node } from '../nodes/node.js';
 import { addDamageRect, damageToPaint } from '../nodes/damage.js';

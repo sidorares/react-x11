@@ -42,7 +42,8 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { Path2D, Image as NtkImage } from 'ntk';
+import { Image as NtkImage } from 'ntk/image';
+import { Path2D } from 'ntk/path';
 import { glDevice } from './device.js';
 import { GlyphAtlas } from './glyphatlas.js';
 import { GLTarget } from './target.js';

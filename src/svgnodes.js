@@ -10,7 +10,7 @@
 // `<Formula>`), composed from public host elements. `<svg>` stays here
 // because it is not a document — it is a drawing, and one node is the right
 // grain for it.
-import { SvgView } from 'ntk';
+import SvgView from 'ntk/svg';
 
 import { Node } from './nodes/node.js';
 import { intrinsicSize } from './nodes/layout.js';

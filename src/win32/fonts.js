@@ -15,7 +15,7 @@
 // `indexAt()` returns code points, which is what the selection and the caret
 // speak. DirectWrite is UTF-16 end to end, like CoreText, so the conversion
 // happens at this boundary and nowhere else.
-import { cssColorStraight } from 'ntk';
+import { cssColorStraight } from 'ntk/color';
 
 // REACT_X11_WIN32_DEBUG=1 reports the size each paragraph is shaped at, which
 // is how to tell a scale that never reached the text engine from one that did.

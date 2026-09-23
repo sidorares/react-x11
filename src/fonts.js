@@ -37,7 +37,7 @@
 
 import { basename, extname } from 'node:path';
 
-import { Font } from 'ntk';
+import Font from 'ntk/font';
 
 /**
  * Per-app bookkeeping. Keyed on the app rather than stored on it, like

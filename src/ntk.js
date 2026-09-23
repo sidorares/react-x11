@@ -22,43 +22,20 @@
 // `@react-x11/components` (`<Markdown>`, `<Formula>`). `SvgView` is still
 // here; a drawing is not a document.
 //
-// One name is not a plain re-export. `Surface` below asks the app it is
+// One name is not a plain re-export. `Surface` (src/offscreen.js) asks the app it is
 // handed for the implementation, because ntk's own is a pixmap and a
 // Picture — an X connection's — and a component allocates its buffer
 // without knowing which backend it was mounted on. This subpath is where a
 // drawing-adjacent name gets its backend-neutral answer; the X-only names
 // (`createClient`, `Pixmap`, `Picture`, `XEmbedSocket`) stay X-only.
-import { Surface as NtkSurface } from 'ntk';
+import * as ntk from 'ntk';
+
+import { adoptNtk } from './ntkroot.js';
 
 export * from 'ntk';
 export { default } from 'ntk';
+export { Surface } from './offscreen.js';
 
-/**
- * ntk's offscreen `Surface`, on whichever backend `app` is.
- *
- * An app that makes its own surfaces answers `createSurface(options)` —
- * the Cocoa app does, over a CG bitmap (src/cocoa/surface.js), the Wayland
- * app over a GL render target (src/wayland/surface.js) — and an ntk
- * connection has no such method and gets ntk's pixmap. The result is
- * whichever implementation answered, not an instance of this class: the
- * contract is the shape — `width`/`height`, `getContext('2d')`, `render`,
- * `clear`, `copyWithin`, `destroy`, and `ctx.drawImage(surface, …)` —
- * (docs/extending.md "Scrolling the pixels, not just the offset"), and
- * nothing needs `instanceof`.
- *
- * Part of that shape is that a context may be **held**: ntk tells a caller
- * doing many draws to take `getContext('2d')` once rather than one per
- * frame, and that holds on every backend here, including the ones where a
- * surface is a GPU target sharing a device with the window (#566). Draws
- * through a held context land in the surface whenever they are made, and
- * leave nothing for the caller to restore; `render(fn)` is the scoped form,
- * for a caller that wants a frame's clean transform and clip.
- */
-export class Surface {
-  constructor(app, options) {
-    if (typeof app?.createSurface === 'function') {
-      return app.createSurface(options);
-    }
-    return new NtkSurface(app, options);
-  }
-}
+// what src/ntkroot.js would load, already loaded: handed over rather than
+// imported twice
+adoptNtk(ntk);

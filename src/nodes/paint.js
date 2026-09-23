@@ -3,7 +3,7 @@
 // window, background first.
 
 import { isPlaced } from '../layouts.js';
-import { Surface } from '../ntk.js';
+import { Surface } from '../offscreen.js';
 import { isPaintedColor } from './boxpaint.js';
 import { DAMAGE_SLOP } from './damage.js';
 import { DRAWN_KINDS } from './kinds.js';

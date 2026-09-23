@@ -2,7 +2,7 @@
 // selection paints, and the glyph strip.
 
 import { localTextStyleChanged, TEXT_REMEASURE } from '../styles.js';
-import { cssColorStraight } from 'ntk';
+import { cssColorStraight } from 'ntk/color';
 import { hooks as a11yHooks } from '../a11y.js';
 import { codePointAtOffset, codeUnitOffsets } from '../textrange.js';
 import { NO_DAMAGE } from './damage.js';

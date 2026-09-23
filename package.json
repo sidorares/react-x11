@@ -103,7 +103,7 @@
   "dependencies": {
     "ical.js": "^2.2.1",
     "linebreak": "^1.1.0",
-    "ntk": "^8.9.0",
+    "ntk": "^8.10.0",
     "react-reconciler": "^0.34.0",
     "yoga-layout": "^3.2.1"
   },

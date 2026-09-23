@@ -32,7 +32,7 @@
 // buttons do what they say. input.js routes; this answers where things are.
 
 import fs from 'node:fs';
-import { Path2D } from 'ntk';
+import { Path2D } from 'ntk/path';
 import { RESIZE_EDGE, TOPLEVEL_STATE } from './window.js';
 import { DEFAULTS, parseButtonLayout, titleFont } from './framestyle.js';
 
