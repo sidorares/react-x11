@@ -19,7 +19,7 @@
 // `appcontext.js` (for `useSupports('shaders')`) and the node layer can use
 // it without the two importing each other.
 
-import { GLError } from 'ntk';
+import { GLError } from 'ntk/gl';
 
 /** Does this connection's policy ever choose the direct backend? */
 const wantsDirect = (app) => {

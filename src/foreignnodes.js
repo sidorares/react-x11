@@ -30,7 +30,7 @@
 // save set, **never destroyed**. Destroying somebody else's window because a
 // React tree changed is the failure mode this element is most able to cause,
 // and `test/foreign.test.js` asserts against it first.
-import { XEMBED, XEmbedSocket } from 'ntk';
+import { x11Ntk } from './ntkroot.js';
 
 import { isFocusable } from './a11y.js';
 import { canEmbed } from './embedding.js';
@@ -161,6 +161,8 @@ export class ForeignNode extends Node {
     if (!canEmbed(this.app)) return this._refuse();
     const rect = this._geometry();
     this.rect = rect;
+    // `<foreign>` embeds on an X connection only, where ntk's root is loaded
+    const { XEmbedSocket } = x11Ntk('<foreign>');
     const socket = new XEmbedSocket(parent, {
       ...rect,
       // react-x11 has a focus manager; a socket that answered
@@ -318,6 +320,8 @@ export class ForeignNode extends Node {
   defaultFocus(info) {
     const socket = this.socket;
     if (!socket || !this.client) return;
+    // a socket is an X connection's, so ntk's root is loaded (src/ntkroot.js)
+    const { XEMBED } = x11Ntk('<foreign>');
     const time = lastInputTime(this.app);
     socket.activate(true, { time });
     const detail =
@@ -338,6 +342,7 @@ export class ForeignNode extends Node {
     if (!socket) return;
     const time = lastInputTime(this.app);
     if (this._focusSent) {
+      const { XEMBED } = x11Ntk('<foreign>');
       socket.send(XEMBED.FOCUS_OUT, 0, 0, 0, { time });
       this._focusSent = false;
     }

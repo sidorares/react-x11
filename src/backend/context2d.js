@@ -23,7 +23,7 @@
 // class keeps the JS-visible state (fillStyle strings, gradient objects,
 // dash arrays) and re-syncs it when the backing surface is replaced after a
 // resize — `_gen` is that generation.
-import { cssColorStraight } from 'ntk';
+import { cssColorStraight } from 'ntk/color';
 
 const BLACK = [0, 0, 0, 1];
 

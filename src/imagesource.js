@@ -6,7 +6,9 @@
 // and the `cacheKey` cache live here, where a test needs no server; the node
 // half in nodes/image.js is only lifecycle — when to resolve, when to claim
 // damage, when to let go.
-import { Image, Picture, decodeImage } from 'ntk';
+import { Image, decodeImage } from 'ntk/image';
+
+import { x11Ntk } from './ntkroot.js';
 
 /**
  * A client-side object the 2d context composites as-is: an ntk `Image` or
@@ -429,6 +431,7 @@ export class DrawableSource {
   picture() {
     if (!this._picture) {
       const Render = this.app.display.Render;
+      const { Picture } = x11Ntk('<image> on a server-side picture');
       this._picture = new Picture(this.app, {
         drawable: { id: this.id },
         format: Render[DEPTH_FORMATS[this.depth]],

@@ -1,7 +1,7 @@
 // What a window can paint: compositing and ARGB transparency, the window
 // background, and the capabilities `@supports` blocks read.
 
-import { cssColorStraight } from 'ntk';
+import { cssColorStraight } from 'ntk/color';
 import {
   argbVisual,
   compositingActive,

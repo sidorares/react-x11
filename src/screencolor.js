@@ -56,7 +56,7 @@
 // and losing the grab to someone else is detected (the server says so, with
 // a LeaveNotify of mode Ungrab) rather than waited out.
 
-import { pixelLayout, toStraightRgba } from 'ntk';
+import { pixelLayout, toStraightRgba } from 'ntk/imagedata';
 
 import { sessionBus } from './bus.js';
 import { XK_ESCAPE, XK_KP_ENTER, XK_RETURN, XK_SPACE } from './keysyms.js';

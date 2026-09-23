@@ -20,7 +20,7 @@ import {
 // `paintcache.js`: a named import of something an older ntk does not export
 // is a *load-time* SyntaxError, which would take the renderer down rather
 // than the one feature that needs it.
-import * as ntk from 'ntk';
+import { loadImage } from 'ntk/image';
 import { symbolWeight, symbolsFor, warnOnce } from '../symbols.js';
 import { intrinsicSize } from './layout.js';
 import { Node } from './node.js';
@@ -164,7 +164,7 @@ export class ImageNode extends Node {
   _loadEntry(src) {
     if (isPathImageSource(src)) {
       return {
-        promise: ntk.loadImage(toLoadablePath(src)).then(
+        promise: loadImage(toLoadablePath(src)).then(
           (image) => image,
           (err) => {
             console.error(
@@ -196,7 +196,7 @@ export class ImageNode extends Node {
   async _loadFile(src) {
     const token = ++this._loadToken;
     try {
-      const image = await ntk.loadImage(toLoadablePath(src));
+      const image = await loadImage(toLoadablePath(src));
       if (token !== this._loadToken || this.destroyed) return;
       this._ownedImage = image;
       this._setImage(image);

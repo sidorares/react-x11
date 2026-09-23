@@ -60,7 +60,7 @@
 // A leaf module, like src/embedding.js: `appcontext.js` asks `canOverlay`
 // for `useSupports('glOverlay')`, and it imports nothing of ours but the
 // damage model's arithmetic, which imports nothing at all.
-import { cssColorStraight } from 'ntk';
+import { cssColorStraight } from 'ntk/color';
 
 import { FULL_DAMAGE, addDamageRect } from './nodes/damage.js';
 import {

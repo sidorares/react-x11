@@ -34,7 +34,7 @@
 // derives is the padding a coverage surface has to carry. Both are pure
 // functions — no connection, nothing drawn — so this module stays testable
 // without a server.
-import { shadowReach, shadowSigma } from 'ntk';
+import { shadowReach, shadowSigma } from 'ntk/shadow-math';
 
 /** A number, with or without the `px` CSS wants and this vocabulary does not. */
 const LENGTH = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:px)?$/i;

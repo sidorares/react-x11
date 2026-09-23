@@ -3,7 +3,7 @@
 // Numbers are pixels; strings like '50%' / 'auto' pass through to yoga.
 // The engine is ours (`./yoga.js`) — the enum tables below are built at
 // module scope, which is what that module's synchronous half is for.
-import { cssColorStraight } from 'ntk';
+import { cssColorStraight } from 'ntk/color';
 
 import { parseBoxShadow, parseLinearGradient } from './decorations.js';
 import {

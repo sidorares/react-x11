@@ -18,7 +18,7 @@ import {
 // `paintcache.js`: a named import of something an older ntk does not export
 // is a *load-time* SyntaxError, which would take the renderer down rather
 // than the one feature that needs it.
-import * as ntk from 'ntk';
+import { ntkRoot, x11Ntk } from '../ntkroot.js';
 import { isFocusable as a11yFocusable } from '../a11y.js';
 import { DEV } from './util.js';
 
@@ -320,7 +320,7 @@ export class NodeBoxPaint {
         );
         sctx.fill();
       },
-      after: (surface) => ntk.blurCoverage(surface, sigma),
+      after: (surface) => x11Ntk('a baked shadow').blurCoverage(surface, sigma),
       live: () => this._paintShadowLive(ctx, plan),
     };
     const cache = this.root?._paintCache;
@@ -338,7 +338,9 @@ export class NodeBoxPaint {
    * a k x k kernel, by the ratio of 2k to k squared.
    */
   _paintShadowLive(ctx, plan) {
-    if (typeof ntk.Surface !== 'function' || !this.app?.display?.Render) return;
+    const ntk = ntkRoot();
+    if (typeof ntk?.Surface !== 'function' || !this.app?.display?.Render)
+      return;
     let surface = null;
     try {
       surface = new ntk.Surface(this.app, {

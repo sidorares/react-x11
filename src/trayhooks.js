@@ -54,7 +54,7 @@
 // frame is not available for anything that has to ask the desktop.
 
 import { useEffect, useRef, useState } from 'react';
-import { decodeImage } from 'ntk';
+import { decodeImage } from 'ntk/image';
 
 import { useAppOrNull } from './appcontext.js';
 import { currentRegistration } from './application.js';

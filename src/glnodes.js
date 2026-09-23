@@ -5,7 +5,7 @@
 // (NEXT_STEPS §4), sized and positioned by the parent's yoga layout like any
 // other drawn node. Everything about the surface is here; the scene graph
 // that draws into it comes later (docs/glx-plan.md).
-import { cssColorStraight } from 'ntk';
+import { cssColorStraight } from 'ntk/color';
 
 // re-exported so the GL element layer stays one import for consumers
 export { directGLFailure, hasDirectGL } from './glbackend.js';

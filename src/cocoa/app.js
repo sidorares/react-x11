@@ -16,7 +16,7 @@
 // (`_routeBatch`) with no pump at all (docs/macos.md §"JS on a worker").
 import { isMainThread } from 'node:worker_threads';
 
-import { cssColorStraight } from 'ntk';
+import { cssColorStraight } from 'ntk/color';
 
 import { deliverActivate, deliverOpen } from '../application.js';
 import { flushPendingFrames } from '../frames.js';

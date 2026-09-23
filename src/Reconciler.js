@@ -7,7 +7,6 @@
 import { createRequire } from 'node:module';
 import React from 'react';
 import ReactReconciler from 'react-reconciler';
-import { createClient } from 'ntk';
 
 import {
   ConcurrentRoot,
@@ -22,6 +21,7 @@ import {
   flushWindowMaps,
   flushWindowRestacks,
 } from './nodes/window/window.js';
+import { loadNtk } from './ntkroot.js';
 import { PopupNode } from './nodes/window/popup.js';
 import { BoxNode } from './nodes/box.js';
 import { THEME_SCOPE } from './nodes/kinds.js';
@@ -629,6 +629,8 @@ function loadIntegrations() {
  * anyone hits and the least self-explanatory failure in the library.
  */
 async function connect(options) {
+  // ntk's root is the X11 backend's, and loads with it (src/ntkroot.js)
+  const { createClient } = await loadNtk();
   try {
     return await createClient(options);
   } catch (err) {
@@ -822,7 +824,12 @@ export async function createRoot(options = {}) {
   const win32Asked =
     rest.backend === 'win32' || process.env.REACT_X11_BACKEND === 'win32';
   const connecting = !owned
-    ? Promise.resolve(borrowed)
+    ? // an ntk app could only have come from ntk's own createClient: the
+      // root is imported already, and this hands it to the code that reads
+      // it synchronously (src/ntkroot.js)
+      isNtkApp(borrowed)
+      ? loadNtk().then(() => borrowed)
+      : Promise.resolve(borrowed)
     : backend === 'wayland'
       ? // Opt-in only, never through 'auto': X11 stays the default on Linux
         // because the remote case (docs/remote.md) is the flagship reason

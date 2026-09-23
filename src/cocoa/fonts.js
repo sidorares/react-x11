@@ -26,7 +26,8 @@ import { readFileSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
 
 import LineBreaker from 'linebreak';
-import { cssColorStraight, Font } from 'ntk';
+import { cssColorStraight } from 'ntk/color';
+import Font from 'ntk/font';
 
 import { loadNative } from './native.js';
 
