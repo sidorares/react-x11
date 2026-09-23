@@ -598,3 +598,70 @@ test('a registered element can opt into the cache', async () => {
     await app.close();
   }
 });
+
+// --- a context that only moves the origin -----------------------------------
+//
+// An overlay pane over a `<glarea>` paints the surface's children through a
+// translation, from the window's coordinates into its layer's
+// (src/win32/overlay.js), and the cache took any transform at all as a reason
+// to paint live: every cached card of a graph over a GL surface was drawn
+// again whenever its pane repainted, on every step of a pan. A whole-pixel
+// translation keeps the pixel grid the entry was rendered on.
+
+test('a context that only moves its origin still draws from the cache', async () => {
+  const app = await headlessApp();
+  let draws = 0;
+  const onDraw = (ctx, { width, height }) => {
+    draws++;
+    ctx.fillStyle = '#00aa00';
+    ctx.fillRect(0, 0, width, height);
+  };
+  const ctl = await mount(
+    app,
+    React.createElement(
+      'window',
+      { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+      React.createElement('canvas', {
+        cacheKey: 'green:16x16',
+        onDraw,
+        style: {
+          position: 'absolute',
+          left: 20,
+          top: 20,
+          width: 16,
+          height: 16,
+        },
+      }),
+    ),
+  );
+  const cache = ctl.root._paintCache;
+  const canvas = ctl.root.children[0];
+  const ctx = ctl.root._ctx;
+  const paintThrough = (transform) => {
+    cache.beginFrame();
+    ctx.save();
+    transform();
+    cache.paint(canvas, ctx);
+    ctx.restore();
+    cache.endFrame();
+  };
+  // a drawing is cached the second time it is seen
+  await repaint(app, ctl);
+  assert.equal(cache.entries.size, 1, 'precondition: cached');
+  const before = draws;
+
+  paintThrough(() => ctx.translate(-10, -5));
+  assert.equal(draws, before, 'translated by whole pixels: from the cache');
+  await settle(app);
+  const px = await pixels(app, ctl.root);
+  assert.ok(
+    near(px(12, 17), [0, 170, 0]),
+    `and where the live paint would have put it: got ${px(12, 17)}`,
+  );
+
+  paintThrough(() => ctx.scale(2, 2));
+  assert.equal(draws, before + 1, 'scaled: live');
+  paintThrough(() => ctx.translate(0.5, 0));
+  assert.equal(draws, before + 2, 'half a pixel over: live');
+  await app.close();
+});
