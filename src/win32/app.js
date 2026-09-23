@@ -16,6 +16,8 @@ import { setScreensForTests } from '../screens.js';
 import { createBezels } from './bezels.js';
 import { Win32InputMethod } from './ime.js';
 import { decodeKey, modifierMask } from './keymap.js';
+import { refuseOverlay } from '../gloverlay.js';
+import { Win32OverlayPane } from './overlay.js';
 import { Win32PaneHost } from './panehost.js';
 import { Win32PaneWindow } from './panewindow.js';
 import { Win32Surface } from './surface.js';
@@ -118,6 +120,7 @@ export class Win32App {
     this.nativeBezels = null;
 
     this.fonts = new Win32FontManager(native);
+    this._installOverlay();
 
     const screens = native.listScreens?.() ?? [];
     const primary = screens[0] ?? {
@@ -365,6 +368,29 @@ export class Win32App {
    */
   createPaneHost(wnd) {
     return new Win32PaneHost(this, wnd);
+  }
+
+  /**
+   * The pane a `<glarea>`'s children are drawn on (src/gloverlay.js): a
+   * composited layer above the window's swap chains, where the children's
+   * transparent pixels show the GL frame (src/win32/overlay.js). Having this
+   * at all is how the overlay knows it composites — and the X11 fallback it
+   * would otherwise reach for, a plain child window, is a GL surface here.
+   * Installed in the constructor where the bridge has layers.
+   */
+  _installOverlay() {
+    if (typeof this._native.layerCreate === 'function') {
+      this.createOverlayPane = (attributes) =>
+        new Win32OverlayPane(this, attributes);
+      return;
+    }
+    refuseOverlay(
+      this,
+      "this @windowkit/win32 predates layers, which are what a <glarea>'s " +
+        'children are drawn on here, and a child window on this backend is ' +
+        'a GL surface of its own. Update the bridge, or draw the overlay ' +
+        'beside the surface',
+    );
   }
 
   /**
