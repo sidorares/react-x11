@@ -142,6 +142,15 @@ export interface Context2D {
   strokeRect(x: number, y: number, width: number, height: number): void;
   clearRect(x: number, y: number, width: number, height: number): void;
   fillText(text: string, x: number, y: number): void;
+  /**
+   * `true` where text drawn under a transform that scales is drawn scaled,
+   * glyphs and all — the Windows and macOS contexts. Absent on X11, where
+   * ntk rasterizes glyphs at the size the text was shaped at and a
+   * transform moves only where each one lands. An element that would draw
+   * a layout it already has at another size, rather than shape a new one,
+   * asks this first.
+   */
+  readonly scalesText?: boolean;
   measureText(text: string): { width: number; [key: string]: unknown };
   /**
    * Composite an offscreen `Surface` (`react-x11/ntk`) — whole at a point,

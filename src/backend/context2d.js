@@ -577,6 +577,20 @@ export class BackendContext2D {
    * dashes of an animated edge were repainted sixteen times a second and
    * never moved.
    */
+  /**
+   * Text drawn under a transform that scales is drawn scaled, glyphs and
+   * all: both bridges lay a text layout out once and draw its outlines
+   * through the context's matrix (Direct2D's `DrawTextLayout`, CoreText's
+   * `CTFrameDraw`). ntk's context on X11 cannot — its glyphs come out of a
+   * cache rasterized at the size they were shaped at, and a transform
+   * moves where each lands, not how big it is — and says nothing, which is
+   * the same answer. So an element that would rather draw a layout it has
+   * than shape a new one at every step of a zoom asks this first.
+   */
+  get scalesText() {
+    return true;
+  }
+
   get lineDashOffset() {
     return this._state.dashOffset;
   }
