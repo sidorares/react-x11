@@ -5,7 +5,7 @@
 import { Yoga } from '../yoga.js';
 import { callHandler } from '../errors.js';
 import { DAMAGE_SLOP, layoutDiff } from './damage.js';
-import { insetRect } from './rects.js';
+import { insetRect, intersectRects, outerPixels } from './rects.js';
 import { DEV } from './util.js';
 
 export const MEASURE_MODES = [];
@@ -198,20 +198,176 @@ export class NodeLayout {
     // its own — counts as on screen too
     this._placed = true;
     if (!this.yoga) return;
-    this._assignAbs(
-      originX + this.yoga.getComputedLeft(),
-      originY + this.yoga.getComputedTop(),
-      this.yoga.getComputedWidth(),
-      this.yoga.getComputedHeight(),
-    );
-    if (this.props.onLayout) this._reportLayout();
-    if (this._host !== null) {
-      this._absolutizeHostChildren();
-      return;
+    const x = originX + this.yoga.getComputedLeft();
+    const y = originY + this.yoga.getComputedTop();
+    const width = this.yoga.getComputedWidth();
+    const height = this.yoga.getComputedHeight();
+    const wasX = this.abs.x;
+    const wasY = this.abs.y;
+    const move = this._beginRigidMove(x, y, width, height);
+    try {
+      this._assignAbs(x, y, width, height);
+      if (this.props.onLayout) this._reportLayout();
+      if (this._host !== null) {
+        this._absolutizeHostChildren();
+      } else {
+        const dx = this.abs.x - wasX;
+        const dy = this.abs.y - wasY;
+        for (const child of this.children) {
+          if (child.isWindow || child._followParent(dx, dy)) continue;
+          child.absolutize(this.abs.x, this.abs.y);
+        }
+      }
+    } finally {
+      if (move) layoutDiff.shift = null;
     }
-    for (const child of this.children) {
-      if (!child.isWindow) child.absolutize(this.abs.x, this.abs.y);
+    if (move) this._claimRigidMove(move);
+  }
+
+  /**
+   * A child of a node that moved this pass, which yoga did not lay out
+   * again: its box and everything under it sit exactly where the last pass
+   * put them relative to their parents, so the whole subtree moves by
+   * however far its parent did (`dx`, `dy`) — `_shiftAbs`, the scroll fast
+   * path's translation (issue #405), instead of the walk. Answers whether
+   * it was handled; false means walk it.
+   *
+   * The witness is yoga's has-new-layout flag, the one that fast path
+   * reads: a pass sets it on every node it lays out and on every child of
+   * one, cached or not, so a child it is clear on was not reached, nor was
+   * anything under it. Cleared here when it is found set, just before the
+   * walk that reads what the pass left — no pass runs in between — so the
+   * next move of the same subtree finds it clear. Nothing else pays for
+   * it: a child of a node that did not move is walked as it always was,
+   * and a scroll pane always is, since its flag is its own (and a scroll
+   * moves its children with no pass at all).
+   *
+   * Walking such a subtree read four numbers out of yoga per node and wrote
+   * them back unchanged: the bodies of a graph's cards, fifty widgets deep,
+   * on every step of a pan that moved the one box they sit in.
+   *
+   * A move it rode — the diff's `shift`, where the pixels are carried —
+   * claims nothing, as the walk would not have. A move of its own claims
+   * where the subtree's pixels were and where they are, which is what the
+   * walk's claims came to.
+   */
+  _followParent(dx, dy) {
+    if (dx === 0 && dy === 0) return false;
+    const yoga = this.yoga;
+    if (!yoga || !this._placed || this.isScroller?.()) return false;
+    if (yoga.hasNewLayout()) {
+      yoga.markLayoutSeen();
+      return false;
     }
+    const sink = layoutDiff.sink;
+    const shift = layoutDiff.shift;
+    if (
+      sink &&
+      !(shift && shift.x === dx && shift.y === dy) &&
+      !this.hidden &&
+      this.style?.display !== 'none'
+    ) {
+      const reach = this.paintBounds();
+      // where the walk's `_assignAbs` puts the near end: after the shift a
+      // scroll blit is about to make, when one is riding (issue #398)
+      sink(
+        shift
+          ? {
+              x: reach.x + shift.x,
+              y: reach.y + shift.y,
+              width: reach.width,
+              height: reach.height,
+            }
+          : reach,
+        this,
+      );
+      sink(
+        {
+          x: reach.x + dx,
+          y: reach.y + dy,
+          width: reach.width,
+          height: reach.height,
+        },
+        this,
+      );
+    }
+    this._shiftAbs(dx, dy);
+    return true;
+  }
+
+  /**
+   * The start of a move that changed nothing but where this subtree sits:
+   * the same size, somewhere else, in a bounded frame's layout diff that no
+   * shift is riding already. The walk below then runs with the diff's
+   * `shift` set to the move, so every descendant that lands where it was
+   * plus the move claims nothing — and one that lands anywhere else claims
+   * both ends of its own, as under a scroll blit (issue #398).
+   *
+   * What the subtree is owed instead is two claims: where its pixels were,
+   * and where they went (`_claimRigidMove`). Walked node by node, a moved
+   * card of fifty widgets claimed a hundred rects, the frame's cap merged
+   * them into their box, and the box of pieces reaching past every clipping
+   * ancestor was the whole window — a panned layer of such cards made every
+   * step of the pan a full repaint, header and all.
+   *
+   * Null when the move is not of that kind, or no diff is listening; the
+   * walk is then the plain one.
+   */
+  _beginRigidMove(x, y, width, height) {
+    if (!layoutDiff.sink || layoutDiff.shift) return null;
+    const old = this.abs;
+    if (width !== old.width || height !== old.height) return null;
+    if (x === old.x && y === old.y) return null;
+    if (!(old.width > 0 && old.height > 0)) return null;
+    if (this.hidden || this.style?.display === 'none') return null;
+    // a placement moves it again after the walk (src/nodes/position.js)
+    if (this.root?._placedNodes?.has(this)) return null;
+    const shift = { x: x - old.x, y: y - old.y };
+    // before anything under it moves: every pixel it had
+    const was = this.paintBounds();
+    layoutDiff.shift = shift;
+    return { sink: layoutDiff.sink, was, shift };
+  }
+
+  /**
+   * Both ends of a rigid move, each clipped to what the clipping ancestors
+   * let reach the surface. The far end is the near one moved: every
+   * descendant that rode the move is inside it, and one that did not has
+   * claimed where it went itself.
+   *
+   * Named for the node that moved, which is what sends each claim to the
+   * lists that paint it (`_paneReach`): the panes alone inside a
+   * `<glarea>`, both for a subtree holding one.
+   */
+  _claimRigidMove({ sink, was, shift }) {
+    const from = this._clippedByAncestors(was);
+    if (from) sink(from, this);
+    const to = this._clippedByAncestors({
+      x: was.x + shift.x,
+      y: was.y + shift.y,
+      width: was.width,
+      height: was.height,
+    });
+    if (to) sink(to, this);
+  }
+
+  /**
+   * `rect` less whatever the ancestors that clip their children cut away,
+   * up to the window: pixels outside one never reach the surface, so a
+   * claim of them repaints what cannot change. Null when nothing is left.
+   * Each clip is the whole pixels the ancestor's box touches — its clip
+   * antialiases a fractional edge over the pixel it cuts, and on a box on
+   * whole pixels cuts exactly; a clip it skips is one nothing inside
+   * reaches (`_childrenCanOverflow`).
+   */
+  _clippedByAncestors(rect) {
+    let out = rect;
+    for (let n = this.parent; n && out; n = n.parent) {
+      if (n.isWindow) break;
+      if (!n.clipsChildren()) continue;
+      out = intersectRects(out, outerPixels(n.abs));
+    }
+    return out;
   }
 
   /**

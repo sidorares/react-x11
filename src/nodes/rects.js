@@ -34,6 +34,19 @@ export function innerPixels(rect) {
   return { x, y, width: right - x, height: bottom - y };
 }
 
+/** The whole pixels `rect` touches — a fractional edge taken whole, which is
+ * where antialiasing can put ink. */
+export function outerPixels(rect) {
+  const x = Math.floor(rect.x);
+  const y = Math.floor(rect.y);
+  return {
+    x,
+    y,
+    width: Math.ceil(rect.x + rect.width) - x,
+    height: Math.ceil(rect.y + rect.height) - y,
+  };
+}
+
 /** The overlap of two rects, or null when they have none. */
 export function intersectRects(a, b) {
   const x = Math.max(a.x, b.x);

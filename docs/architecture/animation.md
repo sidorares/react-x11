@@ -102,7 +102,10 @@ is where the node _was_; a tick on a layout property asks for a layout pass,
 and the pass claims the old and new rect of every node it moves — the
 animating one and whatever it pushed, in flow or not (`_assignAbs`,
 src/nodes/layout.js) — so a layout animation repaints what it moves rather
-than the window (#603). The
+than the window (#603). A box that moved and changed nothing else is one
+claim at each end for its whole subtree, clipped to the boxes that clip it
+(`_beginRigidMove`), and the nodes under it that yoga did not lay out again
+are moved with it rather than read back out of yoga (`_followParent`). The
 window keeps asking for frames while `_animating` is non-empty; the
 animation _is_ the repaint loop. `interpolate` (src/styles.js:990) lerps
 numbers, percentages of the same unit, and colours — premultiplied, so a

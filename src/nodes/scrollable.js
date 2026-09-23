@@ -144,14 +144,28 @@ export const Scrollable = (Base) =>
     absolutize(originX, originY) {
       this._placed = true;
       if (!this.yoga) return;
-      this._assignAbs(
-        originX + this.yoga.getComputedLeft(),
-        originY + this.yoga.getComputedTop(),
-        this.yoga.getComputedWidth(),
-        this.yoga.getComputedHeight(),
-      );
-      if (this.props.onLayout) this._reportLayout();
-      this._absolutizeChildren(this.abs.x, this.abs.y);
+      const x = originX + this.yoga.getComputedLeft();
+      const y = originY + this.yoga.getComputedTop();
+      const width = this.yoga.getComputedWidth();
+      const height = this.yoga.getComputedHeight();
+      // a box that moved and changed nothing else claims where it was and
+      // where it went, once — not once per node inside it (`Node`'s)
+      const wasX = this.abs.x;
+      const wasY = this.abs.y;
+      const move = this._beginRigidMove(x, y, width, height);
+      try {
+        this._assignAbs(x, y, width, height);
+        if (this.props.onLayout) this._reportLayout();
+        this._absolutizeChildren(
+          this.abs.x,
+          this.abs.y,
+          this.abs.x - wasX,
+          this.abs.y - wasY,
+        );
+      } finally {
+        if (move) layoutDiff.shift = null;
+      }
+      if (move) this._claimRigidMove(move);
     }
 
     /**
@@ -159,8 +173,11 @@ export const Scrollable = (Base) =>
      * Split out of `absolutize` because a `<window>` writes its own `abs`
      * during flush and then walks its children from (0, 0) — the same walk,
      * reached by a different route.
+     *
+     * `dx`/`dy` is how far this box moved in this pass, which is how far a
+     * child yoga did not lay out again moves with it (`_followParent`).
      */
-    _absolutizeChildren(originX, originY) {
+    _absolutizeChildren(originX, originY, dx = 0, dy = 0) {
       if (!this.isScroller()) {
         // a layout host's children go where its algorithm put them
         if (this._host !== null) {
@@ -168,7 +185,8 @@ export const Scrollable = (Base) =>
           return;
         }
         for (const child of this.children) {
-          if (!child.isWindow) child.absolutize(originX, originY);
+          if (child.isWindow || child._followParent(dx, dy)) continue;
+          child.absolutize(originX, originY);
         }
         return;
       }

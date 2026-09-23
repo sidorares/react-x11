@@ -379,8 +379,10 @@ export class GlAreaNode extends Node {
     // `_assignAbs` keeps the object when nothing changed
     const still = this.abs === was;
     const { x, y } = this.abs;
+    const dx = x - was.x;
+    const dy = y - was.y;
     for (const child of this.children) {
-      if (child.isWindow) continue;
+      if (child.isWindow || child._followParent(dx, dy)) continue;
       if (still) this._absolutizeChild(child, x, y, overlay);
       else child.absolutize(x, y);
     }

@@ -134,14 +134,16 @@ test('a loop claims the block it moves, not the window', async () => {
       assert.strictEqual(block.abs.x, 45, 'a crossing is 1100ms of 280px');
       // Where the block was, claimed before the tick, and where the layout
       // pass put it — each 82x10, the 80x8 block with the one pixel of slack
-      // every claim carries, 19..101 and 44..126 merged into one — and never
-      // the 400x200 window, which is the whole reason this is a renderer
-      // feature rather than a setInterval in a component. Not the 200px
-      // track either, which used to stand in for where the block was going
-      // before the layout pass was trusted to claim that (#603).
+      // every claim carries — and never the 400x200 window, which is the
+      // whole reason this is a renderer feature rather than a setInterval
+      // in a component. Not the 200px track either, which used to stand in
+      // for where the block was going before the layout pass was trusted to
+      // claim that (#603). Each end clipped to the track, which clips the
+      // block: of 19..101 and 44..126 only the track's 100..126, and of the
+      // claim's ten rows only the track's eight, can ever be seen.
       assert.deepStrictEqual(
         window._lastDamageRects,
-        [{ x: 19, y: 39, width: 107, height: 10 }],
+        [{ x: 100, y: 40, width: 26, height: 8 }],
         'the frame repaints the block, not the window',
       );
     },
