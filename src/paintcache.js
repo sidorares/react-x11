@@ -83,19 +83,26 @@ const MAX_ITEM_PIXELS = 256 * 256;
  * grow this forever; the cost of forgetting is one extra live paint. */
 const MAX_PENDING = 4096;
 
-/** Whether a context is drawing 1:1 into device space.
- *
- * A cached surface is pixels at a fixed size and orientation. Under a scaled
- * or rotated CTM, compositing it would *resample* those pixels where a live
- * paint would re-rasterize at the right size, so the cache has to stand
- * aside. react-x11 only ever translates during paint, and only inside
- * `<canvas>`, so this is insurance rather than a live case.
+/**
+ * Whether `ctx` draws on the device's pixel grid, wherever its origin is: a
+ * surface rendered at device resolution composites through it pixel for
+ * pixel. An integer translation keeps that — and it is how an overlay pane
+ * over a `<glarea>` draws, from the window's coordinates into its layer's
+ * (src/win32/overlay.js) — so declining it painted every cached drawing on a
+ * surface's children live, every time a pane repainted: every card of a
+ * graph, on every step of a pan. A scale, a rotation or a fraction of a
+ * pixel does not, and paints live.
  */
 function isDeviceSpace(ctx) {
   const m = ctx.getTransform?.();
   if (!m) return true;
   return (
-    m.a === 1 && m.b === 0 && m.c === 0 && m.d === 1 && m.e === 0 && m.f === 0
+    m.a === 1 &&
+    m.b === 0 &&
+    m.c === 0 &&
+    m.d === 1 &&
+    Number.isInteger(m.e) &&
+    Number.isInteger(m.f)
   );
 }
 
