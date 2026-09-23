@@ -970,12 +970,22 @@ export class WindowScrollBlit {
         if (ancestors.has(child)) {
           // on the path down: its solid background under the viewport is
           // translation-invariant, its border ring and corners are not.
-          // The widest side is conservative for a non-uniform border
+          // The widest side is conservative for a non-uniform border.
+          //
+          // Rounded, because that is where the ring ends for what is
+          // inside it: at a fractional scale a 1px border is 1.25 or 1.5
+          // device pixels, and layout puts the children at the rounded
+          // inner edge — so the column the ring reaches a quarter of the
+          // way into is a child's, painted over whole. Tested exactly, that
+          // column refused every blit under a bordered box at 125%, the
+          // scale most Windows laptops run at.
           const bw = resolveBorderWidths(
             child.style ?? EMPTY_STYLE,
             child.direction,
           );
-          const ring = Math.max(bw.top, bw.right, bw.bottom, bw.left);
+          const ring = Math.round(
+            Math.max(bw.top, bw.right, bw.bottom, bw.left),
+          );
           if (ring > 0 && !rectContains(insetRect(child.abs, ring), vp)) {
             return false;
           }
