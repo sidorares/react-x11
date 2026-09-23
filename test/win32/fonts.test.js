@@ -118,6 +118,43 @@ describe('win32 fonts: families', () => {
   });
 });
 
+describe('win32 fonts: what is asked of DirectWrite once', () => {
+  it('a face asks for its metrics at a size once', () => {
+    // A trimmed `<text>` asks on every placement of its layout, and each
+    // answer was DirectWrite resolving the family again — on a graph of
+    // widget cards, every body on every step of a drag.
+    const bridge = createFakeBridge();
+    let asked = 0;
+    const metrics = bridge.fontMetrics;
+    bridge.fontMetrics = (...args) => {
+      asked++;
+      return metrics(...args);
+    };
+    const face = new Win32FontManager(bridge).match('sans-serif');
+    const first = face.metrics(14);
+    assert.deepEqual(face.metrics(14), first);
+    assert.equal(asked, 1, 'the same size, one question');
+    face.metrics(16);
+    assert.equal(asked, 2, 'another size is another question');
+  });
+
+  it('a font stack is resolved once', () => {
+    const bridge = createFakeBridge();
+    let asked = 0;
+    const exists = bridge.fontExists;
+    bridge.fontExists = (name) => {
+      asked++;
+      return exists(name);
+    };
+    const fonts = new Win32FontManager(bridge);
+    fonts.match('Inter, Segoe UI, sans-serif');
+    const after = asked;
+    fonts.match('Inter, Segoe UI, sans-serif', { weight: 700 });
+    assert.equal(asked, after, 'the second match asked nothing');
+    assert.equal(fonts.match('Inter, Segoe UI').family, 'Segoe UI');
+  });
+});
+
 describe('win32 fonts: the layout it answers', () => {
   it('derives a per-line descent, which half-leading needs', () => {
     const layout = manager().layout('hello', {});

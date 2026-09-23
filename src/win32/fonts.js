@@ -187,13 +187,25 @@ class Win32Face {
     this.italic = style === 'italic' || style === 'oblique';
   }
 
+  /**
+   * Kept per size: a face's metrics never change, and the bridge answers
+   * each call by resolving the family through DirectWrite again. A trimmed
+   * `<text>` asks on every placement of its layout (`_trim`), which on a
+   * graph of widget cards was every body on every step of a drag.
+   */
   metrics(size) {
-    return this._manager._native.fontMetrics(
-      this.family,
-      size,
-      this.weight,
-      this.italic,
-    );
+    this._metrics ??= new Map();
+    let m = this._metrics.get(size);
+    if (m === undefined) {
+      m = this._manager._native.fontMetrics(
+        this.family,
+        size,
+        this.weight,
+        this.italic,
+      );
+      this._metrics.set(size, m);
+    }
+    return m;
   }
 
   /**
@@ -474,7 +486,14 @@ export class Win32FontManager {
   }
 
   match(family, options = {}) {
-    const name = familyOf(this._native, family);
+    // the stack resolved once: a named family is a DirectWrite lookup, and
+    // every text layout asks
+    this._families ??= new Map();
+    let name = this._families.get(family);
+    if (name === undefined) {
+      name = familyOf(this._native, family);
+      this._families.set(family, name);
+    }
     const key = `${name}|${weightOf(options.weight)}|${options.style ?? 'normal'}`;
     let face = this._faces.get(key);
     if (!face) {
