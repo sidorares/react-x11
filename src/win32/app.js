@@ -278,10 +278,19 @@ export class Win32App {
    * A copy of the set is walked because `onDismiss` is what unmounts the
    * popup, and unmounting runs `ungrabPointer` — which deletes from the set
    * this loop would otherwise still be reading.
+   *
+   * `open` is the popups to judge — for a press, the ones that were open
+   * *before* it (`_route`). The press is delivered first, and a press that
+   * opens a menu — a `<Select>`, a menu button — opens it and takes its
+   * grab synchronously, in the same dispatch; judged afterwards, the new
+   * menu heard the press that opened it as a press outside itself and
+   * closed at once. Every `<Select>` did that. An X11 grab taken during a
+   * press does not see that press either.
    */
-  _dismissOutsidePopups(pressed) {
+  _dismissOutsidePopups(pressed, open = null) {
     if (this._dismissOnOutside.size === 0) return;
-    for (const wnd of [...this._dismissOnOutside]) {
+    for (const wnd of open ?? [...this._dismissOnOutside]) {
+      if (!this._dismissOnOutside.has(wnd)) continue;
       if (wnd === pressed) continue;
       if (wnd.destroyed) {
         this._dismissOnOutside.delete(wnd);
@@ -590,7 +599,13 @@ export class Win32App {
         break;
       }
       case 'mousedown':
-      case 'mouseup':
+      case 'mouseup': {
+        // the menus this press may close: those open before it (see
+        // `_dismissOutsidePopups`)
+        const open =
+          event.type === 'mousedown' && this._dismissOnOutside.size !== 0
+            ? [...this._dismissOnOutside]
+            : null;
         // `keycode` is the button, numbered as X numbers them — the bridge
         // already speaks that vocabulary. It used to be hardcoded to 1, so
         // a right-click arrived as a left-click and no context menu ever
@@ -605,8 +620,9 @@ export class Win32App {
         // A press in one window is a press *outside* every open menu but the
         // one it landed in — which on X11 the grab would have delivered to
         // the menu instead of to this window.
-        if (event.type === 'mousedown') this._dismissOutsidePopups(wnd);
+        if (open) this._dismissOutsidePopups(wnd, open);
         break;
+      }
       case 'keydown':
       case 'keyup': {
         // The bridge asked the active layout what the key types before the
