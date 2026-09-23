@@ -56,6 +56,8 @@ export class Win32Window {
     // a pane over a `<glarea>` here changed and its commit is this frame's
     // (src/win32/overlay.js)
     this._owesCommit = false;
+    // pointer motion and wheel held for the next frame (`_queueInput`)
+    this._pendingInput = null;
 
     // `overrideRedirect` is how a `<popup>` says what it is — a menu, a
     // select's list, a tooltip. On X11 it means "the window manager does not
@@ -105,6 +107,58 @@ export class Win32Window {
 
   emit(name, ev) {
     for (const fn of this._handlers[name] ?? []) fn(ev);
+  }
+
+  /**
+   * Hold a pointer motion or a wheel for the next frame, merged with any
+   * already held: ntk's coalescing on X11 (its lib/window.js,
+   * `_deliverEvent`), which the rest of the event path was written against
+   * — src/events.js paces motion on the strength of it.
+   *
+   * Windows merges WM_MOUSEMOVE itself, but only while a queue waits to be
+   * read, and the bridge reads its messages on a UI thread of its own and
+   * posts every one of them to the loop. So a mouse reporting a thousand
+   * times a second was a thousand events on the loop, and a handler slower
+   * than a millisecond fell behind the pointer — then replayed every
+   * position it had missed, a frame of work each, long after the pointer
+   * had stopped: a box selection over a large graph trailed the pointer by
+   * seconds. Held here, a burst is one event a frame: the newest motion,
+   * with the rest riding along in `ev.coalesced`, and the wheel's deltas
+   * added up at its last position.
+   */
+  _queueInput(name, ev) {
+    const pending = (this._pendingInput ??= new Map());
+    const prev = pending.get(name);
+    if (!prev) {
+      ev.coalesced = [ev];
+      pending.set(name, ev);
+    } else if (name === 'wheel') {
+      // scroll distance adds up — the last delta alone would throw away all
+      // but the final step of a fast scroll
+      prev.coalesced.push(ev);
+      prev.deltaX += ev.deltaX;
+      prev.deltaY += ev.deltaY;
+      prev.x = ev.x;
+      prev.y = ev.y;
+      prev.rootx = ev.rootx;
+      prev.rooty = ev.rooty;
+      prev.smooth = prev.smooth || ev.smooth;
+    } else {
+      ev.coalesced = prev.coalesced;
+      ev.coalesced.push(ev);
+      pending.set(name, ev);
+    }
+    this.app._holdInput(this);
+  }
+
+  /** Deliver what `_queueInput` held: at the top of the next frame, and
+   *  before any other event of this window's, so a handler sees events in
+   *  the order they happened — a drag its last move, then the release. */
+  _flushInput() {
+    const pending = this._pendingInput;
+    if (pending === null) return;
+    this._pendingInput = null;
+    for (const [name, ev] of pending) this.emit(name, ev);
   }
 
   /**
@@ -171,6 +225,7 @@ export class Win32Window {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this._pendingInput = null;
     this._native.destroyWindow?.(this.id);
     this.app._unregister(this);
   }

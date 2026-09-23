@@ -82,6 +82,8 @@ export class Win32App {
     // an in-app drop reads to keep `e.items` by reference (src/dnd.js).
     this._activeDrag = null;
     this._rafQueue = [];
+    /** Windows holding input for the next frame (`Win32Window._queueInput`). */
+    this._inputHeld = new Set();
     this._frameTimer = null;
     /** A frame has been asked for and not yet delivered — one outstanding
      *  request at a time, whether the clock or the timer is answering it. */
@@ -456,7 +458,18 @@ export class Win32App {
 
   _requestFrame(cb, wnd = null) {
     this._rafQueue.push({ cb, wnd });
-    if (this._framePending || this._closed) return this._rafQueue.length;
+    this._armFrame();
+    return this._rafQueue.length;
+  }
+
+  /** A window is holding input for the next frame: there has to be one. */
+  _holdInput(wnd) {
+    this._inputHeld.add(wnd);
+    this._armFrame();
+  }
+
+  _armFrame() {
+    if (this._framePending || this._closed) return;
     this._framePending = true;
     // One tick, from the compositor if this Windows has a clock to wait on.
     // It answers false when it has not, and then — and only then — a timer.
@@ -469,7 +482,7 @@ export class Win32App {
         this._tickFrames();
       }, CLOCK_WATCHDOG_MS);
       this._frameTimer.unref?.();
-      return this._rafQueue.length;
+      return;
     }
     this._frameTimer = setTimeout(() => {
       this._frameTimer = null;
@@ -477,10 +490,24 @@ export class Win32App {
       this._tickFrames();
     }, FRAME_INTERVAL_MS);
     this._frameTimer.unref?.();
-    return this._rafQueue.length;
   }
 
   _tickFrames() {
+    // The input held for this frame goes first: what it changes is what the
+    // frame paints, and the frames its handlers ask for are this one —
+    // the callbacks are taken after it.
+    if (this._inputHeld.size !== 0) {
+      const held = [...this._inputHeld];
+      this._inputHeld.clear();
+      for (const wnd of held) {
+        if (wnd.destroyed) continue;
+        try {
+          wnd._flushInput();
+        } catch (err) {
+          if (process.env.NODE_ENV !== 'production') console.error(err);
+        }
+      }
+    }
     const due = this._rafQueue;
     this._rafQueue = [];
     const now = performance.now();
@@ -550,6 +577,11 @@ export class Win32App {
 
     const wnd = this._windows.get(event.id);
     if (!wnd) return;
+    // Whatever this is happened after the motion and the wheel the window is
+    // holding for its next frame, so they go first (`_queueInput`).
+    if (event.type !== 'mousemove' && event.type !== 'wheel') {
+      wnd._flushInput?.();
+    }
     switch (event.type) {
       case 'window-ready':
         wnd._onReady(event.a, event.b);
@@ -568,7 +600,7 @@ export class Win32App {
         break;
       }
       case 'mousemove':
-        wnd.emit('mousemove', {
+        wnd._queueInput('mousemove', {
           x: event.a,
           y: event.b,
           ...rootOf(wnd, event),
@@ -580,7 +612,7 @@ export class Win32App {
       case 'wheel': {
         const deltaX = event.c;
         const deltaY = event.d;
-        wnd.emit('wheel', {
+        wnd._queueInput('wheel', {
           name: 'wheel',
           x: event.a,
           y: event.b,
