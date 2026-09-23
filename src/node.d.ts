@@ -100,6 +100,9 @@ export interface Context2D {
   };
   setLineDash(segments: number[]): void;
   getLineDash(): number[];
+  /** Where along the dash pattern a stroke starts, in the same units as the
+   * pattern — the phase a marching dash moves. */
+  lineDashOffset: number;
   beginPath(): void;
   closePath(): void;
   moveTo(x: number, y: number): void;

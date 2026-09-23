@@ -558,11 +558,34 @@ export class BackendContext2D {
 
   setLineDash(segments) {
     this._state.dash = Array.isArray(segments) ? segments : [];
-    this._native.ctxSetLineDash(this._s(), this._state.dash, 0);
+    // the offset is state of its own, and a new pattern keeps it
+    this._native.ctxSetLineDash(
+      this._s(),
+      this._state.dash,
+      this._state.dashOffset,
+    );
   }
 
   getLineDash() {
     return [...this._state.dash];
+  }
+
+  /**
+   * Where along the pattern a stroke starts — the phase a marching dash
+   * moves. Missing here, a caller that asks `'lineDashOffset' in ctx` found
+   * no such thing and every stroke started its pattern at nought: the
+   * dashes of an animated edge were repainted sixteen times a second and
+   * never moved.
+   */
+  get lineDashOffset() {
+    return this._state.dashOffset;
+  }
+
+  set lineDashOffset(value) {
+    // canvas ignores anything that is not a finite number
+    if (typeof value !== 'number' || !Number.isFinite(value)) return;
+    this._state.dashOffset = value;
+    this._native.ctxSetLineDash(this._s(), this._state.dash, value);
   }
 
   save() {
