@@ -251,6 +251,82 @@ describe('win32 a11y: the diff', () => {
     }
   });
 
+  it('a window no client has read is not pushed, whoever else is listening', async () => {
+    // UiaClientsAreListening is true whenever any client on the desktop is
+    // subscribed to anything — the touch keyboard, the text services — so
+    // on a Windows machine it is true, and every commit walked and pushed
+    // a mirror nobody read: 1.6 ms of each frame of a graph pane's pan.
+    // The question is per window: has a client read *this* one lately.
+    const { a11y, win, bridge, unmount } = await setup(
+      h('window', null, h('box', { role: 'button', 'aria-label': 'One' })),
+    );
+    try {
+      const active = new Set();
+      bridge.uiaListeners = true;
+      bridge.uiaActive = (id) => active.has(id);
+      a11y._dirty.add(win);
+      a11y.flush();
+      assert.equal(bridge.uiaPushes.length, 1, 'the first push, whatever');
+
+      // something did change — a pan moves every item — and still nothing
+      // is walked or pushed for it
+      win.children[0].abs = { x: 1, y: 0, width: 10, height: 10 };
+      a11y._dirty.add(win);
+      a11y.flush();
+      assert.equal(bridge.uiaPushes.length, 1, 'walked for a client elsewhere');
+
+      // a client reads this window: its commits push again
+      active.add(win.window.id);
+      win.children[0].abs = { x: 2, y: 0, width: 10, height: 10 };
+      a11y._dirty.add(win);
+      a11y.flush();
+      assert.equal(
+        bridge.uiaPushes.length,
+        2,
+        'a reader of this window is told',
+      );
+
+      // a focus change goes by the desktop-wide answer: a client subscribed
+      // to focus events reads the focused element the moment it hears of it
+      active.clear();
+      win.children[0].abs = { x: 3, y: 0, width: 10, height: 10 };
+      a11y._dirty.add(win);
+      a11y.flush({ global: true });
+      assert.equal(bridge.uiaPushes.length, 3, 'a focus change is pushed');
+    } finally {
+      await unmount();
+    }
+  });
+
+  it('a stream of commits pushes once per interval, the last one catching up', async () => {
+    const { a11y, win, bridge, unmount } = await setup(
+      h('window', null, h('box', { role: 'button', 'aria-label': 'One' })),
+    );
+    try {
+      bridge.uiaListeners = true;
+      a11y._dirty.add(win);
+      a11y._commitFlush();
+      assert.equal(
+        bridge.uiaPushes.length,
+        1,
+        'a commit after quiet pushes at once',
+      );
+      for (let i = 0; i < 5; i++) {
+        win.children[0].abs = { x: 10 + i, y: 0, width: 10, height: 10 };
+        a11y._dirty.add(win);
+        a11y._commitFlush();
+      }
+      assert.equal(bridge.uiaPushes.length, 1, 'the stream is held');
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      assert.equal(bridge.uiaPushes.length, 2, 'and caught up once');
+      const xs = bridge.uiaPushes[1].nodes.map((n) => n.x);
+      assert.ok(xs.includes(14), 'with the last of it');
+    } finally {
+      a11y.bury();
+      await unmount();
+    }
+  });
+
   it('keeps a window whose HWND does not exist yet', async () => {
     const { a11y, bridge, unmount } = await setup(
       h('window', null, h('box', { role: 'button', 'aria-label': 'One' })),
