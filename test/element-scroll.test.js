@@ -21,7 +21,7 @@ import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient } from 'ntk';
 
-import { createRoot } from '../src/index.js';
+import { createRoot, Renderer } from '../src/index.js';
 import { registerElement, unregisterElement } from '../src/host.js';
 import { Node, Scrollable } from '../src/node.js';
 import { createMockApp } from './helpers/mock-app.js';
@@ -532,6 +532,133 @@ test('an overlapping sibling above the region keeps the full repaint', async () 
   assert.deepStrictEqual(blits(wnd), []);
 });
 
+/**
+ * The pane and, over it, a layer the pane pans with — a graph's node bodies:
+ * laid out in one absolutely positioned box, inside a box that clips it to
+ * the pane and paints nothing of its own. `setLayer(x, y)` moves it, in a
+ * commit of its own.
+ */
+async function mountCarrying({ layerStyle = {}, clipStyle = {} } = {}) {
+  register('pan');
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const ref = React.createRef();
+  const layerRef = React.createRef();
+  let setAt = null;
+  function Layer() {
+    const [at, set] = React.useState({ x: 30, y: 20 });
+    setAt = set;
+    return h(
+      'box',
+      {
+        ref: layerRef,
+        style: {
+          position: 'absolute',
+          left: at.x,
+          top: at.y,
+          width: 200,
+          height: 160,
+          ...layerStyle,
+        },
+      },
+      h('box', {
+        style: { height: 40, margin: 8, backgroundColor: '#f1c40f' },
+      }),
+      h('box', {
+        style: { height: 40, margin: 8, backgroundColor: '#9b59b6' },
+      }),
+    );
+  }
+  x11Root.render(
+    h(
+      'window',
+      { width: W, height: H, style: { backgroundColor: '#101820' } },
+      h('pan', { ref, style: { flexGrow: 1, margin: INSET } }),
+      h(
+        'box',
+        {
+          style: {
+            position: 'absolute',
+            left: INSET,
+            top: INSET,
+            width: VP.width,
+            height: VP.height,
+            overflow: 'hidden',
+            ...clipStyle,
+          },
+        },
+        h(Layer),
+      ),
+    ),
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const node = ref.current;
+  wnd.calls.length = 0;
+  let at = { x: 30, y: 20 };
+  /** Pan the pane, carrying the layer, and move the layer by `lx`/`ly` —
+   *  the pan's own shift unless told otherwise — the way `<Flow>` does:
+   *  the pan first, then the commit, inside one frame. */
+  const pan = (dx, dy, lx = dx, ly = dy) => {
+    node.panX += dx;
+    node.panY += dy;
+    node.scrollContents(node.viewport(), dx, dy, [layerRef.current]);
+    at = { x: at.x + lx, y: at.y + ly };
+    const next = at;
+    Renderer.flushSyncFromReconciler(() => setAt(next));
+  };
+  return { wnd, node, root: node.root, pan, layer: () => layerRef.current };
+}
+
+test('a layer the pan carries rides the blit, and costs only the strip', async () => {
+  const { wnd, root, pan, layer } = await mountCarrying();
+  const was = { ...layer().abs };
+  pan(0, 40);
+  await tick();
+  assert.deepStrictEqual(blits(wnd), [['scrollRegion', { ...VP }, 0, 40]]);
+  assert.deepStrictEqual(
+    root._lastDamageRects,
+    [{ x: VP.x, y: VP.y, width: VP.width, height: 40 }],
+    'the exposed strip and nothing else',
+  );
+  assert.deepStrictEqual(layer().abs, { ...was, y: was.y + 40 }, 'moved');
+
+  pan(-24, 0);
+  await tick();
+  assert.deepStrictEqual(blits(wnd).at(-1), [
+    'scrollRegion',
+    { ...VP },
+    -24,
+    0,
+  ]);
+  assert.deepStrictEqual(root._lastDamageRects, [
+    { x: VP.x + VP.width - 24, y: VP.y, width: 24, height: VP.height },
+  ]);
+});
+
+test('a layer the pan carries that moves by anything else keeps the full repaint', async () => {
+  const { wnd, pan } = await mountCarrying();
+  pan(0, 40, 0, 30);
+  await tick();
+  assert.deepStrictEqual(blits(wnd), [], 'its pixels are not where it went');
+});
+
+test('a box that paints over the carried layer keeps the full repaint', async () => {
+  const { wnd, pan } = await mountCarrying({
+    clipStyle: { backgroundColor: '#ffffff' },
+  });
+  pan(0, 40);
+  await tick();
+  assert.deepStrictEqual(blits(wnd), [], 'its fill does not move');
+});
+
+test('a layer the pan does not name keeps the full repaint', async () => {
+  const { wnd, node } = await mountCarrying();
+  node.pan(0, 40);
+  await tick();
+  assert.deepStrictEqual(blits(wnd), []);
+});
+
 test('a rounded corner on the element itself keeps the full repaint', async () => {
   // the ring and the corners are `Node.paint`'s, not the element's drawing,
   // and they do not translate
@@ -769,6 +896,112 @@ test('a blitted pan is byte-identical to the repaint it replaced', async (t) => 
     assert.ok(
       blitted.equals(repainted),
       'blitted pixels differ from a full repaint of the same scene',
+    );
+  } finally {
+    await x11Root.unmount();
+    await app.close();
+  }
+});
+
+test('so is a pan that carried a layer over the region', async (t) => {
+  // The riders' half of the same promise: the layer's pixels were moved
+  // with the pane's, its commit claimed nothing, and the strip repainted
+  // it where it went. A rider claimed nowhere, or moved and not blitted,
+  // shows up here as a difference.
+  register();
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const ref = React.createRef();
+    const layerRef = React.createRef();
+    let setAt = null;
+    function Layer() {
+      const [at, set] = React.useState({ x: 30, y: 20 });
+      setAt = set;
+      return h(
+        'box',
+        {
+          ref: layerRef,
+          style: {
+            position: 'absolute',
+            left: at.x,
+            top: at.y,
+            width: 220,
+            height: 170,
+          },
+        },
+        h('box', {
+          style: { height: 50, margin: 10, backgroundColor: '#f1c40f' },
+        }),
+        h('box', {
+          style: { height: 50, margin: 10, backgroundColor: '#9b59b6' },
+        }),
+      );
+    }
+    const instance = await new Promise((resolve) =>
+      x11Root.render(
+        h(
+          'window',
+          { width: W, height: H, style: { backgroundColor: '#101820' } },
+          h('pan', { ref, style: { flexGrow: 1, margin: INSET } }),
+          h(
+            'box',
+            {
+              style: {
+                position: 'absolute',
+                left: INSET,
+                top: INSET,
+                width: VP.width,
+                height: VP.height,
+                overflow: 'hidden',
+              },
+            },
+            h(Layer),
+          ),
+        ),
+        resolve,
+      ),
+    );
+    if (typeof instance.scrollRegion !== 'function') {
+      t.skip('installed ntk has no Window.scrollRegion yet');
+      return;
+    }
+    const node = ref.current;
+    const root = node.root;
+    const frame = () => {
+      root._scheduled = false;
+      root.flush();
+    };
+    frame();
+    await settle(app);
+
+    let blitCalls = 0;
+    const real = instance.scrollRegion.bind(instance);
+    instance.scrollRegion = (...args) => {
+      blitCalls += 1;
+      return real(...args);
+    };
+
+    node.panX += 20;
+    node.panY += 30;
+    node.scrollContents(node.viewport(), 20, 30, [layerRef.current]);
+    Renderer.flushSyncFromReconciler(() => setAt({ x: 50, y: 50 }));
+    frame();
+    await settle(app);
+    assert.strictEqual(blitCalls, 1, 'the fast path fired with the layer');
+    assert.ok(root._lastDamageRects, 'and the frame stayed bounded');
+    const blitted = await readPixels(
+      root._ctx ?? (root._ctx = root.window.getContext('2d')),
+    );
+
+    root.invalidate(false);
+    frame();
+    await settle(app);
+    const repainted = await readPixels(root._ctx);
+
+    assert.ok(
+      blitted.equals(repainted),
+      'the carried pan differs from a full repaint of the same scene',
     );
   } finally {
     await x11Root.unmount();

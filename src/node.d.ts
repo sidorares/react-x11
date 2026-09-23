@@ -545,8 +545,21 @@ export declare class Node {
    * coordinates and inside this node. The return says whether the frame is
    * still a blit candidate; the gates that matter close at frame time, and
    * every one of them falls back to repainting `rect`.
+   *
+   * `riders` are other nodes whose pixels in `rect` are part of what moves —
+   * a layer of widgets the element lays out over its own drawing and pans
+   * with it. Each is to move by exactly (dx, dy) in this frame's layout pass
+   * and change nothing else; then it does not decline the blit, and only
+   * what it leaves or reaches outside `rect` is repainted, so keep what it
+   * can paint inside the element (a box that clips it). Anything else it
+   * does is claimed as usual, which declines the blit.
    */
-  scrollContents(rect: Rect, dx: number, dy: number): boolean;
+  scrollContents(
+    rect: Rect,
+    dx: number,
+    dy: number,
+    riders?: Iterable<Node>,
+  ): boolean;
   /**
    * Did anything this node draws change? True damages the whole node, false
    * contributes no damage at all, and the default answers true for any prop

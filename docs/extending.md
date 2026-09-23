@@ -1354,6 +1354,29 @@ mounted as sibling nodes work the same way, as long as they sit outside the
 rect: one drawing over it is dragged along by the blit, so it declines
 instead.
 
+**Unless its pixels are meant to move with it.** A graph whose cards carry
+real widgets mounts them beside the pane, all in one box it moves with the
+pan — and that box is over the rect every frame. Name it as a rider and it
+rides the blit instead of declining it:
+
+```js
+onDragPan(dx, dy) {
+  this.panX += dx;
+  this.panY += dy;
+  // the layer moves by (dx, dy) in this same frame's commit
+  this.scrollContents(this.contentBox(), dx, dy, [this.bodiesLayer]);
+}
+```
+
+A rider promises what your drawing promises: that it moves by exactly
+(dx, dy) this frame and changes nothing else. Then its commit claims nothing,
+the blit carries its pixels with yours, and its move claims only what it
+leaves or reaches _outside_ the rect — so clip it to your element, with a
+box around it that paints nothing of its own, and that is nothing at all.
+Anything else it does — moving by some other amount, a widget in it
+changing, one mounting as the pan brings it in — is claimed the ordinary
+way, which declines that frame's blit; the next one blits again.
+
 **Zoom is not a blit.** Scaling resamples; it is a full repaint and should
 be. That is the right trade: a zoom is a gesture step, a pan is sixty of them
 a second.
