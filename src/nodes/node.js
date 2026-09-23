@@ -140,6 +140,9 @@ export class Node {
     // palette with one against the app's own — and none of those is a
     // *change* the user saw, so no transition may start from it.
     this._placed = false;
+    // the element whose pending `scrollContents` carries this node's pixels
+    // this frame (src/nodes/scrollblit.js), or null
+    this._ridesBlitOf = null;
     // the loops this node's style declares, whether or not they are running
     this._loops = null;
     // `resolvedTextStyle()`'s cache: this node's own text style over what it
@@ -623,8 +626,12 @@ export class Node {
       // subtree here, before and after, would be the repaint the overlay
       // exists to skip — and the pass claims both ends of the move itself
       // whenever the overlay cannot move the pixels.
+      //
+      // …and so is a node an element's pan carries (`scrollContents`'s
+      // riders): its pixels move with the region the frame blits, and the
+      // pass claims what they leave outside it (src/nodes/layout.js).
       if (
-        this.parent?.isGlArea &&
+        (this.parent?.isGlArea || this._ridesBlitOf !== null) &&
         moved &&
         !this.paintChanged(newProps, prev)
       ) {

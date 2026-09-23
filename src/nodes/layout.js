@@ -8,6 +8,51 @@ import { DAMAGE_SLOP, layoutDiff } from './damage.js';
 import { insetRect, intersectRects, outerPixels } from './rects.js';
 import { DEV } from './util.js';
 
+/** The parts of `rect` outside `hole`: up to four bands, full width above
+ *  and below, the rest beside. */
+function outside(rect, hole) {
+  const cut = intersectRects(rect, hole);
+  if (!cut) return [rect];
+  const out = [];
+  const right = rect.x + rect.width;
+  const bottom = rect.y + rect.height;
+  if (cut.y > rect.y) {
+    out.push({
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: cut.y - rect.y,
+    });
+  }
+  const cutBottom = cut.y + cut.height;
+  if (cutBottom < bottom) {
+    out.push({
+      x: rect.x,
+      y: cutBottom,
+      width: rect.width,
+      height: bottom - cutBottom,
+    });
+  }
+  if (cut.x > rect.x) {
+    out.push({
+      x: rect.x,
+      y: cut.y,
+      width: cut.x - rect.x,
+      height: cut.height,
+    });
+  }
+  const cutRight = cut.x + cut.width;
+  if (cutRight < right) {
+    out.push({
+      x: cutRight,
+      y: cut.y,
+      width: right - cutRight,
+      height: cut.height,
+    });
+  }
+  return out;
+}
+
 export const MEASURE_MODES = [];
 MEASURE_MODES[Yoga.MEASURE_MODE_UNDEFINED] = 'unconstrained';
 MEASURE_MODES[Yoga.MEASURE_MODE_EXACTLY] = 'exactly';
@@ -326,7 +371,15 @@ export class NodeLayout {
     // before anything under it moves: every pixel it had
     const was = this.paintBounds();
     layoutDiff.shift = shift;
-    return { sink: layoutDiff.sink, was, shift };
+    // Carried by an element's blit (`scrollContents`'s riders), when the
+    // move is the blit's own: then the pixels inside its rect are moved
+    // for it, and only what lies outside is owed.
+    const contents = this._ridesBlitOf?._pendingBlitContents;
+    const carried =
+      contents && contents.dx === shift.x && contents.dy === shift.y
+        ? contents.rect
+        : null;
+    return { sink: layoutDiff.sink, was, shift, carried };
   }
 
   /**
@@ -339,16 +392,32 @@ export class NodeLayout {
    * lists that paint it (`_paneReach`): the panes alone inside a
    * `<glarea>`, both for a subtree holding one.
    */
-  _claimRigidMove({ sink, was, shift }) {
-    const from = this._clippedByAncestors(was);
-    if (from) sink(from, this);
-    const to = this._clippedByAncestors({
+  _claimRigidMove({ sink, was, shift, carried }) {
+    const root = this.root;
+    const to = {
       x: was.x + shift.x,
       y: was.y + shift.y,
       width: was.width,
       height: was.height,
-    });
-    if (to) sink(to, this);
+    };
+    if (carried) {
+      // Straight to the window's list rather than through the diff, whose
+      // claims read as "this frame is not a pure scroll": what is outside
+      // the rect is beside it, and the blit stands.
+      const cap = root._damageRectCap();
+      for (const end of [was, to]) {
+        const clipped = this._clippedByAncestors(end);
+        if (!clipped) continue;
+        for (const piece of outside(clipped, carried)) {
+          root._claimLayoutMove(piece, this, cap);
+        }
+      }
+      return;
+    }
+    const from = this._clippedByAncestors(was);
+    if (from) sink(from, this);
+    const at = this._clippedByAncestors(to);
+    if (at) sink(at, this);
   }
 
   /**

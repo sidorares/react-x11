@@ -20,6 +20,7 @@ import {
   cornerSquaresOverlap,
   rectsOverlap,
 } from './rects.js';
+import { isPaintedColor } from './boxpaint.js';
 import { scrollbarTrackRect } from './scrollbars.js';
 import { debugPaint } from './window/debugpaint.js';
 
@@ -336,11 +337,22 @@ export class NodeScrollBlit {
    * and claims it as ordinary damage. Those claims land beside the rect and
    * the frame stays a blit.
    *
+   * `riders` are the other way round: nodes that are not this one whose
+   * pixels in `rect` are part of what moves — a layer of widgets an element
+   * lays out over its own drawing and pans with it (a graph's node bodies).
+   * Each is to move by exactly (dx, dy) in this frame's layout pass and to
+   * change nothing else. Doing that, it does not decline the blit by being
+   * over the rect, its commit claims nothing, and its move claims only
+   * what it leaves or reaches outside the rect (`_claimRigidMove`) — so
+   * keep what it can paint inside the element's box, a box that clips it
+   * being the way. Doing anything else, it is claimed like any other node,
+   * which declines the blit; the rect then repaints, riders and all.
+   *
    * Returns whether the frame is still a blit candidate. The real answer
    * arrives as `paintDamage()`, because most of the gates cannot be decided
    * until the frame closes; a `false` here is only the ones that can.
    */
-  scrollContents(rect, dx, dy) {
+  scrollContents(rect, dx, dy, riders) {
     const root = this.root;
     if (
       !root ||
@@ -403,6 +415,13 @@ export class NodeScrollBlit {
     // coalescing scrollTo gets from recording an origin
     state.dx += dx;
     state.dy += dy;
+    if (riders) {
+      for (const rider of riders) {
+        if (!rider || rider === this || rider.destroyed) continue;
+        (state.riders ??= new Set()).add(rider);
+        rider._ridesBlitOf = this;
+      }
+    }
     this._pendingBlitFrom ??= BLIT_CONTENTS;
     (root._pendingScrolls ??= new Set()).add(this);
     // ...and the claim about to be recorded is the shift itself, not a
@@ -437,6 +456,23 @@ export class NodeScrollBlit {
     const sv = this._blitViewport();
     const clipped = sv ? intersectRects(bounds, sv.paintBounds()) : bounds;
     return clipped && this._clippedByAncestors(clipped);
+  }
+
+  /**
+   * Whether this node puts no pixels of its own on the surface — a plain
+   * box with no fill, border, shadow or outline, holding what is under it
+   * and nothing more. Conservative: anything but a box answers false.
+   */
+  _paintsNothingOwn() {
+    if (this.kind !== 'box' || this.isScroller?.()) return false;
+    const style = this.style ?? EMPTY_STYLE;
+    if (isPaintedColor(style.backgroundColor) || style.backgroundImage) {
+      return false;
+    }
+    if (style.opacity !== undefined && style.opacity < 1) return false;
+    if (this._outlineExtent() > 0 || this._shadowExtent() > 0) return false;
+    const bw = resolveBorderWidths(style, this.direction);
+    return !(bw.top > 0 || bw.right > 0 || bw.bottom > 0 || bw.left > 0);
   }
 
   /** The scroll container above this node that is waiting to blit, if there
@@ -475,6 +511,10 @@ export class WindowScrollBlit {
     const contents = nodes[0]._pendingBlitContents;
     const ledger = nodes[0]._blitLedger;
     for (const n of nodes) {
+      // the pass that needed them is over: a rider is a rider for a frame
+      for (const rider of n._pendingBlitContents?.riders ?? []) {
+        if (rider._ridesBlitOf === n) rider._ridesBlitOf = null;
+      }
       n._pendingBlitFrom = null;
       n._pendingBlitContents = null;
       n._blitLedger = null;
@@ -803,7 +843,13 @@ export class WindowScrollBlit {
    * balloon back towards the whole viewport. With no bars the L is two
    * disjoint rects and stays two.
    */
-  _applyContentsBlit(node, { rect: vp, dx, dy }, width, height, target) {
+  _applyContentsBlit(
+    node,
+    { rect: vp, dx, dy, riders },
+    width,
+    height,
+    target,
+  ) {
     // only a whole-pixel shift of a whole-pixel region is a copy
     if (!isIntegerRect(vp)) return;
     if (!Number.isInteger(dx) || !Number.isInteger(dy)) return;
@@ -872,7 +918,7 @@ export class WindowScrollBlit {
     ) {
       return;
     }
-    if (!this._scrollBlitSafe(node, shifted, target.top)) return;
+    if (!this._scrollBlitSafe(node, shifted, target.top, riders)) return;
     // the element's deltas are already how far the pixels moved, the sense
     // scrollRegion takes (0 + x rather than x: a caller's -0 would survive
     // into request buffers and test comparisons)
@@ -956,7 +1002,7 @@ export class WindowScrollBlit {
    * only its own children — what the window draws under the surface was
    * never in the pane's pixels.
    */
-  _scrollBlitSafe(scroller, vp, top = this) {
+  _scrollBlitSafe(scroller, vp, top = this, riders = null) {
     // the window itself scrolls: everything inside it *is* the scrolled
     // content, so there is nothing that could be dragged along
     if (scroller === this) return true;
@@ -1014,7 +1060,14 @@ export class WindowScrollBlit {
         // be dragged along — a pulsing toast over a list is what promotion
         // is for, and this is the half of it that keeps the pan a blit.
         if (child._promoted) continue;
-        if (rectsOverlap(child._subtreeBounds(), vp)) return false;
+        // …and a node the blit carries has pixels that move with it
+        // (`scrollContents`'s riders)
+        if (riders?.has(child)) continue;
+        if (!rectsOverlap(child._subtreeBounds(), vp)) continue;
+        // A box that paints nothing of its own is its children, and as
+        // safe as they are: the box that clips a rider to its element.
+        if (child._paintsNothingOwn() && check(child)) continue;
+        return false;
       }
       return true;
     };
