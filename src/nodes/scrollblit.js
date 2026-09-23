@@ -426,15 +426,17 @@ export class NodeScrollBlit {
    * own, leave `_blitKeptDamage` a damage rect many times the viewport to
    * refuse. Null when the clip left nothing.
    *
-   * Only while a blit is pending — outside that this is `paintBounds()` and
-   * one property read. Clipping every claim to every clipping ancestor
-   * would be correct too, and is a bigger change than the frame this is
-   * about.
+   * And clipped to every other clipping ancestor too, for the same reason
+   * without the blit: a claim past an `overflow: 'hidden'` box repaints
+   * pixels nothing inside it can reach. A layer of cards panned inside a
+   * clipped graph pane reaches past the pane on every side, and its
+   * claims, unclipped, were the whole window.
    */
   _claimBounds() {
     const bounds = this.paintBounds();
     const sv = this._blitViewport();
-    return sv ? intersectRects(bounds, sv.paintBounds()) : bounds;
+    const clipped = sv ? intersectRects(bounds, sv.paintBounds()) : bounds;
+    return clipped && this._clippedByAncestors(clipped);
   }
 
   /** The scroll container above this node that is waiting to blit, if there
