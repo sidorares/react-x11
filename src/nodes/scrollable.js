@@ -301,11 +301,11 @@ export const Scrollable = (Base) =>
             // for a `<glarea>` child's move that this pane rides (issue
             // #644): its box claimed nothing, and a pane laid out again may
             // have moved rows the move's copy carries where they were.
-            if (clamped || layoutDiff.ride) outer(vp);
+            if (clamped || layoutDiff.ride) outer(vp, this);
           } else {
-            layoutDiff.sink = (rect) => {
+            layoutDiff.sink = (rect, node) => {
               const clipped = intersectRects(rect, vp);
-              if (clipped) outer(clipped);
+              if (clipped) outer(clipped, node);
             };
           }
           this._claimThumbs(thumbsWere, outer);
@@ -863,8 +863,8 @@ export const Scrollable = (Base) =>
         if (sameThumb(before, after)) continue;
         // a pixel of slop for the rounded corners' antialiasing, as the
         // blit's own thumb repair takes
-        if (before) sink(insetRect(before, -1));
-        if (after) sink(insetRect(after, -1));
+        if (before) sink(insetRect(before, -1), this);
+        if (after) sink(insetRect(after, -1), this);
       }
     }
 

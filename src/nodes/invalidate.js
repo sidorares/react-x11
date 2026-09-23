@@ -477,6 +477,27 @@ export class WindowInvalidate {
     return WINDOW_ONLY;
   }
 
+  /**
+   * One rect the layout diff says a node moved through (`layoutDiff.sink`,
+   * nodes/window/flush.js), to the lists that paint that node — the same
+   * reach a claim of it has (`_paneReach`). A node inside a surface is the
+   * panes' alone: the window's pass under the surface would repaint pixels
+   * no child of it ever had, and it went to both, so a card dragged across
+   * a graph drawn through GL was a window pass under the surface on every
+   * step. Answers whether the window's list took it.
+   */
+  _claimLayoutMove(rect, node, cap) {
+    const reach =
+      this._overlaid.size !== 0 ? this._paneReach(node ?? null) : WINDOW_ONLY;
+    let windowTook = false;
+    if (reach !== PANES_ONLY && this._damage !== FULL_DAMAGE) {
+      this._damage = addDamageRect(this._damage, rect, cap);
+      windowTook = true;
+    }
+    if (reach !== WINDOW_ONLY) this._addPaneDamage(rect);
+    return windowTook;
+  }
+
   /** One rect more for the panes, unless they repaint whole already. */
   _addPaneDamage(rect) {
     if (this._paneDamage === FULL_DAMAGE) return;

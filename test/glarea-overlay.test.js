@@ -1548,6 +1548,77 @@ test('a child pushed along by another’s growth is repainted where it went', as
   }
 });
 
+test('a node the surface holds that layout moved costs the window nothing', async () => {
+  // The layout diff claimed every node it moved on both lists, the
+  // window's and the panes', where a claim of the same node goes to the
+  // panes alone (`_paneReach`): the window's pass under the surface repaints
+  // pixels none of its children ever had. A card dragged across a graph
+  // drawn through GL was a window pass under the surface, a step.
+  const noDraw = () => {};
+  const tree = (grow, left = 10) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(
+        'glarea',
+        { style: { flexGrow: 1 }, clearColor: '#000000', onDraw: noDraw },
+        h(
+          'box',
+          {
+            style: {
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              right: 0,
+              bottom: 0,
+            },
+          },
+          h(
+            'box',
+            {
+              style: {
+                position: 'absolute',
+                left,
+                top: 10,
+                width: 60,
+                height: 100,
+              },
+            },
+            h('box', {
+              key: 'a',
+              style: { height: grow, backgroundColor: '#ff0000' },
+            }),
+            h('box', {
+              key: 'b',
+              style: { height: 20, backgroundColor: '#0000ff' },
+            }),
+          ),
+        ),
+      ),
+    );
+  const s = await mount(() => tree(20), { panes: 1 });
+  try {
+    await frameOf(s, tree(40));
+    assert.deepEqual(
+      s.windowNode._lastDamageRects,
+      [],
+      'pushed along by its sibling',
+    );
+    await frameOf(s, tree(40, 90));
+    assert.deepEqual(
+      s.windowNode._lastDamageRects,
+      [],
+      'and carried by a box that moved',
+    );
+    const [pane] = s.area()._overlay.panes;
+    const at = (x, y) => rgbOf(pane.wnd, x - pane.rect.x, y - pane.rect.y);
+    near(await at(120, 45), RED, 'the pane has it where it went');
+    near(await at(120, 65), BLUE);
+  } finally {
+    await s.close();
+  }
+});
+
 test('a sticky header in a scroll pane over the surface stays put on the pane', async () => {
   // The pane's own scroll blit carries the header along with the rows, and
   // the header's re-placement claims it back — both on the pane.
