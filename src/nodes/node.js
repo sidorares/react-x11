@@ -605,6 +605,18 @@ export class Node {
     // which is what keeps a commit from widening the region to every node
     // it touched.
     if (layoutChanged) {
+      const moved = onlyInsetsChanged(style, prevStyle);
+      // An absolutely positioned box of a set size that moved and changed
+      // nothing else is out of its ancestors' flow and sized by its width
+      // and height rather than its insets, so no content floor anywhere
+      // moved with it (src/nodes/invalidate.js, `'position'`).
+      const reason =
+        moved &&
+        style.position === 'absolute' &&
+        typeof style.width === 'number' &&
+        typeof style.height === 'number'
+          ? 'position'
+          : 'props';
       // A child of a `<glarea>` that only moved (issue #644): its pixels are
       // on a pane, one shift away, and the layout pass reports the move to
       // the overlay rather than claiming it (src/glnodes.js). A claim of the
@@ -613,12 +625,12 @@ export class Node {
       // whenever the overlay cannot move the pixels.
       if (
         this.parent?.isGlArea &&
-        onlyInsetsChanged(style, prevStyle) &&
+        moved &&
         !this.paintChanged(newProps, prev)
       ) {
-        this.invalidate(true, NO_DAMAGE, 'props');
+        this.invalidate(true, NO_DAMAGE, reason);
       } else {
-        this._invalidateLayout('props');
+        this._invalidateLayout(reason);
       }
     } else {
       // The style half is asked here rather than inside `paintChanged`, and

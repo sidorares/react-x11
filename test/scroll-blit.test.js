@@ -392,6 +392,55 @@ test('a border on the scroll box keeps the full repaint', async () => {
   assert.strictEqual(blits(wnd).length, 0);
 });
 
+test('at 1.25x a scroll box inside a bordered one still blits', async () => {
+  // A 1px border there is 1.25 device pixels, and layout puts what is inside
+  // it at the rounded inner edge — so the scroll box starts on the column the
+  // ring reaches a quarter of the way into, and paints all of it. Tested
+  // exactly, that column refused every blit under a bordered box at 125%,
+  // the scale most Windows laptops run at.
+  const app = createMockApp();
+  const x11Root = await createRoot({ app, scale: 1.25 });
+  const ref = React.createRef();
+  x11Root.render(
+    h(
+      'window',
+      { width: 400, height: 400 },
+      h(
+        'box',
+        {
+          style: {
+            flexGrow: 1,
+            margin: 12,
+            borderWidth: 1,
+            borderColor: '#333333',
+          },
+        },
+        h(
+          'box',
+          { ref, style: { overflow: 'scroll', flexGrow: 1 } },
+          ...Array.from({ length: 20 }, (_, i) =>
+            h('box', {
+              key: i,
+              style: {
+                height: 40,
+                flexShrink: 0,
+                backgroundColor: i % 2 ? '#ffffff' : '#eef1f5',
+              },
+            }),
+          ),
+        ),
+      ),
+    ),
+  );
+  const wnd = app.windows[0];
+  await tick();
+  wnd.calls.length = 0;
+  // 48 logical pixels, 60 device ones: a whole-pixel shift
+  ref.current.scrollTo(48);
+  await tick();
+  assert.strictEqual(blits(wnd).length, 1, 'the scroll moved the pixels');
+});
+
 test('an overlapping sibling above the viewport keeps the full repaint', async () => {
   const { wnd, ref } = await mount({
     extra: h('box', {

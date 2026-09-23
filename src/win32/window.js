@@ -53,6 +53,9 @@ export class Win32Window {
     this._pendingFrames = [];
     this._owesFullPaint = false;
     this._dirty = false;
+    // a pane over a `<glarea>` here changed and its commit is this frame's
+    // (src/win32/overlay.js)
+    this._owesCommit = false;
 
     // `overrideRedirect` is how a `<popup>` says what it is — a menu, a
     // select's list, a tooltip. On X11 it means "the window manager does not
@@ -577,7 +580,13 @@ export class Win32Window {
         this._native.endDraw(this.id);
       }
     }
-    if (painted) this._native.commit();
+    // …and the panes over a `<glarea>` in this window, painted before this
+    // (src/win32/overlay.js), in the same commit: a frame whose only change
+    // was theirs still owes one
+    if (painted || this._owesCommit) {
+      this._owesCommit = false;
+      this._native.commit();
+    }
   }
 
   /**
@@ -602,6 +611,12 @@ export class Win32Window {
       Math.round(dx),
       Math.round(dy),
     );
+  }
+
+  /** The frame is the ordinary paint walk, a pass per damage rect, so it
+   * paints through core's paint cache (src/nodes/window/flush.js). */
+  get usesPaintCache() {
+    return true;
   }
 
   /** DirectComposition does not hold a frame back the way an X server's fence

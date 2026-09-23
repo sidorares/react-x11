@@ -36,6 +36,22 @@ import { onApp } from '../trace-registry.js';
 
 const TRACE = process.env.REACT_X11_TRACE_A11Y === '1';
 
+/**
+ * How often commits may push the mirror, in ms. A commit that follows a
+ * quiet spell pushes at once; a stream of them — a pan, a drag, a value
+ * ticking — pushes once per interval, the last of them catching up.
+ *
+ * UIA's clients are almost always listening on a desktop Windows (the
+ * touch keyboard, the text services and others ask for the tree), so the
+ * push is not the rare case the listening gate makes it elsewhere: a walk
+ * of the window and a marshalled diff, on every commit. For a graph pane
+ * whose every item moves on every step of a pan that was 1.6 ms of each
+ * frame. A screen reader reads positions on demand and does not need
+ * sixty of them a second; a focus change, which it is waiting on, still
+ * pushes at once (`hooks.focus`), as does an announcement.
+ */
+const COMMIT_PUSH_MS = 100;
+
 // --------------------------------------------------------------------------
 // The one translation that is Windows' own
 // --------------------------------------------------------------------------
@@ -300,6 +316,9 @@ export class Win32Accessibility {
     this._pushed = new Set();
     this._unsubscribes = [];
     this.dead = false;
+    /** When a commit last pushed, and the push a stream of commits owes. */
+    this._lastCommitPush = -Infinity;
+    this._trailing = null;
   }
 
   _idOf(node) {
@@ -388,15 +407,29 @@ export class Win32Accessibility {
    * commit and paying nothing — the same shape as the AT-SPI bridge's "no
    * bus, no work".
    *
+   * *Nobody* is asked per window where the bridge can say (`uiaActive`):
+   * whether a client has read this window's tree in the last few seconds.
+   * UIA's own answer, `UiaClientsAreListening`, is whether any client on
+   * the desktop is subscribed to anything, and on a Windows running the
+   * touch keyboard or the text services that is always yes — so every
+   * commit walked and diffed the window for a mirror nobody read. A client
+   * that comes back after a quiet spell is noticed on its first read and
+   * asks for a fresh push (`wanted`). `global` keeps the desktop-wide answer
+   * for a focus change and an announcement: a client subscribed to focus
+   * events reads the focused element the moment it hears of it, before
+   * any read of ours could say it was there.
+   *
    * With one exception, which is what makes the gate safe: **every window is
    * pushed once regardless.** A client's first `WM_GETOBJECT` has to find a
    * tree, and it arrives before anything in this process knows a client
    * exists. After that first push the mirror is live, and a client attaching
    * later asks for a fresh one (`uia-wanted`).
    */
-  flush({ force = false } = {}) {
+  flush({ force = false, global = false } = {}) {
     if (this.dead || this._dirty.size === 0) return;
-    const listening = force || this._native.uiaListening();
+    const perWindow =
+      !force && !global && typeof this._native.uiaActive === 'function';
+    const listening = force || (!perWindow && this._native.uiaListening());
     const windows = [...this._dirty];
     this._dirty.clear();
     for (const win of windows) {
@@ -409,10 +442,35 @@ export class Win32Accessibility {
         this._dirty.add(win);
         continue;
       }
-      if (!listening && this._pushed.has(wnd.id)) continue;
+      if (
+        !listening &&
+        this._pushed.has(wnd.id) &&
+        !(perWindow && this._native.uiaActive(wnd.id))
+      ) {
+        continue;
+      }
       this._pushed.add(wnd.id);
       this._push(win);
     }
+  }
+
+  /** A commit's push, at most once per `COMMIT_PUSH_MS`. */
+  _commitFlush() {
+    if (this.dead || this._dirty.size === 0) return;
+    const now = performance.now();
+    const wait = this._lastCommitPush + COMMIT_PUSH_MS - now;
+    if (wait <= 0) {
+      this._lastCommitPush = now;
+      this.flush();
+      return;
+    }
+    if (this._trailing) return;
+    this._trailing = setTimeout(() => {
+      this._trailing = null;
+      this._lastCommitPush = performance.now();
+      this.flush();
+    }, wait);
+    this._trailing.unref?.();
   }
 
   /** A window's HWND exists now, so what is owed for it can be pushed. */
@@ -546,12 +604,12 @@ export class Win32Accessibility {
       // Pushed now rather than at the next commit: a focus change is what a
       // screen reader is waiting for, and the event has to follow an update
       // that already carries the new state or the client reads the old one.
-      this.flush();
+      this.flush({ global: true });
       const wnd = this._windowOf(win);
       if (wnd && next) this._native.uiaFocusChanged(wnd.id, this._idOf(next));
     };
     hooks.windowFocus = (win) => this._dirty.add(win);
-    hooks.commit = () => this.flush();
+    hooks.commit = () => this._commitFlush();
     hooks.announce = (text, opts) => {
       const win =
         this.toplevels.find((w) => w.events?.windowFocused) ??
@@ -562,7 +620,7 @@ export class Win32Accessibility {
       // The window must be in the mirror before anything can be announced
       // from it, which on the first announcement of a session it may not be.
       this._dirty.add(win);
-      this.flush();
+      this.flush({ global: true });
       return Boolean(
         this._native.uiaAnnounce(wnd.id, String(text), !opts?.assertive),
       );
@@ -579,6 +637,8 @@ export class Win32Accessibility {
   bury() {
     if (this.dead) return;
     this.dead = true;
+    if (this._trailing) clearTimeout(this._trailing);
+    this._trailing = null;
     for (const key of Object.keys(hooks)) hooks[key] = null;
     for (const unsubscribe of this._unsubscribes) unsubscribe();
     this._unsubscribes = [];

@@ -115,6 +115,18 @@ export function overlayRefusal(app) {
 }
 
 /**
+ * A backend saying nothing can be drawn over a GL surface on this app, and
+ * why: one whose child windows are not X windows, and that has no
+ * composited pane either — on Windows a window with a parent is a GL
+ * surface of its own (src/win32/glarea.js), and a bridge without layers has
+ * nothing else to offer. Before the first render, like `beginGlOverlay`, so
+ * `useSupports('glOverlay')` never changes its answer.
+ */
+export function refuseOverlay(app, reason) {
+  if (app) refusals.set(app, reason);
+}
+
+/**
  * Is this an X server where nothing can be drawn over a GL surface? Asked
  * in `createRoot`, with the other startup probes and before the first
  * render, so that `canOverlay` answers the same from the first frame on —
@@ -654,35 +666,46 @@ export class GlOverlay {
   _paintPane(pane, passes) {
     const area = this.area;
     const root = area.root;
-    const ctx = pane.context();
-    if (!ctx || !root) return;
+    if (!root) return;
     // an opaque pane is filled with what the surface starts its frames from;
     // a composited one is cleared, and shows the frame itself
     const ground = pane.transparent ? null : groundOf(area.props);
-    ctx.save();
-    try {
-      ctx.translate(-pane.rect.x, -pane.rect.y);
-      for (const pass of passes) {
-        ctx.save();
-        try {
-          ctx.beginPath();
-          ctx.rect(pass.x, pass.y, pass.width, pass.height);
-          ctx.clip();
-          if (ground) {
-            ctx.fillStyle = ground;
-            ctx.fillRect(pass.x, pass.y, pass.width, pass.height);
-          } else {
-            ctx.clearRect(pass.x, pass.y, pass.width, pass.height);
-          }
-          root._paintDamage = pass;
-          area._paintChildren(ctx);
-        } finally {
-          root._paintDamage = null;
-          ctx.restore();
+    // one pass, drawn by a context in window coordinates
+    const paintPass = (ctx, pass) => {
+      ctx.save();
+      try {
+        ctx.beginPath();
+        ctx.rect(pass.x, pass.y, pass.width, pass.height);
+        ctx.clip();
+        if (ground) {
+          ctx.fillStyle = ground;
+          ctx.fillRect(pass.x, pass.y, pass.width, pass.height);
+        } else {
+          ctx.clearRect(pass.x, pass.y, pass.width, pass.height);
         }
+        root._paintDamage = pass;
+        area._paintChildren(ctx);
+      } finally {
+        root._paintDamage = null;
+        ctx.restore();
       }
-    } finally {
-      ctx.restore();
+    };
+    if (typeof pane.wnd.paintPasses === 'function') {
+      // A pane drawn a rect at a time — a DirectComposition surface hands
+      // out a context per `BeginDraw`, valid until `EndDraw` — opens each
+      // pass itself (src/win32/overlay.js), the way such a window takes its
+      // frame through `presentFrame`.
+      pane.wnd.paintPasses(passes, paintPass);
+    } else {
+      const ctx = pane.context();
+      if (!ctx) return;
+      ctx.save();
+      try {
+        ctx.translate(-pane.rect.x, -pane.rect.y);
+        for (const pass of passes) paintPass(ctx, pass);
+      } finally {
+        ctx.restore();
+      }
     }
     // A layer's contents are a copy the bitmap is pushed to; an X window's
     // backing store is blitted by ntk on its own, from the paint above

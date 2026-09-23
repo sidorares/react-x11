@@ -63,6 +63,27 @@ describe('win32 <popup grab>: a press somewhere else', () => {
     );
   });
 
+  it('does not close the menu the press itself opened', () => {
+    const { app, windows } = setup();
+    const [owner, menu] = windows;
+    // A `<Select>`: the press on it opens the list, which takes its grab in
+    // the same dispatch — before the press is judged against open menus.
+    owner.on('mousedown', (ev) => {
+      if (!ev.dismissed) menu.grabPointer({}, () => {});
+    });
+
+    app._route(press(owner.id));
+
+    assert.equal(
+      dismissed(menu),
+      false,
+      'the list closed on the press that opened it — every <Select> did',
+    );
+    // …and the next press beside it closes it as before
+    app._route(press(owner.id));
+    assert.ok(dismissed(menu), 'a press beside the open list left it open');
+  });
+
   it('does not close a menu the press landed in', () => {
     const { app, windows } = setup();
     const [, menu] = windows;

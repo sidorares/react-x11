@@ -729,3 +729,53 @@ test('a change under a hidden subtree is measured when it is shown', async () =>
   );
   await root.unmount();
 });
+
+test('an absolutely positioned box of a set size that only moved measures no floors', async () => {
+  // A card dragged across a graph pane, or a thousand of them panned: every
+  // step moved a box that is out of its ancestors' flow and sized by its
+  // own width and height, and every step measured the content floors of
+  // the tree again — half of the layout a drag step cost.
+  const tree = (left, width = 60) =>
+    box(
+      { flexDirection: 'row', flexGrow: 1 },
+      box({ width: 100 }, h('text', null, 'a label that has a floor')),
+      h('box', {
+        style: { position: 'absolute', left, top: 10, width, height: 30 },
+      }),
+    );
+  const app = createMockApp();
+  const root = await createRoot({ app });
+  root.render(
+    h('window', { title: 'moves', width: 300, height: 200 }, tree(10)),
+  );
+  await tick();
+  app.windows[0].flushFrame?.();
+  await tick();
+  const win = app.windows[0]._reactX11Node;
+  let measured = 0;
+  const own = win._applyContentFloors.bind(win);
+  win._applyContentFloors = (...args) => {
+    measured++;
+    return own(...args);
+  };
+  for (const left of [20, 35, 50]) {
+    root.render(
+      h('window', { title: 'moves', width: 300, height: 200 }, tree(left)),
+    );
+    await tick();
+    app.windows[0].flushFrame?.();
+    await tick();
+  }
+  assert.strictEqual(measured, 0, 'three moves, no floors measured');
+  const moved = win.children[0].children[1];
+  assert.strictEqual(moved.abs.x, 50, 'and the box is where it was sent');
+
+  // …while a change to its size is a change to what it holds
+  root.render(
+    h('window', { title: 'moves', width: 300, height: 200 }, tree(50, 80)),
+  );
+  await tick();
+  app.windows[0].flushFrame?.();
+  await tick();
+  assert.strictEqual(measured, 1, 'a new size measures them');
+});

@@ -435,3 +435,90 @@ describe(
     });
   },
 );
+
+describe('a bridge that takes a path whole', () => {
+  /** the fake above, plus `ctxPath`, recording each stream it is handed */
+  function bulk() {
+    const streams = [];
+    const calls = [];
+    const native = {
+      calls,
+      streams,
+      ctxBeginPath: () => calls.push(['begin']),
+      ctxPath: (s, stream) => {
+        // a copy: the context reuses the buffer for the next path
+        streams.push(Array.from(stream));
+        calls.push(['path', stream.length]);
+      },
+      ctxStroke: () => calls.push(['stroke']),
+      ctxFill: () => calls.push(['fill']),
+      ctxClip: () => calls.push(['clip']),
+    };
+    const ctx = new BackendContext2D(
+      new Proxy(native, { get: (t, k) => (k in t ? t[k] : () => undefined) }),
+      () => ({ fake: true }),
+      () => 1,
+    );
+    return { ctx, native };
+  }
+
+  test('a path is recorded as it is built and handed over in one call', () => {
+    const { ctx, native } = bulk();
+    native.calls.length = 0;
+    ctx.beginPath();
+    ctx.moveTo(1, 2);
+    ctx.lineTo(3, 4);
+    ctx.bezierCurveTo(5, 6, 7, 8, 9, 10);
+    ctx.arc(20, 20, 5, 0, Math.PI, true);
+    ctx.closePath();
+    assert.deepStrictEqual(native.calls, [], 'nothing crossed while building');
+    ctx.fill();
+    assert.deepStrictEqual(native.calls, [['begin'], ['path', 21], ['fill']]);
+    assert.deepStrictEqual(native.streams[0], [
+      0,
+      1,
+      2,
+      1,
+      3,
+      4,
+      2,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      7,
+      20,
+      20,
+      5,
+      0,
+      Math.PI,
+      1,
+      4,
+    ]);
+  });
+
+  test('a stroke split into chunks hands each chunk over whole', () => {
+    const { ctx, native } = bulk();
+    ctx.lineWidth = 2;
+    rings(ctx, 3000, 13);
+    native.calls.length = 0;
+    ctx.stroke();
+    const paths = native.calls.filter((c) => c[0] === 'path').length;
+    const chunks = native.calls.filter((c) => c[0] === 'stroke').length;
+    assert.ok(chunks > 1, 'the stroke was split');
+    assert.strictEqual(paths, chunks, 'one call per chunk');
+    // the chunks together are the whole path, in order
+    const all = native.streams.flat();
+    assert.strictEqual(all.length, 3000 * (3 + 12 * 3 + 1));
+  });
+
+  test('a bridge without it is handed the path a point at a time', () => {
+    const { ctx, native } = context();
+    ctx.beginPath();
+    ctx.moveTo(1, 2);
+    ctx.lineTo(3, 4);
+    assert.deepStrictEqual(native.calls, [['begin'], ['M', 1, 2], ['L', 3, 4]]);
+  });
+});

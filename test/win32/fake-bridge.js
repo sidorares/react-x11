@@ -9,7 +9,7 @@
 // frame reached. The Cocoa scroll-blit test keeps a pixel-holding fake for the
 // same reason.
 
-export function createFakeBridge() {
+export function createFakeBridge({ layers = true } = {}) {
   const calls = [];
   const record = (name, ...args) => calls.push([name, ...args]);
 
@@ -288,6 +288,82 @@ export function createFakeBridge() {
   bridge.uiaPropertyChanged = (windowId, nodeId, which) => {
     bridge.uiaProperties.push([windowId, nodeId, which]);
   };
+
+  // --- layers ------------------------------------------------------------
+  //
+  // What a `<glarea>`'s children are drawn on (src/win32/overlay.js): a
+  // visual with a surface of its own over the window's swap chains. Drawn
+  // like a window — one BeginDraw per pass, in the layer's own coordinates —
+  // so each pass is an open surface here too, and its ops are kept per
+  // layer. `layers: false` is a bridge from before them.
+
+  if (layers) {
+    let nextLayer = 1;
+    bridge.layers = new Map();
+    bridge.layerCreate = (windowId, x, y, width, height) => {
+      if (!bridge.windows.get(windowId)?.composed) return 0;
+      const id = nextLayer++;
+      bridge.layers.set(id, {
+        id,
+        windowId,
+        x,
+        y,
+        width,
+        height,
+        visible: true,
+        passes: [],
+        ops: [],
+        scrolled: [],
+      });
+      record('layerCreate', windowId, x, y, width, height);
+      return id;
+    };
+    bridge.layerSetRect = (id, x, y, width, height) => {
+      const layer = bridge.layers.get(id);
+      if (!layer) return false;
+      Object.assign(layer, { x, y, width, height });
+      record('layerSetRect', id, x, y, width, height);
+      return true;
+    };
+    bridge.layerSetVisible = (id, on) => {
+      const layer = bridge.layers.get(id);
+      if (layer) layer.visible = on;
+      record('layerSetVisible', id, on);
+    };
+    bridge.layerBeginDraw = (id, x, y, w, h) => {
+      const layer = bridge.layers.get(id);
+      // the real surface refuses a rect that leaves it, as a window's does
+      if (
+        !layer ||
+        x < 0 ||
+        y < 0 ||
+        x + w > layer.width ||
+        y + h > layer.height
+      ) {
+        return 0;
+      }
+      const handle = nextSurface++;
+      bridge.open.set(handle, { layer: id, x, y, w, h, ops: layer.ops });
+      layer.passes.push([x, y, w, h]);
+      return handle;
+    };
+    bridge.layerEndDraw = (id) => {
+      for (const [handle, surface] of bridge.open) {
+        if (surface.layer === id) bridge.open.delete(handle);
+      }
+      record('layerEndDraw', id);
+      return true;
+    };
+    bridge.layerScroll = (id, x, y, w, h, dx, dy) => {
+      bridge.layers.get(id)?.scrolled.push([x, y, w, h, dx, dy]);
+      record('layerScroll', id, x, y, w, h, dx, dy);
+      return true;
+    };
+    bridge.layerDestroy = (id) => {
+      bridge.layers.delete(id);
+      record('layerDestroy', id);
+    };
+  }
 
   // --- panes -------------------------------------------------------------
   //
