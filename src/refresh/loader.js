@@ -327,6 +327,28 @@ function buildTransformer({ babel, jsxTransform, refreshTransform }, options) {
 let registered = false;
 
 /**
+ * Which files stay out of the hot graph: every package in node_modules,
+ * react-x11's own src/, and whatever the app's `ignore` names.
+ *
+ * Compared with forward slashes, whichever the path arrives with: on
+ * Windows a file path's separators are backslashes, and a forward-slash
+ * test let every package in node_modules into the hot graph — where the
+ * HMR layer's rewrite of a package's modules could leave one reading an
+ * import before it was bound (entities, under htmlparser2).
+ */
+export function hotIgnoreFor(ignore, srcDir = SRC_DIR) {
+  const src = srcDir.replaceAll('\\', '/');
+  return (path) => {
+    const slashed = path.replaceAll('\\', '/');
+    return (
+      slashed.includes('/node_modules/') ||
+      slashed.startsWith(src) ||
+      (ignore ? ignore(path) === true : false)
+    );
+  };
+}
+
+/**
  * Register the hot-reload loader. `react-x11/refresh/register` calls this
  * with no options; a tool that needs the seams writes its own two-line
  * `--import` module and passes them here.
@@ -362,10 +384,7 @@ export async function registerRefresh(options = {}) {
   const { ignore } = validated;
   registered = true;
 
-  const hotIgnore = (path) =>
-    path.includes('/node_modules/') ||
-    path.startsWith(SRC_DIR) ||
-    (ignore ? ignore(path) === true : false);
+  const hotIgnore = hotIgnoreFor(ignore);
 
   nodeModule.registerHooks({
     load(url, context, nextLoad) {
