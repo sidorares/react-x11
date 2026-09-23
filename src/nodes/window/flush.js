@@ -326,9 +326,26 @@ export class WindowFlush {
     // list was still taken (its bookkeeping is what keeps the two paths one
     // code) and is simply not consumed; the presenter diffs at the layer.
     if (typeof this.window.presentFrame === 'function') {
-      // the panes are no presenter's: they paint from their damage either way
-      if (this._overlaid.size !== 0) this._paintOverlays(paneDamage);
-      this.window.presentFrame(this, damage);
+      // A presenter whose frame is the ordinary paint walk — a pass per
+      // damage rect into a context, the Windows window's — paints through
+      // the paint cache as an ntk window does, and says so
+      // (`usesPaintCache`). Without it every `<canvas cacheKey>` drew
+      // afresh in every pass that reached it, and a shadow, which is only
+      // ever baked into the cache (issue #413), was not drawn at all. The
+      // retained layer presenter paints nodes onto layers of their own and
+      // keeps to itself.
+      const cache = this.window.usesPaintCache
+        ? (this._paintCache ??= paintCacheFor(this.app))
+        : null;
+      cache?.beginFrame();
+      try {
+        // the panes are no presenter's: they paint from their damage either
+        // way
+        if (this._overlaid.size !== 0) this._paintOverlays(paneDamage);
+        this.window.presentFrame(this, damage);
+      } finally {
+        cache?.endFrame();
+      }
       this.app._reactX11Startup?.painted();
       return true;
     }

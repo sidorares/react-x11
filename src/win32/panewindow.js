@@ -287,6 +287,12 @@ export class Win32PaneWindow {
     }
   }
 
+  /** The frame is the ordinary paint walk, so it paints through core's
+   * paint cache (src/nodes/window/flush.js), as the window does. */
+  get usesPaintCache() {
+    return true;
+  }
+
   /**
    * No scroll blit. The fast path moves a band of pixels *within the surface
    * being drawn into*, and this one is `STALE_FRAMES` frames behind — the

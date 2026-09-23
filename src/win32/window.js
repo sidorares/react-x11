@@ -613,6 +613,12 @@ export class Win32Window {
     );
   }
 
+  /** The frame is the ordinary paint walk, a pass per damage rect, so it
+   * paints through core's paint cache (src/nodes/window/flush.js). */
+  get usesPaintCache() {
+    return true;
+  }
+
   /** DirectComposition does not hold a frame back the way an X server's fence
    * or a WindowServer's buffer does: Commit is asynchronous and the surface
    * retains its own pixels. So there is never a frame in flight to wait for. */
