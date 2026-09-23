@@ -314,8 +314,16 @@ export class WindowInvalidate {
       // the whole reason this is not just `needsLayout`: a scroll moves an
       // offset applied during `absolutize` and leaves every yoga node exactly
       // as it was, at input rate, on the biggest trees in any app.
-      if (reason !== 'scroll') this._floorsDirty = true;
-      if (reason !== 'scroll' && reason !== 'resize') {
+      //
+      // Nor does a box that only moved (`'position'`, from `applyProps`):
+      // absolutely positioned and sized by its own width and height, it is
+      // out of every ancestor's flow and sizes nothing inside it by its
+      // insets. A card dragged across a graph — or a thousand of them
+      // panned — was a full measurement of the content floors a step.
+      if (reason !== 'scroll' && reason !== 'position') {
+        this._floorsDirty = true;
+      }
+      if (reason !== 'scroll' && reason !== 'resize' && reason !== 'position') {
         this._floorsContentDirty = true;
       }
     }
