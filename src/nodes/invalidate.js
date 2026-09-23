@@ -322,6 +322,11 @@ export class WindowInvalidate {
       // panned — was a full measurement of the content floors a step.
       if (reason !== 'scroll' && reason !== 'position') {
         this._floorsDirty = true;
+        // …and which node changed, so that a change inside a box that sizes
+        // itself measures that box and nothing around it (`_floorsScope`).
+        // A claim that names no node, or names the window, is the tree's.
+        if (source && source !== this) this._floorsSources.add(source);
+        else this._floorsUnscoped = true;
       }
       if (reason !== 'scroll' && reason !== 'resize' && reason !== 'position') {
         this._floorsContentDirty = true;

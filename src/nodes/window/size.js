@@ -4,9 +4,12 @@
 
 import { measuringExactly } from '../../styles.js';
 import { availableArea } from '../../screens.js';
+import { Yoga } from '../../yoga.js';
 import {
   captureLeafHeights,
   collectFloorStale,
+  dirtyOutside,
+  floorBoundaryOf,
   probeHeightFloors,
   setMeasuringShrink,
   restoreShrink,
@@ -26,6 +29,26 @@ import {
   isAutoSize,
   scaleWindowGeometry,
 } from './hints.js';
+
+// Escape hatch, read once like the others: for measuring the scoped floors
+// against the whole-tree ones on the same build, and as first aid if a
+// change inside a card is ever measured wrong. `=== '1'` for the reason
+// REACT_X11_NO_SCROLL_BLIT gives.
+const NO_SCOPED_FLOORS = process.env.REACT_X11_NO_SCOPED_FLOORS === '1';
+
+/**
+ * Mark a box laid out alone (`_measureBoundary`) for the window's pass to lay
+ * out again. It was laid out at the size that pass will give it, so yoga
+ * would answer from its cache and keep what the measurement left inside —
+ * placed off the pixel grid, with the shrink borrowed. A style set to
+ * something else and back is how a box with no measure function says it
+ * changed.
+ */
+function relayOut(node) {
+  const shrink = node.style.flexShrink ?? 1;
+  node.yoga.setFlexShrink(shrink + 1);
+  node.yoga.setFlexShrink(shrink);
+}
 
 /** Content-sized windows, installed onto `WindowNode.prototype` by window.js. */
 export class WindowSize {
@@ -102,11 +125,143 @@ export class WindowSize {
     this._sweepLayoutHosts();
     const found = { width: false, height: false };
     this._floorsStale.clear();
+    // Decided afresh on every call rather than once a frame: something
+    // between the two calls a frame makes — a size query resolving — can
+    // turn a scoped change into one that is not, and the wider collection
+    // is the one that is always right.
+    const scope = this._floorsScope();
+    this._floorsScopeNow = scope;
+    if (scope !== null) {
+      for (const boundary of scope) {
+        // its children's floors are written from here; its own extent is
+        // its style's, and stands
+        this._floorsStale.add(boundary);
+        collectFloorStale(boundary, this._floorsStale, found, false);
+      }
+      return found;
+    }
     // the root's own children are written from here too, and its direction
     // can move like any node's
     this._floorsStale.add(this);
     collectFloorStale(this, this._floorsStale, found, !this._floorsSwept);
     return found;
+  }
+
+  /**
+   * The boxes the changes since the last measurement are confined to, or
+   * null when a measurement has to look at the whole tree.
+   *
+   * Every change to a box tree announces itself through `invalidate` with
+   * the node it changed (`_floorsSources`), and every node above it is
+   * dirty in yoga for it — which is all `collectFloorStale` can see, so a
+   * text that changed inside a card took every extent from the card up to
+   * the window with it, and the measurement that followed laid the whole
+   * tree out three times to read them back. A box that sizes itself
+   * (`isFloorBoundary`) holds the change in: its extent is its style's, the
+   * extents above it are what they were, and what is inside it can be
+   * measured by laying it out alone.
+   *
+   * Scoped only when all of that is known to hold: every change has such a
+   * box around it, yoga has nothing dirty outside them and the way down to
+   * them (a change nobody named), the tree has been measured once already,
+   * the window is the width it was measured at and sizes itself from no
+   * content, and no layout host or container query is in play. Anything
+   * else is the whole tree, as it always was.
+   */
+  _floorsScope() {
+    const sources = this._floorsSources;
+    if (
+      NO_SCOPED_FLOORS ||
+      this._floorsUnscoped ||
+      sources.size === 0 ||
+      !this._floorsSwept ||
+      this._layoutHosts.size !== 0 ||
+      this._containerQueryNodes.size !== 0 ||
+      this._floorsWidth !== (this.window?.width ?? this._requestedSize?.width)
+    ) {
+      return null;
+    }
+    const props = this.props;
+    if (
+      isAutoSize(props.width) ||
+      isAutoSize(props.height) ||
+      CONTENT_BOUND_PROPS.some((key) => isContentBound(props[key]))
+    ) {
+      return null;
+    }
+    const boundaries = new Set();
+    for (const source of sources) {
+      // gone, or moved to another window: its old parent's child list is
+      // the change that counts, and that parent said so itself
+      if (source.destroyed || source.root !== this) continue;
+      const boundary = floorBoundaryOf(source, this);
+      if (boundary === null) return null;
+      boundaries.add(boundary);
+    }
+    if (boundaries.size === 0) return null;
+    // the outermost of nested ones: measuring it measures what it holds
+    const paths = new Set();
+    for (const boundary of [...boundaries]) {
+      for (let n = boundary.parent; n && n !== this; n = n.parent) {
+        if (boundaries.has(n)) {
+          boundaries.delete(boundary);
+          break;
+        }
+      }
+    }
+    for (const boundary of boundaries) {
+      for (let n = boundary.parent; n && n !== this; n = n.parent) {
+        paths.add(n);
+      }
+    }
+    if (dirtyOutside(this, boundaries, paths)) return null;
+    return boundaries;
+  }
+
+  /**
+   * One boundary's floors, measured with it laid out alone — the passes
+   * `_measureContentSpans` runs over the whole tree, run over the box: its
+   * size is its style's in either, so the space everything inside it is
+   * laid out in is the same. `probe` is the height measurement's check for
+   * leaves whose width moved, stopped at the box, whose own extent stands.
+   */
+  _measureBoundary(boundary, axis, probe = false) {
+    const yoga = boundary.yoga;
+    const dir =
+      boundary.direction === 'rtl' ? Yoga.DIRECTION_RTL : Yoga.DIRECTION_LTR;
+    if (axis === 'width') {
+      const shrunk = [];
+      setMeasuringShrink(boundary, axis, shrunk);
+      this._scopedFloorPasses += 1;
+      yoga.calculateLayout(undefined, undefined, dir);
+      contentSpan(boundary, axis, null, this);
+      restoreShrink(shrunk);
+      relayOut(boundary);
+      return;
+    }
+    this._scopedFloorPasses += 1;
+    yoga.calculateLayout(undefined, undefined, dir);
+    if (probe) {
+      const hit = { marked: false, owed: false };
+      probeHeightFloors(boundary, this, hit, boundary);
+      if (hit.marked) {
+        this._writeFloors('height');
+        this._scopedFloorPasses += 1;
+        yoga.calculateLayout(undefined, undefined, dir);
+      }
+    }
+    const intrinsic = new Map();
+    captureLeafHeights(boundary, intrinsic);
+    const frozen = [];
+    freezeWidths(boundary, frozen);
+    const shrunk = [];
+    setMeasuringShrink(boundary, axis, shrunk);
+    this._scopedFloorPasses += 1;
+    yoga.calculateLayout(undefined, 0, dir);
+    contentSpan(boundary, axis, intrinsic, this);
+    restoreWidths(frozen);
+    restoreShrink(shrunk);
+    relayOut(boundary);
   }
 
   /** The floors on the children of every node found stale, from the extents
@@ -203,28 +358,77 @@ export class WindowSize {
    */
   _applyContentFloors(width, height) {
     const found = this._collectFloorStale();
+    const scope = this._floorsScopeNow;
+    if (scope !== null) {
+      this._applyScopedFloors(scope, found, width, height);
+    } else {
+      measuringExactly(() => {
+        if (found.width) this._measureWidthFloors();
+        else this._writeFloors('width');
+        // from the extents on hand; a stale one writes the style's minimum,
+        // which is the floor coming off ahead of its measurement below
+        this._writeFloors('height');
+      });
+      let heights = found.height;
+      let probed = false;
+      if (!heights) {
+        this._layoutRoot(width, height);
+        heights = this._probeHeightFloors().owed;
+        probed = true;
+      }
+      if (heights) {
+        measuringExactly(() => this._measureHeightFloors(width, !probed));
+        this._layoutRoot(width, height);
+      }
+    }
+    this._floorsDirty = false;
+    this._floorsContentDirty = false;
+    this._floorsSwept = true;
+    this._floorsWidth = width;
+    this._floorsSources.clear();
+    this._floorsUnscoped = false;
+    this._floorsScopeNow = null;
+  }
+
+  /**
+   * `_applyContentFloors` for changes confined to boxes that size
+   * themselves (`_floorsScope`): the same measurements in the same order,
+   * each over one box laid out alone rather than over the window, and the
+   * window's one real pass after them — which yoga answers from its cache
+   * everywhere but the boxes and the way down to them.
+   */
+  _applyScopedFloors(boundaries, found, width, height) {
     measuringExactly(() => {
-      if (found.width) this._measureWidthFloors();
-      else this._writeFloors('width');
-      // from the extents on hand; a stale one writes the style's minimum,
-      // which is the floor coming off ahead of its measurement below
+      if (found.width) {
+        this._writeFloors('width');
+        for (const boundary of boundaries) {
+          this._measureBoundary(boundary, 'width');
+        }
+      }
+      this._writeFloors('width');
       this._writeFloors('height');
     });
     let heights = found.height;
     let probed = false;
     if (!heights) {
       this._layoutRoot(width, height);
-      heights = this._probeHeightFloors().owed;
+      const hit = { marked: false, owed: false };
+      for (const boundary of boundaries) {
+        probeHeightFloors(boundary, this, hit, boundary);
+      }
+      heights = hit.owed;
       probed = true;
     }
     if (heights) {
-      measuringExactly(() => this._measureHeightFloors(width, !probed));
+      measuringExactly(() => {
+        this._writeFloors('height');
+        for (const boundary of boundaries) {
+          this._measureBoundary(boundary, 'height', !probed);
+        }
+        this._writeFloors('height');
+      });
       this._layoutRoot(width, height);
     }
-    this._floorsDirty = false;
-    this._floorsContentDirty = false;
-    this._floorsSwept = true;
-    this._floorsWidth = width;
   }
 
   /**

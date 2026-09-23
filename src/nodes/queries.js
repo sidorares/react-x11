@@ -196,6 +196,7 @@ export class NodeQueries {
       if (applyLayoutStyle(this.yoga, this.style, before) && this.root) {
         this.root._floorsDirty = true;
         this.root._floorsContentDirty = true;
+        this.root._floorsSources.add(this);
       }
     }
   }
@@ -233,6 +234,7 @@ export class WindowQueries {
     // a query block may carry layout properties, so the floors measured from
     // the styles it is replacing are not the answer any more
     this._floorsDirty = true;
+    this._floorsUnscoped = true;
     for (const node of [...this._sizeQueryNodes]) {
       if (node.destroyed) this._sizeQueryNodes.delete(node);
       else node._sizeQueriesChanged();
@@ -324,7 +326,10 @@ export class WindowQueries {
     // a block may carry layout properties, so the floors measured from the
     // styles it is replacing are not the answer any more — the same debt a
     // window query leaves (`_resolveSizeQueries`)
-    if (changed) this._floorsDirty = true;
+    if (changed) {
+      this._floorsDirty = true;
+      this._floorsUnscoped = true;
+    }
     return changed;
   }
 }

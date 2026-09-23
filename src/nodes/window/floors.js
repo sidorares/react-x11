@@ -198,6 +198,88 @@ export function collectFloorStale(node, stale, found, sweep) {
 }
 
 /**
+ * Whether `node` is a box its content cannot size and its surroundings cannot
+ * size either — an edge a floor measurement may stop at
+ * (`WindowNode._floorsScope`).
+ *
+ * Absolutely positioned, with a width and a height its style names as
+ * numbers: it is out of its parent's flow, so nothing measured inside it
+ * reaches anything above it (`contentSpan` skips it, and no floor is written
+ * on it), and every pass lays it out at those numbers wherever it sits, so
+ * what is inside it is measured the same in a pass over the window and in a
+ * pass over it alone. Nothing in its own box resolves against its parent —
+ * a percentage of padding would — and neither it nor its parent is a layout
+ * host, whose children are measured tree by tree.
+ *
+ * A card on a graph, a popover laid out inside the window, a sized overlay:
+ * the boxes a change inside is most often confined to. An in-flow box with a
+ * size of its own would do as well along its cross axis, but on its main
+ * axis a flex line can grow it past its width or shrink it under a minimum
+ * the author named, and that is a question about its siblings.
+ */
+export function isFloorBoundary(node) {
+  const style = node.style;
+  return (
+    node.yoga != null &&
+    !node.isWindow &&
+    style.position === 'absolute' &&
+    style.display !== 'none' &&
+    typeof style.width === 'number' &&
+    typeof style.height === 'number' &&
+    typeof style.minWidth !== 'string' &&
+    typeof style.minHeight !== 'string' &&
+    typeof style.maxWidth !== 'string' &&
+    typeof style.maxHeight !== 'string' &&
+    !PADDINGS.some((key) => typeof style[key] === 'string') &&
+    node._host === null &&
+    (node.parent?._host ?? null) === null
+  );
+}
+
+const PADDINGS = [
+  'padding',
+  'paddingTop',
+  'paddingRight',
+  'paddingBottom',
+  'paddingLeft',
+  'paddingHorizontal',
+  'paddingVertical',
+  'paddingStart',
+  'paddingEnd',
+];
+
+/**
+ * The box that holds a change to `node` in (`isFloorBoundary`), or null when
+ * none does below `root`. Looked for from the parent up: a node that changed
+ * may have changed its own size, and it is what is *around* the change that
+ * has to hold still.
+ */
+export function floorBoundaryOf(node, root) {
+  for (let n = node.parent; n && n !== root; n = n.parent) {
+    if (n.isWindow) return null;
+    if (isFloorBoundary(n)) return n;
+  }
+  return null;
+}
+
+/**
+ * Whether yoga has a change on record anywhere but inside `boundaries` and on
+ * the way down to them (`paths`) — something that changed with no node
+ * saying so, which a measurement confined to the boundaries would miss. A
+ * dirty node's ancestors are dirty too, so the walk goes down dirty nodes
+ * only, and a clean one has nothing under it to find.
+ */
+export function dirtyOutside(node, boundaries, paths) {
+  for (const child of node.children) {
+    if (!child.yoga || child.isWindow || !child.yoga.isDirty()) continue;
+    if (boundaries.has(child)) continue;
+    if (!paths.has(child)) return true;
+    if (dirtyOutside(child, boundaries, paths)) return true;
+  }
+  return false;
+}
+
+/**
  * After a pass that settled the widths: which of the height floors, each a
  * height *for a width*, were measured for a width their node no longer has.
  *
@@ -216,7 +298,7 @@ export function collectFloorStale(node, stale, found, sweep) {
  * the pixel grid off and the real one with it on, so the same layout reads
  * a fraction apart between them.
  */
-export function probeHeightFloors(node, root, hit) {
+export function probeHeightFloors(node, root, hit, stop = root) {
   for (const child of node.children) {
     if (!child.yoga || child.isWindow) continue;
     if (child.style.display === 'none') continue;
@@ -230,10 +312,10 @@ export function probeHeightFloors(node, root, hit) {
         at !== undefined &&
         child._heightForWidth(width) !== child._heightForWidth(at)
       ) {
-        markHeightStale(child, root, hit);
+        markHeightStale(child, root, hit, stop);
       }
     } else {
-      probeHeightFloors(child, root, hit);
+      probeHeightFloors(child, root, hit, stop);
     }
     // whatever the extent is, it is the extent for this width now — a
     // stale one is about to be measured here, a clean one was just checked
@@ -241,10 +323,12 @@ export function probeHeightFloors(node, root, hit) {
   }
 }
 
-/** A leaf whose height moved takes every extent above it with it. */
-function markHeightStale(node, root, hit) {
+/** A leaf whose height moved takes every extent above it with it — up to
+ *  `stop`, a box that sizes itself (`isFloorBoundary`), whose extent is its
+ *  style's whatever moved inside it. */
+function markHeightStale(node, root, hit, stop = root) {
   hit.marked = true;
-  for (let n = node; n && n !== root; n = n.parent) {
+  for (let n = node; n && n !== stop; n = n.parent) {
     if (n._floorH === undefined) continue;
     n._floorH = undefined;
     root._floorsStale.add(n);

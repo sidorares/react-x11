@@ -1521,6 +1521,17 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   - `_floorsDirty` is what keeps this off the input path — `invalidate()`
     sets it for every layout change **except a scroll**, which moves no yoga
     node.
+  - **a change inside a box that sizes itself is measured in that box
+    alone** (`_floorsScope`, `isFloorBoundary`): an absolutely positioned
+    box with a numeric width and height is out of its parent's flow and laid
+    out at those numbers by every pass, so what changed inside it is
+    measured by laying it out on its own, and the window's real pass is all
+    the rest of the tree pays. It rests on every layout change naming its
+    node: `invalidate()` records the source (`_floorsSources`), so **anything
+    else that sets `_floorsDirty` must add its node there or set
+    `_floorsUnscoped`**, which measures the whole tree. Yoga's dirty record
+    is checked for anything changed outside the boxes (`dirtyOutside`), and
+    `REACT_X11_NO_SCOPED_FLOORS=1` turns it off.
   - the deliberate deviation from CSS is that a **named size is kept**: CSS
     floors an item at `min(its size, its content)`, which is fine on the web
     where a `<div>` is a block container and its children are not flex items,
