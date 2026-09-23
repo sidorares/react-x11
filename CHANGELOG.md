@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.19.0](https://github.com/sidorares/react-x11/compare/v2.18.6...v2.19.0) (2026-09-23)
+
+
+### Features
+
+* **backend:** a context says whether it scales text with its transform ([#666](https://github.com/sidorares/react-x11/issues/666)) ([de348c8](https://github.com/sidorares/react-x11/commit/de348c89d87d9a5396ec46a9a0e37567aab98b7d))
+
+
+### Bug Fixes
+
+* **win32:** depend on @windowkit/win32 ^0.0.3, whose dash offset is pixels ([#665](https://github.com/sidorares/react-x11/issues/665)) ([1b73340](https://github.com/sidorares/react-x11/commit/1b7334077af3e6757c07b95de436b23eaf3c769e))
+
+
+### Performance Improvements
+
+* **floors:** a change inside a box that sizes itself measures that box alone ([#668](https://github.com/sidorares/react-x11/issues/668)) ([34325fc](https://github.com/sidorares/react-x11/commit/34325fc5004d05b76e002956a0681bb323b0aac4))
+* **paint-cache:** a context that only moves its origin still draws from the cache ([#667](https://github.com/sidorares/react-x11/issues/667)) ([034df77](https://github.com/sidorares/react-x11/commit/034df770829e6a4b2bd6c73369c7ddbe1fe68f02))
+
 ## [2.18.6](https://github.com/sidorares/react-x11/compare/v2.18.5...v2.18.6) (2026-09-23)
 
 
