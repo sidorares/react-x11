@@ -362,10 +362,20 @@ export async function registerRefresh(options = {}) {
   const { ignore } = validated;
   registered = true;
 
-  const hotIgnore = (path) =>
-    path.includes('/node_modules/') ||
-    path.startsWith(SRC_DIR) ||
-    (ignore ? ignore(path) === true : false);
+  // Compared with forward slashes, whichever the path arrives with: on
+  // Windows a file path's separators are backslashes, and a forward-slash
+  // test let every package in node_modules into the hot graph — where the
+  // HMR layer's rewrite of a package's modules could leave one reading an
+  // import before it was bound (entities, under htmlparser2).
+  const srcDir = SRC_DIR.replaceAll('\\', '/');
+  const hotIgnore = (path) => {
+    const slashed = path.replaceAll('\\', '/');
+    return (
+      slashed.includes('/node_modules/') ||
+      slashed.startsWith(srcDir) ||
+      (ignore ? ignore(path) === true : false)
+    );
+  };
 
   nodeModule.registerHooks({
     load(url, context, nextLoad) {
