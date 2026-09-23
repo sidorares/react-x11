@@ -604,7 +604,10 @@ Everything the renderer needs from text goes through one object today —
 `{width, height, draw(ctx, x, y), indexAt(x, y), caretPosition(index),
 rangeBands(...)}` plus font loading (`openFont`/`loadFont`) and glyph
 queries. That interface _is_ the TextEngine contract; the macOS backend
-implements it over CoreText:
+implements it over CoreText — all of it but the optional `coverage()` (#673),
+which would be CoreText into an alpha-only bitmap context with font
+smoothing off, through `@windowkit/appkit`, and is absent until it can be
+checked on a Mac:
 
 - **Matching**: family list + weight/style/`fontVariationSettings` →
   `CTFontDescriptor`/`CTFontCreateWithName`, with the CSS generic

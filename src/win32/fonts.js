@@ -154,6 +154,25 @@ class Win32TextLayout {
     return this._native.layoutCaret(this._handle, this._cuOf(cp));
   }
 
+  /**
+   * How much of each device pixel the glyphs cover, one byte a pixel,
+   * without drawing them anywhere (#673) — for text that is drawn where a 2D
+   * context is not, a GL surface's labels. The raster is the layout's box in
+   * whole pixels with `pad` round it, the layout's origin at (pad, pad).
+   *
+   * DirectWrite's own glyph-run analysis rather than a surface read back:
+   * grayscale, grid fit off, and none of the gamma or enhanced contrast
+   * Direct2D gives text it blends — the outlines' coverage, which is what a
+   * distance field is made from. Null on a bridge that predates it
+   * (`@windowkit/win32` before `layoutCoverage`), so a caller keeps its
+   * readback.
+   */
+  coverage({ pad = 0 } = {}) {
+    if (this._handle == null) return null;
+    if (typeof this._native.layoutCoverage !== 'function') return null;
+    return this._native.layoutCoverage(this._handle, pad) ?? null;
+  }
+
   _cuOf(cp) {
     this._offsets ??= codeUnitOffsets(this._text);
     const at = Math.max(0, Math.min(this._offsets.length - 1, cp));
