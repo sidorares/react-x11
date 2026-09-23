@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.20.0](https://github.com/sidorares/react-x11/compare/v2.19.0...v2.20.0) (2026-09-23)
+
+
+### Features
+
+* **scroll:** an element's pan carries the layers it names over its region ([#671](https://github.com/sidorares/react-x11/issues/671)) ([f3dfb59](https://github.com/sidorares/react-x11/commit/f3dfb5914dee2441d674c8dabe58395121dcb092))
+
+
+### Performance Improvements
+
+* **layout:** a moved subtree is claimed once and moved, not walked node by node ([#670](https://github.com/sidorares/react-x11/issues/670)) ([6661ead](https://github.com/sidorares/react-x11/commit/6661ead7659be27de2ca686d851c80cf0c62b7eb))
+
 ## [2.19.0](https://github.com/sidorares/react-x11/compare/v2.18.6...v2.19.0) (2026-09-23)
 
 
