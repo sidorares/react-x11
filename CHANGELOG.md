@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.18.5](https://github.com/sidorares/react-x11/compare/v2.18.4...v2.18.5) (2026-09-23)
+
+
+### Bug Fixes
+
+* **win32:** &lt;glarea&gt; overlay on layers, &lt;Select&gt; popups, and Windows performance ([#656](https://github.com/sidorares/react-x11/issues/656)) ([e002830](https://github.com/sidorares/react-x11/commit/e0028300631a359b6489c843a8b6eef8a6c75f31))
+
+
+### Performance Improvements
+
+* **win32:** pointer motion and the wheel are held for the next frame ([#657](https://github.com/sidorares/react-x11/issues/657)) ([2e61709](https://github.com/sidorares/react-x11/commit/2e6170969478098e49f0961966e336abfaff6ed5))
+
 ## [2.18.4](https://github.com/sidorares/react-x11/compare/v2.18.3...v2.18.4) (2026-09-22)
 
 
