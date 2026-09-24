@@ -1509,6 +1509,32 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   as one `ctx.fillRects` batch (ntk >= 7.6, one `Render.FillRectangles`) —
   made it 25, and flat in the size of the value. `test/selection-batch.test.js`
   measures the two sizes against each other rather than pinning a number.
+- **A rounded `overflow` box does not clip with its outline** (issue #685,
+  `src/nodes/roundclip.js`). A clip that is not a rectangle is a window-sized
+  a8 mask in ntk, and everything drawn under one leaves the fast paths — a
+  glyph run under a mask clears and composites the whole surface three
+  times. So the children are drawn under the box's rectangle, and each
+  corner square a child reaches is kept before and put back after: copied
+  into a spare surface premultiplied by the arc's outside coverage, and
+  returned with `destination-out` through that coverage plus `lighter`. On
+  the arc's antialiased pixels that clips the children as one layer rather
+  than drawing by drawing, which is what a clip means. Four things are easy
+  to undo:
+  - **the order is the correctness**: every corner is kept before the first
+    child draws and put back after the last, before the box's border;
+  - **it needs a context that reads its own pixels back** — ntk's
+    `ctx.picture`, under a whole-pixel translation. Cocoa, win32 and Wayland
+    clip to the outline as before, and so does a box laid out off the pixel
+    grid or one whose corner squares would overlap (a pill);
+  - **`getContext('2d')` on an ntk `Surface` makes a new context per call**,
+    with a Picture the caller owns: the spares hold theirs, since one made
+    per kept corner is a leak a frame;
+  - **a pass per corner is the fix it looks like, and is not.** Clipping
+    each corner square to the outline in a pass of its own repaints every
+    child that reaches a corner once more per corner, each time through a
+    window-sized mask: 2-4x the old cost for a rounded thumbnail, or a
+    full-bleed `<canvas>` that draws everything whatever its damage. The
+    bench's `shapes: 30 rounded thumbnails, full repaint` is there for it.
 - **Interpolate colours premultiplied.** `transparent` is _black_ at zero
   alpha, so lerping the four straight channels drags every fade-in towards
   black on the way: half way from `transparent` to a near-white hover fill

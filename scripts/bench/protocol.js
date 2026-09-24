@@ -780,6 +780,82 @@ const panSceneWindow = () =>
     }),
   );
 
+// The same pane inside a box that clips it to rounded corners: what an app's
+// `borderRadius` on `<Flow>` is, since the element's style goes on the box
+// around its pane (issue #685).
+const roundedPanSceneWindow = () =>
+  React.createElement(
+    'window',
+    { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+    React.createElement(
+      'box',
+      {
+        style: {
+          flexGrow: 1,
+          margin: 8,
+          overflow: 'hidden',
+          borderRadius: 6,
+          borderWidth: 1,
+          borderColor: '#b2bec3',
+        },
+      },
+      React.createElement('panscene', {
+        cells: panCells(),
+        style: { flexGrow: 1 },
+      }),
+    ),
+  );
+
+/** `count` rounded image cards: a box that clips a full-bleed picture and
+ * its caption to rounded corners, the way an app rounds a thumbnail. */
+function thumbnailWall(count) {
+  const tints = ['#74b9ff', '#55efc4', '#fab1a0', '#a29bfe'];
+  return React.createElement(
+    'window',
+    { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+    React.createElement(
+      'box',
+      { style: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, padding: 6 } },
+      Array.from({ length: count }, (_, i) =>
+        React.createElement(
+          'box',
+          {
+            key: i,
+            style: {
+              width: 58,
+              height: 58,
+              overflow: 'hidden',
+              borderRadius: 8,
+            },
+          },
+          React.createElement(
+            'box',
+            {
+              style: {
+                flexGrow: 1,
+                justifyContent: 'flex-end',
+                backgroundColor: tints[i % tints.length],
+              },
+            },
+            React.createElement(
+              'text',
+              {
+                style: {
+                  fontSize: 11,
+                  color: '#ffffff',
+                  backgroundColor: 'rgba(0, 0, 0, 0.35)',
+                  paddingStart: 4,
+                },
+              },
+              `photo ${i}`,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 const sceneWindow = (cells) =>
   React.createElement(
     'window',
@@ -1607,6 +1683,66 @@ const SCENARIOS = [
             ctl.frame();
             await settle(app);
           }
+        },
+      };
+    })(),
+  ],
+  [
+    // The same five steps in a pane with rounded corners (issue #685): each
+    // step's exposed strips run along two edges, and the rows the blit
+    // leaves under the corners repaint as bands, so every frame reaches all
+    // four. The rounded outline used to be the clip, which ntk builds as a
+    // mask the size of the window, and every cell under it left the fast
+    // paths for composites through that mask: 4223 requests, 2584
+    // composites, 4.54 Mpx and 80 churned resources for these five steps,
+    // against 2746 / 1362 / 0.53 / 0 with the corners kept
+    // (src/nodes/roundclip.js).
+    'scene: 5 pan steps with pinned furniture, in a rounded pane',
+    (() => {
+      let ctl;
+      let pane;
+      return {
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, roundedPanSceneWindow());
+          pane = ctl.root.children[0].children.find(
+            (n) => n.kind === 'panscene',
+          );
+          pane.panels = pane.corners();
+          pane.invalidate(false, pane, 'props');
+          ctl.frame();
+          await settle(app);
+        },
+        run: async (app, x11Root) => {
+          for (let i = 0; i < 5; i++) {
+            pane.panPinned(7, 5);
+            ctl.frame();
+            await settle(app);
+          }
+        },
+      };
+    })(),
+  ],
+  [
+    // Thirty rounded image cards repainted whole, which is what an expose
+    // or a theme change does to a gallery. Every card's picture reaches all
+    // four of its corners, so each keeps four — and the scenario is here
+    // because it is the shape a cheaper-looking fix gets wrong: a pass per
+    // corner under the rounded clip repaints each card four more times,
+    // each through a window-sized mask. Clipped to the outline, the frame
+    // was 519 requests, 151 composites, 9.99 Mpx and 120 churned resources
+    // (a mask pixmap and its picture per card); kept, it is 639 / 541 /
+    // 0.32 / 0 — more requests, each a composite the size of a corner.
+    'shapes: 30 rounded thumbnails, full repaint',
+    (() => {
+      let ctl;
+      return {
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, thumbnailWall(30));
+        },
+        run: async (app) => {
+          ctl.root.invalidate(true, null, 'expose');
+          ctl.frame();
+          await settle(app);
         },
       };
     })(),

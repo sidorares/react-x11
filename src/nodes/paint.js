@@ -7,7 +7,13 @@ import { Surface } from '../offscreen.js';
 import { isPaintedColor } from './boxpaint.js';
 import { DAMAGE_SLOP } from './damage.js';
 import { DRAWN_KINDS } from './kinds.js';
-import { rectsOverlap } from './rects.js';
+import {
+  intersectRects,
+  isIntegerRect,
+  rectsOverlap,
+  roundedCorners,
+} from './rects.js';
+import { keepCorners } from './roundclip.js';
 import { DEV } from './util.js';
 import { devWarnWindowShadow } from './window/capabilities.js';
 import { FLASH_COLORS, debugPaint } from './window/debugpaint.js';
@@ -289,12 +295,12 @@ export class NodePaint {
    * truncates, and then almost every cell's text fits — 191 clips a frame, of
    * which a handful do anything.
    *
-   * Rounded corners are never skipped: the clip is not a rectangle then, and
-   * the rounding can cut a child that a rect test says fits. The one-pixel
-   * inset is for antialiasing, which can put ink just outside a glyph's box.
+   * A rectangle test, so it answers for the box's rectangle only: rounded
+   * corners can cut a child this says fits, which `_paintRoundedChildren`
+   * settles before it asks. The one-pixel inset is for antialiasing, which
+   * can put ink just outside a glyph's box.
    */
   _childrenCanOverflow() {
-    if (this.style?.borderRadius) return true;
     const box = this.abs;
     for (const child of this.children) {
       if (child.isWindow || !child.yoga || child.hidden) continue;
@@ -320,19 +326,108 @@ export class NodePaint {
     if (this._ownPaintOnly) return;
     const order = this.paintOrder();
     if (order.length === 0) return;
-    const clip = this.clipsChildren() && this._childrenCanOverflow();
+    if (!this.clipsChildren()) {
+      this._paintChildList(ctx, order);
+      return;
+    }
+    // a context with no `roundRect` has always clipped a rounded box to its
+    // rectangle, the way `_roundedPath` degrades
+    const radius =
+      typeof ctx.roundRect === 'function' ? (this.style.borderRadius ?? 0) : 0;
+    if (radius > 0 && this._paintRoundedChildren(ctx, order, radius)) return;
+    const clip = this._childrenCanOverflow();
     if (clip) {
       ctx.save();
-      this._roundedPath(ctx, this.style.borderRadius ?? 0);
+      this._roundedPath(ctx, 0);
       ctx.clip();
     }
+    this._paintChildList(ctx, order);
+    if (clip) ctx.restore();
+  }
+
+  /** `order` painted in turn, each child culled against the window, its
+   *  clipping ancestors and the pass. */
+  _paintChildList(ctx, order) {
     for (const child of order) {
       if (child._promoted) continue; // on a layer of its own: a hole here
       if (child._offscreen(child.abs, DAMAGE_SLOP)) continue;
       if (child._outsideDamage()) continue;
       child.paint(ctx);
     }
-    if (clip) ctx.restore();
+  }
+
+  /**
+   * Would a pass over `rect` paint this node? The culling `_paintChildList`
+   * does, asked of a rect before it is the pass.
+   */
+  _paintsInto(rect) {
+    if (this._promoted) return false;
+    if (!rectsOverlap(this._subtreeBounds(), rect, DAMAGE_SLOP)) return false;
+    return !this._offscreen(this.abs, DAMAGE_SLOP);
+  }
+
+  /**
+   * Children clipped to a rounded outline (issue #685) — false when this pass
+   * needs no more than a square box's clip, which the caller then applies.
+   *
+   * A clip that is not a rectangle is one ntk builds as an a8 mask the size
+   * of the window, and every fill and glyph run under it leaves the
+   * server-side fast paths for composites through that mask: a pane that
+   * clipped its content to a rounded border paid it for every drawing in
+   * every pass, to decide a few pixels in each corner. A `<Flow>` with
+   * `borderRadius: 6` panned at 10 fps where the square pane ran at 56.
+   *
+   * The outline is the box's rectangle everywhere but its four corner
+   * squares, so this asks which squares the pass reaches that a child draws
+   * into. None — a pass that misses them, or a box whose padding keeps its
+   * children off them — and the outline clips nothing the rectangle would
+   * not. Otherwise the children are drawn once, under the rectangle,
+   * and those squares are put back the way they were outside the arc
+   * (`keepCorners`): a few composites the size of a corner, whatever the
+   * children drew. A context that cannot read its pixels back clips to the
+   * outline, as does a box off the pixel grid or one that is corner all the
+   * way along — a pill.
+   */
+  _paintRoundedChildren(ctx, order, radius) {
+    const damage = this.root?._paintDamage ?? null;
+    const corners =
+      !damage || isIntegerRect(damage)
+        ? roundedCorners(this.abs, radius)
+        : null;
+    let kept = null;
+    if (corners) {
+      // nothing inside the outline is being repainted
+      const pass = damage ? intersectRects(damage, this.abs) : this.abs;
+      if (!pass) return true;
+      const cut = corners.squares.filter((square) => {
+        const piece = intersectRects(square, pass);
+        return piece && order.some((child) => child._paintsInto(piece));
+      });
+      if (cut.length === 0) return false;
+      kept = keepCorners(ctx, this.app, corners, cut);
+    }
+    if (!kept) {
+      ctx.save();
+      this._roundedPath(ctx, radius);
+      ctx.clip();
+      this._paintChildList(ctx, order);
+      ctx.restore();
+      return true;
+    }
+    try {
+      const clip = this._childrenCanOverflow();
+      if (clip) {
+        ctx.save();
+        this._roundedPath(ctx, 0);
+        ctx.clip();
+      }
+      this._paintChildList(ctx, order);
+      if (clip) ctx.restore();
+      kept.restore();
+    } finally {
+      kept.release();
+    }
+    return true;
   }
 
   /**

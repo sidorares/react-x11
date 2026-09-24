@@ -297,5 +297,31 @@
     "stalls": 0,
     "dupQueries": 0,
     "churn": 0
+  },
+  "scene: 5 pan steps with pinned furniture, in a rounded pane": {
+    "requests": 2746,
+    "bytesOut": 761000,
+    "bytesIn": 352,
+    "replies": 11,
+    "composites": 1362,
+    "compositePixels": 526096,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
+    "stalls": 0,
+    "dupQueries": 0,
+    "churn": 0
+  },
+  "shapes: 30 rounded thumbnails, full repaint": {
+    "requests": 639,
+    "bytesOut": 22664,
+    "bytesIn": 192,
+    "replies": 3,
+    "composites": 541,
+    "compositePixels": 316000,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
+    "stalls": 0,
+    "dupQueries": 0,
+    "churn": 0
   }
 }

@@ -111,6 +111,39 @@ export function cornerSquaresOverlap(box, radius, rect) {
 }
 
 /**
+ * The four squares of `box` a rounded outline of `radius` is not a rectangle
+ * in: whole pixels, `side` on a side — the radius taken up to a whole pixel,
+ * since the arc spans exactly `radius` from each edge and a pixel it crosses
+ * is one it shades — and named for their corner. Outside them the outline
+ * *is* the box, so a clip to it can be the box's rectangle there.
+ *
+ * Null when that cut cannot be made: a box off the pixel grid, whose own
+ * edges are antialiased wherever they run, and a radius whose squares would
+ * overlap — a pill, which is corner all the way along.
+ */
+export function roundedCorners(box, radius) {
+  if (!isIntegerRect(box)) return null;
+  // the radius a canvas `roundRect` draws: scaled down so that two corners
+  // never meet — for a uniform radius, half the shorter side
+  const r = Math.min(radius, box.width / 2, box.height / 2);
+  if (!(r > 0)) return null;
+  const side = Math.ceil(r);
+  if (side * 2 > box.width || side * 2 > box.height) return null;
+  const right = box.x + box.width - side;
+  const bottom = box.y + box.height - side;
+  return {
+    radius: r,
+    side,
+    squares: [
+      { corner: 'tl', x: box.x, y: box.y, width: side, height: side },
+      { corner: 'tr', x: right, y: box.y, width: side, height: side },
+      { corner: 'br', x: right, y: bottom, width: side, height: side },
+      { corner: 'bl', x: box.x, y: bottom, width: side, height: side },
+    ],
+  };
+}
+
+/**
  * Do two rects share any area? Touching edges do not count. With a
  * `margin`, do they come within that many pixels of each other: the same
  * question asked of either one grown by `margin` on every side.

@@ -363,7 +363,15 @@ histogram the route shows up directly: `Render.CompositeGlyphs8` and
   the off switch reports.
 - `gradient` — the fill or stroke style is not a solid colour.
 - `clip-mask` — a non-rectangular clip is in effect. Rectangular clips are
-  fine; they go out as picture clip rectangles.
+  fine; they go out as picture clip rectangles. A box's own `overflow` with
+  a `borderRadius` is not one of these on X11: its children are clipped to
+  its rectangle and the corner squares they reach are put back afterwards
+  (`src/nodes/roundclip.js`, issue #685), so everything inside a rounded
+  card or pane stays on the route. The exceptions still clip to the
+  outline: a box that is corner all the way along a side (a pill whose
+  corner squares would overlap), and one laid out off the pixel grid. So a
+  `clip-mask` miss points at one of those, or at a clip an element sets
+  itself.
 - `dashes` — `borderStyle: 'dashed'`.
 - `transform` — the context's matrix is not translate-only.
 - `composite-op`, `geometry`, `radii-mix`, `join` — a non-`source-over`
