@@ -210,6 +210,91 @@ test('a <textarea> bar drag scrolls it, and never moves the caret', async () => 
   await x11Root.unmount();
 });
 
+// --- a track shorter than the thumb ----------------------------------------
+
+test('a track shorter than the minimum thumb is all thumb, with no travel', async () => {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    h(
+      'window',
+      { width: 200, height: 100 },
+      h(
+        'box',
+        { style: { overflow: 'scroll', height: 12, flexShrink: 0 } },
+        ...Array.from({ length: 4 }, (_, i) =>
+          h('box', { key: i, style: { height: 16, flexShrink: 0 } }),
+        ),
+      ),
+    ),
+  );
+  await tick();
+  const sv = scroller(app);
+  const bar = sv._scrollbar();
+  assert.ok(bar, 'the rows overflow a 12px pane');
+  assert.strictEqual(bar.trackLength, 12);
+  assert.strictEqual(bar.thumbLength, 12, 'the thumb fills the track');
+  assert.strictEqual(bar.travel, 0);
+
+  // a press at the far end of the track is on the thumb, so it grabs
+  // rather than paging — and a drag of a thumb with nowhere to go scrolls
+  // nothing, where dividing by its travel would scroll to the end or to NaN
+  const wnd = app.windows[0];
+  const x = bar.x + 2;
+  wnd.emit('mousedown', { x, y: bar.trackStart + 11, keycode: 1 });
+  assert.strictEqual(sv.scrollY, 0, 'the press grabbed the thumb');
+  wnd.emit('mousemove', { x, y: bar.trackStart + 40 });
+  assert.strictEqual(sv.scrollY, 0, 'dragged down');
+  wnd.emit('mousemove', { x, y: bar.trackStart + 11 });
+  assert.strictEqual(sv.scrollY, 0, 'and back to where it was grabbed');
+  wnd.emit('mouseup', { x, y: bar.trackStart + 11, keycode: 1 });
+
+  await x11Root.unmount();
+});
+
+test('a <textarea> shorter than the minimum thumb fills its track too', async () => {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    h(
+      'window',
+      { width: 200, height: 80 },
+      h('textarea', { value: 'many lines', style: { height: 16 } }),
+    ),
+  );
+  await tick();
+
+  const area = app.windows[0]._reactX11Node.children[0];
+  // as above: the mock has no font metrics, and the bar needs only a height
+  area._valueLayout = () => ({
+    height: 600,
+    caretPosition: () => ({ x: 0, y: 0, height: 12 }),
+    lines: [],
+  });
+
+  const box = area.contentBox();
+  assert.ok(box.height < 20, `a ${box.height}px field is shorter than a thumb`);
+  const bar = area._scrollbar();
+  assert.ok(bar, 'text taller than the field gets a thumb');
+  assert.strictEqual(bar.thumbLength, box.height, 'the thumb fills the track');
+  assert.strictEqual(bar.travel, 0);
+
+  area.defaultMouseDown({
+    x: bar.x + 2,
+    y: bar.thumbStart + 1,
+    capturePointer() {},
+  });
+  area.defaultMouseDrag({ x: bar.x + 2, y: bar.thumbStart + 40 });
+  assert.strictEqual(
+    area._scrollY,
+    0,
+    'a thumb with no travel scrolls nothing',
+  );
+  area.defaultMouseUp({});
+
+  await x11Root.unmount();
+});
+
 // --- horizontal ------------------------------------------------------------
 
 /** A row of fixed-width cells: wider than the viewport, and unable to

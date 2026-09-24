@@ -67,9 +67,15 @@ export function scrollbarGeometry({
   // radius downstream draw from the same number.
   const barWidth = SCROLLBAR_WIDTH * scale;
   const rtl = direction === 'rtl';
-  const thumbLength = Math.max(
-    SCROLLBAR_MIN_THUMB * scale,
-    (length * length) / content,
+  // Never longer than the track: a pane shorter than the minimum gets a
+  // thumb that fills it and has no travel. The bar paints outside the
+  // pane's clip, and a node that clips its children reaches no further than
+  // its own box (`_subtreeBounds`), so a thumb run past the track put ink
+  // where no damage claim could reach — left behind by every move of the
+  // pane, and on a part the pointer could not hit.
+  const thumbLength = Math.min(
+    length,
+    Math.max(SCROLLBAR_MIN_THUMB * scale, (length * length) / content),
   );
   const range = content - viewport;
   const travel = Math.max(0, length - thumbLength);
