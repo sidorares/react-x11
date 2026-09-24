@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.21.2](https://github.com/sidorares/react-x11/compare/v2.21.1...v2.21.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **win32:** a frame clock that missed a tick is trusted again when it ticks ([#678](https://github.com/sidorares/react-x11/issues/678)) ([d6c1703](https://github.com/sidorares/react-x11/commit/d6c17038b160fc6eb50cd20668226e94b5f5d1e0))
+
 ## [2.21.1](https://github.com/sidorares/react-x11/compare/v2.21.0...v2.21.1) (2026-09-24)
 
 
