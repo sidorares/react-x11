@@ -50,12 +50,14 @@ export const layoutDiff = {
   // else, and restored through `finally` like the sink beside it.
   shift: null,
 
-  // True when `shift` is a `<glarea>` child's own move rather than a scroll
-  // (src/glnodes.js, `_absolutizeChild`, issue #644): the overlay moves the
-  // child's pixels on its pane, and a node that lands where it was plus the
-  // shift is carried by that. A node that turns the diff off under a shift —
-  // a scroll pane laid out again, whose box would have claimed its children
-  // — claims its own box instead, since the move claimed nothing for it.
+  // True when `shift` is a subtree's own move whose pixels a copy may carry,
+  // rather than a scroll: a `<glarea>` child's, moved on its pane
+  // (src/glnodes.js, `_absolutizeChild`, issue #644), or one the window may
+  // copy in its backing (nodes/moveblit.js, issue #681). A node that lands
+  // where it was plus the shift is carried by that copy. A node that turns
+  // the diff off under a shift — a scroll pane laid out again, whose box
+  // would have claimed its children — claims its own box instead, since the
+  // move claimed nothing for it.
   ride: false,
 };
 

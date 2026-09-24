@@ -57,6 +57,16 @@ export function intersectRects(a, b) {
   return { x, y, width: right - x, height: bottom - y };
 }
 
+/** `rect` moved by (dx, dy). */
+export function shiftRect(rect, dx, dy) {
+  return {
+    x: rect.x + dx,
+    y: rect.y + dy,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
 export function unionRect(a, b) {
   if (!b) return a ?? null;
   if (!a) return { ...b };

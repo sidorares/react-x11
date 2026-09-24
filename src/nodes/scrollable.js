@@ -163,7 +163,10 @@ export const Scrollable = (Base) =>
           this.abs.y - wasY,
         );
       } finally {
-        if (move) layoutDiff.shift = null;
+        if (move) {
+          layoutDiff.shift = null;
+          layoutDiff.ride = false;
+        }
       }
       if (move) this._claimRigidMove(move);
     }
@@ -316,9 +319,11 @@ export const Scrollable = (Base) =>
             // content shrank, or the viewport grew, under the offset — a row
             // collapsing at the end of a list scrolled to its end — and
             // nothing claimed the viewport every child just moved in. Nor
-            // for a `<glarea>` child's move that this pane rides (issue
-            // #644): its box claimed nothing, and a pane laid out again may
-            // have moved rows the move's copy carries where they were.
+            // for a move this pane rides whose pixels are copied — a
+            // `<glarea>` child's on its pane (issue #644), a subtree's in
+            // the window (issue #681): its box claimed nothing, and a pane
+            // laid out again may have moved rows the move's copy carries
+            // where they were.
             if (clamped || layoutDiff.ride) outer(vp, this);
           } else {
             layoutDiff.sink = (rect, node) => {

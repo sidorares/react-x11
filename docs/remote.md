@@ -48,13 +48,18 @@ in-process server — so these are exact protocol costs, not estimates:
 | 50 filled rounded boxes            | 122      | 6.6 kB    | 7       | 0      |
 | a paragraph of text                | 39       | 6.0 kB    | 7       | 0      |
 | 10 wheel notches over 500 rows     | 224      | 11.2 kB   | 22      | 4      |
+| 5 drag steps of a card of widgets  | 72       | 4.3 kB    | 11      | 0      |
 
 **A whole window appears for about four kilobytes.** A single 1280×800 frame
 of VNC, even well compressed, is tens to hundreds of kilobytes, and it is
 sent again every time anything moves. Scrolling a 500-row table ten notches
 costs 11 kB here because only the damaged strip is redrawn (the
 [scroll-blit path](../AGENTS.md), issue #138); the same scroll under pixel
-streaming is ten full frames.
+streaming is ten full frames. Dragging a card with a background of its own
+is the same trade: each step copies the card where it went and draws the
+strip it uncovered, so its widgets are not drawn again
+([extending.md](extending.md#an-element-that-covers-its-box), issue #681) —
+the five steps in the table would be 24 kB drawn.
 
 What react-x11 pays instead is **latency sensitivity**. Bandwidth is not the
 scarce resource on a link like this — round trips are. A request that waits

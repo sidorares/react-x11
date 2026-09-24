@@ -105,7 +105,7 @@ process.env.REACT_X11_NO_AUTORUN = '1';
 const { createRoot } = await import('../../src/index.js');
 const { registerElement } = await import('../../src/host.js');
 const { Node } = await import('../../src/node.js');
-const { Checkbox } = await import('../../src/components/index.js');
+const { Button, Checkbox } = await import('../../src/components/index.js');
 
 const args = process.argv.slice(2);
 
@@ -447,6 +447,111 @@ function absBoxWindow(left, color) {
         backgroundColor: color,
       },
     }),
+  );
+}
+
+// --- a card of widgets dragged over a pane (issue #681) ------------------
+//
+// flow-stress's node body — a status line, a progress bar, a checkbox and a
+// button — on an opaque card, moved by `left`/`top` a step at a time over a
+// pane dotted like a graph's. The card covers its box, so a step copies its
+// pixels where they went and paints the strip it uncovered.
+
+function dragCardWindow(at) {
+  const dots = [];
+  for (let y = 12; y < 360; y += 24) {
+    for (let x = 12; x < 380; x += 24) {
+      dots.push(
+        React.createElement('box', {
+          key: `${x},${y}`,
+          style: {
+            position: 'absolute',
+            left: x,
+            top: y,
+            width: 2,
+            height: 2,
+            backgroundColor: '#b2bec3',
+          },
+        }),
+      );
+    }
+  }
+  return React.createElement(
+    'window',
+    { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+    React.createElement(
+      'box',
+      {
+        style: {
+          margin: 10,
+          flexGrow: 1,
+          overflow: 'hidden',
+          backgroundColor: '#ffffff',
+        },
+      },
+      ...dots,
+      React.createElement(
+        'box',
+        {
+          key: 'card',
+          style: {
+            position: 'absolute',
+            left: at.x,
+            top: at.y,
+            width: 200,
+            height: 124,
+            backgroundColor: '#ffffff',
+            borderWidth: 1,
+            borderColor: '#dfe6e9',
+          },
+        },
+        React.createElement(
+          'box',
+          { style: { flexGrow: 1, padding: 6, gap: 5 } },
+          React.createElement(
+            'box',
+            { style: { flexDirection: 'row', alignItems: 'center', gap: 6 } },
+            React.createElement('box', {
+              style: {
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                backgroundColor: '#3fb950',
+              },
+            }),
+            React.createElement(
+              'text',
+              { style: { fontSize: 11 } },
+              'queue 12',
+            ),
+          ),
+          React.createElement(
+            'box',
+            {
+              style: {
+                height: 6,
+                borderRadius: 3,
+                backgroundColor: '#dfe6e9',
+                overflow: 'hidden',
+              },
+            },
+            React.createElement('box', {
+              style: { width: 64, height: 6, backgroundColor: '#0984e3' },
+            }),
+          ),
+          React.createElement(
+            'box',
+            { style: { flexDirection: 'row', alignItems: 'center', gap: 8 } },
+            React.createElement(Checkbox, {
+              label: 'on',
+              checked: true,
+              onChange: () => {},
+            }),
+            React.createElement(Button, { label: 'run 3', onPress: () => {} }),
+          ),
+        ),
+      ),
+    ),
   );
 }
 
@@ -1339,6 +1444,39 @@ const SCENARIOS = [
             await new Promise((resolve) =>
               x11Root.render(
                 absBoxWindow(40 + (i + 1) * 30, '#3498db'),
+                resolve,
+              ),
+            );
+            ctl.frame();
+            await settle(app);
+          }
+        },
+      };
+    })(),
+  ],
+  [
+    // Issue #681: five drag steps of a card of widgets. Nothing in the card
+    // changes, and it covers its box, so each step is one CopyArea of the
+    // card and a repaint of the strip the move uncovered — the widgets are
+    // not drawn again.
+    //
+    // Baselined with the copy live, like the scroll-blit scenario: --check
+    // only fails on an increase, so a change that quietly stopped the copy
+    // from firing lands here. The same five steps with the copy declined —
+    // every gate falls back to exactly that — are the plain repaint of the
+    // card where it was and where it went.
+    'update: 5 drag steps of an opaque card of widgets',
+    (() => {
+      let ctl;
+      return {
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, dragCardWindow({ x: 40, y: 40 }));
+        },
+        run: async (app, x11Root) => {
+          for (let i = 1; i <= 5; i++) {
+            await new Promise((resolve) =>
+              x11Root.render(
+                dragCardWindow({ x: 40 + i * 3, y: 40 + i * 2 }),
                 resolve,
               ),
             );

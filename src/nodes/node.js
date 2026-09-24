@@ -38,6 +38,7 @@ import { NodeInvalidate } from './invalidate.js';
 import { CUSTOM_SELF_DAMAGED, THEME_SCOPE } from './kinds.js';
 import { NodeLayout } from './layout.js';
 import { NodeLayoutHost } from './layouthost.js';
+import { NodeMoveBlit } from './moveblit.js';
 import { NodePaint } from './paint.js';
 import { NodePosition } from './position.js';
 import { NodeQueries } from './queries.js';
@@ -620,21 +621,18 @@ export class Node {
         typeof style.height === 'number'
           ? 'position'
           : 'props';
-      // A child of a `<glarea>` that only moved (issue #644): its pixels are
-      // on a pane, one shift away, and the layout pass reports the move to
-      // the overlay rather than claiming it (src/glnodes.js). A claim of the
-      // subtree here, before and after, would be the repaint the overlay
-      // exists to skip — and the pass claims both ends of the move itself
-      // whenever the overlay cannot move the pixels.
-      //
-      // …and so is a node an element's pan carries (`scrollContents`'s
-      // riders): its pixels move with the region the frame blits, and the
-      // pass claims what they leave outside it (src/nodes/layout.js).
-      if (
-        (this.parent?.isGlArea || this._ridesBlitOf !== null) &&
-        moved &&
-        !this.paintChanged(newProps, prev)
-      ) {
+      // A node that only moved claims nothing here: the layout pass claims
+      // both ends of the move itself — where the subtree's pixels were and
+      // where they went, once (`_beginRigidMove`), or node by node through
+      // the diff when the move turns out to be more than a move — and a
+      // claim of the subtree here, before and after, would be the repaint
+      // that three copies exist to skip. A child of a `<glarea>` is moved
+      // on its pane (issue #644, src/glnodes.js); a node an element's pan
+      // carries rides the region the frame blits (`scrollContents`'s
+      // riders, src/nodes/layout.js); and anything else that covers its
+      // box opaquely is copied in the window (issue #681,
+      // src/nodes/moveblit.js). Each claims what it cannot copy.
+      if (moved && !this.paintChanged(newProps, prev)) {
         this.invalidate(true, NO_DAMAGE, reason);
       } else {
         this._invalidateLayout(reason);
@@ -920,6 +918,7 @@ installMethods(
   NodeHitTest,
   NodeInvalidate,
   NodeScrollBlit,
+  NodeMoveBlit,
   NodePaint,
   NodeBoxPaint,
   NodeSelectable,

@@ -1349,6 +1349,35 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     over its siblings of the same `zIndex`, hit testing walks the same order
     backwards, and the Cocoa layer presenter takes zPosition from it.
 
+- **A subtree that only moved is copied, not repainted, where it covers its
+  box** (issue #681, `src/nodes/moveblit.js`). The layout pass hands a rigid
+  move (`_beginRigidMove`) to the window instead of claiming it, and the
+  frame settles it once every other claim is in: one `scrollRegion` of the
+  opaque cover, and the frame's damage rebuilt around it — the strip the
+  move uncovered, the corners a radius gives up, what is drawn over it.
+  `test/move-blit.test.js` holds every step against a full repaint, and
+  `update: 5 drag steps of an opaque card of widgets` in the bench is
+  baselined with the copy live. Three things are easy to undo:
+  - **A position-only commit claims nothing** (`applyProps` → `NO_DAMAGE`),
+    for every node, not just `<glarea>` children and pan riders: the layout
+    pass claims both ends of the move, rigidly or through the diff. A claim
+    there names the whole subtree, inside the copy, and leaves it nothing to
+    save.
+  - **Every rect the window's list takes is logged with its node**
+    (`_logClaim`, from `invalidate`, `_claimLayoutMove` and `_placeNodes`).
+    That is what tells a claim under the moved subtree — carved out of the
+    copy, a graph pane's claim of the card its body sits on — from one over
+    it, which is repainted and shifted with the copy. A new writer of
+    `_damage` has to log as well. One that does not fails the log's replay
+    check (`_claimsBySource`), and every claim of that frame is read as
+    drawn over the subtree: correct, and a copy that rarely pays.
+  - **The damage cap decides rounded cards.** A copy whose rects would not
+    fit `_damageRectCap()` unmerged is declined: a merge reaches into the
+    copy and repaints the widgets along its edge, which on X11 cost more
+    requests and more bytes than the card spared. So square cards copy on
+    X11, and rounded ones — four corners and the strip, five rects — copy
+    where the cap is sixteen, on Cocoa.
+
 - **A `layout` host's children are yoga trees of their own** (the layout
   host in `src/nodes/layouthost.js`; docs/architecture/custom-layout.md).
   Yoga gives a node a measure function or children, never both, so the

@@ -66,8 +66,10 @@ import { FULL_DAMAGE, addDamageRect } from './nodes/damage.js';
 import {
   innerPixels,
   intersectRects,
+  outside,
   rectArea,
   rectContains,
+  shiftRect,
   unionRect,
 } from './nodes/rects.js';
 
@@ -196,48 +198,6 @@ function around(a, b) {
 
 const sameRect = (a, b) =>
   a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
-
-const shifted = (r, dx, dy) => ({
-  x: r.x + dx,
-  y: r.y + dy,
-  width: r.width,
-  height: r.height,
-});
-
-/** `a` with `b` taken out of it: up to four rects — the full-width bands
- * above and below `b`, and the pieces either side of it between them. */
-function subtractRect(a, b) {
-  const cut = intersectRects(a, b);
-  if (!cut) return [a];
-  const out = [];
-  const right = a.x + a.width;
-  const bottom = a.y + a.height;
-  const cutRight = cut.x + cut.width;
-  const cutBottom = cut.y + cut.height;
-  if (cut.y > a.y) {
-    out.push({ x: a.x, y: a.y, width: a.width, height: cut.y - a.y });
-  }
-  if (cutBottom < bottom) {
-    out.push({
-      x: a.x,
-      y: cutBottom,
-      width: a.width,
-      height: bottom - cutBottom,
-    });
-  }
-  if (cut.x > a.x) {
-    out.push({ x: a.x, y: cut.y, width: cut.x - a.x, height: cut.height });
-  }
-  if (cutRight < right) {
-    out.push({
-      x: cutRight,
-      y: cut.y,
-      width: right - cutRight,
-      height: cut.height,
-    });
-  }
-  return out;
-}
 
 /** On screen: nothing from here to the window hidden or `display: 'none'`. */
 function shown(node) {
@@ -594,7 +554,7 @@ export class GlOverlay {
     );
     if (!pane) return false;
     const view = intersectRects(pane.rect, box);
-    const dest = intersectRects(shifted(was, dx, dy), view);
+    const dest = intersectRects(shiftRect(was, dx, dy), view);
     if (!dest) return false;
     const cap = root._damageRectCap();
     const claimed = root._paneDamage ?? [];
@@ -603,14 +563,14 @@ export class GlOverlay {
       if (rect) rects = addDamageRect(rects, rect, cap);
     };
     for (const claim of claimed)
-      add(intersectRects(shifted(claim, dx, dy), dest));
-    for (const piece of subtractRect(was, dest)) add(piece);
-    if (now) for (const piece of subtractRect(now, dest)) add(piece);
+      add(intersectRects(shiftRect(claim, dx, dy), dest));
+    for (const piece of outside(was, dest)) add(piece);
+    if (now) for (const piece of outside(now, dest)) add(piece);
     for (const other of area.paintOrder()) {
       if (other === node) continue;
       const theirs = whole(other.paintBounds());
       add(intersectRects(theirs, dest));
-      add(intersectRects(shifted(theirs, dx, dy), dest));
+      add(intersectRects(shiftRect(theirs, dx, dy), dest));
     }
     // the list is disjoint, so the sum is the area it covers
     let repainted = 0;
@@ -621,7 +581,7 @@ export class GlOverlay {
     if (repainted > rectArea(dest) * MOVE_BLIT_MAX_REPAINT) return false;
     // the verb moves the band that survives inside the rect it is handed,
     // so handed where the pixels are and where they go, that band is `dest`
-    if (!pane.blit(unionRect(shifted(dest, -dx, -dy), dest), dx, dy)) {
+    if (!pane.blit(unionRect(shiftRect(dest, -dx, -dy), dest), dx, dy)) {
       return false;
     }
     root._paneDamage = rects;

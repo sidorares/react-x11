@@ -210,6 +210,8 @@ export class WindowFlush {
           if (this._claimLayoutMove(rect, node, cap)) layoutMoved = true;
         };
       }
+      // the moves this walk hands over to be copied are this frame's alone
+      this._rigidMoves = null;
       try {
         // `_absolutizeChildren`, not the loop it wraps: a `<window
         // style={{overflow: 'scroll'}}>` is a scroll container like any box,
@@ -279,6 +281,16 @@ export class WindowFlush {
     this.window.prepareFrame?.(this, layoutRan);
     // any node this pass laid out may be what an open popup is anchored to
     if (layoutRan) this._notifyAnchorChange();
+    // A subtree that only moved and covers its box opaquely is copied where
+    // it went, and the frame paints around the copy — or its move is
+    // claimed, where it was and where it is (nodes/moveblit.js). Once every
+    // other claim of the frame is in: what the copy leaves to paint depends
+    // on what else changed around it.
+    const moves = layoutRan ? this._rigidMoves : null;
+    this._rigidMoves = null;
+    if (moves !== null && this._settleRigidMoves(moves, width, height)) {
+      layoutMoved = true;
+    }
     // after layout (the claims above included), before the damage is taken:
     // a frame that turns out to be a pure scroll blits the surviving band
     // and narrows its claim to the exposed strip
