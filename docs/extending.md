@@ -1405,6 +1405,21 @@ A claim anywhere else in the region still declines the frame, and so does
 furniture that is most of the pane: past three quarters of it repainted, the
 blit is buying a shift and paying for the region anyway.
 
+**A rounded box around your element is pinned the same way.** The arc of a
+rounded corner does not translate, but it lives in the four radius-sized
+squares at the corners and nowhere else, so core pins those squares itself:
+the whole region shifts, and each square is repaired where it is and where
+the copy dragged it — a few pixels a corner (issue #691). A graph pane
+inside a rounded card is the common shape. Its own border ring and corners
+are different: those are the element's paint, not its drawing, and they
+decline the blit.
+
+The rects a pan frame repaints — its strips, the furniture, the corners —
+are merged down to a few passes, and merged together, so the small ones
+join their neighbours before a large box can swallow them: a diagonal pan
+of a rounded pane with furniture in both bottom corners repaints under a
+fifth of it.
+
 A node mounted over the region inside a pinned rect — a zoom button, a
 legend — is furniture too: it does not decline the blit, and its pixels are
 repaired with the rest. Its claims carry the pixel of slop every node's do,
@@ -1444,7 +1459,8 @@ the same five steps under `REACT_X11_NO_SCROLL_BLIT=1`, which is exactly the
 fallback every gate here takes. With a HUD strip claimed beside the region
 they cost 1993 / 993 / 0.43 — the blit plus the strip. With furniture in two
 bottom corners they cost 1622 / 790 / 0.30 pinned, where carving the band
-between the corners costs 2736 / 1349 / 0.70.
+between the corners costs 2736 / 1349 / 0.70, and 1892 / 920 / 0.31 in a
+rounded pane.
 
 If your element keeps its drawing in a `Surface` of its own rather than
 drawing it live, the shift you want is

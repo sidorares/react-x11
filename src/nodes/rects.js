@@ -91,12 +91,12 @@ export function rectsBounds(rects) {
   return out;
 }
 
-/** Does `rect` reach into any of the four `radius`-sized corner squares of
- * `box` — the only part of a rounded border a translation cannot keep? */
-export function cornerSquaresOverlap(box, radius, rect) {
+/** The four `radius`-sized corner squares of `box` — the only part of a
+ * rounded border a translation cannot keep — none when there is no radius. */
+export function cornerSquares(box, radius) {
   const r = Math.min(radius, box.width / 2, box.height / 2);
-  if (!(r > 0)) return false;
-  const corners = [
+  if (!(r > 0)) return [];
+  return [
     { x: box.x, y: box.y, width: r, height: r },
     { x: box.x + box.width - r, y: box.y, width: r, height: r },
     { x: box.x, y: box.y + box.height - r, width: r, height: r },
@@ -107,7 +107,14 @@ export function cornerSquaresOverlap(box, radius, rect) {
       height: r,
     },
   ];
-  return corners.some((square) => rectsOverlap(square, rect));
+}
+
+/** Does `rect` reach into any of the four `radius`-sized corner squares of
+ * `box`? */
+export function cornerSquaresOverlap(box, radius, rect) {
+  return cornerSquares(box, radius).some((square) =>
+    rectsOverlap(square, rect),
+  );
 }
 
 /**

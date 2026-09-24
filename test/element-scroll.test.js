@@ -242,6 +242,19 @@ const blits = (wnd) => wnd.calls.filter(([name]) => name === 'scrollRegion');
 
 const area = (rects) => rects.reduce((sum, r) => sum + r.width * r.height, 0);
 
+/** Is every pixel of `rect` inside one of `rects`? */
+function covered(rects, rect) {
+  for (let y = rect.y; y < rect.y + rect.height; y++) {
+    for (let x = rect.x; x < rect.x + rect.width; x++) {
+      const inside = rects.some(
+        (r) => x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height,
+      );
+      if (!inside) return false;
+    }
+  }
+  return true;
+}
+
 async function mount({
   paneProps = {},
   extra = null,
@@ -999,42 +1012,79 @@ test('a rounded corner on the element itself keeps the full repaint', async () =
   assert.deepStrictEqual(blits(wnd), []);
 });
 
-test('a rounded ancestor leaves its corner rows behind and blits the rest', async () => {
+test('a rounded ancestor pins its corners and blits the whole region', async () => {
   // The arc of a rounded corner does not translate, but it lives in the
-  // four radius-sized squares at the corners and nowhere else: the rows
-  // they reach into come out of the blit as bands the element repaints,
-  // and the band between them shifts. A graph pane inside a rounded card
-  // panned at 3fps before this, on every backend.
+  // four radius-sized squares at the corners and nowhere else: the whole
+  // region shifts, and each square is repaired where it is and where the
+  // copy dragged it (issue #691). A graph pane inside a rounded card panned
+  // at 3fps before any of this, on every backend; carving the rows the
+  // corners reach into instead repainted the pane's full width twice a
+  // frame.
   const RADIUS = 8;
-  const { wnd, node, root } = await mount({ wrapStyle: { borderRadius: 8 } });
+  const { wnd, node, root } = await mount({
+    wrapStyle: { borderRadius: RADIUS },
+  });
   assert.deepStrictEqual(node.abs, VP, 'the pane fills the rounded box');
 
   assert.strictEqual(node.pan(0, 40), true);
   await tick();
-  const shifted = {
-    x: VP.x,
-    y: VP.y + RADIUS,
-    width: VP.width,
-    height: VP.height - 2 * RADIUS,
-  };
-  assert.deepStrictEqual(blits(wnd), [['scrollRegion', shifted, 0, 40]]);
+  assert.deepStrictEqual(blits(wnd), [['scrollRegion', VP, 0, 40]]);
   const rects = root._lastDamageRects;
   assert.ok(rects, 'the frame stayed bounded');
-  const byY = [...rects].sort((a, b) => a.y - b.y);
-  assert.deepStrictEqual(byY, [
-    { x: VP.x, y: VP.y, width: VP.width, height: RADIUS },
-    { x: VP.x, y: shifted.y, width: VP.width, height: 40 },
-    {
-      x: VP.x,
-      y: shifted.y + shifted.height,
-      width: VP.width,
-      height: RADIUS,
-    },
-  ]);
+  // the strip the shift exposed, and each corner where it is and where the
+  // copy put it — however the cap grouped them
+  const corner = (x, y) => ({ x, y, width: RADIUS, height: RADIUS });
+  const right = VP.x + VP.width - RADIUS;
+  const bottom = VP.y + VP.height - RADIUS;
+  for (const owed of [
+    { x: VP.x, y: VP.y, width: VP.width, height: 40 },
+    corner(VP.x, VP.y),
+    corner(VP.x, VP.y + 40),
+    corner(right, VP.y),
+    corner(right, VP.y + 40),
+    corner(VP.x, bottom),
+    corner(right, bottom),
+  ]) {
+    assert.ok(covered(rects, owed), `${JSON.stringify(owed)} is repainted`);
+  }
   assert.ok(
-    area(rects) < VP.width * VP.height * 0.25,
+    area(rects) < VP.width * VP.height * 0.15,
     `repainted ${area(rects)}px² of ${VP.width * VP.height}`,
   );
+});
+
+test('a rounded pane with furniture in both bottom corners blits a pan either way (#691)', async () => {
+  // Furniture in two corners, the rounded ancestor's four and the strip are
+  // more rects than a frame's damage holds, so some merge. Priced by the box
+  // around the pair, the cheapest merge panning left was the controls with
+  // the bottom corner band — whose box grew through the minimap and the
+  // strip into nearly the whole pane, and every frame of the pan going that
+  // way was a full repaint.
+  const { wnd, node, root } = await mount({
+    wrapStyle: { borderRadius: 8 },
+  });
+  for (const [dx, dy] of [
+    [-20, 0],
+    [20, 0],
+    [-12, 16],
+    [12, -16],
+    [0, 24],
+  ]) {
+    wnd.calls.length = 0;
+    assert.strictEqual(node.panPinned(dx, dy), true);
+    await tick();
+    assert.deepStrictEqual(
+      blits(wnd),
+      [['scrollRegion', VP, dx, dy]],
+      `the pan by ${dx},${dy} blits`,
+    );
+    const rects = root._lastDamageRects;
+    assert.ok(rects, `the pan by ${dx},${dy} stays bounded`);
+    assert.ok(
+      area(rects) < VP.width * VP.height * 0.2,
+      `the pan by ${dx},${dy} repainted ${area(rects)}px² of ${VP.width * VP.height}`,
+    );
+  }
 });
 
 test('a rounded ancestor whose corners stay clear of the region blits it whole', async () => {
@@ -1487,6 +1537,94 @@ test('so is a pan with furniture pinned in its corners (#682)', async (t) => {
       assert.ok(
         blitted.equals(repainted),
         `the pinned pan by ${dx},${dy} differs from a full repaint`,
+      );
+      blitCalls = 0;
+    }
+  } finally {
+    await x11Root.unmount();
+    await app.close();
+  }
+});
+
+test('so is a pinned pan in a rounded pane, either way (#691)', async (t) => {
+  // The corners of the rounded box around the pane are repaired where they
+  // are and where the copy dragged them, like the furniture — so the whole
+  // pane shifts, arcs and all, and a repair short by a pixel shows up here
+  // as a difference. Left and up are the directions that used to fall back.
+  register();
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const ref = React.createRef();
+    const instance = await new Promise((resolve) =>
+      x11Root.render(
+        h(
+          'window',
+          { width: W, height: H, style: { backgroundColor: '#101820' } },
+          h(
+            'box',
+            {
+              style: {
+                flexGrow: 1,
+                margin: INSET - 1,
+                borderWidth: 1,
+                borderColor: '#95a5a6',
+                borderRadius: 9,
+                backgroundColor: '#2c3e50',
+              },
+            },
+            h('pan', { ref, style: { flexGrow: 1 } }),
+          ),
+        ),
+        resolve,
+      ),
+    );
+    if (typeof instance.scrollRegion !== 'function') {
+      t.skip('installed ntk has no Window.scrollRegion yet');
+      return;
+    }
+    const node = ref.current;
+    const root = node.root;
+    const frame = () => {
+      root._scheduled = false;
+      root.flush();
+    };
+    frame();
+    assert.deepStrictEqual(node.abs, VP, 'the pane fills the rounded box');
+    node.pins = node.corners();
+    root.invalidate(false);
+    frame();
+    await settle(app);
+
+    let blitCalls = 0;
+    const real = instance.scrollRegion.bind(instance);
+    instance.scrollRegion = (...args) => {
+      blitCalls += 1;
+      return real(...args);
+    };
+
+    for (const [dx, dy] of [
+      [-20, 0],
+      [-12, 16],
+      [24, -8],
+      [0, -30],
+    ]) {
+      node.panPinned(dx, dy);
+      frame();
+      await settle(app);
+      assert.strictEqual(blitCalls, 1, `the fast path fired for ${dx},${dy}`);
+      assert.ok(root._lastDamageRects, 'and the frame stayed bounded');
+      const blitted = await readPixels(
+        root._ctx ?? (root._ctx = root.window.getContext('2d')),
+      );
+
+      root.invalidate(false);
+      frame();
+      await settle(app);
+      const repainted = await readPixels(root._ctx);
+      assert.ok(
+        blitted.equals(repainted),
+        `the pinned pan by ${dx},${dy} in a rounded pane differs from a full repaint`,
       );
       blitCalls = 0;
     }
