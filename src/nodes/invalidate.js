@@ -387,7 +387,7 @@ export class WindowInvalidate {
         // viewport — and the wider zone is what keeps it out.
         //
         // The difference is what lets an element carve furniture out of the
-        // rect it blits — a minimap pinned to a corner, a strip it repaints
+        // rect it blits — a HUD strip along the pane's edge that it repaints
         // itself — and keep the pan at blit cost while that furniture
         // claims beside it.
         const contents = sv._pendingBlitContents;
@@ -404,6 +404,12 @@ export class WindowInvalidate {
           if (sv._blitLedgerOpen() && sv._recordBlitClaim(rect)) {
             continue;
           }
+          // …or it lies inside furniture an element pinned over what it
+          // shifts (issue #682): the frame repaints the pinned rect, and
+          // the image of it the copy drags along, whether or not anything
+          // claims there — so a claim inside one changes nothing about
+          // the pixels the blit moves.
+          if (sv._pinnedHolds(rect)) continue;
           // Poison rather than disarm (react-x11#295): a null here would
           // let a second scrollTo in the same frame re-arm from a
           // mid-frame origin, and the blit would then move pixels that

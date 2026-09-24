@@ -5,53 +5,8 @@
 import { Yoga } from '../yoga.js';
 import { callHandler } from '../errors.js';
 import { DAMAGE_SLOP, layoutDiff } from './damage.js';
-import { insetRect, intersectRects, outerPixels } from './rects.js';
+import { insetRect, intersectRects, outerPixels, outside } from './rects.js';
 import { DEV } from './util.js';
-
-/** The parts of `rect` outside `hole`: up to four bands, full width above
- *  and below, the rest beside. */
-function outside(rect, hole) {
-  const cut = intersectRects(rect, hole);
-  if (!cut) return [rect];
-  const out = [];
-  const right = rect.x + rect.width;
-  const bottom = rect.y + rect.height;
-  if (cut.y > rect.y) {
-    out.push({
-      x: rect.x,
-      y: rect.y,
-      width: rect.width,
-      height: cut.y - rect.y,
-    });
-  }
-  const cutBottom = cut.y + cut.height;
-  if (cutBottom < bottom) {
-    out.push({
-      x: rect.x,
-      y: cutBottom,
-      width: rect.width,
-      height: bottom - cutBottom,
-    });
-  }
-  if (cut.x > rect.x) {
-    out.push({
-      x: rect.x,
-      y: cut.y,
-      width: cut.x - rect.x,
-      height: cut.height,
-    });
-  }
-  const cutRight = cut.x + cut.width;
-  if (cutRight < right) {
-    out.push({
-      x: cutRight,
-      y: cut.y,
-      width: right - cutRight,
-      height: cut.height,
-    });
-  }
-  return out;
-}
 
 export const MEASURE_MODES = [];
 MEASURE_MODES[Yoga.MEASURE_MODE_UNDEFINED] = 'unconstrained';

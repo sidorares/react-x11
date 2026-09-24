@@ -553,12 +553,22 @@ export declare class Node {
    * what it leaves or reaches outside `rect` is repainted, so keep what it
    * can paint inside the element (a box that clips it). Anything else it
    * does is claimed as usual, which declines the blit.
+   *
+   * `pinned` is the other way round: furniture inside `rect` that stays put
+   * while everything around it moves — a minimap, zoom controls — as rects
+   * in the same coordinates. The copy drags a stale image of each along, so
+   * the frame repaints the pinned rect and that image on every pan frame,
+   * changed or not; a claim inside a pinned rect, or a node that lies inside
+   * one, leaves the blit standing. Pin furniture in a corner rather than
+   * carving it out of `rect`: what shifts is one rectangle, so a carved
+   * corner takes the rows beside it too.
    */
   scrollContents(
     rect: Rect,
     dx: number,
     dy: number,
-    riders?: Iterable<Node>,
+    riders?: Iterable<Node> | null,
+    pinned?: Iterable<Rect> | null,
   ): boolean;
   /**
    * Did anything this node draws change? True damages the whole node, false

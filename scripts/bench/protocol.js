@@ -599,6 +599,55 @@ class PanSceneNode extends SceneNode {
     this.scrollContents({ ...box, height: box.height - HUD_HEIGHT }, dx, dy);
     this.invalidate(false, hud, 'props');
   }
+
+  /**
+   * The same pan with furniture in two corners (issue #682): zoom controls
+   * down the bottom-left and a minimap in the bottom-right, drawn over the
+   * scene. Carved out of the region the way the HUD above is, the pair
+   * takes the band between them too — what shifts is one rectangle — so
+   * the element hands the whole pane over and pins the two where they are.
+   */
+  panPinned(dx, dy) {
+    this.panX += dx;
+    this.panY += dy;
+    this.panels = this.corners();
+    this.scrollContents(this.contentBox(), dx, dy, null, this.panels);
+  }
+
+  corners() {
+    const box = this.contentBox();
+    return [
+      { x: box.x + 8, y: box.y + box.height - 104, width: 32, height: 96 },
+      {
+        x: box.x + box.width - 128,
+        y: box.y + box.height - 88,
+        width: 120,
+        height: 80,
+      },
+    ];
+  }
+
+  paintContent(ctx) {
+    super.paintContent(ctx);
+    const damage = this.paintDamage();
+    for (const r of this.panels ?? []) {
+      if (
+        damage &&
+        !(
+          r.x < damage.x + damage.width &&
+          damage.x < r.x + r.width &&
+          r.y < damage.y + damage.height &&
+          damage.y < r.y + r.height
+        )
+      ) {
+        continue;
+      }
+      ctx.fillStyle = '#2d3436';
+      ctx.beginPath();
+      ctx.roundRect(r.x, r.y, r.width, r.height, 6);
+      ctx.fill();
+    }
+  }
 }
 
 const HUD_HEIGHT = 60;
@@ -1384,6 +1433,39 @@ const SCENARIOS = [
         run: async (app, x11Root) => {
           for (let i = 0; i < 5; i++) {
             pane.panBeside(7, 5);
+            ctl.frame();
+            await settle(app);
+          }
+        },
+      };
+    })(),
+  ],
+  [
+    // …and with the furniture in two corners instead (issue #682): zoom
+    // controls down the bottom-left, a minimap in the bottom-right. Carved
+    // out, the pair takes the band between them too, since what shifts is
+    // one rectangle — the same five steps with the rows from the controls
+    // down carved as a band cost 2736 requests / 1349 composites / 0.70 Mpx,
+    // every cell in the band redrawn a step. Pinned, the whole pane shifts
+    // and each piece repaints where it stays and where the copy put its
+    // image: two small rects a step.
+    'scene: 5 pan steps with furniture pinned in two corners',
+    (() => {
+      let ctl;
+      let pane;
+      return {
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, panSceneWindow());
+          pane = ctl.root.children.find((n) => n.kind === 'panscene');
+          // on screen before the first step, as it would be in an app
+          pane.panels = pane.corners();
+          pane.invalidate(false, pane, 'props');
+          ctl.frame();
+          await settle(app);
+        },
+        run: async (app, x11Root) => {
+          for (let i = 0; i < 5; i++) {
+            pane.panPinned(7, 5);
             ctl.frame();
             await settle(app);
           }

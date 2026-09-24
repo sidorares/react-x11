@@ -14,14 +14,17 @@ import {
   isIntegerRect,
   insetRect,
   innerPixels,
+  outerPixels,
   intersectRects,
   unionRect,
   rectArea,
   cornerSquaresOverlap,
   rectsOverlap,
+  outside,
 } from './rects.js';
 import { isPaintedColor } from './boxpaint.js';
 import { scrollbarTrackRect } from './scrollbars.js';
+import { DEV } from './util.js';
 import { debugPaint } from './window/debugpaint.js';
 
 // --- scroll blitting (issue #138) ---------------------------------------
@@ -201,6 +204,86 @@ function unionIsBox(a, b) {
   );
 }
 
+/** Is `rect` inside one of `pins`, the furniture an element blit pinned —
+ * repaired whole after the copy, whatever changed in it (issue #682)? */
+function insidePinned(rect, pins) {
+  if (!pins) return false;
+  for (const pin of pins) {
+    if (rectContains(pin, rect)) return true;
+  }
+  return false;
+}
+
+/** One of `scrollContents`' lists as an array, read once — an iterable may
+ * be a generator — null when it was left out, and undefined when it is not
+ * a list at all. */
+function asList(value) {
+  if (value == null) return null;
+  return typeof value[Symbol.iterator] === 'function' ? [...value] : undefined;
+}
+
+/** The first entry of `list` that `ok` refuses, the value itself when it is
+ * not a list, or undefined when there is nothing wrong with it. */
+function strayIn(value, list, ok) {
+  if (list === undefined) return value;
+  return list?.find((entry) => entry != null && !ok(entry));
+}
+
+const isNode = (value) => typeof value.paintBounds === 'function';
+
+const isRect = (value) =>
+  Number.isFinite(value.x) &&
+  Number.isFinite(value.y) &&
+  Number.isFinite(value.width) &&
+  Number.isFinite(value.height) &&
+  value.width >= 0 &&
+  value.height >= 0;
+
+/**
+ * The furniture one `scrollContents` call pins: the whole pixels each rect
+ * touches inside `rect`, rounded outward because repairing a pixel more
+ * costs nothing and a pixel less is a sliver of stale furniture the pan
+ * drags along. A rect beside `rect` has no pixels the copy moves, and is
+ * left out, as is an empty one. Null when nothing is left.
+ */
+function pinnedRects(rect, list) {
+  let out = null;
+  for (const pin of list ?? []) {
+    if (pin == null || pin.width === 0 || pin.height === 0) continue;
+    const inside = intersectRects(outerPixels(pin), rect);
+    if (inside) (out ??= []).push(inside);
+  }
+  return out;
+}
+
+/** A value from a caller, short enough for a warning. An object that will
+ * not serialize — a node's tree is a cycle — is named by its keys. */
+function describe(value) {
+  if (typeof value?.paintBounds === 'function') {
+    return `the node <${value.kind}>`;
+  }
+  // the likeliest mistake of all, from a React component
+  if (typeof value?.current?.paintBounds === 'function') {
+    return `a ref to <${value.current.kind}> rather than the node, its .current`;
+  }
+  if (value === null || typeof value !== 'object') return String(value);
+  try {
+    const json = JSON.stringify(value);
+    return json.length > 120 ? `${json.slice(0, 117)}...` : json;
+  } catch {
+    return `an object with ${Object.keys(value).join(', ') || 'no keys'}`;
+  }
+}
+
+const warned = new Set();
+/** A development warning, once per kind of mistake rather than per value:
+ * the value is new on every frame of a pan. */
+function warnOnce(key, message) {
+  if (!DEV || warned.has(key)) return;
+  warned.add(key);
+  console.warn(message);
+}
+
 /** Node's half of the scroll blit, installed onto `Node.prototype` by node.js. */
 export class NodeScrollBlit {
   /**
@@ -215,8 +298,10 @@ export class NodeScrollBlit {
    * away, so the paths that make them take a finer route while this is true.
    *
    * `scrollContents` is out: an element blit already tests foreign claims
-   * against the rect it handed over (issue #309), and its region is not a
-   * viewport whose children *are* the scrolled content.
+   * against the rect it handed over (issue #309), its region is not a
+   * viewport whose children *are* the scrolled content, and what changes
+   * inside it on a pan frame is furniture the element names up front as
+   * pinned (issue #682, `_pinnedHolds`).
    */
   _blitLedgerOpen() {
     const from = this._pendingBlitFrom;
@@ -278,6 +363,18 @@ export class NodeScrollBlit {
   }
 
   /**
+   * Is `rect` inside furniture this node's pending element blit pinned
+   * (issue #682)? A claim there is the element's own and costs the blit
+   * nothing: the frame repaints the pinned rect after the copy, and the
+   * rect the copy dragged its old pixels to, so the change is covered
+   * whichever side of the shift the claim was named on — where the
+   * furniture stays, or where the content under it was before it moved.
+   */
+  _pinnedHolds(rect) {
+    return insidePinned(rect, this._pendingBlitContents?.pinned);
+  }
+
+  /**
    * How far the blit this viewport has pending moves the pixels it keeps:
    * the delta `_applyScrollBlits` hands `scrollRegion`, from the offsets
    * captured when the blit was armed to the ones in force now. `from` is
@@ -330,12 +427,24 @@ export class NodeScrollBlit {
    * moved something — and each of them falls back to repainting the rect,
    * which is the behaviour without this call at all.
    *
-   * All of those are about `rect`, not about this node (issue #309). An
-   * element with furniture pinned to a corner of its pane — a minimap, zoom
-   * controls, a HUD strip that has to repaint on a pan frame and whose
-   * pixels must not ride the blit — carves it out of the region it shifts
-   * and claims it as ordinary damage. Those claims land beside the rect and
-   * the frame stays a blit.
+   * All of those are about `rect`, not about this node (issue #309): a
+   * claim beside the rect leaves the frame a blit, so an element can carve
+   * a HUD strip along the pane's edge out of the region it shifts and claim
+   * the strip as ordinary damage.
+   *
+   * Furniture in a corner does better as `pinned` (issue #682): rects inside
+   * `rect`, in the same coordinates, that stay put while everything around
+   * them moves — a minimap, zoom controls, drawn by the element over its
+   * own drawing or laid out over it as nodes. Carved out instead, a corner
+   * takes the rows beside it too, since what shifts is one rectangle, and
+   * two bottom corners carve a band the pane's full width, repainted every
+   * frame. Pinned, the copy drags a stale image of each piece of furniture
+   * by (dx, dy), and the frame repaints the pinned rect and that image —
+   * two small rects, whether the furniture changed or not, so a minimap's
+   * viewport box can follow the pan without claiming a thing. A claim
+   * inside a pinned rect is the element's own rather than a reason to
+   * decline, and so is a node that lies inside one: its pixels are
+   * repaired with the rest of the rect.
    *
    * `riders` are the other way round: nodes that are not this one whose
    * pixels in `rect` are part of what moves — a layer of widgets an element
@@ -352,7 +461,7 @@ export class NodeScrollBlit {
    * arrives as `paintDamage()`, because most of the gates cannot be decided
    * until the frame closes; a `false` here is only the ones that can.
    */
-  scrollContents(rect, dx, dy, riders) {
+  scrollContents(rect, dx, dy, riders, pinned) {
     const root = this.root;
     if (
       !root ||
@@ -367,6 +476,33 @@ export class NodeScrollBlit {
     // rounding a gesture to whole pixels lands here on most events.
     if (!dx && !dy) return true;
     const pending = this._pendingBlitContents;
+    // Two lists, one of nodes and one of rects, and the cost of mixing them
+    // up is not a slow frame but a wrong one: furniture handed over as a
+    // rider is dragged along by the pan and repaired by nobody. So each has
+    // to be what it says, or the frame repaints.
+    const riderList = asList(riders);
+    const pinList = asList(pinned);
+    const strayRider = strayIn(riders, riderList, isNode);
+    const strayPin = strayIn(pinned, pinList, isRect);
+    if (strayRider !== undefined) {
+      warnOnce(
+        'riders',
+        'react-x11: scrollContents() takes the nodes a pan carries as a ' +
+          `list of riders, and got ${describe(strayRider)}. Furniture that ` +
+          'stays put while the pan moves around it is pinned — a list of ' +
+          'rects, the argument after riders. This frame repaints the region ' +
+          'instead of blitting it.',
+      );
+    } else if (strayPin !== undefined) {
+      warnOnce(
+        'pinned',
+        'react-x11: scrollContents() takes the furniture it pins as a list ' +
+          'of rects — { x, y, width, height }, in window coordinates like ' +
+          `the region — and got ${describe(strayPin)}. This frame repaints ` +
+          'the region instead of blitting it, since a blit would drag the ' +
+          'furniture along with the pan.',
+      );
+    }
     // The rect has to be the same one all frame: two different regions of
     // one node shifting by different deltas is not one CopyArea, and the
     // second claim would coalesce into the first past the point either can
@@ -374,12 +510,14 @@ export class NodeScrollBlit {
     // offsets this frame — two shifts of the same pixels, and a frame can
     // only have one.
     if (
-      this._pendingBlitFrom != null &&
-      (!pending ||
-        pending.rect.x !== rect.x ||
-        pending.rect.y !== rect.y ||
-        pending.rect.width !== rect.width ||
-        pending.rect.height !== rect.height)
+      strayRider !== undefined ||
+      strayPin !== undefined ||
+      (this._pendingBlitFrom != null &&
+        (!pending ||
+          pending.rect.x !== rect.x ||
+          pending.rect.y !== rect.y ||
+          pending.rect.width !== rect.width ||
+          pending.rect.height !== rect.height))
     ) {
       this._pendingBlitFrom = BLIT_POISONED;
     } else if (this._pendingBlitFrom == null && Array.isArray(root._damage)) {
@@ -394,11 +532,13 @@ export class NodeScrollBlit {
       // claim it could swallow has to overlap it, and every claim carries
       // its own slop already — `paintBounds` inflates a node's region by
       // `DAMAGE_SLOP` on every side, so ink that bleeds into `rect` is
-      // claimed overlapping it. Furniture *beside* the rect — a minimap in
-      // a corner the element carved out and repaints itself — is not a
-      // change to the pixels about to move.
+      // claimed overlapping it. Furniture *beside* the rect — a strip the
+      // element carved out and repaints itself — is not a change to the
+      // pixels about to move, and nor is furniture this call pins inside
+      // it (issue #682): the frame repaints that whole, blit or no blit.
+      const pins = pinnedRects(rect, pinList);
       for (const claimed of root._damage) {
-        if (rectsOverlap(claimed, rect)) {
+        if (rectsOverlap(claimed, rect) && !insidePinned(claimed, pins)) {
           this._pendingBlitFrom = BLIT_POISONED;
           break;
         }
@@ -415,11 +555,20 @@ export class NodeScrollBlit {
     // coalescing scrollTo gets from recording an origin
     state.dx += dx;
     state.dy += dy;
-    if (riders) {
-      for (const rider of riders) {
+    if (strayRider === undefined) {
+      for (const rider of riderList ?? []) {
         if (!rider || rider === this || rider.destroyed) continue;
         (state.riders ??= new Set()).add(rider);
         rider._ridesBlitOf = this;
+      }
+    }
+    // …and the furniture of every call this frame: a pan that moved its
+    // minimap names both places, and the frame repairs both. Kept in whole
+    // pixels inside the rect, once each.
+    if (strayPin === undefined) {
+      for (const pin of pinnedRects(state.rect, pinList) ?? []) {
+        const pins = (state.pinned ??= []);
+        if (!pins.some((held) => rectContains(held, pin))) pins.push(pin);
       }
     }
     this._pendingBlitFrom ??= BLIT_CONTENTS;
@@ -842,10 +991,15 @@ export class WindowScrollBlit {
    * the L of exposed strips overlaps the scrollbar rects and the merges
    * balloon back towards the whole viewport. With no bars the L is two
    * disjoint rects and stays two.
+   *
+   * Furniture the element pinned (issue #682) is the one thing inside the
+   * region that does not move: the copy drags a stale image of it along,
+   * so each pinned rect is repaired where it is and where the image landed,
+   * and a node inside one is furniture too rather than a reason to refuse.
    */
   _applyContentsBlit(
     node,
-    { rect: vp, dx, dy, riders },
+    { rect: vp, dx, dy, riders, pinned },
     width,
     height,
     target,
@@ -888,11 +1042,14 @@ export class WindowScrollBlit {
     // A scroll container's children *are* the scrolled content, which is
     // why _scrollBlitSafe skips that subtree. An element's are not: it
     // draws the region in paintContent and its children are laid out on
-    // top, so one reaching in would have its pixels dragged along.
+    // top, so one reaching in would have its pixels dragged along — unless
+    // it lies inside furniture the element pinned, which is repaired after
+    // the copy whoever drew it.
     for (const child of node.children) {
       if (child.isWindow || !child.yoga || child.hidden) continue;
       if (child.style?.display === 'none') continue;
-      if (rectsOverlap(child._subtreeBounds(), vp)) return;
+      const reach = child._subtreeBounds();
+      if (rectsOverlap(reach, vp) && !insidePinned(reach, pinned)) return;
     }
     const keep = this._blitKeptDamage(vp, true, target.damage);
     if (!keep) return;
@@ -918,11 +1075,9 @@ export class WindowScrollBlit {
     ) {
       return;
     }
-    if (!this._scrollBlitSafe(node, shifted, target.top, riders)) return;
-    // the element's deltas are already how far the pixels moved, the sense
-    // scrollRegion takes (0 + x rather than x: a caller's -0 would survive
-    // into request buffers and test comparisons)
-    if (!target.blit({ ...shifted }, 0 + dx, 0 + dy)) return;
+    if (!this._scrollBlitSafe(node, shifted, target.top, riders, pinned)) {
+      return;
+    }
     let rects = keep;
     if (bands.top) {
       rects = addDamageRect(rects, {
@@ -940,28 +1095,61 @@ export class WindowScrollBlit {
         height: bands.bottom,
       });
     }
-    vp = shifted;
     // The strips the shift exposed, on the sides the pixels came from. The
     // horizontal one takes the full width and the vertical one takes what
     // is left, so a diagonal shift claims two rects that do not overlap —
     // overlapping claims merge into their box, and the box of an L is the
     // whole region again.
+    const strips = [];
     if (dy !== 0) {
-      rects = addDamageRect(rects, {
-        x: vp.x,
-        y: dy > 0 ? vp.y : vp.y + vp.height + dy,
-        width: vp.width,
+      strips.push({
+        x: shifted.x,
+        y: dy > 0 ? shifted.y : shifted.y + shifted.height + dy,
+        width: shifted.width,
         height: Math.abs(dy),
       });
     }
     if (dx !== 0) {
-      rects = addDamageRect(rects, {
-        x: dx > 0 ? vp.x : vp.x + vp.width + dx,
-        y: dy > 0 ? vp.y + dy : vp.y,
+      strips.push({
+        x: dx > 0 ? shifted.x : shifted.x + shifted.width + dx,
+        y: dy > 0 ? shifted.y + dy : shifted.y,
         width: Math.abs(dx),
-        height: vp.height - Math.abs(dy),
+        height: shifted.height - Math.abs(dy),
       });
     }
+    for (const strip of strips) rects = addDamageRect(rects, strip);
+    if (pinned) {
+      // Each piece of furniture where it stays, and where the copy put the
+      // image of it it dragged along — one box, since a pan step moves it a
+      // few pixels, and inside what shifted, because the corner bands
+      // repaint whole and the copy wrote nothing outside. Less the strips,
+      // which repaint anyway: furniture flush against the side the pixels
+      // came from would otherwise merge with the strip down that side into
+      // the box of the two, most of the region's height.
+      for (const pin of pinned) {
+        const image = { ...pin, x: pin.x + dx, y: pin.y + dy };
+        const repair = intersectRects(unionRect(pin, image), shifted);
+        if (!repair) continue;
+        let pieces = [repair];
+        for (const strip of strips) {
+          pieces = pieces.flatMap((piece) => outside(piece, strip));
+        }
+        for (const piece of pieces) rects = addDamageRect(rects, piece);
+      }
+      // Furniture can be most of a pane, and the damage cap can merge a
+      // repair with a strip into the box of the two: past this, the blit is
+      // buying a shift and paying for the region anyway.
+      let painted = 0;
+      for (const rect of rects) {
+        const inside = intersectRects(rect, vp);
+        if (inside) painted += rectArea(inside);
+      }
+      if (painted > area * SCROLL_BLIT_MAX_REPAINT) return;
+    }
+    // the element's deltas are already how far the pixels moved, the sense
+    // scrollRegion takes (0 + x rather than x: a caller's -0 would survive
+    // into request buffers and test comparisons)
+    if (!target.blit({ ...shifted }, 0 + dx, 0 + dy)) return;
     target.damage = rects;
   }
 
@@ -1002,7 +1190,7 @@ export class WindowScrollBlit {
    * only its own children — what the window draws under the surface was
    * never in the pane's pixels.
    */
-  _scrollBlitSafe(scroller, vp, top = this, riders = null) {
+  _scrollBlitSafe(scroller, vp, top = this, riders = null, pinned = null) {
     // the window itself scrolls: everything inside it *is* the scrolled
     // content, so there is nothing that could be dragged along
     if (scroller === this) return true;
@@ -1063,7 +1251,11 @@ export class WindowScrollBlit {
         // …and a node the blit carries has pixels that move with it
         // (`scrollContents`'s riders)
         if (riders?.has(child)) continue;
-        if (!rectsOverlap(child._subtreeBounds(), vp)) continue;
+        const reach = child._subtreeBounds();
+        if (!rectsOverlap(reach, vp)) continue;
+        // …and one inside furniture an element blit pinned is repaired
+        // where it is and where the copy dragged it, like the element's own
+        if (insidePinned(reach, pinned)) continue;
         // A box that paints nothing of its own is its children, and as
         // safe as they are: the box that clips a rider to its element.
         if (child._paintsNothingOwn() && check(child)) continue;
