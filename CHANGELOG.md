@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.21.0](https://github.com/sidorares/react-x11/compare/v2.20.0...v2.21.0) (2026-09-24)
+
+
+### Features
+
+* **text:** layout.coverage() — a layout's coverage without a readback ([#674](https://github.com/sidorares/react-x11/issues/674)) ([565a2a0](https://github.com/sidorares/react-x11/commit/565a2a0be53bcbcdeb2dee075a2f2f6f13a7c934))
+
 ## [2.20.0](https://github.com/sidorares/react-x11/compare/v2.19.0...v2.20.0) (2026-09-23)
 
 
