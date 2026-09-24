@@ -8,7 +8,12 @@
 // viewport, so the fast path can cost correctness nothing.
 
 import { EMPTY_STYLE, resolveBorderWidths } from '../styles.js';
-import { DAMAGE_SLOP, addDamageRect } from './damage.js';
+import {
+  DAMAGE_SLOP,
+  MAX_DAMAGE_RECTS,
+  addDamageRect,
+  addDamageRects,
+} from './damage.js';
 import {
   rectContains,
   isIntegerRect,
@@ -18,7 +23,7 @@ import {
   intersectRects,
   unionRect,
   rectArea,
-  cornerSquaresOverlap,
+  cornerSquares,
   rectsOverlap,
   outside,
 } from './rects.js';
@@ -60,6 +65,15 @@ const SCROLL_BLIT_MIN_KEEP = 0.5;
 // the scrollbar column, whose box then reaches back across the viewport.
 // Past this the blit is buying a shift and paying for the viewport anyway.
 const SCROLL_BLIT_MAX_REPAINT = 0.75;
+
+// The rects an element blit may leave its frame to paint: the strips the
+// shift exposed, on top of a frame's usual allowance. A diagonal pan of a
+// rounded pane with furniture in two corners owes two strips, two pieces of
+// furniture and four corner repairs; held to four rects they merged into
+// boxes a third of the pane, and a graph panned diagonally at 41fps on
+// XQuartz and 52 on macOS where two more rects make it 60 and 78 (issue
+// #691). Eight bought nothing past six.
+const CONTENTS_BLIT_MAX_RECTS = MAX_DAMAGE_RECTS + 2;
 
 // A scroll that must not blit this frame: content inside the viewport
 // already changed (see the arming check in scrollTo, and the claim-time
@@ -212,6 +226,18 @@ function insidePinned(rect, pins) {
     if (rectContains(pin, rect)) return true;
   }
   return false;
+}
+
+/** Does every corner square of a rounded `box` that reaches into `vp` lie
+ * inside one of `pins` — repaired after the copy rather than dragged along
+ * by it (issue #691)? True when none reaches in. */
+function cornersPinned(box, radius, vp, pins) {
+  for (const square of cornerSquares(box, radius)) {
+    if (!rectsOverlap(square, vp)) continue;
+    const inside = intersectRects(outerPixels(square), vp);
+    if (inside && !insidePinned(inside, pins)) return false;
+  }
+  return true;
 }
 
 /** One of `scrollContents`' lists as an array, read once — an iterable may
@@ -1053,48 +1079,20 @@ export class WindowScrollBlit {
     }
     const keep = this._blitKeptDamage(vp, true, target.damage);
     if (!keep) return;
-    // An ancestor's rounded corners reach into the top and bottom rows of
-    // the region (a graph pane inside a rounded card is the common shape):
-    // those rows do not translate, so they leave the blit and get repainted
-    // as bands — the same carve the element does for its own furniture —
-    // and the band that shifts is what is left between them.
-    const bands = this._cornerBands(node, vp, target.top);
-    const shifted =
-      bands.top || bands.bottom
-        ? {
-            x: vp.x,
-            y: vp.y + bands.top,
-            width: vp.width,
-            height: vp.height - bands.top - bands.bottom,
-          }
-        : vp;
-    if (shifted.height <= 0 || Math.abs(dy) >= shifted.height) return;
-    if (
-      (shifted.width - Math.abs(dx)) * (shifted.height - Math.abs(dy)) <
-      area * SCROLL_BLIT_MIN_KEEP
-    ) {
-      return;
-    }
-    if (!this._scrollBlitSafe(node, shifted, target.top, riders, pinned)) {
-      return;
-    }
-    let rects = keep;
-    if (bands.top) {
-      rects = addDamageRect(rects, {
-        x: vp.x,
-        y: vp.y,
-        width: vp.width,
-        height: bands.top,
-      });
-    }
-    if (bands.bottom) {
-      rects = addDamageRect(rects, {
-        x: vp.x,
-        y: shifted.y + shifted.height,
-        width: vp.width,
-        height: bands.bottom,
-      });
-    }
+    // An ancestor's rounded corners reach into the region (a graph pane
+    // inside a rounded card is the common shape). Their arcs do not
+    // translate, but they live in four small squares and nowhere else, so
+    // they are pinned like the element's own furniture (issue #691): the
+    // whole region shifts, and each square is repaired where it is and where
+    // the copy dragged its image. Carved out as the rows they reach into,
+    // they took the region's full width at the top and at the bottom —
+    // every card and edge in those rows repainted through the rounded clip
+    // on every frame — and next to furniture in two corners, one rect more
+    // than the damage cap has room for.
+    const corners = this._cornerPins(node, vp, target.top);
+    const pins =
+      corners && pinned ? [...pinned, ...corners] : (corners ?? pinned);
+    if (!this._scrollBlitSafe(node, vp, target.top, riders, pins)) return;
     // The strips the shift exposed, on the sides the pixels came from. The
     // horizontal one takes the full width and the vertical one takes what
     // is left, so a diagonal shift claims two rects that do not overlap —
@@ -1103,39 +1101,44 @@ export class WindowScrollBlit {
     const strips = [];
     if (dy !== 0) {
       strips.push({
-        x: shifted.x,
-        y: dy > 0 ? shifted.y : shifted.y + shifted.height + dy,
-        width: shifted.width,
+        x: vp.x,
+        y: dy > 0 ? vp.y : vp.y + vp.height + dy,
+        width: vp.width,
         height: Math.abs(dy),
       });
     }
     if (dx !== 0) {
       strips.push({
-        x: dx > 0 ? shifted.x : shifted.x + shifted.width + dx,
-        y: dy > 0 ? shifted.y + dy : shifted.y,
+        x: dx > 0 ? vp.x : vp.x + vp.width + dx,
+        y: dy > 0 ? vp.y + dy : vp.y,
         width: Math.abs(dx),
-        height: shifted.height - Math.abs(dy),
+        height: vp.height - Math.abs(dy),
       });
     }
-    for (const strip of strips) rects = addDamageRect(rects, strip);
-    if (pinned) {
+    const pieces = [...strips];
+    if (pins) {
       // Each piece of furniture where it stays, and where the copy put the
       // image of it it dragged along — one box, since a pan step moves it a
-      // few pixels, and inside what shifted, because the corner bands
-      // repaint whole and the copy wrote nothing outside. Less the strips,
-      // which repaint anyway: furniture flush against the side the pixels
-      // came from would otherwise merge with the strip down that side into
-      // the box of the two, most of the region's height.
-      for (const pin of pinned) {
+      // few pixels, and inside the region, since the copy wrote nothing
+      // outside. Less the strips, which repaint anyway: furniture flush
+      // against the side the pixels came from would otherwise merge with
+      // the strip down that side into the box of the two, most of the
+      // region's height.
+      for (const pin of pins) {
         const image = { ...pin, x: pin.x + dx, y: pin.y + dy };
-        const repair = intersectRects(unionRect(pin, image), shifted);
+        const repair = intersectRects(unionRect(pin, image), vp);
         if (!repair) continue;
-        let pieces = [repair];
+        let cut = [repair];
         for (const strip of strips) {
-          pieces = pieces.flatMap((piece) => outside(piece, strip));
+          cut = cut.flatMap((piece) => outside(piece, strip));
         }
-        for (const piece of pieces) rects = addDamageRect(rects, piece);
+        pieces.push(...cut);
       }
+    }
+    // in one call, so the small pieces find their neighbours before the
+    // cap makes anything merge (`addDamageRects`)
+    const rects = addDamageRects(keep, pieces, CONTENTS_BLIT_MAX_RECTS);
+    if (pins) {
       // Furniture can be most of a pane, and the damage cap can merge a
       // repair with a strip into the box of the two: past this, the blit is
       // buying a shift and paying for the region anyway.
@@ -1149,32 +1152,29 @@ export class WindowScrollBlit {
     // the element's deltas are already how far the pixels moved, the sense
     // scrollRegion takes (0 + x rather than x: a caller's -0 would survive
     // into request buffers and test comparisons)
-    if (!target.blit({ ...shifted }, 0 + dx, 0 + dy)) return;
+    if (!target.blit({ ...vp }, 0 + dx, 0 + dy)) return;
     target.damage = rects;
   }
 
   /**
-   * How many rows at the top and at the bottom of `vp` an ancestor's rounded
-   * corners reach into — the rows an element blit has to leave behind and
-   * repaint, so that what shifts stays clear of every corner square
-   * (`_scrollBlitSafe`). Whole pixels, and zero when no corner reaches in.
+   * The squares of `vp` an ancestor's rounded corners reach into — the only
+   * pixels of a rounded outline a translation cannot keep — in whole pixels,
+   * for an element blit to pin (issue #691). Null when no corner reaches in.
    * Ancestors below `upTo`, the node the blit's surface belongs to
    * (`_blitTarget`): a pane is a rectangle no corner above it clips.
    */
-  _cornerBands(node, vp, upTo = this) {
-    let top = 0;
-    let bottom = 0;
+  _cornerPins(node, vp, upTo = this) {
+    let out = null;
     for (let n = node.parent; n && n !== upTo; n = n.parent) {
       const radius = n.style?.borderRadius ?? 0;
       if (!(radius > 0) || !n.abs) continue;
-      if (!cornerSquaresOverlap(n.abs, radius, vp)) continue;
-      top = Math.max(top, Math.ceil(n.abs.y + radius - vp.y));
-      bottom = Math.max(
-        bottom,
-        Math.ceil(vp.y + vp.height - (n.abs.y + n.abs.height - radius)),
-      );
+      for (const square of cornerSquares(n.abs, radius)) {
+        if (!rectsOverlap(square, vp)) continue;
+        const inside = intersectRects(outerPixels(square), vp);
+        if (inside) (out ??= []).push(inside);
+      }
     }
-    return { top: Math.max(0, top), bottom: Math.max(0, bottom) };
+    return out;
   }
 
   /**
@@ -1229,10 +1229,11 @@ export class WindowScrollBlit {
           // radius-sized squares at the corners, and the straight run of
           // the edge between them is the border ring already excluded
           // above. A viewport that reaches the edge but stays clear of the
-          // squares — an element that carved the corner rows into bands it
-          // repaints (`_cornerBands`) — is translation-safe.
+          // squares is translation-safe, and so is an element blit that
+          // pins the squares it reaches into (`_cornerPins`) — repaired
+          // where they are and where the copy dragged them.
           const radius = child.style?.borderRadius ?? 0;
-          if (radius > 0 && cornerSquaresOverlap(child.abs, radius, vp)) {
+          if (radius > 0 && !cornersPinned(child.abs, radius, vp, pinned)) {
             return false;
           }
           if (typeof child._scrollbars === 'function') {

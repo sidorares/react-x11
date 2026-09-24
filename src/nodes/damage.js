@@ -140,39 +140,59 @@ function coalesceRects(rects) {
 
 /**
  * Add one rect to a capped, disjoint damage list, returning a new list.
- *
- * Over the cap, the pair whose merge wastes the least area is merged — waste
- * being the area the merged rect covers that neither of the two did, so
- * neighbours go first and far-apart rects last. That merge can itself overlap a
- * third rect, so the result is coalesced again.
  */
 export function addDamageRect(rects, add, cap = MAX_DAMAGE_RECTS) {
+  return addDamageRects(rects, [add], cap);
+}
+
+/**
+ * Add several rects to a capped, disjoint damage list at once, returning a
+ * new list.
+ *
+ * Over the cap, the pair whose merge leaves the least area to paint is
+ * merged, so neighbours go first and far-apart rects last. The merged rect
+ * can overlap a third one, which it then swallows — and the grown rect a
+ * fourth — so a pair is priced by the list it leaves once that has run its
+ * course, not by the box around the two. Priced by the box alone, the
+ * cheapest pair could be the one whose merge cascades: a rounded pane
+ * panned left with furniture in both bottom corners merged its zoom
+ * controls into a corner's repair, and the box grew through the minimap
+ * and the exposed strip into nearly the whole pane — every frame of the
+ * pan going one way was a full repaint (issue #691). Where no merge
+ * cascades the two prices order the pairs the same way.
+ *
+ * Everything a caller has to add goes in one call where it can: added one
+ * at a time, each rect is squeezed under the cap as it arrives, and a
+ * small one arriving last can only join a box an earlier merge already
+ * grew. Offered together, the small ones merge with their neighbours
+ * first — an element blit's strips, furniture and corner repairs repaint
+ * about a fifth of a pane that way where one at a time took half.
+ */
+export function addDamageRects(rects, adds, cap = MAX_DAMAGE_RECTS) {
   let out = coalesceRects(
-    (rects ?? []).concat([
-      { x: add.x, y: add.y, width: add.width, height: add.height },
-    ]),
+    (rects ?? []).concat(
+      adds.map((r) => ({ x: r.x, y: r.y, width: r.width, height: r.height })),
+    ),
   );
   while (out.length > cap) {
-    let bestI = 0;
-    let bestJ = 1;
-    let bestWaste = Infinity;
+    let best = null;
+    let bestArea = Infinity;
     for (let i = 0; i < out.length; i++) {
       for (let j = i + 1; j < out.length; j++) {
-        const waste =
-          rectArea(unionRect(out[i], out[j])) -
-          rectArea(out[i]) -
-          rectArea(out[j]);
-        if (waste < bestWaste) {
-          bestWaste = waste;
-          bestI = i;
-          bestJ = j;
+        const merged = coalesceRects(
+          out
+            .filter((_, k) => k !== i && k !== j)
+            .concat([unionRect(out[i], out[j])]),
+        );
+        let area = 0;
+        for (const r of merged) area += rectArea(r);
+        if (area < bestArea) {
+          bestArea = area;
+          best = merged;
         }
       }
     }
-    const merged = unionRect(out[bestI], out[bestJ]);
-    out = coalesceRects(
-      out.filter((_, k) => k !== bestI && k !== bestJ).concat([merged]),
-    );
+    out = best;
   }
   return out;
 }
