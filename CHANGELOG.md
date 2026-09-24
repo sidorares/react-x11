@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.21.1](https://github.com/sidorares/react-x11/compare/v2.21.0...v2.21.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **win32:** @windowkit/win32 ^0.0.4, the bridge with layoutCoverage ([#676](https://github.com/sidorares/react-x11/issues/676)) ([4bab51e](https://github.com/sidorares/react-x11/commit/4bab51ec701fa80c1bf3a3b97217c6a50e6a2138))
+
 ## [2.21.0](https://github.com/sidorares/react-x11/compare/v2.20.0...v2.21.0) (2026-09-24)
 
 
