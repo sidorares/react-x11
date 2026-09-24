@@ -604,9 +604,17 @@ is not tied to the primary monitor, which is why it is preferred over
 default vsync thread waits on the primary's anyway). And it can hang if the
 adapter goes away — Chromium answers that with a 100ms timeout; here the
 quit event is passed into the wait, so shutdown never blocks on it, and the
-_frame_ hazard is answered one level up: JS watches a promised tick for 250ms
-and falls back to the timer for the rest of the session if it does not come.
-That watchdog covers a tick lost for any reason, not only this one. The frame queue above it is the Cocoa one: per-window
+_frame_ hazard is answered one level up. A clock that ticked in the last
+50ms is trusted with the next frame, and JS watches the promised tick for
+250ms; one that has not may be asleep, so a frame interval's timer races
+it. Either way the tick, however late, says the clock is awake again, and
+nothing is latched. It was: the first cut fell back to the timer for the
+rest of the session on one missed tick, and a request made after a quiet
+spell can wait 0.3–3s for its tick — 5 of 8 cold starts of the components'
+Flow bench on a 180Hz panel did — so an application that sat still for a
+moment at startup ran at the timer's 34 frames a second from then on. A
+clock that never ticks again paces frames exactly as the timer alone would.
+The frame queue above it is the Cocoa one: per-window
 intervals from the refresh rate of the monitor under the window
 (`frameIntervalFor`), a discrete input answered on the spot
 (`flushPendingFrames`), a window nobody can see owing nothing, and

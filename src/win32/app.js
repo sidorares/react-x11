@@ -48,13 +48,23 @@ import { Win32Window } from './window.js';
 // when that is unavailable.
 const FRAME_INTERVAL_MS = 1000 / 60;
 
-// How long a promised compositor tick may take before the timer takes over
-// for the rest of the session. A tick that is asked for and never arrives
-// would stop every frame in the application for good — an app frozen with a
-// clean event loop, which is the worst kind to be told about — so the clock
-// is watched. One timer per frame costs nothing: what was wrong with a timer
-// here was never its cost, only its granularity.
+// How long a promised compositor tick may take, while the clock has been
+// ticking, before a timer answers the frame in its place. A tick that is
+// asked for and never arrives would stop every frame in the application for
+// good — an app frozen with a clean event loop, which is the worst kind to be
+// told about — so the clock is watched. One timer per frame costs nothing:
+// what was wrong with a timer here was never its cost, only its granularity.
 const CLOCK_WATCHDOG_MS = 250;
+
+// How long since the clock last ticked before it is not trusted to be
+// ticking. A request made after a quiet spell waited 0.3–3 s for its tick
+// (measured on a 180 Hz panel: 5 of 8 cold starts of the Flow bench, and the
+// first frame after most pauses between its phases), so such a frame races a
+// frame interval's timer, and the tick it asked for, however late, says the
+// clock is back. It used to be the watchdog's to catch, and a watchdog that
+// fired latched the timer for the rest of the session — 34 frames a second,
+// alternating one system tick and two, from then on.
+const CLOCK_IDLE_MS = 50;
 
 /**
  * A pointer event's position on the screen, which X carries as `rootx`/
@@ -88,9 +98,9 @@ export class Win32App {
     /** A frame has been asked for and not yet delivered — one outstanding
      *  request at a time, whether the clock or the timer is answering it. */
     this._framePending = false;
-    /** The compositor promised a tick and did not deliver one. Latched: the
-     *  timer answers every frame from then on. */
-    this._clockLost = false;
+    /** When the compositor's clock last ticked: within `CLOCK_IDLE_MS` it is
+     *  trusted to answer the next frame, and otherwise a timer races it. */
+    this._clockAt = -Infinity;
     this._closed = false;
     this._atoms = new Map();
     this._appearanceListeners = new Set();
@@ -473,14 +483,22 @@ export class Win32App {
     this._framePending = true;
     // One tick, from the compositor if this Windows has a clock to wait on.
     // It answers false when it has not, and then — and only then — a timer.
-    if (!this._clockLost && this._native.frameClockRequest?.()) {
-      this._frameTimer = setTimeout(() => {
-        this._frameTimer = null;
-        if (!this._framePending || this._closed) return;
-        this._clockLost = true;
-        this._framePending = false;
-        this._tickFrames();
-      }, CLOCK_WATCHDOG_MS);
+    if (this._native.frameClockRequest?.()) {
+      // A clock that has been ticking answers this frame, and the timer only
+      // watches for a tick that never comes. One that has not ticked lately
+      // may be asleep, so the timer races it at a frame interval — and a
+      // clock that never ticks again paces the app exactly as the timer
+      // alone would, which is what a lost clock used to be latched into.
+      const ticking = performance.now() - this._clockAt < CLOCK_IDLE_MS;
+      this._frameTimer = setTimeout(
+        () => {
+          this._frameTimer = null;
+          if (!this._framePending || this._closed) return;
+          this._framePending = false;
+          this._tickFrames();
+        },
+        ticking ? CLOCK_WATCHDOG_MS : FRAME_INTERVAL_MS,
+      );
       this._frameTimer.unref?.();
       return;
     }
@@ -546,8 +564,11 @@ export class Win32App {
     switch (event.type) {
       // The compositor is ready for a frame. Carries no id and belongs to no
       // window: it is the clock, and every window that asked for a frame in
-      // the meantime is paced by this one tick.
+      // the meantime is paced by this one tick. A tick that a timer beat to
+      // its frame still says the clock is awake again, and answers whatever
+      // frame has been asked for since.
       case 'frame-clock':
+        this._clockAt = performance.now();
         if (this._frameTimer) clearTimeout(this._frameTimer);
         this._frameTimer = null;
         this._framePending = false;
