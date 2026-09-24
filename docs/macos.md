@@ -604,7 +604,7 @@ Everything the renderer needs from text goes through one object today —
 `{width, height, draw(ctx, x, y), indexAt(x, y), caretPosition(index),
 rangeBands(...)}` plus font loading (`openFont`/`loadFont`) and glyph
 queries. That interface _is_ the TextEngine contract; the macOS backend
-implements it over CoreText:
+implements it over CoreText, the optional `coverage()` (#673) included:
 
 - **Matching**: family list + weight/style/`fontVariationSettings` →
   `CTFontDescriptor`/`CTFontCreateWithName`, with the CSS generic
@@ -654,6 +654,19 @@ implements it over CoreText:
   (`contentsScale`-aware); glyph-run-level drawing
   (`CTFontDrawGlyphs`) backs the `drawGlyphs`/`positioned` context
   extensions the terminal and code-editor components use.
+- **Coverage**: `coverage({ pad })`, a layout's coverage without a surface,
+  is the bridge's `layoutCoverage` (`@windowkit/appkit` 0.13.0,
+  windowkit/appkit#73). Each glyph's CoreText outline
+  (`CTFontCreatePathForGlyph`) goes where the run put it, unrounded, and the
+  layout is filled once, non-zero, by the signed-area accumulation ntk
+  rasterizes with, so this engine and X11's give the same bytes for the same
+  outlines. It is deliberately not CoreText's glyph rasterizer. With font
+  smoothing off that snaps nothing, but it shrinks a small glyph's counters:
+  Menlo's `b` at 14px comes out 5% heavier than its outline. CoreGraphics'
+  path fill is exact to a percent but costs 160–340 µs a label, several times
+  the draw and readback it replaces; the accumulation costs 23–58 µs. A
+  span's colour plays no part, and Apple Color Emoji's bitmaps come out as
+  their silhouettes. A bridge without the verb answers null.
 
 The glyph-run seams are part of that contract on both backends (issue
 #432, over @windowkit/appkit 0.3's glyph natives — windowkit/appkit#1).

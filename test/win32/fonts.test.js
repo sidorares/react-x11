@@ -213,3 +213,47 @@ describe('win32 fonts: what it refuses honestly', () => {
     assert.equal(manager().fallbackFor(0x4e00), null);
   });
 });
+
+describe('win32 fonts: coverage', () => {
+  // A layout's coverage without a surface (#673) is the bridge's to compute —
+  // DirectWrite's glyph-run analysis — and this file's to hand over: the
+  // layout's own handle, the pad asked for, and an honest null where the
+  // bridge cannot answer, so a caller keeps its readback.
+  it("asks the bridge for its own layout's coverage, with the pad asked for", () => {
+    const bridge = createFakeBridge();
+    const asked = [];
+    bridge.layoutCoverage = (handle, pad) => {
+      asked.push([handle, pad]);
+      const width = 8 * 3 + pad * 2;
+      const height = 16 + pad * 2;
+      return { width, height, data: new Uint8Array(width * height) };
+    };
+    const fonts = new Win32FontManager(bridge);
+    const layout = fonts.layout('abc', {});
+    const coverage = layout.coverage({ pad: 3 });
+    assert.deepEqual(asked, [[layout._handle, 3]]);
+    assert.equal(coverage.width, 30, 'the layout box with the pad round it');
+    assert.equal(coverage.height, 22);
+    assert.equal(coverage.data.length, 30 * 22);
+    layout.coverage();
+    assert.deepEqual(asked[1], [layout._handle, 0], 'no pad unless asked');
+  });
+
+  it('answers null on a bridge that predates it, so a caller keeps its readback', () => {
+    const layout = manager().layout('abc', {});
+    assert.equal(layout.coverage({ pad: 2 }), null);
+  });
+
+  it('answers null for a layout that has been destroyed', () => {
+    const bridge = createFakeBridge();
+    let asked = 0;
+    bridge.layoutCoverage = () => {
+      asked++;
+      return { width: 1, height: 1, data: new Uint8Array(1) };
+    };
+    const layout = new Win32FontManager(bridge).layout('abc', {});
+    layout.destroy();
+    assert.equal(layout.coverage(), null);
+    assert.equal(asked, 0, 'a released handle is never handed to the bridge');
+  });
+});

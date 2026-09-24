@@ -226,6 +226,30 @@ called with `2` when a glyph can have moved and `1` when only the ink or the
 glyph rounding did. The default re-measures on the first and repaints on the
 second, which is right for most elements.
 
+**Text drawn where a context is not.** A GL surface's labels, or a signed
+distance field made from a string, need the text as pixels rather than
+drawn onto a surface — and a surface read back is a round trip for pixels
+the engine had, one that answers asynchronously and in the ink the screen
+gets (hinted, gamma and contrast applied). A layout answers
+**`coverage({ pad })`** instead (#673): how much of each device pixel its
+glyphs cover, one byte a pixel, synchronously — the layout box in whole
+pixels with `pad` round it, the layout's origin at `(pad, pad)`. Linear,
+grayscale, unhinted: the outlines' own coverage, which is what a raster that
+will be scaled wants.
+
+```js
+const coverage = layout.coverage?.({ pad: 4 }) ?? null;
+if (!coverage) {
+  // no answer on this engine: draw onto a Surface and read it back
+}
+```
+
+It is optional on purpose: ntk's layout answers it (X11, Wayland, the mock),
+and so do DirectWrite's (Windows) and CoreText's (macOS), each from the
+release that added it. Feature-detect, keep a readback, and never assume
+the two are pixel-identical — `draw` snaps and hints, coverage does
+neither.
+
 ### Answering for your own text
 
 _Issue #259._ An element that draws text can also let the user **select**
