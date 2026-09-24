@@ -65,6 +65,7 @@ export const layoutDiff = {
 // DEV validates against this list.
 export const INVALIDATE_REASONS = new Set([
   'props', // a React commit changed what a node draws
+  'position', // an absolute box of a set size moved and changed nothing else
   'style-state', // :hover/:focus/:active/:disabled restyle
   'shadow', // a boxShadow got smaller: where it *was* still owes a repaint
   'outline', // …and the same for an outline a style swap took away

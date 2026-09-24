@@ -404,10 +404,13 @@ same screenshots far more than this route did.
 ## Invalidation reasons
 
 Every internal `invalidate()` call now names why it ran, from a small
-closed set: `props`, `style-state`, `theme`, `direction`, `animation`,
-`scroll`, `text`, `content`, `measure`, `child-list`, `focus`, `caret`,
-`resize`, `mount`, `expose`, `highlight`, `capabilities`. The frame's collected reasons are what
-`REACT_X11_TRACE=requests` frame lines, the chrome trace's frame slices,
-the full-repaint warning and `examples/stress/perf.js` print. After a
-frame they are readable on the window node as `root._lastReasons`
-(instrumentation surface, like `root._lastDamageRects` — not public API).
+closed set (`INVALIDATE_REASONS` in `src/nodes/damage.js`, which says what
+each one means): `props`, `position`, `style-state`, `shadow`, `outline`,
+`theme`, `direction`, `scale`, `animation`, `scroll`, `text`, `selection`,
+`content`, `measure`, `child-list`, `focus`, `caret`, `resize`, `mount`,
+`expose`, `highlight`, `trace-updates`, `capabilities`, `layout`. The
+frame's collected reasons are what `REACT_X11_TRACE=requests` frame lines,
+the chrome trace's frame slices, the full-repaint warning and
+`examples/stress/perf.js` print. After a frame they are readable on the
+window node as `root._lastReasons` (instrumentation surface, like
+`root._lastDamageRects` — not public API).
