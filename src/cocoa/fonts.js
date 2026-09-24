@@ -157,7 +157,7 @@ class CocoaTextLayout {
    * the same outlines — and none of the font smoothing the screen gets. Not
    * CoreText's glyph rasterizer, which shrinks a small glyph's counters even
    * with smoothing off. Null on a bridge that predates it (`@windowkit/appkit`
-   * before `layoutCoverage`), so a caller keeps its readback.
+   * before 0.13.0), so a caller keeps its readback.
    */
   coverage({ pad = 0 } = {}) {
     if (typeof this._native.layoutCoverage !== 'function') return null;
