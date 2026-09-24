@@ -1356,10 +1356,10 @@ the L is two disjoint rects and stays two. A drag-pan is diagonal almost
 every frame, so this is the case rather than the corner.
 
 **Every gate above is about `rect`, not about your node.** A pane usually
-has furniture pinned to a corner — a minimap, zoom controls, a HUD strip —
-that has to repaint on a pan frame and whose pixels must _not_ ride the blit.
-Carve it out of the region you shift and claim it the ordinary way; the claim
-lands beside the rect and the frame stays a blit:
+has furniture — a minimap, zoom controls, a HUD strip — that has to repaint
+on a pan frame and whose pixels must _not_ ride the blit. A strip along one
+edge can be carved out of the region you shift and claimed the ordinary way;
+the claim lands beside the rect and the frame stays a blit:
 
 ```js
 onDragPan(dx, dy) {
@@ -1373,10 +1373,43 @@ onDragPan(dx, dy) {
 ```
 
 A claim that _reaches into_ the rect — by so much as a pixel — still declines
-the frame, and that is the whole of the rule (issue #309). Overlay panels
-mounted as sibling nodes work the same way, as long as they sit outside the
-rect: one drawing over it is dragged along by the blit, so it declines
-instead.
+the frame (issue #309). Overlay panels mounted as sibling nodes work the same
+way, as long as they sit outside the rect: one drawing over it is dragged
+along by the blit, so it declines instead.
+
+**Furniture in a corner is pinned, not carved.** What shifts is one
+rectangle, so carving a minimap out of the bottom-right corner takes the rows
+beside it too, and zoom controls in the other bottom corner make that a band
+the pane's full width — repainted on every pan frame, with every card, label
+and edge in it (issue #682). Hand over the whole pane instead, and name the
+furniture that stays put:
+
+```js
+onDragPan(dx, dy) {
+  this.panX += dx;
+  this.panY += dy;
+  // rects inside the region, in its coordinates, that do not move
+  this.scrollContents(this.contentBox(), dx, dy, null, [
+    this.minimapRect(),
+    this.controlsRect(),
+  ]);
+}
+```
+
+The copy drags a stale image of each piece along by (dx, dy), and core
+repaints the pinned rect and that image: two small rects a piece, on every
+pan frame, whether the furniture changed or not. So what the furniture shows
+can follow the pan — a minimap's viewport box — without a claim of its own,
+and a claim it makes anyway is yours as long as it lies inside a pinned rect.
+A claim anywhere else in the region still declines the frame, and so does
+furniture that is most of the pane: past three quarters of it repainted, the
+blit is buying a shift and paying for the region anyway.
+
+A node mounted over the region inside a pinned rect — a zoom button, a
+legend — is furniture too: it does not decline the blit, and its pixels are
+repaired with the rest. Its claims carry the pixel of slop every node's do,
+so the rect to pin is the one it claims, `node.paintBounds()`, or its hover
+declines the frame it lands in.
 
 **Unless its pixels are meant to move with it.** A graph whose cards carry
 real widgets mounts them beside the pane, all in one box it moves with the
@@ -1406,11 +1439,12 @@ be. That is the right trade: a zoom is a gesture step, a pan is sixty of them
 a second.
 
 The protocol bench prices it at five diagonal pan steps over a 374-cell scene
-— 983 requests / 606 composites / 0.30 Mpx, against 9845 / 6533 / 4.22 for
+— 627 requests / 308 composites / 0.06 Mpx, against 6550 / 3269 / 2.38 for
 the same five steps under `REACT_X11_NO_SCROLL_BLIT=1`, which is exactly the
-fallback every gate here takes. The same five steps with a HUD strip claimed
-beside the region cost 3059 / 1971 / 1.10 — the blit plus the strip, where
-the whole pane repainting is that 9845 again.
+fallback every gate here takes. With a HUD strip claimed beside the region
+they cost 1993 / 993 / 0.43 — the blit plus the strip. With furniture in two
+bottom corners they cost 1622 / 790 / 0.30 pinned, where carving the band
+between the corners costs 2736 / 1349 / 0.70.
 
 If your element keeps its drawing in a `Surface` of its own rather than
 drawing it live, the shift you want is

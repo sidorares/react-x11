@@ -448,6 +448,20 @@ class FlowNode extends Node {
       ev.y - from.y,
     );
     void armed;
+    // …with the furniture in its corners pinned where it is (#682), and no
+    // riders to carry
+    const box = this.contentBox();
+    const minimap: Rect = {
+      x: box.x + box.width - 128,
+      y: box.y + box.height - 88,
+      width: 120,
+      height: 80,
+    };
+    this.scrollContents(box, 3, -2, null, [minimap]);
+    // @ts-expect-error — pinned furniture is rects, not the riders' nodes
+    this.scrollContents(box, 3, -2, null, [this]);
+    // @ts-expect-error — and the riders are nodes, not rects
+    this.scrollContents(box, 3, -2, [minimap]);
   }
 
   paintContent(_ctx: unknown): void {

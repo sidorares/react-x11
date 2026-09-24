@@ -48,6 +48,21 @@ const FURNITURE = {
   width: VP.width,
   height: BAND,
 };
+// …and the furniture in two corners that `corners()` pins (issue #682)
+const CONTROLS = {
+  x: VP.x + 8,
+  y: VP.y + VP.height - 104,
+  width: 40,
+  height: 96,
+};
+const MINIMAP = {
+  x: VP.x + VP.width - 128,
+  y: VP.y + VP.height - 88,
+  width: 120,
+  height: 80,
+};
+
+const byPosition = (rects) => [...rects].sort((a, b) => a.y - b.y || a.x - b.x);
 
 const overlaps = (a, b) =>
   a.x < b.x + b.width &&
@@ -68,6 +83,7 @@ class PanNode extends Node {
     this.panY = 0;
     this.passes = [];
     this.drawn = [];
+    this.pins = null;
   }
 
   /** The region the drawing lives in — the whole node here. */
@@ -113,6 +129,35 @@ class PanNode extends Node {
   }
 
   /**
+   * The same pan with the furniture in two corners, pinned where it is
+   * (issue #682): zoom controls down the bottom-left, a minimap in the
+   * bottom-right. Carved out, the pair would take the band between them
+   * too — the region that shifts is one rectangle — so the element hands
+   * the whole pane over and names the furniture that stays put, drawn by
+   * `paint` below over the scene.
+   */
+  panPinned(dx, dy, pins = this.corners()) {
+    this.panX += dx;
+    this.panY += dy;
+    this.pins = pins;
+    return this.scrollContents(this.viewport(), dx, dy, null, pins);
+  }
+
+  /** The two corners' furniture, inside the pane and clear of its edges. */
+  corners() {
+    const vp = this.viewport();
+    return [
+      { x: vp.x + 8, y: vp.y + vp.height - 104, width: 40, height: 96 },
+      {
+        x: vp.x + vp.width - 128,
+        y: vp.y + vp.height - 88,
+        width: 120,
+        height: 80,
+      },
+    ];
+  }
+
+  /**
    * A world grid drawn at the pan offset — a *translation* of itself and
    * nothing else, which is exactly the promise `scrollContents` makes. Wide
    * enough that the pane is covered at every offset these tests reach.
@@ -148,6 +193,23 @@ class PanNode extends Node {
       ctx.fillStyle = cell.color;
       ctx.fillRect(cell.x, cell.y, cell.width, cell.height);
       drawn += 1;
+    }
+    // The pinned furniture, over the scene. What it shows follows the pan —
+    // a minimap's viewport box — and is never claimed: repairing the pinned
+    // rect on every pan frame is core's half of the bargain.
+    for (const pin of this.pins ?? []) {
+      if (damage && !overlaps(pin, damage)) continue;
+      ctx.fillStyle = '#34495e';
+      ctx.fillRect(pin.x, pin.y, pin.width, pin.height);
+      const along = (offset, span) =>
+        (((Math.trunc(-offset / 4) % span) + span) % span) + 4;
+      ctx.fillStyle = '#f1c40f';
+      ctx.fillRect(
+        pin.x + along(this.panX, pin.width - 16),
+        pin.y + along(this.panY, pin.height - 16),
+        8,
+        8,
+      );
     }
     ctx.restore();
     this.drawn.push(drawn);
@@ -449,6 +511,272 @@ test('a claim the damage cap merged into the blit claim keeps the repaint', asyn
     ),
     'and the merged claim is repainted whole, furniture included',
   );
+});
+
+// --- furniture pinned inside the rect (issue #682) -----------------------
+//
+// Carving furniture out of the rect is fine for a strip along one edge, and
+// wrong for corners: the region that shifts is one rectangle, so zoom
+// controls in one bottom corner and a minimap in the other carve out the
+// band the pane's full width between them, and that band repaints on every
+// pan frame — every card, label and edge in it. Pinned instead, the pane
+// hands the whole region over and names the furniture that stays put: the
+// copy drags a stale image of each piece along, and core repairs the piece
+// where it is and where the image landed. Two small rects, not the band.
+
+test('furniture pinned in two corners costs two small rects, not the band between them', async () => {
+  const { wnd, node, root } = await mount();
+
+  assert.strictEqual(node.panPinned(0, 40), true, 'a blit candidate');
+  await tick();
+
+  assert.deepStrictEqual(
+    blits(wnd),
+    [['scrollRegion', { ...VP }, 0, 40]],
+    'the whole pane shifts, corners and all',
+  );
+  const rects = root._lastDamageRects;
+  assert.deepStrictEqual(byPosition(rects), [
+    // the strip the shift exposed
+    { x: VP.x, y: VP.y, width: VP.width, height: 40 },
+    // each piece of furniture and the image the copy put 40 below it, cut
+    // at the pane's edge where the image fell off it
+    {
+      x: CONTROLS.x,
+      y: CONTROLS.y,
+      width: 40,
+      height: VP.y + VP.height - CONTROLS.y,
+    },
+    {
+      x: MINIMAP.x,
+      y: MINIMAP.y,
+      width: 120,
+      height: VP.y + VP.height - MINIMAP.y,
+    },
+  ]);
+  // …against the band two corners carve out of the rect: the rows from the
+  // taller piece down, the pane's full width, and the strip on top
+  const band = VP.width * (VP.y + VP.height - CONTROLS.y);
+  assert.ok(
+    area(rects) < (band + VP.width * 40) * 0.6,
+    `repainted ${area(rects)}px², where carving costs ${band + VP.width * 40}`,
+  );
+  assert.strictEqual(node.passes.length, 3, 'one pass a rect');
+});
+
+test('a diagonal pan cuts the repairs around the strips they meet', async () => {
+  // The controls sit 8px in from the left edge and the pan brings 20px in
+  // down that side: the controls' repair overlaps the strip, and overlapping
+  // damage merges into its box — the strip's whole height, 60px wide. Cut
+  // around the strip instead, it stays the controls' own column.
+  const { wnd, node, root } = await mount();
+
+  node.panPinned(20, 30);
+  await tick();
+
+  assert.deepStrictEqual(blits(wnd), [['scrollRegion', { ...VP }, 20, 30]]);
+  assert.deepStrictEqual(byPosition(root._lastDamageRects), [
+    { x: VP.x, y: VP.y, width: VP.width, height: 30 },
+    { x: VP.x, y: VP.y + 30, width: 20, height: VP.height - 30 },
+    {
+      x: VP.x + 20,
+      y: CONTROLS.y,
+      width: CONTROLS.x + CONTROLS.width + 20 - (VP.x + 20),
+      height: VP.y + VP.height - CONTROLS.y,
+    },
+    {
+      x: MINIMAP.x,
+      y: MINIMAP.y,
+      width: VP.x + VP.width - MINIMAP.x,
+      height: VP.y + VP.height - MINIMAP.y,
+    },
+  ]);
+});
+
+test('several pans in one frame repair the furniture where the net shift put its image', async () => {
+  const { wnd, node, root } = await mount();
+
+  node.panPinned(0, 24);
+  node.panPinned(0, 24);
+  node.panPinned(0, -8);
+  await tick();
+
+  assert.deepStrictEqual(blits(wnd), [['scrollRegion', { ...VP }, 0, 40]]);
+  assert.deepStrictEqual(byPosition(root._lastDamageRects), [
+    { x: VP.x, y: VP.y, width: VP.width, height: 40 },
+    {
+      x: CONTROLS.x,
+      y: CONTROLS.y,
+      width: 40,
+      height: VP.y + VP.height - CONTROLS.y,
+    },
+    {
+      x: MINIMAP.x,
+      y: MINIMAP.y,
+      width: 120,
+      height: VP.y + VP.height - MINIMAP.y,
+    },
+  ]);
+});
+
+test('a claim inside pinned furniture is the element’s own, before the pan or after it', async () => {
+  // The minimap redrawing its viewport box: repaired whole anyway, so the
+  // claim changes nothing about the pixels the blit moves
+  const box = { x: MINIMAP.x + 4, y: MINIMAP.y + 4, width: 24, height: 16 };
+
+  const after = await mount();
+  assert.strictEqual(after.node.panPinned(0, 40), true);
+  after.node.invalidate(false, box, 'props');
+  await tick();
+  assert.deepStrictEqual(blits(after.wnd), [
+    ['scrollRegion', { ...VP }, 0, 40],
+  ]);
+  assert.strictEqual(after.root._lastDamageRects.length, 3, 'nothing added');
+
+  const before = await mount();
+  before.node.invalidate(false, box, 'props');
+  assert.strictEqual(before.node.panPinned(0, 40), true, 'arms over it');
+  await tick();
+  assert.deepStrictEqual(blits(before.wnd), [
+    ['scrollRegion', { ...VP }, 0, 40],
+  ]);
+});
+
+test('a claim a pixel outside pinned furniture still declines the blit', async () => {
+  const over = { x: MINIMAP.x - 1, y: MINIMAP.y + 4, width: 24, height: 16 };
+
+  const after = await mount();
+  after.node.panPinned(0, 40);
+  after.node.invalidate(false, over, 'props');
+  await tick();
+  assert.deepStrictEqual(blits(after.wnd), [], 'claimed after arming');
+
+  const before = await mount();
+  before.node.invalidate(false, over, 'props');
+  assert.strictEqual(before.node.panPinned(0, 40), false, 'and before');
+  await tick();
+  assert.deepStrictEqual(blits(before.wnd), []);
+});
+
+test('a claim where the copy puts the furniture’s image still declines the blit', async () => {
+  // Repaired too, but only a claim inside the furniture is covered whichever
+  // side of the shift it names: one that means content before the shift
+  // lands a shift further along again, past the repair.
+  const { wnd, node } = await mount();
+  node.panPinned(0, 40);
+  node.invalidate(
+    false,
+    {
+      x: MINIMAP.x + 8,
+      y: MINIMAP.y + MINIMAP.height + 2,
+      width: 16,
+      height: 4,
+    },
+    'props',
+  );
+  await tick();
+  assert.deepStrictEqual(blits(wnd), []);
+});
+
+test('furniture that is most of the pane keeps the full repaint', async () => {
+  const { wnd, node, root } = await mount();
+
+  node.panPinned(0, 40, [{ ...VP, y: VP.y + 60, height: 300 }]);
+  await tick();
+
+  assert.deepStrictEqual(blits(wnd), [], 'the repairs were most of it');
+  assert.deepStrictEqual(root._lastDamageRects, [{ ...VP }]);
+});
+
+test('furniture handed over as something other than rects keeps the full repaint, and says why', async (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const { wnd, node } = await mount();
+
+  // pinned rects that are not rects
+  assert.strictEqual(
+    node.scrollContents({ ...VP }, 0, 40, null, [{ x: CONTROLS.x }]),
+    false,
+  );
+  await tick();
+  assert.deepStrictEqual(blits(wnd), []);
+  // …the lists swapped, which would drag the furniture along unrepaired
+  assert.strictEqual(
+    node.scrollContents({ ...VP }, 0, 40, [{ ...CONTROLS }]),
+    false,
+  );
+  await tick();
+  assert.deepStrictEqual(blits(wnd), []);
+  // …and one rect where a list goes
+  assert.strictEqual(
+    node.scrollContents({ ...VP }, 0, 40, null, { ...CONTROLS }),
+    false,
+  );
+  await tick();
+  assert.deepStrictEqual(blits(wnd), []);
+
+  const said = warn.mock.calls.map((call) => String(call.arguments[0]));
+  assert.ok(
+    said.some((m) => /pins as a list of rects/.test(m)),
+    `warned about the rects: ${said.join('\n')}`,
+  );
+  assert.ok(
+    said.some((m) => /list of riders/.test(m) && /pinned/.test(m)),
+    `warned about the riders: ${said.join('\n')}`,
+  );
+});
+
+test('a node laid over the region inside pinned furniture is furniture too', async () => {
+  // A zoom button mounted over the minimap: its pixels are repaired with
+  // the minimap's, and its hover — a claim a pixel of slop around it — is
+  // inside the pinned rect like the minimap's own.
+  const buttonRef = React.createRef();
+  const button = (left) =>
+    h('box', {
+      ref: buttonRef,
+      style: {
+        position: 'absolute',
+        left,
+        top: MINIMAP.y + 8,
+        width: 40,
+        height: 24,
+        backgroundColor: '#ecf0f1',
+      },
+    });
+
+  const inside = await mount({ extra: button(MINIMAP.x + 8) });
+  inside.node.panPinned(0, 40);
+  buttonRef.current.invalidate(false, buttonRef.current, 'style-state');
+  await tick();
+  assert.deepStrictEqual(blits(inside.wnd), [
+    ['scrollRegion', { ...VP }, 0, 40],
+  ]);
+
+  // …and one reaching out of it is over the pixels that move
+  const poking = await mount({ extra: button(MINIMAP.x - 12) });
+  poking.node.panPinned(0, 40);
+  await tick();
+  assert.deepStrictEqual(blits(poking.wnd), []);
+});
+
+test('a child of the element inside pinned furniture is furniture too', async () => {
+  const { wnd, node } = await mount({
+    paneProps: {
+      children: h('box', {
+        style: {
+          position: 'absolute',
+          left: MINIMAP.x - VP.x + 8,
+          top: MINIMAP.y - VP.y + 8,
+          width: 40,
+          height: 24,
+          backgroundColor: '#ecf0f1',
+        },
+      }),
+    },
+  });
+
+  node.panPinned(0, 40);
+  await tick();
+  assert.deepStrictEqual(blits(wnd), [['scrollRegion', { ...VP }, 0, 40]]);
 });
 
 test('damage claimed before the frame’s first pan poisons it (#295)', async () => {
@@ -1066,6 +1394,211 @@ test('so is one that carved furniture out of the region (#309)', async (t) => {
     assert.ok(
       blitted.equals(repainted),
       'the carved pan differs from a full repaint of the same scene',
+    );
+  } finally {
+    await x11Root.unmount();
+    await app.close();
+  }
+});
+
+test('so is a pan with furniture pinned in its corners (#682)', async (t) => {
+  // The pixels behind the repairs: the whole pane shifts, furniture and
+  // all, and each piece is repainted where it stays and where the copy put
+  // its image — with what it shows following the pan unclaimed, and a
+  // button mounted over the minimap changing colour mid-pan. A repair short
+  // by a pixel, or a claim let through that nothing repaired, shows up here
+  // as a difference.
+  register();
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const ref = React.createRef();
+    let setLit = null;
+    function Button() {
+      const [lit, set] = React.useState(false);
+      setLit = set;
+      return h('box', {
+        style: {
+          position: 'absolute',
+          left: MINIMAP.x + 8,
+          top: MINIMAP.y + 8,
+          width: 40,
+          height: 24,
+          backgroundColor: lit ? '#e67e22' : '#ecf0f1',
+        },
+      });
+    }
+    const instance = await new Promise((resolve) =>
+      x11Root.render(
+        h(
+          'window',
+          { width: W, height: H, style: { backgroundColor: '#101820' } },
+          h('pan', { ref, style: { flexGrow: 1, margin: INSET } }),
+          h(Button),
+        ),
+        resolve,
+      ),
+    );
+    if (typeof instance.scrollRegion !== 'function') {
+      t.skip('installed ntk has no Window.scrollRegion yet');
+      return;
+    }
+    const node = ref.current;
+    const root = node.root;
+    const frame = () => {
+      root._scheduled = false;
+      root.flush();
+    };
+    frame();
+    // on screen before the first pan, so the first copy drags it along —
+    // placed once the pane is, since `corners()` reads where layout put it
+    node.pins = node.corners();
+    root.invalidate(false);
+    frame();
+    await settle(app);
+
+    let blitCalls = 0;
+    const real = instance.scrollRegion.bind(instance);
+    instance.scrollRegion = (...args) => {
+      blitCalls += 1;
+      return real(...args);
+    };
+
+    const steps = [
+      [20, 30, false],
+      [-24, 12, true],
+      [0, -40, false],
+    ];
+    for (const [dx, dy, lit] of steps) {
+      node.panPinned(dx, dy);
+      Renderer.flushSyncFromReconciler(() => setLit(lit));
+      frame();
+      await settle(app);
+      assert.strictEqual(blitCalls, 1, `the fast path fired for ${dx},${dy}`);
+      assert.ok(root._lastDamageRects, 'and the frame stayed bounded');
+      const blitted = await readPixels(
+        root._ctx ?? (root._ctx = root.window.getContext('2d')),
+      );
+
+      root.invalidate(false);
+      frame();
+      await settle(app);
+      const repainted = await readPixels(root._ctx);
+      assert.ok(
+        blitted.equals(repainted),
+        `the pinned pan by ${dx},${dy} differs from a full repaint`,
+      );
+      blitCalls = 0;
+    }
+  } finally {
+    await x11Root.unmount();
+    await app.close();
+  }
+});
+
+test('so is a pan that carried a layer past pinned furniture', async (t) => {
+  // `<Flow>`'s whole shape: bodies riding the blit over the scene, and
+  // furniture that stays put while the layer slides past under it.
+  register();
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const ref = React.createRef();
+    const layerRef = React.createRef();
+    let setAt = null;
+    function Layer() {
+      const [at, set] = React.useState({ x: 0, y: 250 });
+      setAt = set;
+      return h(
+        'box',
+        {
+          ref: layerRef,
+          style: {
+            position: 'absolute',
+            left: at.x,
+            top: at.y,
+            width: 220,
+            height: 170,
+          },
+        },
+        h('box', {
+          style: { height: 50, margin: 10, backgroundColor: '#f1c40f' },
+        }),
+        h('box', {
+          style: { height: 50, margin: 10, backgroundColor: '#9b59b6' },
+        }),
+      );
+    }
+    const instance = await new Promise((resolve) =>
+      x11Root.render(
+        h(
+          'window',
+          { width: W, height: H, style: { backgroundColor: '#101820' } },
+          h('pan', { ref, style: { flexGrow: 1, margin: INSET } }),
+          h(
+            'box',
+            {
+              style: {
+                position: 'absolute',
+                left: INSET,
+                top: INSET,
+                width: VP.width,
+                height: VP.height,
+                overflow: 'hidden',
+              },
+            },
+            h(Layer),
+          ),
+        ),
+        resolve,
+      ),
+    );
+    if (typeof instance.scrollRegion !== 'function') {
+      t.skip('installed ntk has no Window.scrollRegion yet');
+      return;
+    }
+    const node = ref.current;
+    const root = node.root;
+    const frame = () => {
+      root._scheduled = false;
+      root.flush();
+    };
+    frame();
+    // on screen before the first pan, so the first copy drags it along —
+    // placed once the pane is, since `corners()` reads where layout put it
+    node.pins = node.corners();
+    root.invalidate(false);
+    frame();
+    await settle(app);
+
+    let blitCalls = 0;
+    const real = instance.scrollRegion.bind(instance);
+    instance.scrollRegion = (...args) => {
+      blitCalls += 1;
+      return real(...args);
+    };
+
+    node.panX += 20;
+    node.panY += 30;
+    node.pins = node.corners();
+    node.scrollContents(node.viewport(), 20, 30, [layerRef.current], node.pins);
+    Renderer.flushSyncFromReconciler(() => setAt({ x: 20, y: 280 }));
+    frame();
+    await settle(app);
+    assert.strictEqual(blitCalls, 1, 'the fast path fired with both');
+    assert.ok(root._lastDamageRects, 'and the frame stayed bounded');
+    const blitted = await readPixels(
+      root._ctx ?? (root._ctx = root.window.getContext('2d')),
+    );
+
+    root.invalidate(false);
+    frame();
+    await settle(app);
+    const repainted = await readPixels(root._ctx);
+
+    assert.ok(
+      blitted.equals(repainted),
+      'the carried pan past pinned furniture differs from a full repaint',
     );
   } finally {
     await x11Root.unmount();
