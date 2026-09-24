@@ -219,7 +219,10 @@ export class NodeLayout {
         }
       }
     } finally {
-      if (move) layoutDiff.shift = null;
+      if (move) {
+        layoutDiff.shift = null;
+        layoutDiff.ride = false;
+      }
     }
     if (move) this._claimRigidMove(move);
   }
@@ -312,6 +315,12 @@ export class NodeLayout {
    *
    * Null when the move is not of that kind, or no diff is listening; the
    * walk is then the plain one.
+   *
+   * A move the window may copy rather than repaint (`_mayBlitMove`, issue
+   * #681) is walked as a ride as well, the way a `<glarea>` child's is
+   * (`layoutDiff.ride`): a scroll pane inside it that is laid out again
+   * claims its viewport, since a copy of the pane would carry rows that
+   * moved inside it and nothing else claims them.
    */
   _beginRigidMove(x, y, width, height) {
     if (!layoutDiff.sink || layoutDiff.shift) return null;
@@ -334,7 +343,9 @@ export class NodeLayout {
       contents && contents.dx === shift.x && contents.dy === shift.y
         ? contents.rect
         : null;
-    return { sink: layoutDiff.sink, was, shift, carried };
+    const defer = !carried && this.root._mayBlitMove(this, shift);
+    if (defer) layoutDiff.ride = true;
+    return { sink: layoutDiff.sink, was, shift, carried, defer };
   }
 
   /**
@@ -346,9 +357,18 @@ export class NodeLayout {
    * Named for the node that moved, which is what sends each claim to the
    * lists that paint it (`_paneReach`): the panes alone inside a
    * `<glarea>`, both for a subtree holding one.
+   *
+   * A move the window may copy is handed to it instead, and claimed once
+   * the frame's other claims are in (`WindowNode._settleRigidMoves`): the
+   * copy, and so the question of what is left to paint, needs to know what
+   * else changed around the subtree.
    */
-  _claimRigidMove({ sink, was, shift, carried }) {
+  _claimRigidMove({ sink, was, shift, carried, defer }) {
     const root = this.root;
+    if (defer) {
+      root._deferRigidMove(this, was, shift);
+      return;
+    }
     const to = {
       x: was.x + shift.x,
       y: was.y + shift.y,

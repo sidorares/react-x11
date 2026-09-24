@@ -452,6 +452,9 @@ export class WindowInvalidate {
           bounds,
           this._damageRectCap(),
         );
+        // …and whose claim it was, for a copy of a subtree that moved
+        // (`_settleRigidMoves`): what is under the subtree it covers
+        this._logClaim(bounds, damage?.kind ? damage : source);
       }
       if (panes) this._addPaneDamage(bounds);
     }
@@ -503,6 +506,7 @@ export class WindowInvalidate {
     let windowTook = false;
     if (reach !== PANES_ONLY && this._damage !== FULL_DAMAGE) {
       this._damage = addDamageRect(this._damage, rect, cap);
+      this._logClaim(rect, node ?? null);
       windowTook = true;
     }
     if (reach !== WINDOW_ONLY) this._addPaneDamage(rect);
@@ -563,6 +567,8 @@ export class WindowInvalidate {
   _takeDamage(width, height) {
     const damage = this._damage;
     this._damage = null;
+    // the next frame's claims start a log of their own
+    this._claimLog = [];
     // what the frame about to run settled on, for the tests and for
     // REACT_X11_DEBUG_LAYOUT to report; null means it repainted everything.
     // `_lastDamage` is the box around the rects, which is what a caller

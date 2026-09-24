@@ -18,6 +18,7 @@ import { NO_DAMAGE } from '../damage.js';
 import { installMethods } from '../install.js';
 import { WindowInvalidate } from '../invalidate.js';
 import { WindowLayoutHost } from '../layouthost.js';
+import { WindowMoveBlit } from '../moveblit.js';
 import { DEVTOOLS_FAKE_DOCUMENT, Node } from '../node.js';
 import { WindowPaint } from '../paint.js';
 import { WindowPosition } from '../position.js';
@@ -209,6 +210,12 @@ export class WindowNode extends Scrollable(Node) {
     // each claim goes to one or both by what it can reach (`_paneReach`).
     // Null with nothing owed.
     this._paneDamage = null;
+    // The claims the window's list took this frame, each with the node that
+    // made it — null once there are too many to be worth keeping — and the
+    // subtrees this frame's layout moved that the window may copy rather
+    // than repaint, settled once the pass is over (nodes/moveblit.js).
+    this._claimLog = [];
+    this._rigidMoves = null;
     this.events = new EventManager(this);
     // ids of the child windows in the order the *server* stacks them,
     // bottom to top — see _restackWindowChildren
@@ -979,6 +986,7 @@ installMethods(
   WindowPosition,
   WindowInvalidate,
   WindowScrollBlit,
+  WindowMoveBlit,
   WindowPaint,
   WindowListeners,
   WindowHints,

@@ -151,7 +151,11 @@ panning is one variable away from being told apart from one that misdraws.
 And it covers the `<glarea>` overlay's copy: a child of a surface that only
 moved is moved on its pane rather than repainted
 ([elements.md](elements.md#glarea)), and with this set it is repainted
-there instead.
+there instead. So too the window's own copy of a subtree that only moved: a
+card with a background nothing shows through, dragged across a pane, is
+copied where it went and the frame paints the strip it uncovered
+([extending.md](extending.md#an-element-that-covers-its-box)); with this
+set it is repainted where it was and where it went.
 
 ## `REACT_X11_STRICT_TOKENS=1`
 

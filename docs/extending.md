@@ -1490,6 +1490,32 @@ background only sometimes, answers `null`, the default. The answer is read
 per pass, so it may follow `contentBox()`, and it costs nothing on a pass
 it does not cover.
 
+**The same promise lets a move be copied** (issue #681). A subtree whose
+only change in a frame is where it is — a terminal dragged across a
+desktop, a card of widgets dragged across a graph — is already on the
+surface, one shift away. When something in it covers its box, nothing under
+it shows through there, so core copies its pixels where they went
+(`CopyArea` on X11, the backing's own copy on Cocoa and Windows) and paints
+only what the copy cannot supply: the strip the move uncovered, the
+corners a radius gives up, and whatever is drawn over it. What covers is
+an element answering `opaqueRect()`, a box with a `backgroundColor`
+nothing shows through, or either of those inside boxes that hold nothing
+else — the wrappers a card is positioned and scaled by. A card with no background of its own is drawn over what is
+under it, and is repainted where it was and where it went.
+
+The frame's other claims are sorted by whose they are. One from an element
+painted **under** the moved subtree is repainted around the copy but not
+through it, since nothing of it shows there — a graph pane that claims the
+box its card moved through, with the card's mounted body over it, pays for
+the card's header and edges and not for the body. One from inside the
+subtree, over it, or from a claim core cannot place is repainted in full,
+and where the copy carried what it covered. When those repaint most of the
+copy, or would take more damage rects than the window affords a frame —
+on X11, four: a rounded card's corners and the strip it uncovered are
+already five — the move is repainted where it was and where it went, as
+it always was. `REACT_X11_NO_SCROLL_BLIT=1` turns the copy off with the
+other blits ([debugging.md](debugging.md#react_x11_no_scroll_blit1)).
+
 ### Drawing once instead of every frame
 
 A drawing that does not change between frames does not have to be redrawn

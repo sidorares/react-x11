@@ -920,3 +920,155 @@ test('a pan in the frame that paints a new size repaints, and blits nothing', as
   assert.equal(pictureDiff(glass(blit), glass(plain)), 0);
   assert.equal(native.glassWrites, 0);
 });
+
+// --- a subtree that only moved (issue #681) -----------------------------------
+//
+// A card dragged across the window is the same promise as a pan with the
+// region the card: its pixels are in the back buffer one shift away, the
+// card covers its box, and the frame copies them and paints the strip the
+// move uncovered. The card and its ground are all fills, which is what this
+// bridge rasters: a ground of tiles the card crosses, the card of nested
+// boxes, and a box over the card's path.
+
+/** Two windows over one app with the card at `at` in each; the second with
+ *  no `scrollRegion`, as a backend without the verb. */
+async function mountMoves() {
+  const native = pixelBridge();
+  const app = new CocoaApp(native);
+  setScaleForTests(app, SCALE, 'cocoa');
+  setScreensForTests(app, {
+    monitors: [{ x: 0, y: 0, width: 2880, height: 1800 }],
+    workArea: { x: 0, y: 0, width: 2880, height: 1750 },
+  });
+  setCompositingForTests(app, true);
+  app._frameInterval = 0;
+  const root = await createRoot({ app });
+  roots.push(root);
+  const tiles = [];
+  for (let r = 0; r < 6; r++) {
+    for (let c = 0; c < 8; c++) {
+      tiles.push(
+        h('box', {
+          key: `${r},${c}`,
+          style: {
+            position: 'absolute',
+            left: c * 20,
+            top: r * 20,
+            width: 14,
+            height: 14,
+            backgroundColor: TINTS[(r * 3 + c) % TINTS.length],
+          },
+        }),
+      );
+    }
+  }
+  const win = (title, at) =>
+    h(
+      'window',
+      { width: 160, height: 120, title },
+      h(
+        'box',
+        { style: { flexGrow: 1, backgroundColor: '#ffffff' } },
+        ...tiles,
+        h(
+          'box',
+          {
+            key: 'card',
+            style: {
+              position: 'absolute',
+              left: at.x,
+              top: at.y,
+              width: 60,
+              height: 44,
+              padding: 4,
+              gap: 3,
+              backgroundColor: '#f8f9fa',
+            },
+          },
+          h('box', { style: { height: 8, backgroundColor: '#343a40' } }),
+          h(
+            'box',
+            { style: { flexDirection: 'row', gap: 3 } },
+            h('box', {
+              style: { width: 12, height: 12, backgroundColor: '#e03131' },
+            }),
+            h('box', {
+              style: { width: 20, height: 12, backgroundColor: '#1971c2' },
+            }),
+          ),
+        ),
+        h('box', {
+          key: 'over',
+          style: {
+            position: 'absolute',
+            left: 96,
+            top: 10,
+            width: 12,
+            height: 90,
+            backgroundColor: '#fab005',
+          },
+        }),
+      ),
+    );
+  const render = (at) =>
+    root.render(h(React.Fragment, null, win('blit', at), win('plain', at)));
+  render({ x: 10, y: 10 });
+  await tick();
+  const [blit, plain] = [...app._windows.values()];
+  plain.scrollRegion = null;
+  const frame = () => {
+    app._tickFrames();
+    app._presentAll();
+  };
+  frame();
+  await tick();
+  frame();
+  await tick();
+  frame();
+  native.blits = 0;
+  const glass = (wnd) => {
+    const shown = native.onGlass.get(wnd._layer.root);
+    for (const buffer of wnd._chain?.buffers ?? []) {
+      if (buffer.iosurfaceId === shown) return buffer.handle;
+    }
+    throw new Error('no buffer on glass');
+  };
+  return { native, render, frame, blit, plain, glass };
+}
+
+test('a card that only moved is copied in the back buffer, and the flip carries it', async () => {
+  const { native, render, frame, blit, plain, glass } = await mountMoves();
+  let at = { x: 10, y: 10 };
+  const steps = [
+    [1, 0],
+    [2, 1],
+    [0, 3],
+    [5, 2],
+    [-3, 4],
+    [8, -2],
+    [13, 1],
+    [-4, -6],
+    [6, 5],
+    [-9, 3],
+    [3, -8],
+    [12, 6],
+  ];
+  for (const [i, [dx, dy]] of steps.entries()) {
+    at = { x: at.x + dx, y: at.y + dy };
+    render(at);
+    await tick();
+    frame();
+    assert.equal(
+      pictureDiff(glass(blit), glass(plain)),
+      0,
+      `step ${i}: the copied picture is not the painted one`,
+    );
+  }
+  assert.ok(native.blits > steps.length / 2, `${native.blits} copies`);
+  assert.equal(native.glassWrites, 0, 'a write landed in the frame on glass');
+  // …and the buffer the next frame draws into holds the same picture
+  const shown = glass(blit);
+  const next = blit._ensureSurface();
+  assert.ok(next !== shown, 'the next frame draws off glass');
+  assert.equal(pictureDiff(next, shown), 0, 'the next buffer is a frame stale');
+});

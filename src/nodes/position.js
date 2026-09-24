@@ -362,6 +362,7 @@ export class WindowPosition {
         }
         if (this._damage !== FULL_DAMAGE) {
           this._damage = addDamageRect(this._damage, claim, cap);
+          this._logClaim(claim, node);
         }
         if (panes) this._addPaneDamage(claim);
         claimed = true;
