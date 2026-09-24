@@ -161,3 +161,36 @@ test('an unknown reason warns in DEV instead of vanishing silently', async (t) =
   root.invalidate(false, null, 'tyop');
   assert.ok(warnings.some((w) => w.includes('unknown reason')));
 });
+
+test('a box that only moved names a reason the set knows', async (t) => {
+  // An absolutely positioned box of a set size that moved and changed
+  // nothing else is `'position'` (src/nodes/node.js, `applyProps`) — every
+  // step of a card dragged across a graph, so a reason missing from the set
+  // is a warning per step.
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  t.after(() => (console.warn = original));
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const render = (left) =>
+    x11Root.render(
+      h(
+        'window',
+        { width: 200, height: 100 },
+        h('box', {
+          style: { position: 'absolute', left, top: 10, width: 40, height: 20 },
+        }),
+      ),
+    );
+  render(10);
+  await tick();
+  const root = app.windows[0]._reactX11Node;
+  render(60);
+  await tick();
+  assert.deepStrictEqual(root._lastReasons, ['position'], 'the move says so');
+  assert.deepStrictEqual(
+    warnings.filter((w) => w.includes('unknown reason')),
+    [],
+  );
+});
