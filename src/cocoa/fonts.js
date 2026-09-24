@@ -5,7 +5,7 @@
 //   fonts.layout(spans, base, { maxWidth, align, lineHeight, maxLines,
 //                               overflow, direction })
 //     -> { width, height, lines, draw(ctx, x, y),
-//          indexAt(x, y), caretPosition(cp) }
+//          indexAt(x, y), caretPosition(cp), coverage({ pad }) }
 //   fonts.match(family, { weight, style }) -> face
 //   fonts.fallbackFor(codepoint, family, { weight, style }) -> face | null
 //
@@ -143,6 +143,25 @@ class CocoaTextLayout {
   /** Caret rect for a code-point index: { x, y, height }. */
   caretPosition(cp) {
     return this._native.layoutCaret(this._handle, this._cuOf(cp));
+  }
+
+  /**
+   * How much of each device pixel the glyphs cover, one byte a pixel,
+   * without drawing them anywhere (#673) — for text that is drawn where a 2D
+   * context is not, a GL surface's labels. The raster is the layout's box in
+   * whole pixels with `pad` round it, the layout's origin at (pad, pad).
+   *
+   * The bridge's `layoutCoverage`: each glyph's CoreText outline where the
+   * run put it, unrounded, filled once by the signed-area accumulation ntk
+   * rasterizes with, so the X11 engine and this one give the same bytes for
+   * the same outlines — and none of the font smoothing the screen gets. Not
+   * CoreText's glyph rasterizer, which shrinks a small glyph's counters even
+   * with smoothing off. Null on a bridge that predates it (`@windowkit/appkit`
+   * before `layoutCoverage`), so a caller keeps its readback.
+   */
+  coverage({ pad = 0 } = {}) {
+    if (typeof this._native.layoutCoverage !== 'function') return null;
+    return this._native.layoutCoverage(this._handle, pad) ?? null;
   }
 }
 

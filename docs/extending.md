@@ -244,9 +244,9 @@ if (!coverage) {
 }
 ```
 
-It is optional on purpose: ntk's layout answers it (X11, Wayland, the mock)
-and so does DirectWrite's (Windows), each from the release that added it;
-CoreText's does not yet. Feature-detect, keep a readback, and never assume
+It is optional on purpose: ntk's layout answers it (X11, Wayland, the mock),
+and so do DirectWrite's (Windows) and CoreText's (macOS), each from the
+release that added it. Feature-detect, keep a readback, and never assume
 the two are pixel-identical — `draw` snaps and hints, coverage does
 neither.
 
