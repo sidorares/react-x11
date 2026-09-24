@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.22.0](https://github.com/sidorares/react-x11/compare/v2.21.2...v2.22.0) (2026-09-24)
+
+
+### Features
+
+* **scroll:** an element's pan pins the furniture inside its region ([#688](https://github.com/sidorares/react-x11/issues/688)) ([cd31042](https://github.com/sidorares/react-x11/commit/cd31042965977b6406aa5e9c931f730d96762828)), closes [#682](https://github.com/sidorares/react-x11/issues/682)
+
+
+### Bug Fixes
+
+* **paint:** a box that only moved no longer warns of an unknown reason ([#686](https://github.com/sidorares/react-x11/issues/686)) ([9f7fd7c](https://github.com/sidorares/react-x11/commit/9f7fd7c058476fbc4af291bd668e213ea3ed0ed1))
+* **scroll:** a thumb is never longer than its track ([#687](https://github.com/sidorares/react-x11/issues/687)) ([e8ff79e](https://github.com/sidorares/react-x11/commit/e8ff79ef7f43a3838e36705aa635bd769baf3786))
+* **win32:** @windowkit/win32 ^0.0.5, the bridge whose popups a press does not activate ([#680](https://github.com/sidorares/react-x11/issues/680)) ([060df8e](https://github.com/sidorares/react-x11/commit/060df8e00a20078898abf6242188d784fd86b30e))
+
+
+### Performance Improvements
+
+* **paint:** a rounded box clips its children to its rectangle and puts its corners back ([#690](https://github.com/sidorares/react-x11/issues/690)) ([f3b2ad9](https://github.com/sidorares/react-x11/commit/f3b2ad9ecebbf66dd4378fce7db004104248181f))
+* **paint:** a subtree that only moved is copied, not repainted ([#689](https://github.com/sidorares/react-x11/issues/689)) ([5a8b784](https://github.com/sidorares/react-x11/commit/5a8b78499910c4e54e2cb8888cb9512cf808b5c5))
+
 ## [2.21.2](https://github.com/sidorares/react-x11/compare/v2.21.1...v2.21.2) (2026-09-24)
 
 
