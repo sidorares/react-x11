@@ -1164,7 +1164,12 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   are not worth the bookkeeping (`SCROLL_BLIT_MIN_AREA`,
   `SCROLL_BLIT_MIN_KEEP`), fractional offsets and diagonal deltas cannot
   blit, a border/borderRadius on the scroll pane, an overlapping
-  non-descendant, a debug overlay or DevTools highlight all bail.
+  non-descendant, a debug overlay or DevTools highlight all bail. An
+  _ancestor's_ rounded corners reaching into the viewport do not: they are
+  pinned and repaired where they are and where the copy dragged them, the
+  way an element blit pins them (issue #691, `_cornerPins`) — a scroll box
+  filling a rounded card is the commonest place one is, and it used to
+  repaint its viewport on every step.
 
   The shift is the content's move, not the offsets': `scrollX` counts from
   the start edge, so under `direction: 'rtl'` a growing offset carries the
@@ -1207,6 +1212,26 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   claims go per-child instead of naming its own box, and the layout diff
   runs under a scroll with the shift subtracted so it reports the children
   that really moved rather than the ones that only rode the blit.
+
+  The same list one box down — its rows in a column inside the scroll box,
+  which is how a document holds its blocks — got none of that while only
+  the scroll box's own child list went per-child. `_childListFine` extends
+  it: a child that enters or leaves any box inside a scroll box claims
+  itself, in a scroll's frame or not, and the diff names where things
+  landed. Two claims stay whole: a move (a reorder changes which sibling
+  paints over which, and no rect says that), and a scroll box's own
+  children outside a ledger frame (its box is also the claim that repaints
+  its bars, which its content sizes). And a box whose origin held and only
+  grew or shrank claims the edges that moved, as deep as its radius,
+  border, shadow or outline reaches in (`_edgeBands`), in either kind of
+  frame — so a column that gains a block below the fold, or re-slices in
+  the scroll's frame with the rows it has not built held at a guess,
+  claims its far end instead of itself clipped to the viewport. Measured on
+  `@react-x11/components`' rich text editor wheel-scrolling a 600 KB
+  document, whose scroll box fills a rounded frame: none of its scroll
+  frames blitted and now all of them do, the frames between them paint 3%
+  of the view where they painted all of it, and a frame on macOS went from
+  8.9 to 3.4 ms (XQuartz 4.0 to 2.5).
 
   The invariant, pinned by a pixel test in
   `test/scroll-blit.test.js`, is that a blitted frame is byte-identical to

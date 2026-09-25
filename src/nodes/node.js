@@ -384,8 +384,10 @@ export class Node {
     // captured before the child joins, so it covers the arrangement that is
     // about to be replaced (see _childListChanged). A viewport mid-blit has
     // nothing vacating — the child being added had no pixels — and the
-    // layout diff claims where it lands, so it names no region at all.
-    const before = this._blitLedgerOpen() ? null : this._childListBefore();
+    // layout diff claims where it lands, so it names no region at all. A
+    // child already here is a move, and says so (`_childListFine`).
+    const fine = this._childListFine(child.parent !== this);
+    const before = fine ? null : this._childListBefore();
     // a move has to leave the yoga tree too — yoga aborts on insertChild of
     // a node that still has a parent
     if (child.parent === this && this._joinsYoga(child)) {
@@ -414,7 +416,7 @@ export class Node {
     // against the app's, and only now can see the `scale` props above it.
     child._rescaleSubtree(mounting);
     this._textContentChanged();
-    this._childListChanged(before);
+    this._childListChanged(before, fine);
     a11yHooks.attached?.(this, child);
   }
 
@@ -464,7 +466,7 @@ export class Node {
    * through the layout diff in flush(), which is what lets this claim stay
    * bounded without requiring the node's own size to be pinned.
    */
-  _childListChanged(before) {
+  _childListChanged(before, fine = this._childListFine(true)) {
     // belt for a subtree attached imperatively with its rect already laid
     // out — nothing then re-runs _assignAbs to notice the reach grew
     this._clearHitBounds();
@@ -477,12 +479,45 @@ export class Node {
     // and says nothing about the ones that only rode the scroll. Joining
     // `_reflowed` would undo both — its post-layout claim is this node's
     // box, the whole band the blit is about to move.
-    if (this._blitLedgerOpen()) {
+    if (fine) {
       root.invalidate(true, before ?? NO_DAMAGE, 'child-list', this);
       return;
     }
     root.invalidate(true, before, 'child-list', this);
     root._reflowed.add(this);
+  }
+
+  /**
+   * Whether a child-list change here is claimed the fine way — the child
+   * that leaves claims its own rect, and the layout diff names where an
+   * entering child lands and whatever its arrival displaced — rather than
+   * as this node's box before and after the pass.
+   *
+   * Always for a viewport keeping a ledger this frame (issue #398). And,
+   * for a child that enters or leaves (`entersOrLeaves`), for any node
+   * inside a scroll box, scrolling or not: a document's blocks, the rows
+   * of a virtualized list one box down from its scroll box, a log that
+   * grows. Such a node is usually taller than the view, and its box
+   * clipped to the viewport is the whole viewport — so every re-slice of
+   * a list inside a column, all of it below the fold, repainted the view,
+   * and one landing in a scroll's frame poisoned its blit. The diff runs
+   * over every node that pass laid out, however deep, and a node that
+   * only grew claims the edge that moved (`_edgeBands`).
+   *
+   * Not for a move: a child moved within the list keeps its rect when
+   * what changed is only which sibling it is painted over, and no rect
+   * says that. Nor for a scroll box's own children outside a ledger frame:
+   * its box is also the claim that repaints its bars, which its content
+   * sizes.
+   */
+  _childListFine(entersOrLeaves) {
+    if (this._blitLedgerOpen()) return true;
+    if (!entersOrLeaves) return false;
+    for (let n = this.parent; n; n = n.parent) {
+      if (n.isWindow) return false;
+      if (n.isScroller?.()) return true;
+    }
+    return false;
   }
 
   removeChild(child) {
@@ -494,7 +529,8 @@ export class Node {
     // captured while the child is still attached, so it covers the rect the
     // child is about to stop occupying — the child's own, for a viewport
     // mid-blit, where this node's box is the whole scrolled band
-    const before = this._blitLedgerOpen()
+    const fine = this._childListFine(true);
+    const before = fine
       ? (child._claimBounds() ?? NO_DAMAGE)
       : this._childListBefore();
     this.children.splice(index, 1);
@@ -515,7 +551,7 @@ export class Node {
       child.yoga = null;
     }
     this._textContentChanged();
-    this._childListChanged(before);
+    this._childListChanged(before, fine);
   }
 
   /** Destroy real resources (X windows) in this subtree. Yoga nodes are

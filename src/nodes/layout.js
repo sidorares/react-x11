@@ -5,6 +5,7 @@
 import { Yoga } from '../yoga.js';
 import { callHandler } from '../errors.js';
 import { DAMAGE_SLOP, layoutDiff } from './damage.js';
+import { resolveBorderWidths } from '../styles.js';
 import { insetRect, intersectRects, outerPixels, outside } from './rects.js';
 import { DEV } from './util.js';
 
@@ -520,10 +521,31 @@ export class NodeLayout {
         ) {
           return;
         }
+        // …and one that rode it and only grew or shrank changed the pixels
+        // along the edges that moved — the column a virtualized document's
+        // blocks sit in, whose spacers re-slice in the scroll's own frame
+        const bands =
+          had && was.x === x && was.y === y && width > 0 && height > 0
+            ? this._edgeBands(was, grow)
+            : null;
+        if (bands) {
+          for (const band of bands) layoutDiff.sink(band, this);
+          return;
+        }
         if (had) layoutDiff.sink(insetRect(was, -grow), this);
         if (width > 0 && height > 0) {
           layoutDiff.sink(insetRect(this.abs, -grow), this);
         }
+        return;
+      }
+      // A box that stayed where it was and only grew or shrank changed the
+      // pixels along the edges that moved, and no others (`_edgeBands`)
+      const bands =
+        had && old.x === x && old.y === y && width > 0 && height > 0
+          ? this._edgeBands(old, grow)
+          : null;
+      if (bands) {
+        for (const band of bands) layoutDiff.sink(band, this);
         return;
       }
       if (had) {
@@ -533,6 +555,64 @@ export class NodeLayout {
         layoutDiff.sink(insetRect(this.abs, -grow), this);
       }
     }
+  }
+
+  /**
+   * The pixels a resize changed, for a box whose origin held: a band along
+   * each edge that moved, from where it was to where it is, as deep as the
+   * box's paint reaches in from that edge — a rounded corner, a border, a
+   * shadow's or an outline's reach. Its own paint anywhere else is the same
+   * solid fill it was, and its children claim for themselves when they move.
+   *
+   * A tall box that grows at its far end is the case: a document or a log
+   * or a virtualized list whose column gained a block far below the fold
+   * claimed the column, clipped to its scroll box — the whole viewport — on
+   * every frame it grew, for pixels that were all out of sight.
+   *
+   * Null where the whole box has to be claimed: anything that is not a
+   * plain box, one that scrolls (its bars are sized by it), one whose
+   * gradient is stretched over it, and one drawn through a group surface.
+   */
+  _edgeBands(old, grow) {
+    if (this.kind !== 'box' || this.isScroller?.()) return null;
+    const style = this.style;
+    if (style.backgroundImage) return null;
+    if (style.opacity !== undefined && style.opacity < 1) return null;
+    const bw = resolveBorderWidths(style, this.direction);
+    const reach =
+      Math.max(
+        style.borderRadius ?? 0,
+        bw.top,
+        bw.right,
+        bw.bottom,
+        bw.left,
+        grow,
+      ) + DAMAGE_SLOP;
+    const now = this.abs;
+    const bands = [];
+    const oldBottom = old.y + old.height;
+    const newBottom = now.y + now.height;
+    if (oldBottom !== newBottom) {
+      const top = Math.min(oldBottom, newBottom) - reach;
+      bands.push({
+        x: now.x - reach,
+        y: top,
+        width: Math.max(old.width, now.width) + 2 * reach,
+        height: Math.max(oldBottom, newBottom) + reach - top,
+      });
+    }
+    const oldRight = old.x + old.width;
+    const newRight = now.x + now.width;
+    if (oldRight !== newRight) {
+      const left = Math.min(oldRight, newRight) - reach;
+      bands.push({
+        x: left,
+        y: now.y - reach,
+        width: Math.max(oldRight, newRight) + reach - left,
+        height: Math.max(old.height, now.height) + 2 * reach,
+      });
+    }
+    return bands;
   }
 
   /**
