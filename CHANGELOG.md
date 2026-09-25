@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.22.6](https://github.com/sidorares/react-x11/compare/v2.22.5...v2.22.6) (2026-09-25)
+
+
+### Performance Improvements
+
+* **layout:** the width pass shapes only the text a floor is read from ([#704](https://github.com/sidorares/react-x11/issues/704)) ([a97ea76](https://github.com/sidorares/react-x11/commit/a97ea763b9f94d802271cbe63832738748b82945))
+
 ## [2.22.5](https://github.com/sidorares/react-x11/compare/v2.22.4...v2.22.5) (2026-09-25)
 
 
