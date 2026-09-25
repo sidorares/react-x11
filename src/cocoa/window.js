@@ -50,6 +50,50 @@ function owe(owed, damage) {
   return rects.length > OWED_RECTS_MAX ? 'full' : rects;
 }
 
+/** The band `scrollSurface` would write for a shift of `scroll` inside a
+ * `width` x `height` bitmap, clamped the way the native clamps the rect:
+ * rect ∩ (rect + delta), or null when nothing survives the shift. */
+function survivingBand(scroll, width, height) {
+  const { x, y, dx, dy } = scroll;
+  if (!dx && !dy) return null;
+  const clamp = (v, hi) => (v < 0 ? 0 : v > hi ? hi : v);
+  const x0 = clamp(x, width);
+  const y0 = clamp(y, height);
+  const x1 = clamp(x + scroll.width, width);
+  const y1 = clamp(y + scroll.height, height);
+  const left = Math.max(x0, x0 + dx);
+  const top = Math.max(y0, y0 + dy);
+  const right = Math.min(x1, x1 + dx);
+  const bottom = Math.min(y1, y1 + dy);
+  if (right <= left || bottom <= top) return null;
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/** Flat `[x, y, w, h, …]` rects less the `[x, y, w, h]` hole: the rows above
+ * and below it full width, the pieces beside it its rows only. */
+function aroundHole(rects, [hx, hy, hw, hh]) {
+  const out = [];
+  for (let i = 0; i + 3 < rects.length; i += 4) {
+    const x = rects[i];
+    const y = rects[i + 1];
+    const right = x + rects[i + 2];
+    const bottom = y + rects[i + 3];
+    const top = Math.max(y, hy);
+    const under = Math.min(bottom, hy + hh);
+    const left = Math.max(x, hx);
+    const beside = Math.min(right, hx + hw);
+    if (beside <= left || under <= top) {
+      out.push(x, y, right - x, bottom - y);
+      continue;
+    }
+    if (top > y) out.push(x, y, right - x, top - y);
+    if (bottom > under) out.push(x, under, right - x, bottom - under);
+    if (left > x) out.push(x, top, left - x, under - top);
+    if (right > beside) out.push(beside, top, right - beside, under - top);
+  }
+  return out;
+}
+
 export class CocoaWindow {
   constructor(app, attributes = {}) {
     this.app = app;
@@ -599,8 +643,18 @@ export class CocoaWindow {
    * always drew into.
    *
    * Then what it missed, copied across from the frame on glass.
+   *
+   * When the frame's first draw is a scroll blit (`scrollRegion`), the band
+   * it moves comes across already moved: one copy from the frame on glass
+   * at the shift, where catching up and then shifting in place wrote the
+   * band twice — the catch-up owes it, since the frame before blitted too.
+   * The catch-up copies the rest. Every pixel ends as the two passes left
+   * it, the strips the shift exposes included, so what the frame repaints
+   * does not change. Answers whether the band moved, or undefined when
+   * there was no scroll to take or it has to move in place: a chain of
+   * one, a buffer that owes nothing, a bridge without `blitSurface`.
    */
-  _takeBack() {
+  _takeBack(scroll = null) {
     const chain = this._chain;
     let free = null;
     let oldest = null;
@@ -639,10 +693,9 @@ export class CocoaWindow {
     // re-syncs its sticky state off the generation
     this._surfaceGen++;
     this._native.surfaceLock(back.handle);
+    let moved;
     if (back.owed && back !== chain.front) {
-      this._native.copySurfaceRegion(
-        chain.front.handle,
-        back.handle,
+      let owed =
         back.owed === 'full'
           ? null
           : back.owed.flatMap((r) => [
@@ -650,10 +703,39 @@ export class CocoaWindow {
               Math.floor(r.y),
               Math.ceil(r.width) + 1,
               Math.ceil(r.height) + 1,
-            ]),
-      );
+            ]);
+      if (scroll && typeof this._native.blitSurface === 'function') {
+        const { width, height } = this._surfaceSize;
+        const band = survivingBand(scroll, width, height);
+        // the band and where it comes from are both inside the bitmap, so
+        // the copy is the whole band — anything else is a bridge that did
+        // not copy, and the band moves in place after the plain catch-up
+        const copied =
+          band &&
+          this._native.blitSurface(
+            chain.front.handle,
+            band.x - scroll.dx,
+            band.y - scroll.dy,
+            band.width,
+            band.height,
+            back.handle,
+            band.x,
+            band.y,
+          );
+        if (!band) {
+          moved = false;
+        } else if (Array.isArray(copied)) {
+          moved = true;
+          owed = aroundHole(owed ?? [0, 0, width, height], copied);
+        }
+      }
+      // (an empty list is the whole bitmap to the native, not nothing)
+      if (owed === null || owed.length > 0) {
+        this._native.copySurfaceRegion(chain.front.handle, back.handle, owed);
+      }
     }
     back.owed = null;
+    return moved;
   }
 
   /**
@@ -832,18 +914,30 @@ export class CocoaWindow {
       return false;
     }
     if (!Number.isInteger(dx) || !Number.isInteger(dy)) return false;
-    // The band moves in the buffer this frame draws into — taken, and
-    // caught up to the frame on glass, before anything moves in it.
-    const surface = this._ensureSurface();
-    const moved = this._native.scrollSurface(
-      surface,
-      Math.round(rect.x),
-      Math.round(rect.y),
-      Math.round(rect.width),
-      Math.round(rect.height),
-      dx,
-      dy,
-    );
+    const x = Math.round(rect.x);
+    const y = Math.round(rect.y);
+    const width = Math.round(rect.width);
+    const height = Math.round(rect.height);
+    // The band moves in the buffer this frame draws into. When this is the
+    // frame's first draw, taking that buffer moves it (`_takeBack`);
+    // otherwise, or where that cannot, it is taken and caught up to the
+    // frame on glass first, and the band moves in place.
+    const chain = this._chain;
+    let moved =
+      chain && !chain.back
+        ? this._takeBack({ x, y, width, height, dx, dy })
+        : undefined;
+    if (moved === undefined) {
+      moved = this._native.scrollSurface(
+        this._ensureSurface(),
+        x,
+        y,
+        width,
+        height,
+        dx,
+        dy,
+      );
+    }
     if (moved) {
       this._dirty = true;
       // The band moved inside the BACK buffer only. After the flip every
@@ -851,14 +945,7 @@ export class CocoaWindow {
       // is owed only covers what the flush painted — the strips the shift
       // exposed — so the next frame would blit a band one frame stale.
       // Record the shifted rect as painted, and the catch-up carries it.
-      this.noteFrameDamage([
-        {
-          x: Math.round(rect.x),
-          y: Math.round(rect.y),
-          width: Math.round(rect.width),
-          height: Math.round(rect.height),
-        },
-      ]);
+      this.noteFrameDamage([{ x, y, width, height }]);
     }
     return Boolean(moved);
   }

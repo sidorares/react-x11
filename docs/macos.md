@@ -1144,9 +1144,10 @@ What it does not do yet, each noted where it lives:
 - `react-x11/refresh`'s module hooks inside a worker.
 - The swapchain on glass. No frame writes into a buffer the WindowServer
   holds, measured at the moment of every write (§"Measured: the swapchain
-  and the WindowServer's hold"), and the scroll blit moves its band in a
-  buffer already caught up; but a torn frame has not been looked for on
-  screen, before the change or after it, and a capture cannot see one.
+  and the WindowServer's hold"), and the scroll blit moves its band as the
+  frame takes its buffer, or in one already caught up; but a torn frame has
+  not been looked for on screen, before the change or after it, and a
+  capture cannot see one.
 - IME and NSAccessibility, neither built yet: both are questions AppKit asks
   the view synchronously, and both take the answer the Windows design gives
   them — the caret rect and a copy of the accessibility tree, pushed ahead
@@ -2432,6 +2433,49 @@ is not measured is a torn frame on glass, before or after: `snapshotWindow`
 renders the window from the buffer just flipped in, not the one being
 written, and cannot see this race either way.
 
+## Measured: a scroll's band, copied once
+
+Written 2026-09-25 against react-x11 2.22.6 and `@windowkit/appkit` 0.13.0,
+the M1 Pro at scale 2. A scroll blit's frame used to write its band twice.
+The frame's first draw took a buffer and caught it up to the frame on glass,
+and the catch-up owed the band, because the frame before had blitted it too.
+Then `scrollSurface` moved the band inside that buffer. Now a scroll that is
+its frame's first draw takes its buffer with the band already moved:
+`blitSurface` copies it across from the frame on glass at the shift, and
+the catch-up copies everything else (`CocoaWindow._takeBack`). Every pixel
+ends where the two passes left it, the strips the shift exposes included, so
+the frame repaints what it did. A scroll later in a frame, a chain of one, a
+buffer that owes nothing or a bridge without `blitSurface` moves the band in
+place, as before.
+
+The time spent in the bridge's copies, in each probe of the components
+sweep (`scripts/bench/sweep/` in react-x11-components), the median of three
+runs alternating the two:
+
+| scroll                              | copies per frame | the window's flush, p50 |
+| ----------------------------------- | ---------------- | ----------------------- |
+| `<CodeEditor>`, 50,000 lines, wheel | 2.09 → 1.61ms    | 4.00 → 3.72ms           |
+| `<Markdown>`, 600 KB, wheel         | 1.44 → 1.01ms    | 6.02 → 5.55ms           |
+| `<Table>`, 100,000 rows, wheel      | 1.15 → 0.99ms    | 2.66 → 2.68ms           |
+| `<Flow>`, a pan of the cards scene  | 1.36 → 0.80ms    | —                       |
+
+`scripts/cocoa-blit-probe.mjs` counts the frames that take the band across
+(`across`): 499 of its 500 on the real bridge, with the two windows'
+pictures identical on every frame.
+
+**A copy measured in a loop is not the copy a frame makes.** A 15 MB copy
+between two IOSurfaces takes 0.34 ms back to back on this machine, 45 GB/s.
+One copy every 16 ms, with the thread asleep in between, takes 1.8 ms at
+the median and 4 ms at the 90th percentile. The band copies above run at
+that rate: about 8.5 GB/s. It is not the surface: plain `malloc`ed memory
+slows down the same way, and a buffer the WindowServer is showing copies at
+full speed in a loop. It is not the thread's QoS class either:
+user-interactive, default and utility all measure alike. Splitting the rows over two to eight GCD threads makes the
+loop twice as fast and the paced copy no faster. So the time is in the
+memory system waking up, not in the core doing the copy. What a frame can
+do about it is copy fewer bytes, and a benchmark of a copy has to leave the
+thread idle between copies, the way a frame clock does.
+
 ## Testing
 
 The strategy mirrors the X11 suite's shape rather than its mechanism:
@@ -2465,8 +2509,9 @@ what issue #458 reports.
 Two harnesses answer it, and they answer the same question:
 
 - `test/cocoa-scroll-blit.test.js` runs in CI on any OS. Its bridge holds
-  real rasters — a byte per pixel, `ScrollSurface` and `CopySurfaceRegion`
-  written out with the natives' own clamping — and the proof obligation is
+  real rasters — a byte per pixel, `ScrollSurface`, `CopySurfaceRegion` and
+  `BlitSurface` written out with the natives' own clamping — and the proof
+  obligation is
   one line: render the same pane into two windows, delete `scrollRegion`
   on the second (which is how the scroll blit feature-detects a backend without
   the fast path), and the buffer handed to the layer must hold the picture
@@ -2475,7 +2520,9 @@ Two harnesses answer it, and they answer the same question:
   occluded, a resize mid-gesture, fuzzers over all of it — and a third
   window whose buffers the WindowServer holds for up to two frames after
   each flip (#602), so that a buffer comes back several frames behind,
-  where no write may land in a held buffer or in the one on glass.
+  where no write may land in a held buffer or in the one on glass. The
+  heaviest of those run twice: the band taken across with the buffer, and
+  a bridge without `blitSurface`, moving it in place.
 - `scripts/cocoa-blit-probe.mjs` is the same comparison over the real
   bridge — CoreGraphics contexts, IOSurfaces, an actual swapchain — for
   when the question is whether the bridge does what the model says. Not
