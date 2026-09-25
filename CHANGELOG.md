@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.22.4](https://github.com/sidorares/react-x11/compare/v2.22.3...v2.22.4) (2026-09-25)
+
+
+### Performance Improvements
+
+* **layout:** a change in a big tree costs the change, not the tree ([#700](https://github.com/sidorares/react-x11/issues/700)) ([4b68939](https://github.com/sidorares/react-x11/commit/4b689391080cf0a6e45c26273ff25666b69faf65))
+
 ## [2.22.3](https://github.com/sidorares/react-x11/compare/v2.22.2...v2.22.3) (2026-09-25)
 
 
