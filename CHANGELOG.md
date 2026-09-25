@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.22.3](https://github.com/sidorares/react-x11/compare/v2.22.2...v2.22.3) (2026-09-25)
+
+
+### Bug Fixes
+
+* **scroll:** a thumb drag moves whole device pixels ([#698](https://github.com/sidorares/react-x11/issues/698)) ([ec51d6c](https://github.com/sidorares/react-x11/commit/ec51d6c5582d3cb18e943ddaf8c6fe8a6ce2349c)), closes [#697](https://github.com/sidorares/react-x11/issues/697)
+
 ## [2.22.2](https://github.com/sidorares/react-x11/compare/v2.22.1...v2.22.2) (2026-09-25)
 
 
