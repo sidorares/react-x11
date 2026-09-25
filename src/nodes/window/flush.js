@@ -212,6 +212,9 @@ export class WindowFlush {
       }
       // the moves this walk hands over to be copied are this frame's alone
       this._rigidMoves = null;
+      // a subtree no pass reached and nothing scrolled in is where the last
+      // walk left it (`_followParent`)
+      layoutDiff.skipUnreached = !this._walkWhole;
       try {
         // `_absolutizeChildren`, not the loop it wraps: a `<window
         // style={{overflow: 'scroll'}}>` is a scroll container like any box,
@@ -219,7 +222,9 @@ export class WindowFlush {
         this._absolutizeChildren(0, 0);
       } finally {
         layoutDiff.sink = null;
+        layoutDiff.skipUnreached = false;
       }
+      this._walkWhole = false;
       // …and placed nodes against the arrangement that walk produced: where
       // one goes depends on where its pane and its parent landed
       if (this._placedNodes.size !== 0) this._placeNodes();

@@ -1587,6 +1587,37 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     `_floorsUnscoped`**, which measures the whole tree. Yoga's dirty record
     is checked for anything changed outside the boxes (`dirtyOutside`), and
     `REACT_X11_NO_SCOPED_FLOORS=1` turns it off.
+  - **so is a change down a column whose height is its content's**
+    (`src/nodes/window/spine.js`): a document, a log, a transcript — one
+    scroll pane, one column, thousands of blocks. The change is measured from
+    the highest box on its way up that no column above can sum (a text in a
+    list row is measured with the row), and each column above it is summed
+    from the extents its other children carry (`columnHeightSpan`, which is
+    `contentSpan`'s `shift` rule written out) up to a box that names its size
+    on both axes — a scroll pane — or the window. A source that only gained
+    or lost children (`_floorsOtherSources` says which did more) measures the
+    children that are new. Width extents on a spine are left unmeasured: a
+    column writes floors down its main axis only, and the floors leave any
+    extent nobody reads unmeasured anyway. `test/content-floors.test.js`
+    holds every spine frame to the whole tree's answer, and fails if the sum
+    drops a gap or a margin, if a root is squashed, or if it is measured at
+    the wrong width in the width pass.
+  - **a box measured alone is measured on copies** (`exactcopy.js`): its
+    subtree copied into a second yoga config that never rounds, laid out,
+    read and freed. Switching the renderer's config off the grid
+    (`measuringExactly`) makes yoga treat every cached layout as stale, so
+    the pass after it laid the whole tree out again — 58 ms on 13,000 boxes
+    where a cached pass is 0.05. A copy's computed values are the copy's:
+    read a new node's margins from its style (`columnHeightSpan`), never
+    from its real box, which has not been laid out yet.
+  - **the walk after a pass leaves alone what yoga did not reach**
+    (`_followParent`): a child with a clear has-new-layout flag under a
+    parent that did not move is where the last walk put it. Only on a frame
+    nothing scrolled on (`_walkWhole`, set by any `'scroll'` invalidation or
+    one that names no node): a scroll moves boxes without a pass, and the
+    walk is what carries the offset down to a pane under an untouched box.
+    A pane's content reach is cached per box on the same witness
+    (`contentReach`, `_contentReach`).
   - the deliberate deviation from CSS is that a **named size is kept**: CSS
     floors an item at `min(its size, its content)`, which is fine on the web
     where a `<div>` is a block container and its children are not flex items,

@@ -94,7 +94,7 @@ export function inFlow(node) {
 }
 
 /** Which axis this node lays its children out along. */
-const mainAxisOf = (node) => {
+export const mainAxisOf = (node) => {
   const direction = node.style.flexDirection ?? 'column';
   return direction === 'row' || direction === 'row-reverse'
     ? 'width'
@@ -107,7 +107,7 @@ const mainAxisOf = (node) => {
  * content. The same test `writeFloors` applies, asked ahead of time — it is
  * what decides whether a stale extent is one anybody will read.
  */
-function receivesFloor(child, axis) {
+export function receivesFloor(child, axis) {
   const parent = child.parent;
   if (
     !parent ||
@@ -277,6 +277,80 @@ export function dirtyOutside(node, boundaries, paths) {
     if (dirtyOutside(child, boundaries, paths)) return true;
   }
   return false;
+}
+
+/**
+ * `contentSpan`'s height for a column, from the extents its children
+ * already carry rather than from a measuring pass — the sum a column spine
+ * (`spine.js`) is recomputed with, bottom up, where a pass would lay the
+ * whole tree out to read it.
+ *
+ * It is the same number. In a measuring pass `contentSpan` places each
+ * child at the sum of the extents before it (its `shift`), so what it reads
+ * back is every in-flow child's extent, the margins *between* them — the
+ * first child's leading margin and the last one's trailing margin fall
+ * outside the span, which runs from the first box to the last — the gap
+ * between each pair, and the column's own padding and border. That holds
+ * for a column whose height is its content's, which is the only kind a
+ * spine sums (`isSummableColumn`): with no height of its own the pass has
+ * no free space to justify into, and nothing in it to squash.
+ *
+ * Undefined where it cannot be summed: a child with no extent on hand, a
+ * negative margin (the boxes would overlap, and the last would not have to
+ * be the lowest), or nothing in flow at all — a leaf's answer, which is
+ * `contentSpan`'s to give.
+ */
+export function columnHeightSpan(node) {
+  const yoga = node.yoga;
+  let span = 0;
+  let count = 0;
+  let trailing = 0;
+  for (const child of node.children) {
+    if (!inFlow(child)) continue;
+    const extent = child._floorH;
+    if (extent === undefined) return undefined;
+    const top = marginDown(child.yoga, Yoga.EDGE_TOP);
+    const bottom = marginDown(child.yoga, Yoga.EDGE_BOTTOM);
+    if (!(top >= 0 && bottom >= 0)) return undefined;
+    span += count === 0 ? extent : trailing + top + extent;
+    trailing = bottom;
+    count += 1;
+  }
+  if (count === 0) return undefined;
+  const gap = columnGap(node);
+  if (gap === undefined) return undefined;
+  return (
+    span +
+    gap * (count - 1) +
+    yoga.getComputedPadding(Yoga.EDGE_TOP) +
+    yoga.getComputedPadding(Yoga.EDGE_BOTTOM) +
+    yoga.getComputedBorder(Yoga.EDGE_TOP) +
+    yoga.getComputedBorder(Yoga.EDGE_BOTTOM)
+  );
+}
+
+/**
+ * A box's margin on one edge down the page, from its style as yoga resolves
+ * it — the edge, else the vertical pair, else all four — rather than from a
+ * pass: a box that has just arrived has never been laid out in the tree, and
+ * its computed margins read 0 until it is. Undefined where it is not a
+ * length (a percentage, `auto`).
+ */
+function marginDown(yoga, edge) {
+  for (const at of [edge, Yoga.EDGE_VERTICAL, Yoga.EDGE_ALL]) {
+    const value = yoga.getMargin(at);
+    if (value.unit === Yoga.UNIT_POINT) return value.value;
+    if (value.unit !== Yoga.UNIT_UNDEFINED) return undefined;
+  }
+  return 0;
+}
+
+/** The gap a column leaves between its rows, as yoga resolves it — the row
+ *  gutter, else the both-ways one — or undefined where it is not a length. */
+function columnGap(node) {
+  const style = node.style;
+  const gap = style.rowGap ?? style.gap ?? 0;
+  return typeof gap === 'number' ? gap : undefined;
 }
 
 /**

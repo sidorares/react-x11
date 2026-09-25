@@ -570,13 +570,13 @@ test('a padding change on a container measures the container and nothing below i
   const { app, root, node } = await mount(container(8));
   const measured = node._floorsMeasured;
   const passes = node._layoutPasses;
+  const scoped = node._scopedFloorPasses;
   await rerender(app, root, container(12));
   assert.strictEqual(node._floorsMeasured - measured, 1, 'the container alone');
-  assert.strictEqual(
-    node._layoutPasses - passes,
-    3,
-    'the two height passes and the layout',
-  );
+  // laid out alone to measure it — it is stretched across the window, which
+  // is where its change stops mattering (spine.js) — and the tree once
+  assert.ok(node._scopedFloorPasses > scoped, 'measured alone');
+  assert.strictEqual(node._layoutPasses - passes, 1, 'and the layout');
   await root.unmount();
 });
 
@@ -632,13 +632,13 @@ test('a label that shrinks in a row takes its floor with it', async () => {
     const { app, root, node } = await mount(tree(100));
     assert.strictEqual(label.current.abs.width, 100);
     const passes = node._layoutPasses;
+    const scoped = node._scopedFloorPasses;
     await rerender(app, root, tree(60));
     assert.strictEqual(label.current.abs.width, 60, 'the floor followed');
-    assert.strictEqual(
-      node._layoutPasses - passes,
-      4,
-      'the width pass, the two height passes and the layout',
-    );
+    // the row measured alone — it is stretched across the window, where the
+    // change stops mattering (spine.js) — and the tree laid out once
+    assert.ok(node._scopedFloorPasses > scoped, 'the row, alone');
+    assert.strictEqual(node._layoutPasses - passes, 1, 'and the layout');
     await root.unmount();
   } finally {
     unregisterElement('label');
@@ -880,15 +880,184 @@ test('a change inside a card measures the card alone, and lays the tree out once
   });
 });
 
-test('a change outside every card, or to a card’s own size, measures the tree', async () => {
+test('a label in a row is measured with its row; a change to a card’s own size, with the tree', async () => {
   await withTestElements(async () => {
     const { app, root, node } = await mount(cardsTree());
     let passes = node._layoutPasses;
     await rerender(app, root, cardsTree({ a: 80 }));
-    assert.ok(node._layoutPasses - passes > 1, 'a label in the column');
+    assert.strictEqual(node._layoutPasses - passes, 1, 'the row, alone');
     passes = node._layoutPasses;
     await rerender(app, root, cardsTree({ a: 80, width1: 110 }));
     assert.ok(node._layoutPasses - passes > 1, 'a card that changed its width');
+    await root.unmount();
+  });
+});
+
+// --- column spines ----------------------------------------------------------
+
+/**
+ * A document, as the floors see one: a scroll pane, one column in it, and
+ * blocks down the column — paragraphs, labels, a padded box with margins
+ * round a paragraph, a row of labels (a width floor to write), a box of a
+ * fixed height, a box that clips and one that holds one. Each block is
+ * `[kind, key, n]`, so a step can append, remove, insert and edit.
+ */
+const docTree = ({ blocks, pad = 6, gap = 4 }) =>
+  box(
+    { overflow: 'scroll', flexGrow: 1 },
+    box(
+      { padding: pad, gap },
+      ...blocks.map(([kind, key, n]) => {
+        if (kind === 'p') return h('paragraph', { key });
+        if (kind === 'l') return h('label', { key, length: n });
+        if (kind === 'fixed') return h('box', { key, style: { height: n } });
+        // a box that clips, which names its own floor: squashed by any pass
+        // that offers it no room, which down this column none does
+        if (kind === 'clip') {
+          return h(
+            'box',
+            { key, style: { overflow: 'hidden' } },
+            h('paragraph'),
+          );
+        }
+        // a row with a box that names a width and still grows: its extent
+        // is what it was laid out at, so it is only right if the width pass
+        // offered the row what the pass over the whole tree does
+        if (kind === 'grow-row') {
+          return h(
+            'box',
+            { key, style: { flexDirection: 'row' } },
+            h('box', { style: { width: 20, flexGrow: 1, height: 5 } }),
+            h('label', { length: n }),
+          );
+        }
+        if (kind === 'holds-clip') {
+          return h(
+            'box',
+            { key, style: { padding: n } },
+            h('box', { style: { overflow: 'hidden' } }, h('paragraph')),
+          );
+        }
+        if (kind === 'row') {
+          return h(
+            'box',
+            { key, style: { flexDirection: 'row', gap: 2 } },
+            h('label', { length: n }),
+            h('label', { length: 30 }),
+          );
+        }
+        return h(
+          'box',
+          { key, style: { padding: 3, marginTop: 2, marginBottom: n } },
+          h('paragraph'),
+          h('label', { length: n * 4 }),
+        );
+      }),
+    ),
+  );
+
+/**
+ * Every box and every height extent the same, and every width extent where
+ * both windows have one. Neither measures a width nobody reads: a spine
+ * leaves the columns it sums unmeasured across (spine.js), and the whole
+ * tree forgets the width of every box above a change when no width floor
+ * is owed, where a spine keeps the stop's, which did not move. Both are
+ * the floors' way with an extent nobody reads (`collectFloorStale`).
+ */
+function assertSameMeasurement(scoped, whole, message) {
+  const a = layoutOf(scoped);
+  const b = layoutOf(whole);
+  assert.strictEqual(a.length, b.length, message);
+  for (let i = 0; i < a.length; i++) {
+    const { floorW, ...rest } = a[i];
+    const { floorW: wholeW, ...wholeRest } = b[i];
+    assert.deepStrictEqual(rest, wholeRest, `${message}: node ${i}`);
+    if (floorW !== undefined && wholeW !== undefined) {
+      assert.strictEqual(floorW, wholeW, `${message}: node ${i} across`);
+    }
+  }
+}
+
+test('every spine measurement is the one the whole tree gives', async () => {
+  // The column spine (spine.js) measures a block that changed alone and sums
+  // the column it sits in. Two windows, the same frames: one measures what
+  // each change is confined to, the other the whole tree, and every box and
+  // every height has to come out the same.
+  await withTestElements(async () => {
+    const start = [
+      ['p', 'a'],
+      ['l', 'b', 40],
+      ['box', 'c', 5],
+      ['row', 'd', 60],
+      ['fixed', 'e', 30],
+    ];
+    const steps = [
+      { blocks: [...start, ['l', 'f', 20]] }, // a label joins
+      { blocks: [...start, ['l', 'f', 20], ['p', 'g'], ['box', 'h', 9]] },
+      { blocks: [...start, ['l', 'f', 150], ['p', 'g'], ['box', 'h', 9]] },
+      { blocks: [...start, ['p', 'g'], ['box', 'h', 1]] }, // one leaves
+      {
+        blocks: [
+          ['p', 'a'],
+          ['fixed', 'x', 12], // one arrives in the middle
+          ['l', 'b', 40],
+          ['box', 'c', 5],
+          ['row', 'd', 60],
+          ['fixed', 'e', 30],
+          ['box', 'h', 1],
+        ],
+      },
+      { blocks: [...start, ['grow-row', 'g', 15]] }, // grows in the pass
+      { blocks: [...start, ['grow-row', 'g', 35]] },
+      { blocks: [...start, ['clip', 'k'], ['holds-clip', 'm', 3]] }, // clips
+      { blocks: [...start, ['clip', 'k'], ['holds-clip', 'm', 7]] },
+      { blocks: [...start, ['row', 'r', 90]] }, // a row, and its floors
+      { blocks: [...start, ['row', 'r', 12]] }, // inside a row: the tree's
+      { blocks: [...start, ['row', 'r', 12]], pad: 10 }, // the column's own
+      { blocks: [...start, ['row', 'r', 12]], pad: 10, gap: 9 },
+      { blocks: start.slice(0, 2), pad: 10, gap: 9 }, // most of it leaves
+    ];
+    const windowProps = { width: 120, height: 200 };
+    const scoped = await mount(docTree({ blocks: start }), windowProps);
+    const whole = await mount(docTree({ blocks: start }), windowProps);
+    let took = 0;
+    for (const step of steps) {
+      const before = scoped.node._layoutPasses;
+      await rerender(scoped.app, scoped.root, docTree(step), windowProps);
+      if (scoped.node._layoutPasses - before === 1) took++;
+      whole.node._floorsUnscoped = true;
+      await rerender(whole.app, whole.root, docTree(step), windowProps);
+      assertSameMeasurement(
+        scoped.node,
+        whole.node,
+        `the frame after ${JSON.stringify(step)}`,
+      );
+    }
+    assert.ok(took >= 8, `${took} of the frames were on a spine`);
+    await scoped.root.unmount();
+    await whole.root.unmount();
+  });
+});
+
+test('a block that joins a long column is measured alone, and the tree laid out once', async () => {
+  await withTestElements(async () => {
+    const blocks = (n) =>
+      Array.from({ length: n }, (_, i) =>
+        i % 3 === 0
+          ? ['p', `p${i}`]
+          : i % 3 === 1
+            ? ['l', `l${i}`, 20 + i]
+            : ['box', `b${i}`, 2],
+      );
+    const { app, root, node } = await mount(docTree({ blocks: blocks(300) }));
+    const measured = node._floorsMeasured;
+    const passes = node._layoutPasses;
+    await rerender(app, root, docTree({ blocks: blocks(301) }));
+    assert.strictEqual(node._layoutPasses - passes, 1, 'the real pass alone');
+    assert.ok(
+      node._floorsMeasured - measured <= 3,
+      `${node._floorsMeasured - measured} extents measured`,
+    );
     await root.unmount();
   });
 });
@@ -930,9 +1099,9 @@ test('every scoped measurement is the one the whole tree gives', async () => {
       if (scoped.node._scopedFloorPasses > before) took++;
       whole.node._floorsUnscoped = true;
       await rerender(whole.app, whole.root, cardsTree(step));
-      assert.deepStrictEqual(
-        layoutOf(scoped.node),
-        layoutOf(whole.node),
+      assertSameMeasurement(
+        scoped.node,
+        whole.node,
         `the frame after ${JSON.stringify(step)}`,
       );
     }

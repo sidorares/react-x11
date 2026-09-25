@@ -8,9 +8,12 @@ import { Yoga } from '../../yoga.js';
 import {
   captureLeafHeights,
   collectFloorStale,
+  columnHeightSpan,
+  declaresOwnMinimum,
   dirtyOutside,
   floorBoundaryOf,
   probeHeightFloors,
+  receivesFloor,
   setMeasuringShrink,
   restoreShrink,
   freezeWidths,
@@ -18,6 +21,8 @@ import {
   contentSpan,
   writeFloors,
 } from './floors.js';
+import { spineScope } from './spine.js';
+import { onExactCopy } from './exactcopy.js';
 import {
   MAX_WINDOW_EXTENT,
   clampExtent,
@@ -36,18 +41,14 @@ import {
 // REACT_X11_NO_SCROLL_BLIT gives.
 const NO_SCOPED_FLOORS = process.env.REACT_X11_NO_SCOPED_FLOORS === '1';
 
-/**
- * Mark a box laid out alone (`_measureBoundary`) for the window's pass to lay
- * out again. It was laid out at the size that pass will give it, so yoga
- * would answer from its cache and keep what the measurement left inside —
- * placed off the pixel grid, with the shrink borrowed. A style set to
- * something else and back is how a box with no measure function says it
- * changed.
- */
-function relayOut(node) {
-  const shrink = node.style.flexShrink ?? 1;
-  node.yoga.setFlexShrink(shrink + 1);
-  node.yoga.setFlexShrink(shrink);
+/** Take a node's extents off, as `collectFloorStale` does a dirty child's:
+ *  both are measured again, and the minimum yoga holds may no longer be
+ *  the one the floors wrote. */
+function forgetExtents(node) {
+  node._floorW = undefined;
+  node._floorH = undefined;
+  node._floorMinW = null;
+  node._floorMinH = null;
 }
 
 /** Content-sized windows, installed onto `WindowNode.prototype` by window.js. */
@@ -132,11 +133,42 @@ export class WindowSize {
     const scope = this._floorsScope();
     this._floorsScopeNow = scope;
     if (scope !== null) {
+      const spine = this._floorsSpineNow;
       for (const boundary of scope) {
-        // its children's floors are written from here; its own extent is
-        // its style's, and stands
+        if (spine?.roots.has(boundary)) {
+          // A spine's root is measured with what is inside it, unlike a box
+          // that sizes itself, and its column writes the floor it gets.
+          forgetExtents(boundary);
+          if (receivesFloor(boundary, 'width')) found.width = true;
+          if (receivesFloor(boundary, 'height')) found.height = true;
+          this._floorsStale.add(boundary.parent);
+        }
+        // its children's floors are written from here; a sized box's own
+        // extent is its style's, and stands
         this._floorsStale.add(boundary);
         collectFloorStale(boundary, this._floorsStale, found, false);
+      }
+      if (spine !== null) {
+        // the columns the roots sit in are summed again (`_sumSpine`), and
+        // every one of them writes its children's floors, as the box each
+        // spine stops at does
+        for (const column of spine.spine) {
+          column._floorW = undefined;
+          column._floorH = undefined;
+          this._floorsStale.add(column);
+          if (receivesFloor(column, 'height')) found.height = true;
+        }
+        for (const stop of spine.stops) this._floorsStale.add(stop);
+        // How wide a root is in the width pass is worked out on the way
+        // down from the window (spine.js), and past a row only a pass over
+        // the whole tree knows. A width owed there is the whole tree's.
+        if (found.width) {
+          for (const widths of spine.roots.values()) {
+            if (widths.widthPass !== null) continue;
+            this._floorsUnscoped = true;
+            return this._collectFloorStale();
+          }
+        }
       }
       return found;
     }
@@ -189,16 +221,37 @@ export class WindowSize {
     ) {
       return null;
     }
+    this._floorsSpineNow = null;
     const boundaries = new Set();
+    // the changes no sized box holds, which a column spine may (spine.js)
+    const loose = [];
     for (const source of sources) {
       // gone, or moved to another window: its old parent's child list is
       // the change that counts, and that parent said so itself
       if (source.destroyed || source.root !== this) continue;
       const boundary = floorBoundaryOf(source, this);
-      if (boundary === null) return null;
-      boundaries.add(boundary);
+      if (boundary === null) loose.push(source);
+      else boundaries.add(boundary);
     }
-    if (boundaries.size === 0) return null;
+    let spine = null;
+    if (loose.length !== 0) {
+      spine = spineScope(
+        this,
+        loose,
+        (node) => !this._floorsOtherSources.has(node),
+      );
+      if (spine === null) return null;
+      // a sized box inside a root is measured with the root
+      for (const boundary of [...boundaries]) {
+        for (let n = boundary.parent; n && n !== this; n = n.parent) {
+          if (spine.roots.has(n)) {
+            boundaries.delete(boundary);
+            break;
+          }
+        }
+      }
+    }
+    if (boundaries.size === 0 && spine === null) return null;
     // the outermost of nested ones: measuring it measures what it holds
     const paths = new Set();
     for (const boundary of [...boundaries]) {
@@ -214,8 +267,92 @@ export class WindowSize {
         paths.add(n);
       }
     }
+    if (spine !== null) {
+      for (const root of spine.roots.keys()) {
+        boundaries.add(root);
+        for (let n = root.parent; n && n !== this; n = n.parent) paths.add(n);
+      }
+      // the columns summed, and the stops with the way down to them: a
+      // child that left one is a change to it, and nothing below it
+      for (const column of spine.spine) paths.add(column);
+      for (const stop of spine.stops) {
+        for (let n = stop; n && n !== this; n = n.parent) paths.add(n);
+      }
+    }
     if (dirtyOutside(this, boundaries, paths)) return null;
+    this._floorsSpineNow = spine;
     return boundaries;
+  }
+
+  /**
+   * One spine root's floors, measured with it laid out alone — at the width
+   * it has in each of the passes over the whole tree (`spine.js`), and with
+   * no height on offer in either height pass, because down a column whose
+   * height is its content's the pass over the whole tree has none to offer
+   * it either. Its own extents are written here: unlike a box that sizes
+   * itself, a root's are its content's, and the column it sits in is summed
+   * from them (`_sumSpine`).
+   */
+  _measureSpineRoot(root, widths, axis, probe = false) {
+    onExactCopy(root, () =>
+      this._measureSpineRootOnCopy(root, widths, axis, probe),
+    );
+  }
+
+  _measureSpineRootOnCopy(root, widths, axis, probe) {
+    const yoga = root.yoga;
+    const dir =
+      root.direction === 'rtl' ? Yoga.DIRECTION_RTL : Yoga.DIRECTION_LTR;
+    if (axis === 'width') {
+      const shrunk = [];
+      setMeasuringShrink(root, axis, shrunk);
+      this._scopedFloorPasses += 1;
+      yoga.calculateLayout(widths.widthPass, undefined, dir);
+      const span = contentSpan(root, axis, null, this);
+      root._floorW = declaresOwnMinimum(root, axis)
+        ? yoga.getComputedWidth()
+        : span;
+      restoreShrink(shrunk);
+      return;
+    }
+    this._scopedFloorPasses += 1;
+    yoga.calculateLayout(widths.width, undefined, dir);
+    if (probe) {
+      const hit = { marked: false, owed: false };
+      probeHeightFloors(root, this, hit, root);
+      if (hit.marked) {
+        this._writeFloors('height');
+        this._scopedFloorPasses += 1;
+        yoga.calculateLayout(widths.width, undefined, dir);
+      }
+    }
+    const intrinsic = new Map();
+    captureLeafHeights(root, intrinsic);
+    const frozen = [];
+    freezeWidths(root, frozen);
+    const shrunk = [];
+    setMeasuringShrink(root, axis, shrunk);
+    this._scopedFloorPasses += 1;
+    yoga.calculateLayout(widths.width, undefined, dir);
+    const span = contentSpan(root, axis, intrinsic, this);
+    root._floorH = declaresOwnMinimum(root, axis)
+      ? yoga.getComputedHeight()
+      : span;
+    root._floorAtW = yoga.getComputedWidth();
+    this._floorsMeasured += 1;
+    restoreWidths(frozen);
+    restoreShrink(shrunk);
+  }
+
+  /** The columns of this frame's spines, deepest first, summed from their
+   *  children's extents (`columnHeightSpan`) — their widths are the last
+   *  pass's, which is what a height is for. */
+  _sumSpine(columns) {
+    for (const column of columns) {
+      column._floorH = columnHeightSpan(column);
+      column._floorAtW = column.yoga.getComputedWidth();
+      this._floorsMeasured += 1;
+    }
   }
 
   /**
@@ -226,6 +363,15 @@ export class WindowSize {
    * leaves whose width moved, stopped at the box, whose own extent stands.
    */
   _measureBoundary(boundary, axis, probe = false) {
+    // on copies of its boxes (exactcopy.js): the tree's own are left as the
+    // last pass cached them, which is what keeps the pass after this one
+    // from laying the whole tree out again
+    onExactCopy(boundary, () =>
+      this._measureBoundaryOnCopy(boundary, axis, probe),
+    );
+  }
+
+  _measureBoundaryOnCopy(boundary, axis, probe) {
     const yoga = boundary.yoga;
     const dir =
       boundary.direction === 'rtl' ? Yoga.DIRECTION_RTL : Yoga.DIRECTION_LTR;
@@ -236,7 +382,6 @@ export class WindowSize {
       yoga.calculateLayout(undefined, undefined, dir);
       contentSpan(boundary, axis, null, this);
       restoreShrink(shrunk);
-      relayOut(boundary);
       return;
     }
     this._scopedFloorPasses += 1;
@@ -261,7 +406,6 @@ export class WindowSize {
     contentSpan(boundary, axis, intrinsic, this);
     restoreWidths(frozen);
     restoreShrink(shrunk);
-    relayOut(boundary);
   }
 
   /** The floors on the children of every node found stale, from the extents
@@ -386,8 +530,10 @@ export class WindowSize {
     this._floorsSwept = true;
     this._floorsWidth = width;
     this._floorsSources.clear();
+    this._floorsOtherSources.clear();
     this._floorsUnscoped = false;
     this._floorsScopeNow = null;
+    this._floorsSpineNow = null;
   }
 
   /**
@@ -398,16 +544,21 @@ export class WindowSize {
    * everywhere but the boxes and the way down to them.
    */
   _applyScopedFloors(boundaries, found, width, height) {
-    measuringExactly(() => {
-      if (found.width) {
-        this._writeFloors('width');
-        for (const boundary of boundaries) {
-          this._measureBoundary(boundary, 'width');
-        }
-      }
+    const spine = this._floorsSpineNow;
+    const measure = (boundary, axis, probe) => {
+      const widths = spine?.roots.get(boundary);
+      if (widths) this._measureSpineRoot(boundary, widths, axis, probe);
+      else this._measureBoundary(boundary, axis, probe);
+    };
+    // Measured on copies in the exact config (exactcopy.js), so the
+    // renderer's config never leaves the grid, and the pass below answers
+    // from its cache everywhere these boxes and the way down to them are not.
+    if (found.width) {
       this._writeFloors('width');
-      this._writeFloors('height');
-    });
+      for (const boundary of boundaries) measure(boundary, 'width');
+    }
+    this._writeFloors('width');
+    this._writeFloors('height');
     let heights = found.height;
     let probed = false;
     if (!heights) {
@@ -420,13 +571,12 @@ export class WindowSize {
       probed = true;
     }
     if (heights) {
-      measuringExactly(() => {
-        this._writeFloors('height');
-        for (const boundary of boundaries) {
-          this._measureBoundary(boundary, 'height', !probed);
-        }
-        this._writeFloors('height');
-      });
+      this._writeFloors('height');
+      for (const boundary of boundaries) {
+        measure(boundary, 'height', !probed);
+      }
+      if (spine !== null) this._sumSpine(spine.spine);
+      this._writeFloors('height');
       this._layoutRoot(width, height);
     }
   }

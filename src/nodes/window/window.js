@@ -277,8 +277,15 @@ export class WindowNode extends Scrollable(Node) {
     // the nodes whose changes the next measurement owes, and whether one
     // came with no node to name (`_floorsScope`)
     this._floorsSources = new Set();
+    // …the ones that changed for any reason but their child list, which
+    // are measured themselves rather than through the children they gained
+    // (spine.js), and the spines this frame's measurement runs on
+    this._floorsOtherSources = new Set();
     this._floorsUnscoped = false;
     this._floorsScopeNow = null;
+    this._floorsSpineNow = null;
+    // whether the next layout walk must visit every box (`invalidate`)
+    this._walkWhole = true;
     this._scopedFloorPasses = 0;
     // whether the first floors pass has run (`collectFloorStale`'s sweep)
     this._floorsSwept = false;

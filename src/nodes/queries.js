@@ -197,6 +197,7 @@ export class NodeQueries {
         this.root._floorsDirty = true;
         this.root._floorsContentDirty = true;
         this.root._floorsSources.add(this);
+        this.root._floorsOtherSources.add(this);
       }
     }
   }
