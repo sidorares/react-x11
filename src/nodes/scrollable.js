@@ -942,7 +942,16 @@ export const Scrollable = (Base) =>
       const ny = ev.nativeEvent?.y ?? ev.y * this.scale;
       const at = along(bar, nx, ny) - this._barGrab.offset - bar.trackStart;
       const from = bar.reversed ? bar.travel - at : at;
-      const to = (from / bar.travel) * bar.range;
+      // Whole device pixels, as a wheel's default action moves (events.js).
+      // The pointer's share of the travel times the range is a fraction at
+      // almost every position, and a fractional offset costs the scroll blit,
+      // which can only shift by whole pixels, and draws everything in the
+      // pane off the pixel grid, where the X11 backend fills an edge or a
+      // rounded box through a coverage mask it uploads shape by shape. A
+      // thumb dragged through a 100,000-row table ran at 25 fps on XQuartz,
+      // with two thirds of the server's time in those masks, and at 52 once
+      // the offset was whole.
+      const to = Math.round((from / bar.travel) * bar.range);
       this._scrollToDevice(bar.axis === 'x' ? { x: to } : { y: to });
     }
 
