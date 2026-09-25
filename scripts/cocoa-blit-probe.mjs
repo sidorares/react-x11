@@ -141,6 +141,10 @@ const paneOf = (wnd) => {
 const panes = windows.map(paneOf);
 
 let blits = 0;
+// …of which the band came across with the buffer the frame took, already
+// moved (`CocoaWindow._takeBack`): the pane paints fills only, so every
+// `blitSurface` that copies is a scroll blit's
+let across = 0;
 const native = blitWnd._native;
 const scrollSurface = native.scrollSurface.bind(native);
 native.scrollSurface = (...args) => {
@@ -148,6 +152,17 @@ native.scrollSurface = (...args) => {
   if (moved) blits++;
   return moved;
 };
+if (typeof native.blitSurface === 'function') {
+  const blitSurface = native.blitSurface.bind(native);
+  native.blitSurface = (...args) => {
+    const copied = blitSurface(...args);
+    if (copied) {
+      blits++;
+      across++;
+    }
+    return copied;
+  };
+}
 
 /** The frame a window last presented, straight off the bridge. */
 const readBack = (wnd) => {
@@ -216,6 +231,7 @@ console.log(
   JSON.stringify({
     frames: FRAMES,
     blits,
+    across,
     pixels,
     worstDiff: worst,
     firstBadFrame: firstBad,

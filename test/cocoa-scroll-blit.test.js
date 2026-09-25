@@ -23,6 +23,12 @@
 // occluded across a blit, a resize landing mid-gesture — and buffers the
 // WindowServer has not let go of yet, so that a frame takes a third or a
 // fourth that missed several frames (#602).
+//
+// A scroll that is its frame's first draw takes its buffer with the band
+// already moved — copied across from the frame on glass at the shift, the
+// catch-up copying the rest — where a bridge without `blitSurface` catches
+// up and then moves the band in place. The same picture either way, so the
+// heaviest tests below run both.
 import assert from 'node:assert';
 import { afterEach, test } from 'node:test';
 import React from 'react';
@@ -150,15 +156,66 @@ function copySurfaceRegion(src, dst, rects) {
   }
 }
 
+/** `BlitSurface`: a rect of one raster into another at a translate, trimmed
+ *  to the clip and to both rasters, answering the rect it wrote or null. One
+ *  raster at both ends is refused, as the native refuses it. */
+function blitSurface(src, sx, sy, w, h, dst, dx, dy, clip) {
+  assert.notEqual(src, dst, 'blitSurface: source and destination are one');
+  if (clip) {
+    const [cx, cy, cw, ch] = clip;
+    if (dx < cx) {
+      sx += cx - dx;
+      w -= cx - dx;
+      dx = cx;
+    }
+    if (dy < cy) {
+      sy += cy - dy;
+      h -= cy - dy;
+      dy = cy;
+    }
+    if (dx + w > cx + cw) w = cx + cw - dx;
+    if (dy + h > cy + ch) h = cy + ch - dy;
+  }
+  if (sx < 0) {
+    dx -= sx;
+    w += sx;
+    sx = 0;
+  }
+  if (sy < 0) {
+    dy -= sy;
+    h += sy;
+    sy = 0;
+  }
+  if (dx < 0) {
+    sx -= dx;
+    w += dx;
+    dx = 0;
+  }
+  if (dy < 0) {
+    sy -= dy;
+    h += dy;
+    dy = 0;
+  }
+  w = Math.min(w, src.width - sx, dst.width - dx);
+  h = Math.min(h, src.height - sy, dst.height - dy);
+  if (w <= 0 || h <= 0) return null;
+  for (let row = 0; row < h; row++) {
+    const from = (sy + row) * src.width + sx;
+    dst.px.set(src.px.subarray(from, from + w), (dy + row) * dst.width + dx);
+  }
+  return [dx, dy, w, h];
+}
+
 /**
  * Enough of @windowkit/appkit to raster a box tree into a swapchain: the
  * window verbs of cocoa-frames.test.js's fake, plus a 2d context that
  * really draws. The context state is a colour and a clip stack, because
  * that is all the tree below paints with — anything else reaching the
  * bridge is a paint path this test does not model, and it throws rather
- * than quietly rastering nothing.
+ * than quietly rastering nothing. `across: false` is a bridge without
+ * `blitSurface`, whose scroll blits all move the band in place.
  */
-function pixelBridge() {
+function pixelBridge({ across = true } = {}) {
   let seq = 0;
   let backendCb = null;
   const onGlass = new Map(); // layer -> the raster the WindowServer holds
@@ -249,7 +306,19 @@ function pixelBridge() {
       if (moved) native.blits++;
       return moved;
     },
+    // nothing here composites a surface into another, so every copy that
+    // lands is a scroll blit taken with its buffer
+    blitSurface: (src, ...a) => {
+      wrote(a[4]);
+      const copied = blitSurface(src, ...a);
+      if (copied) {
+        native.blits++;
+        native.across++;
+      }
+      return copied;
+    },
     blits: 0,
+    across: 0,
     // --- the 2d context ----------------------------------------------------
     ctxSave(s) {
       const st = stateOf(s);
@@ -325,6 +394,7 @@ function pixelBridge() {
   };
   return new Proxy(native, {
     get(target, key) {
+      if (key === 'blitSurface' && !across) return undefined;
       if (key in target) return target[key];
       // a paint that reaches a verb this bridge does not raster would
       // compare equal by drawing nothing at all in both windows
@@ -471,8 +541,9 @@ async function mountPair({
   height = 120,
   furniture = false,
   held: withHeld = false,
+  across = true,
 } = {}) {
-  const native = pixelBridge();
+  const native = pixelBridge({ across });
   const app = new CocoaApp(native);
   setScaleForTests(app, SCALE, 'cocoa');
   setScreensForTests(app, {
@@ -538,6 +609,7 @@ async function mountPair({
   await tick();
   frame();
   native.blits = 0;
+  native.across = 0;
   return {
     app,
     native,
@@ -616,6 +688,11 @@ test('a pan blits the surviving band and presents the picture a repaint would', 
     );
   }
   assert.equal(blits(), 40, 'every frame took the fast path');
+  assert.equal(
+    native.across,
+    40,
+    'a frame whose first draw is the blit took its buffer with the band moved',
+  );
   assert.equal(native.glassWrites, 0, 'a write landed in the frame on glass');
 });
 
@@ -779,55 +856,61 @@ test('a pan across a resize', async () => {
   assert.ok(blits() >= 12, `the resizes ate every blit (${blits()})`);
 });
 
-test('a pan whose every frame the fuzzer picks apart', async () => {
-  // Everything above at once, on an odd-sized window: bursts, furniture,
-  // resizes, and presents the pump holds, skips or never runs.
-  const tints = ['#f1f3f5', '#dee2e6', '#ced4da', '#adb5bd'];
-  const {
-    app,
-    pan,
-    frame,
-    resize,
-    repaintFurniture,
-    pinStrip,
-    panes,
-    blit,
-    plain,
-    glass,
-    blits,
-  } = await mountPair({ width: 173, height: 131, furniture: true });
-  pinStrip(18, '#adb5bd');
-  let seed = 458;
-  const rng = () =>
-    (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
-  for (let i = 0; i < 300; i++) {
-    for (let b = 0, n = 1 + Math.floor(rng() * 3); b < n; b++) {
-      pan(Math.round((rng() * 2 - 1) * 13), Math.round((rng() * 2 - 1) * 11));
-    }
-    if (rng() < 0.4) repaintFurniture(tints[Math.floor(rng() * tints.length)]);
-    if (rng() < 0.5) {
-      const tint = tints[Math.floor(rng() * tints.length)];
-      for (const pane of panes) pane.stripTint = tint;
-    }
-    const dice = rng();
-    if (dice < 0.12) {
-      blit._occluded = plain._occluded = true;
+for (const across of [true, false]) {
+  test(`a pan whose every frame the fuzzer picks apart${across ? '' : ', the band moving in place'}`, async () => {
+    // Everything above at once, on an odd-sized window: bursts, furniture,
+    // resizes, and presents the pump holds, skips or never runs.
+    const tints = ['#f1f3f5', '#dee2e6', '#ced4da', '#adb5bd'];
+    const {
+      app,
+      native,
+      pan,
+      frame,
+      resize,
+      repaintFurniture,
+      pinStrip,
+      panes,
+      blit,
+      plain,
+      glass,
+      blits,
+    } = await mountPair({ width: 173, height: 131, furniture: true, across });
+    pinStrip(18, '#adb5bd');
+    let seed = 458;
+    const rng = () =>
+      (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    for (let i = 0; i < 300; i++) {
+      for (let b = 0, n = 1 + Math.floor(rng() * 3); b < n; b++) {
+        pan(Math.round((rng() * 2 - 1) * 13), Math.round((rng() * 2 - 1) * 11));
+      }
+      if (rng() < 0.4)
+        repaintFurniture(tints[Math.floor(rng() * tints.length)]);
+      if (rng() < 0.5) {
+        const tint = tints[Math.floor(rng() * tints.length)];
+        for (const pane of panes) pane.stripTint = tint;
+      }
+      const dice = rng();
+      if (dice < 0.12) {
+        blit._occluded = plain._occluded = true;
+        frame();
+        blit._occluded = plain._occluded = false;
+      } else if (dice < 0.24) {
+        blit._holdPresent = plain._holdPresent = true;
+        frame();
+        blit._holdPresent = plain._holdPresent = false;
+      } else if (dice < 0.36) {
+        app._tickFrames();
+      } else if (dice < 0.42) {
+        resize(160 + Math.floor(rng() * 30), 120 + Math.floor(rng() * 20));
+      }
       frame();
-      blit._occluded = plain._occluded = false;
-    } else if (dice < 0.24) {
-      blit._holdPresent = plain._holdPresent = true;
-      frame();
-      blit._holdPresent = plain._holdPresent = false;
-    } else if (dice < 0.36) {
-      app._tickFrames();
-    } else if (dice < 0.42) {
-      resize(160 + Math.floor(rng() * 30), 120 + Math.floor(rng() * 20));
+      assert.equal(pictureDiff(glass(blit), glass(plain)), 0, `frame ${i}`);
     }
-    frame();
-    assert.equal(pictureDiff(glass(blit), glass(plain)), 0, `frame ${i}`);
-  }
-  assert.ok(blits() > 50, `the fuzzer never took the fast path (${blits()})`);
-});
+    assert.ok(blits() > 50, `the fuzzer never took the fast path (${blits()})`);
+    if (across) assert.ok(native.across > 25, `${native.across} came across`);
+    else assert.equal(native.across, 0);
+  });
+}
 
 // #602. The WindowServer lets go of a buffer a refresh or so after a flip
 // took it off glass, and the swapchain takes one it has let go of: here a
@@ -836,69 +919,82 @@ test('a pan whose every frame the fuzzer picks apart', async () => {
 // — owing the rects of every frame it missed, band shifts included. Its
 // picture has to be the other two windows' on every frame, and no write may
 // land in a buffer while it is held.
-test('a pan across buffers the WindowServer still holds', async () => {
-  const {
-    app,
-    native,
-    pan,
-    frame,
-    repaintFurniture,
-    windows,
-    blit,
-    plain,
-    held,
-    glass,
-    blits,
-  } = await mountPair({ width: 187, height: 139, furniture: true, held: true });
-  let seed = 602;
-  const rng = () =>
-    (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
-  const tints = ['#f1f3f5', '#dee2e6', '#ced4da'];
-  // raster -> the last step it is held through
-  const holds = new Map();
-  let step = 0;
-  native.onFlip = (root, retired) => {
-    if (root !== held._layer.root || !retired) return;
-    const frames = Math.floor(rng() * 3);
-    if (frames === 0) return;
-    holds.set(retired, step + frames);
-    native.held.add(retired);
-  };
-  let grew = 0;
-  for (; step < 300; step++) {
-    // some frames only repaint the furniture, so that what a buffer missed
-    // is not all under the band the next pan claims
-    const panned = rng() < 0.7;
-    for (let b = 0, n = panned ? 1 + Math.floor(rng() * 3) : 0; b < n; b++) {
-      pan(Math.round((rng() * 2 - 1) * 13), Math.round((rng() * 2 - 1) * 11));
-    }
-    if (!panned || rng() < 0.3) {
-      repaintFurniture(tints[Math.floor(rng() * tints.length)]);
-      await tick();
-    }
-    const dice = rng();
-    if (dice < 0.1) {
-      for (const wnd of windows) wnd._occluded = true;
+for (const across of [true, false]) {
+  test(`a pan across buffers the WindowServer still holds${across ? '' : ', the band moving in place'}`, async () => {
+    const {
+      app,
+      native,
+      pan,
+      frame,
+      repaintFurniture,
+      windows,
+      blit,
+      plain,
+      held,
+      glass,
+      blits,
+    } = await mountPair({
+      width: 187,
+      height: 139,
+      furniture: true,
+      held: true,
+      across,
+    });
+    let seed = 602;
+    const rng = () =>
+      (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    const tints = ['#f1f3f5', '#dee2e6', '#ced4da'];
+    // raster -> the last step it is held through
+    const holds = new Map();
+    let step = 0;
+    native.onFlip = (root, retired) => {
+      if (root !== held._layer.root || !retired) return;
+      const frames = Math.floor(rng() * 3);
+      if (frames === 0) return;
+      holds.set(retired, step + frames);
+      native.held.add(retired);
+    };
+    let grew = 0;
+    for (; step < 300; step++) {
+      // some frames only repaint the furniture, so that what a buffer missed
+      // is not all under the band the next pan claims
+      const panned = rng() < 0.7;
+      for (let b = 0, n = panned ? 1 + Math.floor(rng() * 3) : 0; b < n; b++) {
+        pan(Math.round((rng() * 2 - 1) * 13), Math.round((rng() * 2 - 1) * 11));
+      }
+      if (!panned || rng() < 0.3) {
+        repaintFurniture(tints[Math.floor(rng() * tints.length)]);
+        await tick();
+      }
+      const dice = rng();
+      if (dice < 0.1) {
+        for (const wnd of windows) wnd._occluded = true;
+        frame();
+        for (const wnd of windows) wnd._occluded = false;
+      } else if (dice < 0.2) {
+        app._tickFrames();
+      }
       frame();
-      for (const wnd of windows) wnd._occluded = false;
-    } else if (dice < 0.2) {
-      app._tickFrames();
+      grew = Math.max(grew, held._chain.buffers.length);
+      assert.equal(pictureDiff(glass(held), glass(blit)), 0, `frame ${step}`);
+      assert.equal(pictureDiff(glass(held), glass(plain)), 0, `frame ${step}`);
+      for (const [buffer, last] of holds) {
+        if (last > step) continue;
+        holds.delete(buffer);
+        native.held.delete(buffer);
+      }
     }
-    frame();
-    grew = Math.max(grew, held._chain.buffers.length);
-    assert.equal(pictureDiff(glass(held), glass(blit)), 0, `frame ${step}`);
-    assert.equal(pictureDiff(glass(held), glass(plain)), 0, `frame ${step}`);
-    for (const [buffer, last] of holds) {
-      if (last > step) continue;
-      holds.delete(buffer);
-      native.held.delete(buffer);
-    }
-  }
-  assert.equal(native.heldWrites, 0, 'a write landed in a held buffer');
-  assert.equal(native.glassWrites, 0, 'a write landed in the frame on glass');
-  assert.ok(grew > 2, `the holds never grew the chain (${grew})`);
-  assert.ok(blits() > 200, `the fuzzer never took the fast path (${blits()})`);
-});
+    assert.equal(native.heldWrites, 0, 'a write landed in a held buffer');
+    assert.equal(native.glassWrites, 0, 'a write landed in the frame on glass');
+    assert.ok(grew > 2, `the holds never grew the chain (${grew})`);
+    assert.ok(
+      blits() > 200,
+      `the fuzzer never took the fast path (${blits()})`,
+    );
+    if (across) assert.ok(native.across > 100, `${native.across} came across`);
+    else assert.equal(native.across, 0);
+  });
+}
 
 // A new size is a new chain, painted whole: a band in the chain that frame
 // makes holds nothing to move, so the frame repaints instead of blitting.
@@ -932,8 +1028,8 @@ test('a pan in the frame that paints a new size repaints, and blits nothing', as
 
 /** Two windows over one app with the card at `at` in each; the second with
  *  no `scrollRegion`, as a backend without the verb. */
-async function mountMoves() {
-  const native = pixelBridge();
+async function mountMoves({ across = true } = {}) {
+  const native = pixelBridge({ across });
   const app = new CocoaApp(native);
   setScaleForTests(app, SCALE, 'cocoa');
   setScreensForTests(app, {
@@ -1026,6 +1122,7 @@ async function mountMoves() {
   await tick();
   frame();
   native.blits = 0;
+  native.across = 0;
   const glass = (wnd) => {
     const shown = native.onGlass.get(wnd._layer.root);
     for (const buffer of wnd._chain?.buffers ?? []) {
@@ -1036,39 +1133,49 @@ async function mountMoves() {
   return { native, render, frame, blit, plain, glass };
 }
 
-test('a card that only moved is copied in the back buffer, and the flip carries it', async () => {
-  const { native, render, frame, blit, plain, glass } = await mountMoves();
-  let at = { x: 10, y: 10 };
-  const steps = [
-    [1, 0],
-    [2, 1],
-    [0, 3],
-    [5, 2],
-    [-3, 4],
-    [8, -2],
-    [13, 1],
-    [-4, -6],
-    [6, 5],
-    [-9, 3],
-    [3, -8],
-    [12, 6],
-  ];
-  for (const [i, [dx, dy]] of steps.entries()) {
-    at = { x: at.x + dx, y: at.y + dy };
-    render(at);
-    await tick();
-    frame();
+for (const across of [true, false]) {
+  test(`a card that only moved is copied in the back buffer, and the flip carries it${across ? '' : ', in place'}`, async () => {
+    const { native, render, frame, blit, plain, glass } = await mountMoves({
+      across,
+    });
+    let at = { x: 10, y: 10 };
+    const steps = [
+      [1, 0],
+      [2, 1],
+      [0, 3],
+      [5, 2],
+      [-3, 4],
+      [8, -2],
+      [13, 1],
+      [-4, -6],
+      [6, 5],
+      [-9, 3],
+      [3, -8],
+      [12, 6],
+    ];
+    for (const [i, [dx, dy]] of steps.entries()) {
+      at = { x: at.x + dx, y: at.y + dy };
+      render(at);
+      await tick();
+      frame();
+      assert.equal(
+        pictureDiff(glass(blit), glass(plain)),
+        0,
+        `step ${i}: the copied picture is not the painted one`,
+      );
+    }
+    assert.ok(native.blits > steps.length / 2, `${native.blits} copies`);
+    if (across) assert.equal(native.across, native.blits);
+    else assert.equal(native.across, 0);
+    assert.equal(native.glassWrites, 0, 'a write landed in the frame on glass');
+    // …and the buffer the next frame draws into holds the same picture
+    const shown = glass(blit);
+    const next = blit._ensureSurface();
+    assert.ok(next !== shown, 'the next frame draws off glass');
     assert.equal(
-      pictureDiff(glass(blit), glass(plain)),
+      pictureDiff(next, shown),
       0,
-      `step ${i}: the copied picture is not the painted one`,
+      'the next buffer is a frame stale',
     );
-  }
-  assert.ok(native.blits > steps.length / 2, `${native.blits} copies`);
-  assert.equal(native.glassWrites, 0, 'a write landed in the frame on glass');
-  // …and the buffer the next frame draws into holds the same picture
-  const shown = glass(blit);
-  const next = blit._ensureSurface();
-  assert.ok(next !== shown, 'the next frame draws off glass');
-  assert.equal(pictureDiff(next, shown), 0, 'the next buffer is a frame stale');
-});
+  });
+}
