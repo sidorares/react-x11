@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.22.7](https://github.com/sidorares/react-x11/compare/v2.22.6...v2.22.7) (2026-09-25)
+
+
+### Performance Improvements
+
+* **cocoa:** a paragraph laid out at another width reuses its typesetter ([#707](https://github.com/sidorares/react-x11/issues/707)) ([ba1b637](https://github.com/sidorares/react-x11/commit/ba1b637a04c30226ef27ef71af8e02f6a12bc482))
+* **cocoa:** a scroll blit's band is copied once, as its frame takes its buffer ([#706](https://github.com/sidorares/react-x11/issues/706)) ([567b544](https://github.com/sidorares/react-x11/commit/567b54401f60c125badb222ff6ec68f5d7b95392))
+
 ## [2.22.6](https://github.com/sidorares/react-x11/compare/v2.22.5...v2.22.6) (2026-09-25)
 
 
