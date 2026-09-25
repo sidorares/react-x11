@@ -855,7 +855,15 @@ export class WindowScrollBlit {
       ? unionArea([strip, ...repairs]) - rectArea(strip)
       : 0;
     if (repairArea > area * BLIT_MAX_CLAIM_AREA) return;
-    if (!this._scrollBlitSafe(node, vp, target.top)) return;
+    // An ancestor's rounded corners reach into the viewport: a scroll box
+    // filling a rounded card, the commonest place a scroll box is. Their
+    // arcs do not translate, but they live in four small squares and
+    // nowhere else, so they are pinned the way an element blit pins them
+    // (issue #691) and repaired below, where they are and where the copy
+    // dragged their image. Refused instead, a list or a document inside a
+    // rounded frame repainted its whole viewport on every step of a scroll.
+    const corners = this._cornerPins(node, vp, target.top);
+    if (!this._scrollBlitSafe(node, vp, target.top, null, corners)) return;
     // The band the scrolled bar's thumb travels in is repaired on its own.
     // The thumb's rects are thin and run along the viewport's edge, and a
     // rect reaching into the band from inside — a column held down the
@@ -932,10 +940,28 @@ export class WindowScrollBlit {
       if (dragged) add(dragged);
     }
     for (const repair of repairs) add(repair);
-    rects = joinAlongEdges(rects).reduce(
-      (capped, rect) => addDamageRect(capped, rect),
-      [],
-    );
+    // Each pinned corner where it is and where the copy put its image — one
+    // box, since a step moves it a few pixels, and less the strip, which
+    // repaints anyway.
+    for (const pin of corners ?? []) {
+      const image = { ...pin, x: pin.x + dx, y: pin.y + dy };
+      const repair = intersectRects(unionRect(pin, image), vp);
+      if (!repair) continue;
+      for (const piece of outside(repair, strip)) add(piece);
+    }
+    // Capped in one call where corners were pinned: two at each end of the
+    // viewport and the strip at one of them are more pieces than the cap
+    // holds, and squeezed under it one at a time a corner joined whatever
+    // box an earlier merge had grown — scrolling back up merged the bottom
+    // corners with the strip at the top, which is the viewport. Offered
+    // together, neighbours merge first (`addDamageRects`), with the room an
+    // element blit's pins get.
+    rects = corners
+      ? addDamageRects([], joinAlongEdges(rects), CONTENTS_BLIT_MAX_RECTS)
+      : joinAlongEdges(rects).reduce(
+          (capped, rect) => addDamageRect(capped, rect),
+          [],
+        );
     // The last gate, and the only one that has to wait until the rects are
     // assembled: damage rects must not overlap, and the frame carries at
     // most MAX_DAMAGE_RECTS of them, so repairs that meet — a column and a

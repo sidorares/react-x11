@@ -441,6 +441,84 @@ test('at 1.25x a scroll box inside a bordered one still blits', async () => {
   assert.strictEqual(blits(wnd).length, 1, 'the scroll moved the pixels');
 });
 
+test('a scroll box filling a rounded one blits, and repairs its corners', async () => {
+  // A list or a document in a rounded card: the card's corners reach into
+  // the viewport, and the scroll repainted the whole of it on every step.
+  // The corners are pinned the way an element blit pins them (#691) and
+  // repaired where they are and where the copy dragged their image.
+  const RADIUS = 8;
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const ref = React.createRef();
+  x11Root.render(
+    h(
+      'window',
+      { width: 400, height: 400 },
+      h(
+        'box',
+        {
+          style: {
+            flexGrow: 1,
+            borderRadius: RADIUS,
+            backgroundColor: '#ffffff',
+          },
+        },
+        h(
+          'box',
+          { ref, style: { overflow: 'scroll', flexGrow: 1 } },
+          ...Array.from({ length: 20 }, (_, i) =>
+            h('box', {
+              key: i,
+              style: {
+                height: 40,
+                flexShrink: 0,
+                backgroundColor: i % 2 ? '#ffffff' : '#eef1f5',
+              },
+            }),
+          ),
+        ),
+      ),
+    ),
+  );
+  const wnd = app.windows[0];
+  const root = wnd._reactX11Node;
+  await tick();
+  wnd.calls.length = 0;
+
+  ref.current.scrollTo(48);
+  await tick();
+  const vp = { x: 0, y: 0, width: 400, height: 400 };
+  assert.deepStrictEqual(blits(wnd), [['scrollRegion', vp, 0, -48]]);
+  const rects = root._lastDamageRects;
+  assert.ok(rects, 'the frame stayed bounded');
+  const hit = (x, y) =>
+    rects.some(
+      (r) => x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height,
+    );
+  const owed = [
+    // the strip the shift exposed
+    { x: 0, y: 352, width: 400, height: 48 },
+    // the top corners where they are — their image went above the viewport
+    { x: 0, y: 0, width: RADIUS, height: RADIUS },
+    { x: 400 - RADIUS, y: 0, width: RADIUS, height: RADIUS },
+    // the bottom corners where the copy dragged them
+    { x: 0, y: 352 - RADIUS, width: RADIUS, height: RADIUS },
+    { x: 400 - RADIUS, y: 352 - RADIUS, width: RADIUS, height: RADIUS },
+  ];
+  for (const r of owed) {
+    for (let y = r.y; y < r.y + r.height; y++) {
+      for (let x = r.x; x < r.x + r.width; x++) {
+        assert.ok(
+          hit(x, y),
+          `${x},${y} is not repainted: ${JSON.stringify(rects)}`,
+        );
+      }
+    }
+  }
+  const area = rects.reduce((sum, r) => sum + r.width * r.height, 0);
+  assert.ok(area < 400 * 400 * 0.2, `repainted ${JSON.stringify(rects)}`);
+});
+
 test('an overlapping sibling above the viewport keeps the full repaint', async () => {
   const { wnd, ref } = await mount({
     extra: h('box', {
@@ -633,7 +711,13 @@ const LITERAL_ROWS = {
   marker: (hot) => (hot ? '#c03030' : '#8fa8c8'),
 };
 
-function VirtualList({ scrollRef, height, colors = LITERAL_ROWS }) {
+function VirtualList({
+  scrollRef,
+  height,
+  colors = LITERAL_ROWS,
+  nested = false,
+  estimate = ROW,
+}) {
   const [top, setTop] = React.useState(0);
   const first = Math.floor(top / ROW);
   const last = Math.min(ROWS, first + Math.ceil(height / ROW) + 2);
@@ -665,6 +749,16 @@ function VirtualList({ scrollRef, height, colors = LITERAL_ROWS }) {
       ),
     );
   }
+  const content = [
+    h('box', { key: 'above', style: { height: first * ROW, flexShrink: 0 } }),
+    ...rows,
+    // the rows not built yet, at what a list guesses they measure: guessed
+    // wrong, the content changes length on every re-slice
+    h('box', {
+      key: 'below',
+      style: { height: (ROWS - last) * estimate, flexShrink: 0 },
+    }),
+  ];
   return h(
     'box',
     {
@@ -672,12 +766,11 @@ function VirtualList({ scrollRef, height, colors = LITERAL_ROWS }) {
       style: { overflow: 'scroll', flexGrow: 1 },
       onScroll: (e) => setTop(e.scrollY),
     },
-    h('box', { key: 'above', style: { height: first * ROW, flexShrink: 0 } }),
-    ...rows,
-    h('box', {
-      key: 'below',
-      style: { height: (ROWS - last) * ROW, flexShrink: 0 },
-    }),
+    // the rows one level down, in a column of their own — a document's
+    // blocks, a list with a header row above its body
+    ...(nested
+      ? [h('box', { style: { flexShrink: 0, padding: 4 } }, ...content)]
+      : content),
   );
 }
 
@@ -724,6 +817,93 @@ test('a virtualized list keeps the fast path through a wheel flick (#398)', asyn
     worst < 400 * 400 * 0.25,
     `worst frame repainted ${worst}px² of 160000 — the strip and the ` +
       'entering rows, not the viewport',
+  );
+  await x11Root.unmount();
+});
+
+test('a virtualized list one box down keeps the fast path too', async () => {
+  // The rows in a column inside the scroll box, not in the scroll box: the
+  // column's child list changes on every frame, and it claimed its whole
+  // box for it — the viewport — so no notch after the first blitted.
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const ref = React.createRef();
+  x11Root.render(
+    h(
+      'window',
+      { width: 400, height: 400 },
+      h(VirtualList, { scrollRef: ref, height: 400, nested: true }),
+    ),
+  );
+  const wnd = app.windows[0];
+  const root = wnd._reactX11Node;
+  for (let i = 0; i < 3; i++) await tick();
+
+  let blitted = 0;
+  let worst = 0;
+  const notches = 12;
+  for (let i = 0; i < notches; i++) {
+    wnd.calls.length = 0;
+    spinWheel(wnd, 100, 100, { deltaY: 1 });
+    await tick();
+    if (blits(wnd).length) blitted += 1;
+    const rects = root._lastDamageRects;
+    const area = rects
+      ? rects.reduce((sum, r) => sum + r.width * r.height, 0)
+      : 400 * 400;
+    worst = Math.max(worst, area);
+  }
+  assert.strictEqual(blitted, notches, `only ${blitted}/${notches} blitted`);
+  assert.ok(
+    worst < 400 * 400 * 0.25,
+    `worst frame repainted ${worst}px² of 160000`,
+  );
+  await x11Root.unmount();
+});
+
+test('a virtualized list one box down that guesses its length wrong keeps the fast path too', async () => {
+  // The rows below the view are held at a guess, so each row the slice
+  // builds changes the column's length, in the scroll's own frame. The
+  // column rode the scroll and only grew at its far end — it claims that
+  // end, where it claimed itself, the whole viewport, and poisoned the
+  // blit (`_edgeBands`).
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const ref = React.createRef();
+  x11Root.render(
+    h(
+      'window',
+      { width: 400, height: 400 },
+      h(VirtualList, {
+        scrollRef: ref,
+        height: 400,
+        nested: true,
+        estimate: 30,
+      }),
+    ),
+  );
+  const wnd = app.windows[0];
+  const root = wnd._reactX11Node;
+  for (let i = 0; i < 3; i++) await tick();
+
+  let blitted = 0;
+  let worst = 0;
+  const notches = 12;
+  for (let i = 0; i < notches; i++) {
+    wnd.calls.length = 0;
+    spinWheel(wnd, 100, 100, { deltaY: 1 });
+    await tick();
+    if (blits(wnd).length) blitted += 1;
+    const rects = root._lastDamageRects;
+    const area = rects
+      ? rects.reduce((sum, r) => sum + r.width * r.height, 0)
+      : 400 * 400;
+    worst = Math.max(worst, area);
+  }
+  assert.strictEqual(blitted, notches, `only ${blitted}/${notches} blitted`);
+  assert.ok(
+    worst < 400 * 400 * 0.25,
+    `worst frame repainted ${worst}px² of 160000`,
   );
   await x11Root.unmount();
 });
@@ -900,6 +1080,98 @@ test('a blitted scroll is byte-identical to the repaint it replaced', async (t) 
   }
 });
 
+test('a blitted scroll in a rounded box is byte-identical to its repaint', async (t) => {
+  // The corners' arcs, where the viewport's content runs under them: the
+  // pixels a translation cannot keep, and the ones the repair owes.
+  const app = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const ref = React.createRef();
+    const instance = await new Promise((resolve) =>
+      x11Root.render(
+        h(
+          'window',
+          { width: 400, height: 300, style: { backgroundColor: '#f5f6fa' } },
+          h(
+            'box',
+            {
+              style: {
+                flexGrow: 1,
+                margin: 10,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: '#8090a8',
+                backgroundColor: '#ffffff',
+              },
+            },
+            h(
+              'box',
+              { ref, style: { overflow: 'scroll', flexGrow: 1 } },
+              ...Array.from({ length: 40 }, (_, i) =>
+                h(
+                  'box',
+                  {
+                    key: i,
+                    style: {
+                      height: 40,
+                      flexShrink: 0,
+                      padding: 6,
+                      backgroundColor: i % 2 ? '#ffffff' : '#20304a',
+                    },
+                  },
+                  h(
+                    'text',
+                    { style: { fontSize: 12, color: '#c05030' } },
+                    `row ${i} — some content`,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        resolve,
+      ),
+    );
+    if (typeof instance.scrollRegion !== 'function') {
+      t.skip('installed ntk has no Window.scrollRegion yet');
+      return;
+    }
+    const root = instance._reactX11Node;
+    const frame = () => {
+      root._scheduled = false;
+      root.flush();
+    };
+    frame();
+    await settle(app);
+
+    let blitCalls = 0;
+    const realScrollRegion = instance.scrollRegion.bind(instance);
+    instance.scrollRegion = (...args) => {
+      blitCalls += 1;
+      return realScrollRegion(...args);
+    };
+    for (const to of [48, 88, 40]) {
+      blitCalls = 0;
+      ref.current.scrollTo(to);
+      frame();
+      await settle(app);
+      assert.strictEqual(blitCalls, 1, `the fast path fired for ${to}`);
+      const blitted = await readPixels(root._ctx, 400, 300);
+      root.invalidate(false);
+      frame();
+      await settle(app);
+      const repainted = await readPixels(root._ctx, 400, 300);
+      assert.ok(
+        Buffer.from(blitted.data).equals(Buffer.from(repainted.data)),
+        `scrolled to ${to}, the blitted pixels differ from a full repaint`,
+      );
+    }
+  } finally {
+    await x11Root.unmount();
+    await app.close();
+  }
+});
+
 test("a virtualized list's blitted frame is byte-identical to its repaint (#398)", async (t) => {
   const app = await createHeadlessApp();
   const x11Root = await createRoot({ app });
@@ -967,6 +1239,77 @@ test("a virtualized list's blitted frame is byte-identical to its repaint (#398)
       Buffer.from(blitted.data).equals(Buffer.from(repainted.data)),
       'blitted pixels differ from a full repaint of the same state',
     );
+  } finally {
+    await x11Root.unmount();
+    await app.close();
+  }
+});
+
+test('a virtualized list one box down: blitted frames are byte-identical to their repaint', async (t) => {
+  const app = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const ref = React.createRef();
+    const instance = await new Promise((resolve) =>
+      x11Root.render(
+        h(
+          'window',
+          { width: 400, height: 300, style: { backgroundColor: '#f5f6fa' } },
+          h(VirtualList, {
+            scrollRef: ref,
+            height: 300,
+            nested: true,
+            estimate: 30,
+          }),
+        ),
+        resolve,
+      ),
+    );
+    if (typeof instance.scrollRegion !== 'function') {
+      t.skip('installed ntk has no Window.scrollRegion yet');
+      return;
+    }
+    const root = instance._reactX11Node;
+    const frame = () => {
+      root._scheduled = false;
+      root.flush();
+    };
+    frame();
+    await tick();
+    frame();
+    await settle(app);
+
+    let blitCalls = 0;
+    const realScrollRegion = instance.scrollRegion.bind(instance);
+    instance.scrollRegion = (...args) => {
+      blitCalls += 1;
+      return realScrollRegion(...args);
+    };
+    const above = () => root.children[0].children[0].children[0];
+    for (const to of [48, 96, 60]) {
+      blitCalls = 0;
+      // the scroll and the re-slice its onScroll commits, in one frame
+      root._scheduled = true;
+      ref.current.scrollTo(to);
+      for (let i = 0; i < 5; i++) await tick();
+      frame();
+      await settle(app);
+      assert.strictEqual(blitCalls, 1, `the fast path fired for ${to}`);
+      assert.strictEqual(
+        above().abs.height,
+        Math.floor(to / ROW) * ROW,
+        'the slice moved',
+      );
+      const blitted = await readPixels(root._ctx, 400, 300);
+      root.invalidate(false);
+      frame();
+      await settle(app);
+      const repainted = await readPixels(root._ctx, 400, 300);
+      assert.ok(
+        Buffer.from(blitted.data).equals(Buffer.from(repainted.data)),
+        `scrolled to ${to}, the blitted pixels differ from a full repaint`,
+      );
+    }
   } finally {
     await x11Root.unmount();
     await app.close();
