@@ -1951,6 +1951,34 @@ let exactDepth = 0;
 export const isMeasuringExactly = () => exactDepth > 0;
 
 /**
+ * A second config, never rounded, for measuring a box on copies of its
+ * boxes (nodes/window/exactcopy.js). Switching the renderer's config off the
+ * grid and back is a change yoga answers by treating every layout it has
+ * cached as stale, so the pass after any `measuringExactly` lays the whole
+ * tree out again; a measurement confined to one box is made in this config
+ * instead, and leaves the renderer's, and its caches, alone.
+ */
+let exactConfig = null;
+export const exactLayoutConfig = () => {
+  if (exactConfig === null) {
+    exactConfig = Yoga.Config.create();
+    exactConfig.setPointScaleFactor(0);
+  }
+  return exactConfig;
+};
+
+/** `measure` for layouts made in the exact config: off the grid as far as
+ *  `isMeasuringExactly` is concerned, with nothing to switch. */
+export function measuringInExactConfig(measure) {
+  exactDepth++;
+  try {
+    return measure();
+  } finally {
+    exactDepth--;
+  }
+}
+
+/**
  * The yoga defaults that are not CSS's, written once per node.
  *
  * `applyLayoutStyle` only calls a setter for a property that **changed**, so

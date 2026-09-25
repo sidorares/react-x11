@@ -325,8 +325,10 @@ export class WindowInvalidate {
         // …and which node changed, so that a change inside a box that sizes
         // itself measures that box and nothing around it (`_floorsScope`).
         // A claim that names no node, or names the window, is the tree's.
-        if (source && source !== this) this._floorsSources.add(source);
-        else this._floorsUnscoped = true;
+        if (source && source !== this) {
+          this._floorsSources.add(source);
+          if (reason !== 'child-list') this._floorsOtherSources.add(source);
+        } else this._floorsUnscoped = true;
       }
       if (reason !== 'scroll' && reason !== 'resize' && reason !== 'position') {
         this._floorsContentDirty = true;

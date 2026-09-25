@@ -166,7 +166,12 @@ test('a frame where no answer moves pays no extra pass; a flip pays what the cha
   // at most what the same change costs when React makes it — a layout pass
   // and the content floors a changed layout property owes
   const flipped = await passes(queried, (m) => resize(m.app, 500));
+  // Measured over the whole tree, as a flip is: a window with container
+  // queries always measures its floors whole (`_floorsScope`), and the same
+  // change from React may be confined to its box (spine.js) — which is a
+  // saving of its own, not what this compares.
   const fromReact = await passes(control, async (m) => {
+    nodeOf(m.app)._floorsUnscoped = true;
     m.render({ flexDirection: 'column', gap: 4 });
     await tick();
   });
