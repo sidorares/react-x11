@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.22.1](https://github.com/sidorares/react-x11/compare/v2.22.0...v2.22.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **scroll-blit:** a rounded pane with furniture in two corners blits a pan either way ([#691](https://github.com/sidorares/react-x11/issues/691)) ([#692](https://github.com/sidorares/react-x11/issues/692)) ([370ffa1](https://github.com/sidorares/react-x11/commit/370ffa1be3e62248d86eb9afce2649c10fbcd967))
+
 ## [2.22.0](https://github.com/sidorares/react-x11/compare/v2.21.2...v2.22.0) (2026-09-24)
 
 
