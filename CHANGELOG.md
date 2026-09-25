@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.22.5](https://github.com/sidorares/react-x11/compare/v2.22.4...v2.22.5) (2026-09-25)
+
+
+### Performance Improvements
+
+* **scroll:** a document in a rounded card scrolls by blitting ([#702](https://github.com/sidorares/react-x11/issues/702)) ([7eac0ea](https://github.com/sidorares/react-x11/commit/7eac0eaa34c5c407c54a03916a818b1109583e43))
+
 ## [2.22.4](https://github.com/sidorares/react-x11/compare/v2.22.3...v2.22.4) (2026-09-25)
 
 
