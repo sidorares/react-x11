@@ -83,6 +83,9 @@ export function offsetInParent(node) {
   };
 }
 
+/** What a leaf a width pass reads nothing from answers with. */
+const UNREAD_SIZE = Object.freeze({ width: 0, height: 0 });
+
 /** Layout, installed onto `Node.prototype` by node.js. */
 export class NodeLayout {
   /**
@@ -141,6 +144,10 @@ export class NodeLayout {
       if (heightMode === Yoga.MEASURE_MODE_UNDEFINED) {
         this._floorMeasureMode = MEASURE_MODES[widthMode];
       }
+      // A leaf a pass over the whole tree reads nothing from
+      // (`markUnreadLeaves`): its width there is one yoga replaces and its
+      // height one the pass does not read, so it is not shaped to find them.
+      if (this._widthUnread) return UNREAD_SIZE;
       const size = this.measureContent({
         width: measureOffer(width, widthMode),
         height: measureOffer(height, heightMode),

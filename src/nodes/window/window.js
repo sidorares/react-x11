@@ -282,6 +282,9 @@ export class WindowNode extends Scrollable(Node) {
     // (spine.js), and the spines this frame's measurement runs on
     this._floorsOtherSources = new Set();
     this._floorsUnscoped = false;
+    // every width extent measured, read or not (`REACT_X11_NO_UNREAD_WIDTHS`,
+    // per window): what a test holds the width pass that skips them to
+    this._readEveryWidth = false;
     this._floorsScopeNow = null;
     this._floorsSpineNow = null;
     // whether the next layout walk must visit every box (`invalidate`)

@@ -445,6 +445,142 @@ export function setMeasuringShrink(node, axis, out) {
   }
 }
 
+/**
+ * Mark the leaves whose min-content width the pass over the whole tree has
+ * no use for (`_widthUnread`), listing them in `out`: their measure
+ * function answers without shaping them (`NodeLayout._useMeasureContent`)
+ * until `_measureContentSpans` takes the marks off.
+ *
+ * The pass lays every box out with no room on offer, and for a document that
+ * is every paragraph set a word to a line — 1 s of CoreText for 600 KB of
+ * Markdown, and more than half of the first frame — to read extents that
+ * almost nobody reads. An extent is read where a floor is written from it,
+ * which is a flex item on a `row`'s main axis (`receivesFloor`); by the
+ * extent of a node that is read, which adds up the ones of its children in
+ * flow (`contentSpan`); and at the root, when the window's own size hint is
+ * what is being measured. Down a column from a root nobody reads, none of
+ * that happens: a paragraph in a document is laid out, and nothing reads
+ * what it says.
+ *
+ * It is still laid out, though, and a leaf's answer could reach something
+ * that is read through its size. So it is marked only where it cannot:
+ *
+ * - every box from the root down to it is as wide as something other than
+ *   its content — the root offered no room, a width it names, a column
+ *   stretching it — so the width the leaf answers is one yoga replaces, and
+ *   nothing above it is sized from it;
+ * - no box is handed a share of space the leaf's height changed, which is
+ *   how a height could become somebody's width — an aspect ratio, a column
+ *   that wraps, an image sized to the height it is given. Every column from
+ *   the root down to it is either as tall as its content, and then holds no
+ *   box out of flow whose height it sets, or has a height of its own, and
+ *   then holds nothing that grows or gives way in the pass;
+ * - none of those columns wraps. (One may keep an aspect ratio: a box as
+ *   wide as something other than its content is as tall as that makes it.)
+ *
+ * What is left of its answer is a height, which a pass measuring widths
+ * never reads, and the layouts after the pass run in another config version
+ * (`measuringExactly`), which yoga answers by measuring every leaf again.
+ */
+export function markUnreadLeaves(node, out) {
+  const yoga = node.yoga;
+  const direction = yoga.getFlexDirection();
+  if (
+    (direction !== Yoga.FLEX_DIRECTION_COLUMN &&
+      direction !== Yoga.FLEX_DIRECTION_COLUMN_REVERSE) ||
+    yoga.getFlexWrap() !== Yoga.WRAP_NO_WRAP
+  ) {
+    // a row's items are read, and a column that wraps is as wide as its lines
+    return;
+  }
+  const height = heightOf(yoga);
+  if (height === 'unknown') return;
+  for (const child of node.children) {
+    if (!child.yoga || child.isWindow || child.style.display === 'none') {
+      continue;
+    }
+    if (child.style.position === 'absolute') {
+      // a height that follows this column's follows what is in it
+      if (height === 'content' && heightFollowsParent(child.yoga)) return;
+    } else if (
+      height === 'own' &&
+      // what the pass lets grow or give way (`setMeasuringShrink`)
+      (child.yoga.getFlexGrow() > 0 || namesOwnFloor(child, 'width'))
+    ) {
+      return;
+    }
+  }
+  const items = yoga.getAlignItems();
+  for (const child of node.children) {
+    if (!inFlow(child) || child._host !== null) continue;
+    if (!widthNotItsOwn(child.yoga, items)) continue;
+    if (child._measureFn) {
+      child._widthUnread = true;
+      out.push(child);
+    } else if (child.children.length !== 0) {
+      markUnreadLeaves(child, out);
+    }
+  }
+}
+
+/** The edges a horizontal margin can be set through. */
+const ACROSS_EDGES = [
+  Yoga.EDGE_LEFT,
+  Yoga.EDGE_RIGHT,
+  Yoga.EDGE_START,
+  Yoga.EDGE_END,
+  Yoga.EDGE_HORIZONTAL,
+  Yoga.EDGE_ALL,
+];
+
+/** Whether an in-flow child of a column is as wide as something other than
+ *  its content: a width it names, or the column's, which it stretches to
+ *  unless an alignment or an `auto` margin says otherwise. */
+function widthNotItsOwn(yoga, items) {
+  const width = yoga.getWidth().unit;
+  if (width === Yoga.UNIT_POINT || width === Yoga.UNIT_PERCENT) return true;
+  const self = yoga.getAlignSelf();
+  if ((self === Yoga.ALIGN_AUTO ? items : self) !== Yoga.ALIGN_STRETCH) {
+    return false;
+  }
+  for (const edge of ACROSS_EDGES) {
+    if (yoga.getMargin(edge).unit === Yoga.UNIT_AUTO) return false;
+  }
+  return true;
+}
+
+/**
+ * Where a column's height comes from, down a pass with none on offer: its
+ * `'content'`, when it names nothing that bounds it; its `'own'`, when all it
+ * names are numbers — a height, a basis (a height, down a column), a floor or
+ * a ceiling; and `'unknown'` for a share of something (a percentage), which
+ * a pass with no height on offer resolves as it likes.
+ */
+function heightOf(yoga) {
+  let own = false;
+  for (const value of [
+    yoga.getHeight(),
+    yoga.getFlexBasis(),
+    yoga.getMinHeight(),
+    yoga.getMaxHeight(),
+  ]) {
+    if (value.unit === Yoga.UNIT_PERCENT) return 'unknown';
+    if (value.unit === Yoga.UNIT_POINT) own = true;
+  }
+  return own ? 'own' : 'content';
+}
+
+/** Whether a box out of flow takes its height from its parent's: pinned to
+ *  both edges, or a share of it. */
+function heightFollowsParent(yoga) {
+  const pinned = (edge) => yoga.getPosition(edge).unit !== Yoga.UNIT_UNDEFINED;
+  const both = pinned(Yoga.EDGE_VERTICAL) || pinned(Yoga.EDGE_ALL);
+  if (both || (pinned(Yoga.EDGE_TOP) && pinned(Yoga.EDGE_BOTTOM))) return true;
+  return [yoga.getHeight(), yoga.getMinHeight(), yoga.getMaxHeight()].some(
+    (value) => value.unit === Yoga.UNIT_PERCENT,
+  );
+}
+
 /** …and back to the layout everything else is run from. */
 export function restoreShrink(shrunk) {
   for (const child of shrunk) {
@@ -540,8 +676,15 @@ export function restoreWidths(frozen) {
  * one's: a scroll pane contributes nothing to the floor above it and still
  * needs floors written *inside* it, or the column of rows it holds would
  * shrink to the viewport and there would be nothing left to scroll.
+ *
+ * `read` false is a node whose own extent nobody reads (`markUnreadLeaves`
+ * says which those are), so neither are those of its children in flow: the
+ * walk goes on through them to the rows inside, whose items' floors are
+ * written, and measures nothing on the way. An extent left unmeasured is
+ * asked for when it starts to count — its parent turned into a row, which
+ * leaves the parent dirty (`collectFloorStale`).
  */
-export function contentSpan(node, axis, intrinsic, root) {
+export function contentSpan(node, axis, intrinsic, root, read = true) {
   const yoga = node.yoga;
   const horizontal = axis === 'width';
   const own = horizontal ? yoga.getComputedWidth() : yoga.getComputedHeight();
@@ -564,6 +707,11 @@ export function contentSpan(node, axis, intrinsic, root) {
     // by itself, and a <text> span has no box of its own
     if (!child.yoga || child.isWindow) continue;
     if (child.style.display === 'none') continue;
+    if (!read && !receivesFloor(child, axis)) {
+      if (child._host === null)
+        contentSpan(child, axis, intrinsic, root, false);
+      continue;
+    }
     const laidOut = horizontal
       ? child.yoga.getComputedWidth()
       : child.yoga.getComputedHeight();
@@ -600,6 +748,8 @@ export function contentSpan(node, axis, intrinsic, root) {
     start = Math.min(start, at);
     end = Math.max(end, at + extent);
   }
+  // a span nobody reads, and — for a leaf — a measurement nobody needs
+  if (!read) return 0;
   if (start === Infinity) {
     // A leaf: nothing inside to look at, and what the pass did to it may
     // have been a stretch rather than a measurement. So it is asked again.
