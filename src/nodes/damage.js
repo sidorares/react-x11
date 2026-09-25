@@ -59,6 +59,13 @@ export const layoutDiff = {
   // would have claimed its children — claims its own box instead, since the
   // move claimed nothing for it.
   ride: false,
+
+  // Whether this walk may leave alone a subtree yoga did not reach under a
+  // parent that did not move (`Node._followParent`) — everything in it is
+  // where the last walk put it. False on a frame something scrolled on, or
+  // asked to: a scroll moves boxes without a pass, and the walk is what
+  // carries the offset down to them (`WindowNode._walkWhole`).
+  skipUnreached: false,
 };
 
 // What an invalidate() may name as its reason — a small closed set, so the

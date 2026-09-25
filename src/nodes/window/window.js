@@ -284,6 +284,8 @@ export class WindowNode extends Scrollable(Node) {
     this._floorsUnscoped = false;
     this._floorsScopeNow = null;
     this._floorsSpineNow = null;
+    // whether the next layout walk must visit every box (`invalidate`)
+    this._walkWhole = true;
     this._scopedFloorPasses = 0;
     // whether the first floors pass has run (`collectFloorStale`'s sweep)
     this._floorsSwept = false;

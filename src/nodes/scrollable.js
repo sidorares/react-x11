@@ -31,6 +31,56 @@ import { BLIT_POISONED } from './scrollblit.js';
 const clampScroll = (v, max) => Math.min(Math.max(0, v), max);
 
 /**
+ * How far everything under `node` reaches from its origin — the leftmost
+ * edge, the rightmost, the lowest — through every box that does not clip
+ * what it holds: the walk `measureScrollContent` sums a pane's extent from.
+ *
+ * Kept on each box (`_contentReach`) and reused while yoga has laid nothing
+ * under it out again. Its has-new-layout flag is set on every box a pass
+ * lays out and on each child of one, and a change anywhere below dirties
+ * every box above it, so a clear flag is a subtree whose boxes sit where
+ * they did relative to it — the same witness `_followParent` reads, read
+ * here before the walk that clears it. Hiding a box, or clipping one, goes
+ * through yoga too (`display`, `overflow`). A layout host places its
+ * children where yoga cannot see, so neither it nor they keep one.
+ *
+ * Walked whole, a pane's content cost every box in it on every pass that
+ * laid out any of it: a block arriving at the end of a document of 13,000
+ * boxes read three numbers out of yoga for each of them.
+ */
+function contentReach(node, top) {
+  const cached = node._contentReach;
+  if (
+    !top &&
+    cached !== undefined &&
+    node._host === null &&
+    node.parent?._host === null &&
+    !node.yoga.hasNewLayout()
+  ) {
+    return cached;
+  }
+  let left = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const child of node.children) {
+    if (child.isWindow || !child.yoga || child.hidden) continue;
+    const offset = offsetInParent(child);
+    left = Math.min(left, offset.x);
+    right = Math.max(right, offset.x + child.yoga.getComputedWidth());
+    bottom = Math.max(bottom, offset.y + child.yoga.getComputedHeight());
+    if (!child.clipsChildren()) {
+      const inner = contentReach(child, false);
+      left = Math.min(left, offset.x + inner.left);
+      right = Math.max(right, offset.x + inner.right);
+      bottom = Math.max(bottom, offset.y + inner.bottom);
+    }
+  }
+  const reach = { left, right, bottom };
+  if (!top) node._contentReach = reach;
+  return reach;
+}
+
+/**
  * One axis of a scroll request held for a pass
  * (`Scrollable._holdScrollTo`): `{ base, steps }`, the request the extent in
  * hand could not answer and the relative ones made after it. `to` is the new
@@ -435,21 +485,9 @@ export const Scrollable = (Base) =>
     measureScrollContent() {
       const rtl = this.direction === 'rtl';
       const width = this.yoga.getComputedWidth();
-      let start = 0;
-      let bottom = 0;
-      const walk = (node, dx, dy) => {
-        for (const child of node.children) {
-          if (child.isWindow || !child.yoga || child.hidden) continue;
-          const offset = offsetInParent(child);
-          const x = dx + offset.x;
-          const y = dy + offset.y;
-          const w = child.yoga.getComputedWidth();
-          start = Math.max(start, rtl ? width - x : x + w);
-          bottom = Math.max(bottom, y + child.yoga.getComputedHeight());
-          if (!child.clipsChildren()) walk(child, x, y);
-        }
-      };
-      walk(this, 0, 0);
+      const reach = contentReach(this, true);
+      const start = Math.max(0, rtl ? width - reach.left : reach.right);
+      const bottom = Math.max(0, reach.bottom);
       // the end padding is part of the content box a browser scrolls to, and
       // it is the one part of it yoga has already resolved for us — on the
       // left in RTL, since that is the end there

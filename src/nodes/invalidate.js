@@ -309,6 +309,11 @@ export class WindowInvalidate {
     const windowToo = reach !== PANES_ONLY;
     if (layoutChanged) {
       this.needsLayout = true;
+      // What the next walk may skip (`layoutDiff.skipUnreached`): nothing,
+      // after a scroll or a change that names no node.
+      if (reason === 'scroll' || !source || source === this) {
+        this._walkWhole = true;
+      }
       // The content floors are measured from the tree, so anything that
       // changed it has to give them up — and **scrolling does not**, which is
       // the whole reason this is not just `needsLayout`: a scroll moves an

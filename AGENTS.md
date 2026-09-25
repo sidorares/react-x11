@@ -1610,6 +1610,14 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     where a cached pass is 0.05. A copy's computed values are the copy's:
     read a new node's margins from its style (`columnHeightSpan`), never
     from its real box, which has not been laid out yet.
+  - **the walk after a pass leaves alone what yoga did not reach**
+    (`_followParent`): a child with a clear has-new-layout flag under a
+    parent that did not move is where the last walk put it. Only on a frame
+    nothing scrolled on (`_walkWhole`, set by any `'scroll'` invalidation or
+    one that names no node): a scroll moves boxes without a pass, and the
+    walk is what carries the offset down to a pane under an untouched box.
+    A pane's content reach is cached per box on the same witness
+    (`contentReach`, `_contentReach`).
   - the deliberate deviation from CSS is that a **named size is kept**: CSS
     floors an item at `min(its size, its content)`, which is fine on the web
     where a `<div>` is a block container and its children are not flex items,

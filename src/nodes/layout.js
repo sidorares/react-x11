@@ -228,22 +228,29 @@ export class NodeLayout {
   }
 
   /**
-   * A child of a node that moved this pass, which yoga did not lay out
-   * again: its box and everything under it sit exactly where the last pass
-   * put them relative to their parents, so the whole subtree moves by
-   * however far its parent did (`dx`, `dy`) — `_shiftAbs`, the scroll fast
-   * path's translation (issue #405), instead of the walk. Answers whether
-   * it was handled; false means walk it.
+   * A child yoga did not lay out again: its box and everything under it
+   * sit exactly where the last pass put them relative to their parents, so
+   * the whole subtree moves by however far its parent did (`dx`, `dy`) —
+   * `_shiftAbs`, the scroll fast path's translation (issue #405), instead
+   * of the walk — and where its parent did not move, it has not moved at
+   * all, and there is nothing to do, unless something scrolled since the
+   * last walk (`layoutDiff.skipUnreached`): a scroll moves boxes with no
+   * pass, and it is the walk that carries the new offset down to them.
+   * Answers whether it was handled; false means walk it.
    *
    * The witness is yoga's has-new-layout flag, the one that fast path
    * reads: a pass sets it on every node it lays out and on every child of
    * one, cached or not, so a child it is clear on was not reached, nor was
    * anything under it. Cleared here when it is found set, just before the
    * walk that reads what the pass left — no pass runs in between — so the
-   * next move of the same subtree finds it clear. Nothing else pays for
-   * it: a child of a node that did not move is walked as it always was,
-   * and a scroll pane always is, since its flag is its own (and a scroll
-   * moves its children with no pass at all).
+   * next look at the same subtree finds it clear. A scroll pane is always
+   * walked, since its flag is its own (and a scroll moves its children
+   * with no pass at all).
+   *
+   * Walking a subtree nothing moved was the whole tree for a change in one
+   * place: a block that arrived at the end of a document of 13,000 boxes
+   * was laid out alone, and the walk still read four numbers out of yoga
+   * for every box in the document — 30 ms of a 60 ms frame.
    *
    * Walking such a subtree read four numbers out of yoga per node and wrote
    * them back unchanged: the bodies of a graph's cards, fifty widgets deep,
@@ -255,13 +262,13 @@ export class NodeLayout {
    * walk's claims came to.
    */
   _followParent(dx, dy) {
-    if (dx === 0 && dy === 0) return false;
     const yoga = this.yoga;
     if (!yoga || !this._placed || this.isScroller?.()) return false;
     if (yoga.hasNewLayout()) {
       yoga.markLayoutSeen();
       return false;
     }
+    if (dx === 0 && dy === 0) return layoutDiff.skipUnreached;
     const sink = layoutDiff.sink;
     const shift = layoutDiff.shift;
     if (
