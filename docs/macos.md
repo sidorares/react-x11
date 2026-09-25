@@ -2479,10 +2479,10 @@ thread idle between copies, the way a frame clock does.
 ## Measured: a paragraph laid out again
 
 Written 2026-09-25 against react-x11 2.22.6 and `@windowkit/appkit` 0.13.0
-with windowkit/appkit#75, on the M1 Pro at scale 2. A window resize lays
-every paragraph of a document out at the new width, and `createLayout` was
-most of that frame. Timed inside the verb over the reflow of a 600 KB
-document, it went to four places:
+with windowkit/appkit#75, which 0.14.0 released, on the M1 Pro at scale 2. A
+window resize lays every paragraph of a document out at the new width, and
+`createLayout` was most of that frame. Timed inside the verb over the reflow
+of a 600 KB document, it went to four places:
 
 | part of `createLayout`                   | `<Markdown>` | `<Html>` |
 | ---------------------------------------- | ------------ | -------- |
@@ -2503,7 +2503,7 @@ rather than an object per line and run (`unpackLines`). The kept
 typesetters hold at most a megabyte of text, about 25 MB of CoreText's, and
 the paragraph laid out least recently is let go past it
 (`releaseTypesetter`); a font the app loads lets them all go. A bridge from
-before the verbs is asked the old way.
+before the verbs, appkit 0.13 and earlier, is asked the old way.
 
 Separately, a layout's code point to code unit table
 (`codeUnitOffsets`) is null for text with no surrogate pair, which is
