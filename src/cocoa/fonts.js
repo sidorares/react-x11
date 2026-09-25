@@ -113,13 +113,15 @@ function codeUnitOffsets(text) {
   return offsets;
 }
 const SURROGATE = /[\uD800-\uDFFF]/;
+const NO_GEOMETRY = new Float64Array(0);
 
 /**
  * A layout's lines from the bridge's packed geometry (`createLayout`'s
  * `packed`): ten numbers a line, five a run, into the objects the
- * unpacked form has, key for key.
+ * unpacked form has, key for key. A bridge that answered neither form
+ * laid out no lines.
  */
-function unpackLines(lineData, runData) {
+function unpackLines(lineData = NO_GEOMETRY, runData = NO_GEOMETRY) {
   const lines = new Array(lineData.length / 10);
   for (let i = 0, l = 0, r = 0; i < lineData.length; i += 10, l++) {
     const runs = new Array(lineData[i + 9]);
