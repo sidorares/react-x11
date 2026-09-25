@@ -71,6 +71,44 @@ test('dragging the thumb scrolls in proportion to the pointer', async () => {
   await x11Root.unmount();
 });
 
+test('a thumb drag scrolls whole device pixels', async () => {
+  // A range the travel does not divide: 481 of content in a 100-tall
+  // viewport, so almost every pointer position is a fraction of a pixel
+  // into the range — and a fractional offset loses the scroll blit and
+  // draws the whole pane off the pixel grid.
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    h(
+      'window',
+      { width: 200, height: 100 },
+      h(
+        'box',
+        { style: { overflow: 'scroll', flexGrow: 1 } },
+        ...Array.from({ length: 13 }, (_, i) =>
+          h('box', { key: i, style: { height: 37, flexShrink: 0 } }),
+        ),
+      ),
+    ),
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const sv = scroller(app);
+  const bar = sv._scrollbar();
+  assert.ok(bar.range % bar.travel !== 0, 'a range the travel divides');
+  const y = bar.thumbStart + bar.thumbLength / 2;
+  wnd.emit('mousedown', { x: bar.x + 2, y, keycode: 1 });
+  const seen = new Set();
+  for (let step = 1; step <= 20; step++) {
+    wnd.emit('mousemove', { x: bar.x + 2, y: y + step });
+    assert.ok(Number.isInteger(sv.scrollY), `step ${step}: ${sv.scrollY}`);
+    seen.add(sv.scrollY);
+  }
+  assert.ok(seen.size > 10, 'the drag moved the pane');
+  wnd.emit('mouseup', { x: bar.x + 2, y: y + 20, keycode: 1 });
+  await x11Root.unmount();
+});
+
 test('the drag keeps its grip on the thumb, without jumping', async () => {
   const { app, wnd } = await mount();
   const x11Root = await createRoot({ app });

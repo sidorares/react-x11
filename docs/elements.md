@@ -1172,8 +1172,11 @@ The bar belongs to the scroller, not to the content painted under it — the
 same rule a browser applies — so a press on the thumb never reaches the row
 behind it. Dragging keeps the grip where it was taken, so the thumb does not
 jump to the pointer, and a press on the track pages towards it, like
-PageUp/PageDown. `<textarea>` behaves the same way, and there a bar press
-never moves the caret.
+PageUp/PageDown. A drag moves the pane by whole device pixels, as a wheel
+does ([extending.md](extending.md#scrolling-content-you-painted)), so the
+scroll stays a blit and nothing in the pane is drawn off the pixel grid.
+`<textarea>` behaves the same way, and there a bar press never moves the
+caret.
 
 ### The layout defaults it brings
 
