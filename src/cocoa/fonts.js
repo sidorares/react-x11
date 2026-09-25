@@ -102,10 +102,52 @@ function parseColor(color) {
 }
 
 /** UTF-16 offset of each code point boundary, plus the end. */
+/** Where each code point of `text` starts, in code units — or null when
+ *  the two are the same index, which is all text with no surrogate pair in
+ *  it. A table per paragraph was a walk of every character of a document,
+ *  every time it was laid out. */
 function codeUnitOffsets(text) {
+  if (!SURROGATE.test(text)) return null;
   const offsets = [0];
   for (const ch of text) offsets.push(offsets[offsets.length - 1] + ch.length);
   return offsets;
+}
+const SURROGATE = /[\uD800-\uDFFF]/;
+const NO_GEOMETRY = new Float64Array(0);
+
+/**
+ * A layout's lines from the bridge's packed geometry (`createLayout`'s
+ * `packed`): ten numbers a line, five a run, into the objects the
+ * unpacked form has, key for key. A bridge that answered neither form
+ * laid out no lines.
+ */
+function unpackLines(lineData = NO_GEOMETRY, runData = NO_GEOMETRY) {
+  const lines = new Array(lineData.length / 10);
+  for (let i = 0, l = 0, r = 0; i < lineData.length; i += 10, l++) {
+    const runs = new Array(lineData[i + 9]);
+    for (let k = 0; k < runs.length; k++, r += 5) {
+      runs[k] = {
+        x: runData[r],
+        width: runData[r + 1],
+        start: runData[r + 2],
+        end: runData[r + 3],
+        rtl: runData[r + 4] === 1,
+      };
+    }
+    lines[l] = {
+      x: lineData[i],
+      y: lineData[i + 1],
+      width: lineData[i + 2],
+      height: lineData[i + 3],
+      baseline: lineData[i + 4],
+      ascent: lineData[i + 5],
+      descent: lineData[i + 6],
+      start: lineData[i + 7],
+      end: lineData[i + 8],
+      runs,
+    };
+  }
+  return lines;
 }
 
 class CocoaTextLayout {
@@ -116,16 +158,20 @@ class CocoaTextLayout {
     this._cpToCu = codeUnitOffsets(text);
     this.width = raw.width;
     this.height = raw.height;
-    this.lines = raw.lines;
+    this.lines = raw.lines ?? unpackLines(raw.lineData, raw.runData);
   }
 
   _cuOf(cp) {
     const t = this._cpToCu;
+    if (t === null) return Math.max(0, Math.min(cp, this._text.length));
     return t[Math.max(0, Math.min(cp, t.length - 1))];
   }
 
   _cpOf(cu) {
     const t = this._cpToCu;
+    if (t === null) {
+      return cu <= 0 ? 0 : Math.min(Math.ceil(cu), this._text.length);
+    }
     // t is sorted; layouts are short, a linear walk is fine
     for (let i = 0; i < t.length; i++) if (t[i] >= cu) return i;
     return t.length - 1;
@@ -500,6 +546,10 @@ function spacedFeatures(features, spacing) {
     : OPTIONAL_LIGATURES_OFF;
 }
 
+/** The text the kept typesetters may hold, in UTF-16 units: a document of
+ *  about a megabyte, at 25 bytes a unit in CoreText. */
+const KEPT_TYPESETTER_UNITS = 1 << 20;
+
 export class CocoaFontManager {
   /** @param native the @windowkit/appkit module; the tests hand in a fake */
   constructor(native = loadNative()) {
@@ -513,6 +563,50 @@ export class CocoaFontManager {
     this._sized = new Map(); // face key|size|variations -> CTFont handle
     this._layouts = new Map(); // layout signature -> CocoaTextLayout (LRU)
     this._faceByPs = new Map(); // PostScript name -> face CoreText chose itself
+    // paragraph -> its typesetter, kept to lay it out at another width
+    // (`_keptTypesetter`); LRU, bounded by the UTF-16 units they hold. Only
+    // a bridge that keeps them (`@windowkit/appkit` 0.14) has the verb.
+    this._keeps = typeof native.releaseTypesetter === 'function';
+    this._typesetters = new Map();
+    this._typesetterUnits = 0;
+  }
+
+  /**
+   * A paragraph's typesetter, kept from a layout of the same text at any
+   * width. Two thirds of a layout is the text becoming glyphs — the
+   * attributed string, then CoreText's shaping — and a paragraph laid out
+   * at another width breaks the same glyphs into other lines: a window
+   * resize lays a document out at every width it passes through, and a
+   * paragraph's max-content and wrapped measurements are two layouts of
+   * one text. The cache holds `KEPT_TYPESETTER_UNITS` of text, about
+   * 25 MB, which is a long document; past that the paragraph laid out
+   * least recently is let go.
+   */
+  _keptTypesetter(key) {
+    const kept = this._typesetters.get(key);
+    if (kept === undefined) return null;
+    this._typesetters.delete(key);
+    this._typesetters.set(key, kept);
+    return kept.handle;
+  }
+
+  _keepTypesetter(key, handle, units) {
+    this._typesetters.set(key, { handle, units });
+    this._typesetterUnits += units;
+    while (this._typesetterUnits > KEPT_TYPESETTER_UNITS) {
+      const [oldest, entry] = this._typesetters.entries().next().value;
+      this._typesetters.delete(oldest);
+      this._typesetterUnits -= entry.units;
+      this._native.releaseTypesetter(entry.handle);
+    }
+  }
+
+  _forgetTypesetters() {
+    for (const { handle } of this._typesetters.values()) {
+      this._native.releaseTypesetter(handle);
+    }
+    this._typesetters.clear();
+    this._typesetterUnits = 0;
   }
 
   /** A face the app loaded joins every fallback chain: what the faces that
@@ -941,6 +1035,7 @@ export class CocoaFontManager {
     this._faces.clear();
     this._sized.clear();
     this._layouts.clear();
+    if (this._keeps) this._forgetTypesetters();
     this._forgetCovers();
     // `null` on purpose: src/fonts.js keeps the fontkit face it already
     // opened as the handle, which is the one whose metrics apps can read;
@@ -957,8 +1052,10 @@ export class CocoaFontManager {
     // Memoized: an immediate-mode caller (the fonts app's specimen canvas,
     // a hover pass) lays the same paragraph out every repaint, and a
     // CTFramesetter per pointer move is what sluggish feels like. The key
-    // is everything shaping reads; ~64 entries covers a screenful.
-    const signature = JSON.stringify([
+    // is everything shaping reads — the paragraph, `shape`, which is also
+    // what its kept typesetter is found by — and then everything breaking
+    // it into lines reads; ~64 entries covers a screenful.
+    const shape = JSON.stringify([
       spans.map((sp) => [
         sp.text,
         sp.family ?? base.family,
@@ -971,13 +1068,17 @@ export class CocoaFontManager {
         sp.features ?? base.features ?? null,
         sp.letterSpacing ?? base.letterSpacing ?? 0,
       ]),
-      options.maxWidth,
-      options.align,
-      options.lineHeight,
-      options.maxLines,
-      options.overflow,
       options.direction,
     ]);
+    const signature =
+      shape +
+      JSON.stringify([
+        options.maxWidth,
+        options.align,
+        options.lineHeight,
+        options.maxLines,
+        options.overflow,
+      ]);
     const hit = this._layouts.get(signature);
     if (hit) {
       // refresh LRU position
@@ -1054,8 +1155,17 @@ export class CocoaFontManager {
       : minContent
         ? brokenAtEveryOpportunity(nativeSpans)
         : nativeSpans;
+    // The paragraph's kept typesetter, where it has one. A min-content
+    // measurement lays out other text — the paragraph broken at every
+    // opportunity, and capped for an eliding one — and keeps its own.
+    const shapeKey = probe
+      ? `${shape}|${maxLines}`
+      : minContent
+        ? `${shape}|min`
+        : shape;
+    const typesetter = this._keeps ? this._keptTypesetter(shapeKey) : null;
     const raw = this._native.createLayout({
-      spans: laid,
+      ...(typesetter ? { typesetter } : { spans: laid }),
       maxWidth:
         Number.isFinite(maxWidth) && maxWidth > 0 ? maxWidth : undefined,
       align: flushFor(align, direction),
@@ -1063,7 +1173,15 @@ export class CocoaFontManager {
       maxLines: probe || !Number.isFinite(maxLines) ? undefined : maxLines,
       ellipsis: !probe && overflow === 'ellipsis',
       rtl: direction === 'rtl',
+      // the geometry as two arrays rather than an object a line and a run:
+      // a tenth of the calls across the bridge (`unpackLines`)
+      ...(this._keeps ? { keep: typesetter === null, packed: true } : null),
     });
+    if (raw.typesetter) {
+      let units = 0;
+      for (const span of laid) units += span.text.length;
+      this._keepTypesetter(shapeKey, raw.typesetter, units);
+    }
     // the text the native actually laid out: a min-content measurement's
     // line and run ranges are indices into the broken text, and the two have
     // to agree for `indexAt`/`caretPosition` to mean anything at all

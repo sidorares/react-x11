@@ -2476,6 +2476,51 @@ memory system waking up, not in the core doing the copy. What a frame can
 do about it is copy fewer bytes, and a benchmark of a copy has to leave the
 thread idle between copies, the way a frame clock does.
 
+## Measured: a paragraph laid out again
+
+Written 2026-09-25 against react-x11 2.22.6 and `@windowkit/appkit` 0.13.0
+with windowkit/appkit#75, which 0.14.0 released, on the M1 Pro at scale 2. A
+window resize lays every paragraph of a document out at the new width, and
+`createLayout` was most of that frame. Timed inside the verb over the reflow
+of a 600 KB document, it went to four places:
+
+| part of `createLayout`                   | `<Markdown>` | `<Html>` |
+| ---------------------------------------- | ------------ | -------- |
+| the attributed string from the spans     | 30%          | 27%      |
+| `CTTypesetterCreateWithAttributedString` | 37%          | 40%      |
+| breaking lines, the `CTLine`s and runs   | 16%          | 16%      |
+| the result's objects, one a line and run | 17%          | 17%      |
+
+The first two are the text becoming glyphs, and they are the same at every
+width. So the engine keeps a paragraph's typesetter
+(`CocoaFontManager._keptTypesetter`), found by everything shaping reads — the
+spans' text, faces, colours, features and spacing, and the direction — and a
+layout of the same paragraph at another width, alignment, line height or
+line cap is broken from it (appkit's `typesetter`). A min-content
+measurement lays out other text, the paragraph broken at every opportunity,
+and keeps its own. The geometry comes back packed, two `Float64Array`s
+rather than an object per line and run (`unpackLines`). The kept
+typesetters hold at most a megabyte of text, about 25 MB of CoreText's, and
+the paragraph laid out least recently is let go past it
+(`releaseTypesetter`); a font the app loads lets them all go. A bridge from
+before the verbs, appkit 0.13 and earlier, is asked the old way.
+
+Separately, a layout's code point to code unit table
+(`codeUnitOffsets`) is null for text with no surrogate pair, which is
+nearly all text: it was a walk of every character of a document at every
+width.
+
+| 600 KB document, `docsweep.tsx` | reflow step, p50 | first paint    |
+| ------------------------------- | ---------------- | -------------- |
+| `<Markdown>`                    | 335 → 228 ms     | 1255 → 1174 ms |
+| `<Html>`                        | 574 → 273 ms     | 549 → 526 ms   |
+
+First paint moves too, because a paragraph's max-content measurement and
+its wrapped layout are now one shaping. `test/cocoa-kept-typesetters.test.js`
+holds the keys, the eviction and the unpacking over a fake bridge, and,
+where the bridge keeps typesetters, that every layout made from one is the
+layout made from the spans.
+
 ## Testing
 
 The strategy mirrors the X11 suite's shape rather than its mechanism:
