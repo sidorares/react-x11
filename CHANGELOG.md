@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.22.2](https://github.com/sidorares/react-x11/compare/v2.22.1...v2.22.2) (2026-09-25)
+
+
+### Performance Improvements
+
+* **cocoa:** a rounded box keeps its corners by reading them back, not through a path clip ([#693](https://github.com/sidorares/react-x11/issues/693)) ([#695](https://github.com/sidorares/react-x11/issues/695)) ([a56564b](https://github.com/sidorares/react-x11/commit/a56564b9631f609c035ad5412beef3844b2a2113))
+
 ## [2.22.1](https://github.com/sidorares/react-x11/compare/v2.22.0...v2.22.1) (2026-09-24)
 
 
