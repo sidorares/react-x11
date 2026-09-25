@@ -387,6 +387,16 @@ hardware that offers a better one. Offloading an animation it can — not
 structurally, but for the few nodes that animate, which get a layer of
 their own above the bitmap (§"Layer promotion" below, issue #483).
 
+**A rounded clip stays off CoreGraphics' path clip.** CG draws through a
+non-rectangular clip by masking everything the drawing covers: a pane-sized
+picture through a `roundRect` clip took 22 ms where the same picture under a
+rectangle took 8. So a box with `overflow` and a `borderRadius` draws its
+children under its rectangle and puts the corner squares they reached back,
+the route X11 has taken since #685 (`src/nodes/roundclip.js`). The bitmap is
+CPU memory, so keeping a corner is a row memcpy out of it
+(`BackendContext2D.readbackSource`, #693), and a graph's zoom inside a
+rounded pane went from 34 to 52 frames a second.
+
 ### Tier L — layer presenter (retained, the design target)
 
 The Cocoa presenter consumes the same `invalidate()` stream but keeps a

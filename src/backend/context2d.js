@@ -285,11 +285,15 @@ export class BackendContext2D {
    * @param surfaceOf () => current surface handle — the owner replaces the
    *   surface on resize, and this context follows it.
    * @param genOf () => surface generation number
+   * @param options.readback whether the bitmap this context draws into can
+   *   be read back while it is being drawn into, cheaply — a CPU bitmap, as
+   *   every Cocoa surface is (`readbackSource`)
    */
-  constructor(native, surfaceOf, genOf) {
+  constructor(native, surfaceOf, genOf, { readback = false } = {}) {
     this._native = native;
     this._surfaceOf = surfaceOf;
     this._genOf = genOf;
+    this._readback = readback;
     this._gen = -1;
     this._stack = [];
     this._state = {
@@ -336,6 +340,28 @@ export class BackendContext2D {
       'ctxPath' in native && typeof native.ctxPath === 'function';
     this._pathBuf = null;
     this._strokeChunking = !NO_STROKE_CHUNKING;
+  }
+
+  /**
+   * The bitmap this context draws into, as a source `drawImage` reads — for
+   * a caller that keeps a few of its pixels before drawing over them and
+   * puts them back after, which is how a rounded box clips its children
+   * without a path clip (src/nodes/roundclip.js, issue #693). A `copy` of
+   * it at a whole-pixel translate is `blitSurface`'s memcpy. Null where the
+   * owner has not said the bitmap reads back cheaply while it is drawn
+   * into: a GPU target is a different cost, and nobody has measured it.
+   */
+  readbackSource() {
+    if (!this._readback) return null;
+    const ctx = this;
+    const { width, height } = this._native.surfaceSize(this._s());
+    return {
+      width,
+      height,
+      get _surfaceHandle() {
+        return ctx._s();
+      },
+    };
   }
 
   _s() {

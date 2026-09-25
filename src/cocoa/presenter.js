@@ -435,6 +435,8 @@ export class RasterState {
           presenter.native,
           () => this.surface,
           () => this.gen,
+          // a CPU bitmap: a rounded box keeps its corners by reading it back
+          { readback: true },
         );
         this.ctx._fonts = presenter.fonts;
       }

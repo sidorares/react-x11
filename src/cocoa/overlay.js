@@ -127,6 +127,8 @@ export class CocoaOverlayPane {
           this._ensureSurface();
           return this._gen;
         },
+        // a CPU bitmap: a rounded box keeps its corners by reading it back
+        { readback: true },
       );
       this._ctx._fonts = this.app.fonts;
       this._ctx._onDirty = () => {

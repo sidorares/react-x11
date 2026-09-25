@@ -806,6 +806,8 @@ export class CocoaWindow {
           this._ensureSurface();
           return this._surfaceGen;
         },
+        // a CPU bitmap: a rounded box keeps its corners by reading it back
+        { readback: true },
       );
       this._ctx._fonts = this.app.fonts;
       this._ctx._onDirty = () => {
