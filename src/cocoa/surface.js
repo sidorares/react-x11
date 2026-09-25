@@ -117,6 +117,8 @@ export class CocoaSurface {
         this._native,
         () => this._handle(),
         () => 1,
+        // a CPU bitmap: a rounded box keeps its corners by reading it back
+        { readback: true },
       );
       this._ctx._fonts = this._fonts;
     }

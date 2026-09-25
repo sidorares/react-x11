@@ -7,8 +7,9 @@
 //
 // That needs a context that can read its own pixels back into a surface of
 // its own and composite a coverage surface: ntk's, whose `picture` is the
-// server-side picture it draws through. Anywhere else the caller clips to the
-// outline as it always has.
+// server-side picture it draws through, and a Cocoa one, whose bitmap is CPU
+// memory it names as a `drawImage` source (`readbackSource`, issue #693).
+// Anywhere else the caller clips to the outline as it always has.
 
 import { Surface } from '../offscreen.js';
 
@@ -66,6 +67,20 @@ function cornerPath(ctx, box, { radius: r, side: s }, corner) {
 }
 
 /**
+ * A square to hold a coverage in: an a8 surface where the backend has them,
+ * and elsewhere a colour one whose alpha is the coverage — which is all the
+ * `destination-in` and `destination-out` it is drawn with read of it. The
+ * Cocoa backend has no a8 surfaces and says so by throwing.
+ */
+function coverageSurface(app, side) {
+  try {
+    return new Surface(app, { width: side, height: side, format: 'a8' });
+  } catch {
+    return new Surface(app, { width: side, height: side });
+  }
+}
+
+/**
  * How much of each pixel of a corner square lies outside the outline, as an
  * a8 surface the size of the square: the square filled, and the outline's
  * corner taken out of it. One per corner, radius and side on an app, and
@@ -77,7 +92,7 @@ function outsideCoverage(app, corners, corner) {
   const key = `${corner}|${corners.radius}|${s}`;
   let surface = state.coverage.get(key);
   if (surface) return surface;
-  surface = new Surface(app, { width: s, height: s, format: 'a8' });
+  surface = coverageSurface(app, s);
   // a box whose corner lands on the square's own, in the square's space
   const far = corner === 'tr' || corner === 'br';
   const low = corner === 'bl' || corner === 'br';
@@ -126,16 +141,21 @@ function readback(ctx) {
   if (!m || m.a !== 1 || m.b !== 0 || m.c !== 0 || m.d !== 1) return null;
   if (!Number.isInteger(m.e) || !Number.isInteger(m.f)) return null;
   // reading it settles the picture's clip, which the next drawing re-stamps
-  if (!ctx.picture || !Number.isFinite(ctx.width)) return null;
-  return {
-    dx: m.e,
-    dy: m.f,
-    source: {
-      width: ctx.width,
-      height: ctx.height,
-      picture: () => ctx.picture,
-    },
-  };
+  if (ctx.picture && Number.isFinite(ctx.width)) {
+    return {
+      dx: m.e,
+      dy: m.f,
+      source: {
+        width: ctx.width,
+        height: ctx.height,
+        picture: () => ctx.picture,
+      },
+    };
+  }
+  // a backend context whose owner says its bitmap reads back cheaply
+  const source =
+    typeof ctx.readbackSource === 'function' ? ctx.readbackSource() : null;
+  return source ? { dx: m.e, dy: m.f, source } : null;
 }
 
 /**
