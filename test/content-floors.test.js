@@ -249,6 +249,8 @@ class ParagraphNode extends Node {
   }
 
   measureContent({ width }) {
+    // how often it was set a word to a line — what `markUnreadLeaves` spares
+    if (width === 0) this.setAtNothing = (this.setAtNothing ?? 0) + 1;
     const w = Math.max(WORD, Math.min(LINE, width));
     return { width: w, height: LINE_HEIGHT * Math.ceil(LINE / w) };
   }
@@ -1108,5 +1110,212 @@ test('every scoped measurement is the one the whole tree gives', async () => {
     assert.ok(took >= 3, `${took} of the frames were scoped`);
     await scoped.root.unmount();
     await whole.root.unmount();
+  });
+});
+
+// --- the width pass reads what a floor is written from ----------------------
+//
+// The pass over the whole tree lays every box out with no room on offer, and
+// down a column in a document that is every paragraph set a word to a line,
+// for widths no floor is written from. A leaf nothing reads the width of is
+// not shaped for it (`markUnreadLeaves`) where what it answers cannot reach
+// anything that is read. The differential test holds every frame of that to
+// the pass that measures every width (`_readEveryWidth`), and each of the
+// arrangements below is one where a leaf left unshaped would have moved a
+// floor — each fails the test with its guard taken out.
+
+/** A clipping box that grows along its row: its floor is the width it was
+ *  laid out at, so it shows whatever the row was given. */
+const growing = () =>
+  box({ width: 5, flexGrow: 1, height: 5, overflow: 'hidden' });
+
+/**
+ * A document: paragraphs down columns, which are left unshaped, a list item
+ * (a row, whose items are read), and every way a leaf's answer could still
+ * reach something read. `turned` makes a column a row, so what nobody read
+ * is read the next frame.
+ */
+const unreadTree = ({ bullet = 10, label = 40, grow = 20, turned = false }) =>
+  box(
+    { overflow: 'scroll', flexGrow: 1 },
+    box(
+      { padding: 6, gap: 4 },
+      h('paragraph', { ref: firstParagraph }),
+      box({ padding: 3 }, box(null, h('paragraph'))),
+      box(
+        { flexDirection: 'row', gap: 4 },
+        box({ width: bullet, height: 10 }),
+        box(
+          null,
+          h('paragraph'),
+          box(
+            { flexDirection: 'row' },
+            h('label', { length: label }),
+            h('label', { length: 30 }),
+          ),
+        ),
+      ),
+      // a row with room to share, shared by what its items hold
+      box(
+        { flexDirection: 'row', width: 300 },
+        box({ flexGrow: 1, overflow: 'hidden' }, h('paragraph')),
+        growing(),
+      ),
+      // as wide as its widest child: the row stretches to what the
+      // paragraph needs, and its clipping box grows into it
+      box(
+        { alignSelf: 'flex-start' },
+        h('paragraph'),
+        box(
+          { flexDirection: 'row' },
+          box({ width: grow, flexGrow: 1, height: 5, overflow: 'hidden' }),
+          h('label', { length: label }),
+        ),
+      ),
+      // the same width, found by `auto` margins
+      box(
+        { marginLeft: 'auto', marginRight: 'auto' },
+        h('paragraph'),
+        box({ flexDirection: 'row' }, growing()),
+      ),
+      box(
+        { alignItems: 'center' },
+        h('paragraph'),
+        box({ flexDirection: 'row' }, h('label', { length: label })),
+      ),
+      box({ aspectRatio: 4 }, h('paragraph')),
+      // a line of a wrapping column is as wide as what shares it
+      box(
+        { flexWrap: 'wrap', height: 60 },
+        h('paragraph'),
+        h('paragraph'),
+        box({ flexDirection: 'row' }, growing()),
+      ),
+      box(
+        { position: 'absolute', left: 4, top: 4 },
+        h('paragraph'),
+        box({ flexDirection: 'row' }, h('label', { length: label })),
+      ),
+      // a height of its own, shared out: the box that gives way loses what
+      // the paragraph takes, and its aspect ratio makes that a width
+      box(
+        { height: 120 },
+        h('paragraph'),
+        box(
+          {
+            height: 100,
+            overflow: 'hidden',
+            alignSelf: 'flex-start',
+            aspectRatio: 2,
+          },
+          box({ flexDirection: 'row' }, growing()),
+        ),
+      ),
+      // a height that is its content's, followed by a box pinned to both
+      // edges, whose aspect ratio makes it a width
+      box(
+        null,
+        h('paragraph'),
+        box(
+          { position: 'absolute', top: 0, bottom: 0, left: 0, aspectRatio: 1 },
+          box({ flexDirection: 'row' }, growing()),
+        ),
+      ),
+      box(
+        { flexDirection: turned ? 'row' : 'column' },
+        h('paragraph'),
+        box(null, h('paragraph')),
+      ),
+    ),
+  );
+const firstParagraph = React.createRef();
+
+/** Every box, height extent and written floor the same, and every width
+ *  extent where both windows measured one. */
+function assertSameFloors(a, b, message) {
+  const floorsOf = (win) => {
+    const out = [];
+    const walk = (n) => {
+      if (n.yoga) {
+        out.push({
+          kind: n.kind,
+          abs: n.abs && { ...n.abs },
+          floorW: n._floorW,
+          floorH: n._floorH,
+          minW: n._floorMinW,
+          minH: n._floorMinH,
+        });
+      }
+      for (const child of n.children) walk(child);
+    };
+    walk(win);
+    return out;
+  };
+  const x = floorsOf(a);
+  const y = floorsOf(b);
+  assert.strictEqual(x.length, y.length, message);
+  for (let i = 0; i < x.length; i++) {
+    const { floorW, ...rest } = x[i];
+    const { floorW: everyW, ...everyRest } = y[i];
+    assert.deepStrictEqual(rest, everyRest, `${message}: node ${i}`);
+    if (floorW !== undefined && everyW !== undefined) {
+      assert.strictEqual(floorW, everyW, `${message}: node ${i} across`);
+    }
+  }
+}
+
+test('the width pass measures what a floor is written from, and the tree comes out the same', async () => {
+  await withTestElements(async () => {
+    const windowProps = { width: 200, height: 300 };
+    // Two windows up empty, one of them told to measure every width, and
+    // then the same frames in both: the tree arriving, and the steps.
+    const unread = await mount(null, windowProps);
+    const every = await mount(null, windowProps);
+    every.node._readEveryWidth = true;
+    await rerender(unread.app, unread.root, unreadTree({}), windowProps);
+    const paragraph = firstParagraph.current;
+    await rerender(every.app, every.root, unreadTree({}), windowProps);
+    assertSameFloors(unread.node, every.node, 'the tree arriving');
+    assert.ok(!paragraph.setAtNothing, 'a paragraph down a column, unshaped');
+    assert.strictEqual(paragraph._floorW, undefined, 'and its width unread');
+    assert.ok(
+      firstParagraph.current.setAtNothing > 0,
+      'the other window shaped it',
+    );
+    const steps = [
+      { label: 90 }, // a label in a row that is read
+      { label: 90, grow: 60 }, // the box that grows into its column's room
+      { label: 90, grow: 60, turned: true }, // a column turns into a row
+      { label: 90, grow: 60 }, // and back
+      { bullet: 30, label: 5 },
+    ];
+    for (const step of steps) {
+      await rerender(unread.app, unread.root, unreadTree(step), windowProps);
+      await rerender(every.app, every.root, unreadTree(step), windowProps);
+      assertSameFloors(
+        unread.node,
+        every.node,
+        `the frame after ${JSON.stringify(step)}`,
+      );
+    }
+    await unread.root.unmount();
+    await every.root.unmount();
+  });
+});
+
+test('a window that sizes itself from its content still measures every width', async () => {
+  // Its minimum is the root's own extent, which adds up everything in flow:
+  // a paragraph down a column is read there, so it is shaped.
+  await withTestElements(async () => {
+    const { root } = await mount(
+      box(
+        null,
+        h('paragraph', { ref: firstParagraph }),
+        box(null, h('paragraph')),
+      ),
+      { width: 200, height: 300, minWidth: 'auto' },
+    );
+    assert.ok(firstParagraph.current.setAtNothing > 0, 'shaped for the hint');
+    await root.unmount();
   });
 });

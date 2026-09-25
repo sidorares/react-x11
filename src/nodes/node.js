@@ -111,6 +111,9 @@ export class Node {
     // the width mode yoga last measured this leaf in with no height on
     // offer — the question `_heightForWidth` repeats
     this._floorMeasureMode = null;
+    // set only for the length of a width pass that reads nothing from this
+    // leaf (`markUnreadLeaves`)
+    this._widthUnread = false;
     this.root = null; // owning WindowNode once attached
     this.hidden = false;
     // Composited on a layer of its own above the window's bitmap, by a

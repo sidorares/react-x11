@@ -9,6 +9,7 @@ import {
   captureLeafHeights,
   collectFloorStale,
   columnHeightSpan,
+  markUnreadLeaves,
   declaresOwnMinimum,
   dirtyOutside,
   floorBoundaryOf,
@@ -41,6 +42,10 @@ import {
 // REACT_X11_NO_SCROLL_BLIT gives.
 const NO_SCOPED_FLOORS = process.env.REACT_X11_NO_SCOPED_FLOORS === '1';
 
+// …and for the width pass reading only the extents a floor is written from
+// (`markUnreadLeaves`): with it set, every leaf is shaped at no width again.
+const NO_UNREAD_WIDTHS = process.env.REACT_X11_NO_UNREAD_WIDTHS === '1';
+
 /** Take a node's extents off, as `collectFloorStale` does a dirty child's:
  *  both are measured again, and the minimum yoga holds may no longer be
  *  the one the floors wrote. */
@@ -64,8 +69,13 @@ export class WindowSize {
    * they are when nothing has looked yet this frame, and a leaf the probe
    * finds moved has its floor taken off and the pass run again, since a
    * floor still on a node being measured would be read back as content.
+   *
+   * `wantRoot` is whether the root's own width is wanted — a window whose
+   * minimum is its content's (`_measureMinimum`). Otherwise the width pass
+   * reads only the extents a floor is written from, and the leaves nothing
+   * reads are not shaped (`markUnreadLeaves`).
    */
-  _measureContentSpans(axis, forWidth, probe = false) {
+  _measureContentSpans(axis, forWidth, probe = false, wantRoot = false) {
     this._sweepLayoutHosts();
     const yoga = this.yoga;
     const dir = this._rootDirection;
@@ -79,9 +89,24 @@ export class WindowSize {
       if (this._layoutHosts.size !== 0) this._measureHostChildWidths();
       const shrunk = [];
       setMeasuringShrink(this, axis, shrunk);
+      // A layout host reads its own extent and its children's, and a root
+      // with a ceiling is as wide as its content up to it: both read what
+      // nothing else here does, so both are measured whole.
+      const read =
+        wantRoot ||
+        NO_UNREAD_WIDTHS ||
+        this._readEveryWidth ||
+        this._layoutHosts.size !== 0 ||
+        yoga.getMaxWidth().unit !== Yoga.UNIT_UNDEFINED;
+      const unread = [];
+      if (!read) markUnreadLeaves(this, unread);
       this._layoutPasses += 1;
-      yoga.calculateLayout(0, undefined, dir);
-      const span = contentSpan(this, axis, null, this);
+      try {
+        yoga.calculateLayout(0, undefined, dir);
+      } finally {
+        for (const leaf of unread) leaf._widthUnread = false;
+      }
+      const span = contentSpan(this, axis, null, this, read);
       restoreShrink(shrunk);
       return span;
     }
@@ -429,9 +454,9 @@ export class WindowSize {
    * (a stale extent writes the style's own minimum), which is what keeps a
    * floor from ratcheting: read back as content, it could only ever grow.
    */
-  _measureWidthFloors() {
+  _measureWidthFloors(wantRoot = false) {
     this._writeFloors('width');
-    const span = this._measureContentSpans('width');
+    const span = this._measureContentSpans('width', undefined, false, wantRoot);
     this._writeFloors('width');
     return span;
   }
@@ -452,7 +477,7 @@ export class WindowSize {
     return measuringExactly(() =>
       Math.ceil(
         axis === 'width'
-          ? this._measureWidthFloors()
+          ? this._measureWidthFloors(true)
           : this._measureHeightFloors(forWidth, true),
       ),
     );

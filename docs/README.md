@@ -399,6 +399,6 @@ else's app, a `.desktop` launcher, an A/B run.
 There are a handful more that exist only to switch off one optimisation
 while measuring it — `REACT_X11_NO_PAINT_CACHE`, `REACT_X11_NO_SCROLL_BLIT`,
 `REACT_X11_NO_BOUNDS_CACHE`, `REACT_X11_NO_STROKE_CHUNKING`,
-`REACT_X11_NO_SCOPED_FLOORS`,
+`REACT_X11_NO_SCOPED_FLOORS`, `REACT_X11_NO_UNREAD_WIDTHS`,
 `REACT_X11_NO_APPEARANCE_CACHE`. They are development instruments, not API,
 and they are documented where the thing they disable is.
