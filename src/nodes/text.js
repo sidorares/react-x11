@@ -56,21 +56,6 @@ const textStripBelowFor = (app) =>
     ? textStripBelowEnv
     : TEXT_STRIP_BELOW);
 
-/**
- * Downward shift that recreates CSS "half-leading". ntk's TextLayout puts
- * the first baseline at exactly `ascent` and packs each line's leading
- * (font line gap + any lineHeight surplus) entirely *below* the glyphs, so
- * a layout drawn at the top of its measured box rides visually high —
- * most noticeable centered in buttons/inputs (fonts like Helvetica carry a
- * 0.5em line gap). CSS instead splits that leading evenly above and below
- * the ink (see seek-oss capsize for the metrics background).
- */
-function halfLeading(layout) {
-  const last = layout.lines?.[layout.lines.length - 1];
-  if (!last) return 0;
-  return Math.max(0, (layout.height - (last.baseline + last.descent)) / 2);
-}
-
 /** A selected line with nothing on it still shows, so a blank line inside a
  * selection does not read as the highlight having stopped. */
 const EMPTY_LINE_BAND = 4;
@@ -469,9 +454,10 @@ export class TextNode extends Node {
    * ever optically even by luck. `lineHeight` cannot fix it: it scales the
    * box and the leading still splits evenly, so it moves both edges alike.
    *
-   * Measured in the coordinates the layout is **drawn** in, not the ones it
-   * reports: `halfLeading` shifts it, and deriving the baseline from the
-   * metrics again would silently disagree the day that shift changes.
+   * Measured from the baselines the layout reports, which are where it
+   * draws them: the engine splits a line's leading above and below the
+   * glyphs, and deriving the baseline from the metrics again would silently
+   * disagree with it.
    *
    * The amounts are fractions of a pixel and stay that way — the glyphs are
    * placed from them (`_placedLayout`). What must not stay fractional is the
@@ -505,9 +491,8 @@ export class TextNode extends Node {
     // one backend and half-covers two rows on the other. Rounded, the
     // baseline sits on a pixel wherever the box does.
     const capHeight = Math.round(measured);
-    const shift = halfLeading(layout);
-    const firstBaseline = shift + lines[0].baseline;
-    const lastBaseline = shift + lines[lines.length - 1].baseline;
+    const firstBaseline = lines[0].baseline;
+    const lastBaseline = lines[lines.length - 1].baseline;
     return {
       top: Math.max(0, firstBaseline - capHeight),
       bottom: Math.max(0, Math.ceil(layout.height) - lastBaseline),
@@ -530,7 +515,7 @@ export class TextNode extends Node {
     return {
       layout,
       x: content.x,
-      y: content.y + halfLeading(layout) - (trim ? trim.top : 0),
+      y: content.y - (trim ? trim.top : 0),
     };
   }
 
