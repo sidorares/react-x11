@@ -151,8 +151,15 @@ describe('the kept typesetter', () => {
   test('the packed geometry is the lines, key for key', () => {
     const native = fakeNative();
     const fonts = new CocoaFontManager(native);
-    const layout = fonts.layout(para('abc'), base, { maxWidth: 100 });
-    assert.deepStrictEqual(layout.lines, [
+    const spans = para('abc');
+    const layout = fonts.layout(spans, base, { maxWidth: 100 });
+    // the geometry the bridge sent, and the span each run hangs off
+    const geometry = layout.lines.map((line) => ({
+      ...line,
+      runs: line.runs.map(({ span, run, ...r }) => r),
+    }));
+    assert.strictEqual(layout.lines[0].runs[0].span, spans[0]);
+    assert.deepStrictEqual(geometry, [
       {
         x: 1,
         y: 2,
@@ -232,12 +239,15 @@ describe(
         { text: ', spaced ', letterSpacing: 1.5 },
         { text: 'and an emoji 😀, long enough to wrap at every width.' },
       ];
+      // a run's face is its manager's, so it is compared by what it is
       const shape = (layout) =>
-        JSON.stringify({
-          w: layout.width,
-          h: layout.height,
-          lines: layout.lines,
-        });
+        JSON.stringify(
+          { w: layout.width, h: layout.height, lines: layout.lines },
+          (key, value) =>
+            key === 'run' && value?.font
+              ? { face: value.font.key, size: value.size, dir: value.direction }
+              : value,
+        );
       for (const options of [
         { maxWidth: 400 },
         { maxWidth: 250, align: 'center' },

@@ -150,6 +150,15 @@ function unpackLines(lineData = NO_GEOMETRY, runData = NO_GEOMETRY) {
   return lines;
 }
 
+/** Whether two spans read the same, field for field. */
+function sameSpan(a, b) {
+  if (a === b) return true;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) if (a[key] !== b[key]) return false;
+  return true;
+}
+
 class CocoaTextLayout {
   constructor(native, raw, text) {
     this._native = native;
@@ -175,6 +184,118 @@ class CocoaTextLayout {
     // t is sorted; layouts are short, a linear walk is fine
     for (let i = 0; i < t.length; i++) if (t[i] >= cu) return i;
     return t.length - 1;
+  }
+
+  /**
+   * Hang each run off the span it was laid out from, as ntk's runs hang:
+   * `span` is the caller's own object, markers and all — what a painter
+   * reads a link's underline or a code chip's background off — and `run`
+   * the face and size it was set in, and its direction. CoreText makes one
+   * run of two neighbouring spans with the same attributes, a link beside
+   * plain text of the same colour, so such a run is cut where the spans
+   * meet, at the offset the native gives for that index.
+   */
+  _hangRuns(sources, runOf) {
+    this._sources = sources;
+    const starts = [];
+    let at = 0;
+    for (const source of sources) {
+      starts.push(at);
+      at += String(source.text).length;
+    }
+    for (const line of this.lines) {
+      const runs = [];
+      for (const r of line.runs) this._cutRun(r, line, starts, runOf, runs);
+      line.runs = runs;
+    }
+  }
+
+  _cutRun(r, line, starts, runOf, out) {
+    // the span holding the run's first unit
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid] <= r.start) lo = mid;
+      else hi = mid - 1;
+    }
+    const hang = (run, source) => {
+      run.span = this._sources[source];
+      run.run = runOf(source, run.rtl);
+      // which span, for a layout found again with another call's spans; out
+      // of sight, so a run is ntk's shape to anything that reads it whole
+      Object.defineProperty(run, '_source', { value: source });
+      return run;
+    };
+    let next = lo + 1;
+    if (next >= starts.length || starts[next] >= r.end) {
+      out.push(hang(r, lo));
+      return;
+    }
+    // where each span that starts inside the run begins, from the line's
+    // origin, as the run's own `x` is measured
+    const edges = [r.start];
+    const at = [r.rtl ? r.x + r.width : r.x];
+    const sources = [lo];
+    for (; next < starts.length && starts[next] < r.end; next += 1) {
+      edges.push(starts[next]);
+      at.push(this._native.layoutCaret(this._handle, starts[next]).x - line.x);
+      sources.push(next);
+    }
+    edges.push(r.end);
+    at.push(r.rtl ? r.x : r.x + r.width);
+    const pieces = [];
+    for (let i = 0; i < sources.length; i += 1) {
+      const a = at[i];
+      const b = at[i + 1];
+      pieces.push(
+        hang(
+          {
+            ...r,
+            start: edges[i],
+            end: edges[i + 1],
+            x: Math.min(a, b),
+            width: Math.abs(b - a),
+          },
+          sources[i],
+        ),
+      );
+    }
+    // a line's runs go left to right, and a right-to-left run's first span
+    // is its rightmost piece
+    if (r.rtl) pieces.reverse();
+    out.push(...pieces);
+  }
+
+  /**
+   * This layout for another call's spans: the same text set the same way,
+   * which is what found it in the cache. Spans that are the same, or read
+   * the same field for field, are the same layout — an immediate-mode caller
+   * that builds its spans afresh every paint is answered with the object it
+   * had. A caller whose markers differ — a link here, plain text there — has
+   * the runs pointed at its own spans, in a copy.
+   */
+  _forSources(sources) {
+    const mine = this._sources;
+    if (
+      !mine ||
+      (mine.length === sources.length &&
+        mine.every((source, i) => sameSpan(source, sources[i])))
+    ) {
+      return this;
+    }
+    const copy = Object.create(CocoaTextLayout.prototype);
+    Object.assign(copy, this);
+    copy._sources = sources;
+    copy.lines = this.lines.map((line) => ({
+      ...line,
+      runs: line.runs.map((r) => {
+        const run = { ...r, span: sources[r._source] };
+        Object.defineProperty(run, '_source', { value: r._source });
+        return run;
+      }),
+    }));
+    return copy;
   }
 
   draw(ctx, x, y) {
@@ -1084,17 +1205,20 @@ export class CocoaFontManager {
       // refresh LRU position
       this._layouts.delete(signature);
       this._layouts.set(signature, hit);
-      return hit;
+      return hit._forSources(spans.filter((span) => String(span.text ?? '')));
     }
     const { maxWidth, align, lineHeight, maxLines, overflow, direction } =
       options;
     const nativeSpans = [];
+    // the caller's spans with text, which the runs hang off (`_hangRuns`)
+    const sources = [];
     let text = '';
     let contextInk = false;
     for (const span of spans) {
       const t = String(span.text ?? '');
       if (!t) continue;
       text += t;
+      sources.push(span);
       const size = span.size ?? base.size ?? 14;
       const variations = span.variations ?? base.variations;
       // A span may carry the face itself — an ntk Font from openFont(),
@@ -1191,6 +1315,40 @@ export class CocoaFontManager {
       minContent ? laid.map((span) => span.text).join('') : text,
     );
     layout._contextInk = contextInk;
+    if (!minContent) {
+      const runs = new Map();
+      layout._hangRuns(sources, (i, rtl) => {
+        const key = `${i}|${rtl ? 1 : 0}`;
+        let run = runs.get(key);
+        if (!run) {
+          const span = sources[i];
+          const given = span.font ?? base.font;
+          run = {
+            font:
+              typeof given?.metrics === 'function'
+                ? given
+                : this.match(span.family ?? base.family, {
+                    weight: span.weight ?? base.weight,
+                    style: span.style ?? base.style,
+                  }),
+            size: span.size ?? base.size ?? 14,
+            direction: rtl ? 'rtl' : 'ltr',
+          };
+          runs.set(key, run);
+        }
+        return run;
+      });
+      // ntk's `truncated`: whether a line cap dropped anything. An eliding
+      // layout does not say — its last line is cut to the mark, and where
+      // the cut fell is the native's — so a caller asks the line ends.
+      if (!elides) {
+        const last = layout.lines[layout.lines.length - 1];
+        layout.truncated =
+          Number.isFinite(maxLines) &&
+          !!last &&
+          /\S/.test(text.slice(last.end));
+      }
+    }
     this._layouts.set(signature, layout);
     if (this._layouts.size > 64) {
       this._layouts.delete(this._layouts.keys().next().value);
