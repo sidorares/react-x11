@@ -156,11 +156,11 @@ describe('win32 fonts: what is asked of DirectWrite once', () => {
 });
 
 describe('win32 fonts: the layout it answers', () => {
-  it('derives a per-line descent, which half-leading needs', () => {
+  it("derives a per-line descent, which a line's ink is measured with", () => {
     const layout = manager().layout('hello', {});
-    // DirectWrite reports a baseline and a height per line; nodes/text.js
-    // subtracts `baseline + descent` from the height to recreate CSS
-    // half-leading, so the descent has to be there.
+    // DirectWrite reports a baseline and a height per line; a field and the
+    // edit menu measure a line's ink as its ascent plus its descent, so the
+    // descent has to be there.
     assert.deepEqual(
       layout.lines.map((l) => l.descent),
       [4],

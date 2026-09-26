@@ -59,14 +59,10 @@ class BadgeNode extends Node {
     const layout = fonts.layout(String(this.props.label ?? ''), style, {
       maxWidth: box.width || undefined,
     });
-    // `<text>` centres the line box in the same rectangle. Matching that is
-    // what makes the two renders comparable pixel for pixel; the styling
-    // and the box are what the test is actually about.
-    const last = layout.lines?.[layout.lines.length - 1];
-    const halfLeading = last
-      ? Math.max(0, (layout.height - (last.baseline + last.descent)) / 2)
-      : 0;
-    layout.draw(ctx, box.x, box.y + halfLeading);
+    // `<text>` draws its layout at the top of the same rectangle. Matching
+    // that is what makes the two renders comparable pixel for pixel; the
+    // styling and the box are what the test is actually about.
+    layout.draw(ctx, box.x, box.y);
   }
 }
 

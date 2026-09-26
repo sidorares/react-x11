@@ -618,15 +618,14 @@ export class TextInputNode extends Node {
    * it fills. Centred on the **capitals**, not on the line box and not on
    * the ink.
    *
-   * The layout box carries the line's leading entirely below the glyphs, so
-   * centring that pushes the text visually up (see `halfLeading`). Centring
-   * ascent + descent — what this did — fixes the leading but not the
-   * asymmetry underneath it: a font's ascent clears its capitals by
-   * `ascent - capHeight`, which is not its descent, so a single line of
-   * text sits off-centre by a number that belongs to the typeface. At 14px
-   * that is 0.7px of extra space above the capitals in SF NS and 2.5px the
-   * other way in Helvetica — visible in a field, where there is one short
-   * line and a border close on both sides to measure it against.
+   * Centring the line box centres its ascent + descent, because the engine
+   * splits the leading evenly round them, and that is not enough: a font's
+   * ascent clears its capitals by `ascent - capHeight`, which is not its
+   * descent, so a single line of text sits off-centre by a number that
+   * belongs to the typeface. At 14px that is 0.7px of extra space above the
+   * capitals in SF NS and 2.5px the other way in Helvetica — visible in a
+   * field, where there is one short line and a border close on both sides
+   * to measure it against.
    *
    * So: put the baseline where the space above the capitals equals the
    * space under it. A `<text>` says the same thing as `textBoxTrim`, but a

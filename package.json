@@ -108,7 +108,7 @@
     "yoga-layout": "^3.2.1"
   },
   "optionalDependencies": {
-    "@windowkit/appkit": "^0.14.0",
+    "@windowkit/appkit": "^0.15.0",
     "@windowkit/wayland": "^3.1.1",
     "@windowkit/win32": "^0.0.5",
     "dbus-native": "^0.15.1",

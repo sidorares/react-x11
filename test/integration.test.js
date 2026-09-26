@@ -594,11 +594,11 @@ test('centered text is vertically balanced (half-leading)', async () => {
       'centered text ink',
     );
 
-    // TextLayout packs the line's leading below the glyphs; painting must
-    // redistribute it (CSS half-leading), or centered labels ride high.
+    // The engine splits the line's leading above and below the glyphs (CSS
+    // half-leading); with all of it under them, centred labels ride high.
     // Cap-only text sits (ascent - capHeight - descent) / 2 above the true
-    // center (KaTeX Main: ~1.3px at 48px); without the half-leading shift
-    // it would be ~3.6px off.
+    // center (KaTeX Main: ~1.3px at 48px). test/text-line-box.test.js holds
+    // the same at line heights where the leading is most of the box.
     const image = await readPixels(ctx, 200, 100);
     let inkTop = null;
     let inkBottom = null;

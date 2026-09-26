@@ -486,9 +486,9 @@ export class Win32FontManager {
       );
     }
 
-    // `descent` is what halfLeading() in nodes/text.js subtracts to recreate
-    // CSS half-leading, and DirectWrite reports a baseline and a height per
-    // line rather than a descent.
+    // Every engine answers a descent per line — a field and the edit menu
+    // measure a line's ink as its ascent plus its descent — and DirectWrite
+    // reports a baseline and a height per line rather than a descent.
     const lines = (raw.lines ?? []).map((line) => ({
       ...line,
       descent: Math.max(0, line.height - line.baseline),
