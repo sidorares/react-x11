@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.22.8](https://github.com/sidorares/react-x11/compare/v2.22.7...v2.22.8) (2026-09-26)
+
+
+### Bug Fixes
+
+* **cocoa:** a laid-out run hangs off the span it came from, as ntk's does ([#710](https://github.com/sidorares/react-x11/issues/710)) ([4bb5f5a](https://github.com/sidorares/react-x11/commit/4bb5f5a04d58373277c1ef5caccee1a2835eeb1d))
+* **text:** the engine splits a line's leading, and &lt;text&gt; no longer moves it again ([#709](https://github.com/sidorares/react-x11/issues/709)) ([d9b8dae](https://github.com/sidorares/react-x11/commit/d9b8dae0378ad57174818f0b460a435ca708a7f0))
+
 ## [2.22.7](https://github.com/sidorares/react-x11/compare/v2.22.6...v2.22.7) (2026-09-25)
 
 
