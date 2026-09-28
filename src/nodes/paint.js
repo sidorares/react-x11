@@ -318,13 +318,22 @@ export class NodePaint {
     return false;
   }
 
-  _paintChildren(ctx) {
+  /**
+   * The children, in paint order — or those up to and including `upTo`: an
+   * X11 pane over a `<glarea>` holds its own child and what is under it,
+   * never what is over it (src/gloverlay.js, `_paintPane`).
+   */
+  _paintChildren(ctx, upTo = null) {
     // A retained presenter replays a node's `paint` into a visual of that
     // node's own — its children have visuals of their own, so it sets this
     // for the duration of the call (src/cocoa/presenter.js, `paintSelf`).
     // Never set on the X11 or surface paths, where a frame is one walk.
     if (this._ownPaintOnly) return;
-    const order = this.paintOrder();
+    let order = this.paintOrder();
+    if (upTo !== null) {
+      const at = order.indexOf(upTo);
+      if (at !== -1) order = order.slice(0, at + 1);
+    }
     if (order.length === 0) return;
     if (!this.clipsChildren()) {
       this._paintChildList(ctx, order);

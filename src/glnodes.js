@@ -38,6 +38,10 @@ function recordGlxFailure(app, err) {
   if (app && err && !glxFailures.has(app)) glxFailures.set(app, err);
 }
 
+// ChangeWindowAttributes' backing-store value: the server keeps what the
+// window shows while it is mapped (`_create`)
+const BACKING_STORE_WHEN_MAPPED = 1;
+
 // Apps already told that a <glarea>'s children are not drawn on their
 // display. Once per app, as for a <foreign> that cannot embed: the answer
 // belongs to the server, so the next surface to find out carries no news.
@@ -301,6 +305,19 @@ export class GlAreaNode extends Node {
     this.rect = rect;
     this.config = config;
     wnd._reactX11Node = this;
+    // The server keeps what the surface shows while it is mapped (X backing
+    // store), so a pane over it that moves away — a card dragged across a
+    // graph drawn in GL — uncovers the last frame at once. Without it the
+    // uncovered pixels were the pane's until the surface drew again: an
+    // Expose, a frame requested, and the next vblank, which is a trail of
+    // the card behind it on every step. ntk forwards no backing-store
+    // attribute (its `backingStore` is its own double buffer), and a
+    // backend with no X connection has none to set.
+    if (typeof this.app.X?.ChangeWindowAttributes === 'function') {
+      this.app.X.ChangeWindowAttributes(wnd.id, {
+        backingStore: BACKING_STORE_WHEN_MAPPED,
+      });
+    }
     // Above everything 2D in the owning window on both backends, and above
     // every surface made before this one: X stacks a new child window over
     // its siblings, and Core Animation a layer added later over one at the
@@ -328,6 +345,15 @@ export class GlAreaNode extends Node {
     this.gl?.ready?.catch((err) => {
       if (!this.destroyed) this._failed(err, { reported: true });
     });
+    // …and a context that fails after it was ready — a swap the driver
+    // refused mid-life — says so here (ntk >= 8.12.11). Before ntk said so,
+    // the surface kept its last frame, or nothing, with no word to anyone:
+    // on NVIDIA every resize did that (sidorares/ntk#399).
+    if (this.gl && 'onError' in this.gl) {
+      this.gl.onError = (err) => {
+        if (!this.destroyed) this._failed(err);
+      };
+    }
     wnd.on?.('expose', () => this.requestFrame());
     wnd.map?.();
     // made on top of its siblings — over the panes of children that were
