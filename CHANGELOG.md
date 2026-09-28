@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.22.9](https://github.com/sidorares/react-x11/compare/v2.22.8...v2.22.9) (2026-09-28)
+
+
+### Bug Fixes
+
+* **glarea:** an X11 pane is cut to what its child paints ([#717](https://github.com/sidorares/react-x11/issues/717)) ([bd16512](https://github.com/sidorares/react-x11/commit/bd16512d6904c4aec2cc0b6b238ddbef913343d8))
+* **glarea:** X11 panes are their children's, and move with their pixels ([#715](https://github.com/sidorares/react-x11/issues/715)) ([c3e6d0e](https://github.com/sidorares/react-x11/commit/c3e6d0e29230351a00cba273f3142b0c20f42b44))
+
 ## [2.22.8](https://github.com/sidorares/react-x11/compare/v2.22.7...v2.22.8) (2026-09-26)
 
 
