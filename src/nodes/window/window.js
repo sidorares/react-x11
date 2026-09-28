@@ -847,14 +847,23 @@ export class WindowNode extends Scrollable(Node) {
     }
     if (geometryChanged) {
       if (typeof wnd.setState === 'function') {
+        // Only what this commit changed, as the branch below does. ntk sends
+        // whatever differs from what the server last reported, and under a
+        // reparenting window manager that is not what was asked for: a
+        // position comes back in the frame's coordinates, and a size is the
+        // one the user dragged. Handed the rest anyway, a resize re-sent the
+        // position — the window jumped from where the manager had placed it
+        // (or the user had moved it) to where the app first asked — and a move
+        // re-sent a size the user had changed.
         wnd.setState({
-          x: anchored ? undefined : geo.x,
-          y: anchored ? undefined : geo.y,
+          x: movedByProps ? geo.x : undefined,
+          y: movedByProps ? geo.y : undefined,
           // `'auto'` is not a geometry ntk can be given: an axis the app has
           // handed back is left alone here and resolved by `_refit()` on the
           // layout this same commit is about to schedule.
-          width: isAutoSize(geo.width) ? undefined : geo.width,
-          height: isAutoSize(geo.height) ? undefined : geo.height,
+          width: sizeChanged && !isAutoSize(geo.width) ? geo.width : undefined,
+          height:
+            sizeChanged && !isAutoSize(geo.height) ? geo.height : undefined,
         });
       } else {
         // A window with no `setState` — Cocoa's — is resized whole or not at
