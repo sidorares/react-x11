@@ -28,6 +28,7 @@ import { useGlobalMenu } from '../globalmenu.js';
 import { acceleratedItem } from '../accelerators.js';
 import { useAcceleratorEntry } from '../acceleratorhooks.js';
 import { useTopLevelWindow } from '../windowid.js';
+import { MENU_TEXT_WEIGHT } from '../faces.js';
 import {
   ariaKeyShortcuts,
   checkShortcut,
@@ -212,8 +213,10 @@ const MENU_GUTTER = MENU_ICON_SIZE + MENU_ICON_GAP;
 //
 // Every label measured for a popup's width is measured at this weight too
 // (`measureLabel` takes it), since a menu sized in regular for rows drawn in
-// medium is a menu whose own labels run into its shortcuts.
-const MENU_TEXT_WEIGHT = 500;
+// medium is a menu whose own labels run into its shortcuts. The weight,
+// `MENU_TEXT_WEIGHT`, is in ../faces.js, which a root warms as it connects:
+// a face outside a family's four is otherwise matched in the first frame
+// that sets it.
 
 const MENU_SHORTCUT_GAP = 24;
 // menus size to their content rather than scrolling, so a page is a fixed
