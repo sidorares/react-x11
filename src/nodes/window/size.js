@@ -148,11 +148,12 @@ export class WindowSize {
    * marks the first one left.
    */
   _collectFloorStale() {
+    this._floorsCollectOwed = false;
     this._sweepLayoutHosts();
     const found = { width: false, height: false };
     this._floorsStale.clear();
     // Decided afresh on every call rather than once a frame: something
-    // between the two calls a frame makes — a size query resolving — can
+    // between the two calls a frame can make — a size query resolving — can
     // turn a scoped change into one that is not, and the wider collection
     // is the one that is always right.
     const scope = this._floorsScope();
@@ -202,6 +203,21 @@ export class WindowSize {
     this._floorsStale.add(this);
     collectFloorStale(this, this._floorsStale, found, !this._floorsSwept);
     return found;
+  }
+
+  /**
+   * The collection a flush owes (`_floorsCollectOwed`), taken just before
+   * the first pass that would clear what it reads: a natural-size
+   * measurement (`_refit`), or a layout that measures no floors. The floors'
+   * own measurement collects anyway (`_applyContentFloors`), and nothing in
+   * a flush before it lays anything out — a size query that resolves only
+   * restyles, which adds to yoga's record — so that frame collects once.
+   * Collecting on the way in as well read every block of a long column
+   * twice: 1,704 of them, a millisecond a frame, on an edit to a 600 KB
+   * document.
+   */
+  _collectOwedFloorStale() {
+    if (this._floorsCollectOwed) this._collectFloorStale();
   }
 
   /**
@@ -485,6 +501,7 @@ export class WindowSize {
 
   /** The real layout pass: the tree at the window's size, on the pixel grid. */
   _layoutRoot(width, height) {
+    this._collectOwedFloorStale();
     this._sweepLayoutHosts();
     this._layoutPasses += 1;
     this.yoga.setWidth(width);
@@ -915,6 +932,8 @@ export class WindowSize {
       isContentBound(props[key]),
     );
     if (!tracking && !bounded) return;
+    // the natural size is a pass over the tree
+    this._collectOwedFloorStale();
     const asked = this._requestedSize;
     const measured = this._measure();
     this._sendSizeHints(props, measured.hints);

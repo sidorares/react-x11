@@ -1106,6 +1106,107 @@ test('a change nobody announced keeps the whole tree’s measurement', async () 
   });
 });
 
+test('a frame collects what changed once, ahead of the first pass', async () => {
+  // A pass clears yoga's record of what changed, so the collection comes
+  // before the first one (`_collectOwedFloorStale`). In a window of a size
+  // of its own, that is the floors' measurement, which collects for itself;
+  // in one that takes its content's width, the natural-size pass ahead of
+  // it, which writes the floors from what the collection marked (#586).
+  await withTestElements(async () => {
+    const blocks = (n) => [
+      ['p', 'a'],
+      ['l', 'b', n],
+      ['box', 'c', 5],
+    ];
+    for (const windowProps of [
+      { width: 120, height: 200 },
+      { width: 'auto', height: 200 },
+    ]) {
+      const { app, root, node } = await mount(
+        docTree({ blocks: blocks(40) }),
+        windowProps,
+      );
+      const events = [];
+      const collect = node._collectFloorStale;
+      node._collectFloorStale = function () {
+        events.push('collect');
+        return collect.call(this);
+      };
+      const pass = node.yoga.calculateLayout;
+      node.yoga.calculateLayout = function (...args) {
+        events.push('pass');
+        return pass.apply(this, args);
+      };
+      await rerender(app, root, docTree({ blocks: blocks(90) }), windowProps);
+      assert.strictEqual(events[0], 'collect', events.join(' '));
+      assert.ok(events.includes('pass'), events.join(' '));
+      if (windowProps.width !== 'auto') {
+        assert.deepStrictEqual(
+          events.filter((e) => e === 'collect'),
+          ['collect'],
+          events.join(' '),
+        );
+      }
+      await root.unmount();
+    }
+  });
+});
+
+test('a block whose margin stops being a length ends the spine it sits in', async () => {
+  // A spine sums its column from the extents its blocks carry, and a margin
+  // that is not a length is one it cannot add (`styleFlags`, read once per
+  // style). A change beside such a block is the whole tree's, from the frame
+  // the block takes it until the frame it gives it up.
+  await withTestElements(async () => {
+    const at = (margin, n) =>
+      box(
+        { overflow: 'scroll', flexGrow: 1 },
+        box(
+          { padding: 6, gap: 4 },
+          h('paragraph', { key: 'a' }),
+          h(
+            'box',
+            { key: 'c', style: { padding: 3, marginBottom: margin } },
+            h('paragraph'),
+          ),
+          h('label', { key: 'l', length: n }),
+        ),
+      );
+    const windowProps = { width: 120, height: 200 };
+    const scoped = await mount(at(5, 40), windowProps);
+    const whole = await mount(at(5, 40), windowProps);
+    // [margin, label, whether the frame is on a spine]
+    const steps = [
+      [5, 60, true],
+      ['10%', 60, null], // the box's own change
+      ['10%', 80, false], // the label beside it
+      ['10%', 20, false],
+      [5, 20, null],
+      [5, 70, true],
+    ];
+    for (const [margin, n, spine] of steps) {
+      const before = scoped.node._layoutPasses;
+      await rerender(scoped.app, scoped.root, at(margin, n), windowProps);
+      if (spine !== null) {
+        assert.strictEqual(
+          scoped.node._layoutPasses - before === 1,
+          spine,
+          `margin ${margin}, label ${n}: on a spine`,
+        );
+      }
+      whole.node._floorsUnscoped = true;
+      await rerender(whole.app, whole.root, at(margin, n), windowProps);
+      assertSameMeasurement(
+        scoped.node,
+        whole.node,
+        `margin ${margin}, label ${n}`,
+      );
+    }
+    await scoped.root.unmount();
+    await whole.root.unmount();
+  });
+});
+
 test('every scoped measurement is the one the whole tree gives', async () => {
   // Two windows, the same frames: one measures what each change is confined
   // to, the other is made to measure the whole tree (`_floorsUnscoped`, the
