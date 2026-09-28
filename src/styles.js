@@ -1995,32 +1995,59 @@ export function applyLayoutDefaults(yogaNode) {
   yogaNode.setFlexShrink(1);
 }
 
+/** Each layout prop's applier, by name — `LAYOUT_APPLIERS` without its
+ *  prototype, so a style key that is not a layout prop finds nothing. */
+const LAYOUT_APPLIER_OF = new Map(Object.entries(LAYOUT_APPLIERS));
+
+const NO_STYLE = Object.freeze({});
+
 /**
  * Apply changed layout props to a yoga node.
+ *
+ * Walks the keys the two styles carry rather than every property yoga
+ * knows: a style names a handful of the fifty-odd, and a property neither
+ * names is `undefined` in both, which is no change. Every applier sets a
+ * field of its own, so the order they run in does not matter. Asking every
+ * name of both styles was most of the cost of a node that mounts — a
+ * virtualized list replaces its rows at input rate.
+ *
  * @returns true if any layout-affecting prop changed
  */
-export function applyLayoutStyle(yogaNode, props, oldProps = {}) {
+export function applyLayoutStyle(yogaNode, props, oldProps = NO_STYLE) {
   let changed = false;
   // A placed node's insets — sticky's thresholds, or whatever a registered
   // position reads them as — are the placement's, never offsets: yoga gets
-  // `undefined` for them, and a node that becomes placed (or stops) has all
-  // six re-sent whether or not they changed. The flip still counts as a
-  // change: the pass it asks for is what places the node.
+  // `undefined` for them, and a node that becomes placed (or stops) has
+  // every inset it names re-sent whether or not it changed.
   const placed = isPlacedPosition(props.position);
   const flipped = placed !== isPlacedPosition(oldProps.position);
-  for (const key of Object.keys(LAYOUT_APPLIERS)) {
+  for (const key in props) {
+    const applier = LAYOUT_APPLIER_OF.get(key);
+    if (applier === undefined) continue;
+    const inset = INSETS.has(key);
     const moved =
       key === 'position'
         ? !samePosition(props.position, oldProps.position)
         : props[key] !== oldProps[key];
-    if (moved || (flipped && INSETS.has(key))) {
-      LAYOUT_APPLIERS[key](
-        yogaNode,
-        placed && INSETS.has(key) ? undefined : props[key],
-      );
-      changed = true;
-    }
+    if (!moved && !(flipped && inset)) continue;
+    applier(yogaNode, placed && inset ? undefined : props[key]);
+    changed = true;
   }
+  // …and the ones the new style dropped, which go back to yoga's default
+  for (const key in oldProps) {
+    if (key in props) continue;
+    const applier = LAYOUT_APPLIER_OF.get(key);
+    if (applier === undefined) continue;
+    const moved =
+      key === 'position'
+        ? !samePosition(undefined, oldProps.position)
+        : oldProps[key] !== undefined;
+    if (!moved && !(flipped && INSETS.has(key))) continue;
+    applier(yogaNode, undefined);
+    changed = true;
+  }
+  // An inset neither style names is unset in yoga already, and a flip is a
+  // change to `position` itself, so it is counted above.
   return changed;
 }
 
