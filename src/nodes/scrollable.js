@@ -55,7 +55,7 @@ function contentReach(node, top) {
     cached !== undefined &&
     node._host === null &&
     node.parent?._host === null &&
-    !node.yoga.hasNewLayout()
+    (!node.yoga.hasNewLayout() || childrenSettled(node, cached))
   ) {
     return cached;
   }
@@ -75,9 +75,33 @@ function contentReach(node, top) {
       bottom = Math.max(bottom, offset.y + inner.bottom);
     }
   }
-  const reach = { left, right, bottom };
+  const reach = { left, right, bottom, children: node.children.length };
   if (!top) node._contentReach = reach;
   return reach;
+}
+
+/**
+ * Whether what `node` holds sits where it did, relative to `node`: the same
+ * children, none of them laid out again. The flag on `node` itself says only
+ * that the pass reached it, and a pass reaches every child of a box it lays
+ * out — a column laid out again for one block that grew flags all of its
+ * blocks, though every one of them holds what it held, where it held it. Each
+ * child's own flag is the witness for that: a pass that moved, resized,
+ * showed, hid or clipped a child laid it out, and one that added or took a
+ * child away laid out its parent, which flags every child left, or changed
+ * the count when none was.
+ *
+ * It saves reading each child's place and size back out of yoga, four
+ * calls a child, to find the answer `node` already has: an edit to a 600 KB
+ * document was 1,704 blocks' worth of them every frame.
+ */
+function childrenSettled(node, cached) {
+  const children = node.children;
+  if (children.length !== cached.children) return false;
+  for (const child of children) {
+    if (child.yoga && child.yoga.hasNewLayout()) return false;
+  }
+  return true;
 }
 
 /**
