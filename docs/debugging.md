@@ -170,6 +170,17 @@ copied where it went and the frame paints the strip it uncovered
 ([extending.md](extending.md#an-element-that-covers-its-box)); with this
 set it is repainted where it was and where it went.
 
+## `REACT_X11_NO_PANE_SHAPE=1`
+
+Leaves every X11 pane over a `<glarea>` the rectangle of its child's reach,
+where by default a pane is cut with the SHAPE extension to what its child
+actually paints ([elements.md](elements.md#glarea)). A rectangle covers the
+GL frame with the surface's `clearColor` wherever the child's reach goes
+past its ink — a `<Flow>` graph's edges stop short of every card and lose
+their arrowheads — so this is for measuring the cut against the rectangle,
+and as first aid if a pane's cut is ever wrong. Read once at startup; it
+answers only to `1`.
+
 ## `REACT_X11_STRICT_TOKENS=1`
 
 Makes an unresolvable `$token` fatal instead of reported.

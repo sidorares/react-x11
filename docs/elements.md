@@ -2172,18 +2172,21 @@ same frame and from the same damage as everything else.
 
 What a pane is depends on the backend, and so does what translucent means:
 
-|                      | Cocoa                                                                                                   | X11                                                                                                                                                                                                    |
-| -------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| a pane               | one transparent layer over the whole surface, above the GL layer                                        | one child window per child, as big as its paint reach, stacked directly above the surface's window in the children's order; where two overlap, the upper pane holds the lower child's pixels too       |
-| translucency         | composited by Core Animation: a translucent fill, an antialiased edge or a shadow blends with the frame | none: a pane is opaque, and whatever a child leaves unpainted inside its reach — a rounded corner, a translucent fill, text with no box behind it — shows the surface's `clearColor`, not the GL frame |
-| between the children | the GL frame                                                                                            | the GL frame                                                                                                                                                                                           |
+|                      | Cocoa                                                                                                   | X11                                                                                                                                                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a pane               | one transparent layer over the whole surface, above the GL layer                                        | one child window per child, as big as its paint reach, stacked directly above the surface's window in the children's order; where two overlap, the upper pane holds the lower child's pixels too                                                            |
+| translucency         | composited by Core Animation: a translucent fill, an antialiased edge or a shadow blends with the frame | partly: a pane is cut with SHAPE to where its child painted half its alpha or more, and the frame shows everywhere else; a pixel inside the cut that is translucent — an antialiased edge, a translucent fill — blends with the `clearColor`, not the frame |
+| between the children | the GL frame                                                                                            | the GL frame                                                                                                                                                                                                                                                |
 
-So on X11 give each child a background, and expect a translucent one to be
-tinted by the `clearColor` rather than to show the scene. X11 cannot do
-better without a compositor, and a compositor would not help: it blends
-top-level windows, not the children inside one. A window per child, rather
-than one window cut to shape with the SHAPE extension, keeps each pane as
-small as what it holds and works on servers without SHAPE.
+So on X11 expect a translucent fill to be tinted by the `clearColor`
+rather than to show the scene: the frame shows around a child, not through
+it. X11 cannot do better without a compositor, and a compositor would not
+help: it blends top-level windows, not the children inside one. The cut
+needs the SHAPE extension, which every real X server has; without it — the
+in-process server in `react-x11/test` — a pane is the rectangle of its
+child's reach, and whatever the child leaves unpainted there shows the
+`clearColor`. A window per child keeps each pane as small as what it
+holds.
 
 A pane is its child's, and holds that child and what is under it, never
 what is over it. So a child that moves — a card dragged across a graph —
@@ -2193,6 +2196,7 @@ place and the pixels that go there in one batch of requests, and the
 server keeps what each pane and the surface show while they are mapped
 (backing store), so what a moving pane uncovers is back at once rather than
 after an Expose and a repaint.
+
 `useSupports('glOverlay')` says whether a connection draws a surface's
 children at all. Both backends do, on every display but one.
 

@@ -47,11 +47,15 @@
 //   frame another pane moves off is put back by the server at once, not
 //   after an Expose and a repaint.
 //
-//   A window per child rather than one window shaped by the SHAPE
-//   extension, for two reasons: SHAPE is near-universal but not universal —
-//   node-x11's in-process server, where this is tested, has none — and a
-//   window as big as the surface would keep a backing pixmap the size of a
-//   map to show a legend in its corner.
+//   Each pane is cut with the SHAPE extension to what its child painted
+//   (`X11PaneWindow.cutToInk`), so the frame shows around a child and not
+//   only between the children's reaches — a card's handles and rounded
+//   corners, not the rectangle its canvas reaches. A window per child
+//   rather than one window over the surface cut to all of them keeps each
+//   pixmap as small as what it holds: one the size of the surface would
+//   hold a map's worth of pixels to show a legend in its corner. Where the
+//   server has no SHAPE — node-x11's in-process one — a pane is the
+//   rectangle of its child's reach, as it always was.
 // - **XQuartz: no, and not opaquely either.** Every GL surface there, the
 //   direct ones Apple-DRI exports and indirect GLX's alike, is a surface of
 //   the macOS window server, composited above everything the X server draws
@@ -108,6 +112,10 @@ const MOVE_BLIT_MAX_REPAINT = 0.75;
 // way: every path that moves retained pixels instead of repainting them is
 // one variable away from the plain repaint (docs/debugging.md).
 const NO_BLIT = process.env.REACT_X11_NO_SCROLL_BLIT === '1';
+
+// …and the one for cutting an X11 pane to its ink (`X11PaneWindow.cutToInk`):
+// with it set, every pane is the rectangle of its child's reach
+const NO_PANE_SHAPE = process.env.REACT_X11_NO_PANE_SHAPE === '1';
 
 // Connections on which nothing can be drawn over a GL surface, each with the
 // reason (`beginGlOverlay`), and the probe that finds out, once per app.
@@ -272,6 +280,18 @@ const PIXMAP_STEP = 64;
  * its background is None, so an exposure it does get is filled from the
  * pixmap with nothing flashed first; and a resize keeps what it shows at
  * the corner until the copy lands.
+ *
+ * **Cut to its ink** where the server has SHAPE (`cutToInk`). A pane is a
+ * rectangle as big as its child's reach, and a child's reach is more than
+ * it paints: a card's canvas reaches past the card for its handles, a
+ * rounded box leaves its corners, a shadow its falloff. As a rectangle, all
+ * of that covered the GL frame with the pane's ground — a graph's edges
+ * stopped short of every card and lost their arrowheads, which the 2D
+ * renderer of the same graph drew. Cut, the children are painted on a
+ * transparent ground, and the window's bounding shape is where they left
+ * half their alpha or more: the frame shows everywhere they did not paint.
+ * What stays is the X11 limit on translucency — a pixel inside the shape
+ * blends with the ground, not with the frame.
  */
 export class X11PaneWindow {
   /** Whether the app is one this can be made on: an ntk connection. */
@@ -283,7 +303,11 @@ export class X11PaneWindow {
     );
   }
 
-  constructor(app, owner, rect) {
+  /**
+   * @param shape the SHAPE extension to cut the pane to its ink with, or
+   *   null for a rectangle (`cutToInk` can still cut it later)
+   */
+  constructor(app, owner, rect, shape = null) {
     this.app = app;
     this.X = app.X;
     // where the window is on the server, and where the next present puts it
@@ -295,6 +319,10 @@ export class X11PaneWindow {
     this._painted = false;
     // pane-local rects painted since the last present
     this._owed = [];
+    // cut to its ink: the SHAPE extension, and the ground its alpha is laid
+    // over, straight floats (`_paintPane` sets it)
+    this._shape = null;
+    this.ground = [0, 0, 0];
     this.window = app.createWindow({
       parent: owner,
       x: rect.x,
@@ -314,15 +342,36 @@ export class X11PaneWindow {
     });
     this._gc = this.X.AllocID();
     this.X.CreateGC(this._gc, this.id, { graphicsExposures: 0 });
-    this._pixmap = null;
+    // the pixmaps: `buffer`, what the window is copied from; cut to its
+    // ink, `argb`, what the children paint in, and `mask`, a bit a pixel
+    // of where they did
+    this._store = null;
     this._ctx = null;
-    this._grow(rect.width, rect.height);
+    if (!this.cutToInk(shape)) this._grow(rect.width, rect.height);
     // An exposure the server could not fill from its own copy — one with no
     // backing store, or one that let it go — is filled from the pixmap.
     // Adding the listener is what selects Exposure (ntk).
     this.window.on('expose', (ev) => {
       if (this._painted) this._copy([ev]);
     });
+  }
+
+  /**
+   * Paint on a transparent ground from now on, and show only where the
+   * children painted: the window's bounding shape follows their alpha. True
+   * when it changed — the pane's pixels are gone, and it is painted whole
+   * next — and false where it cannot: no SHAPE, no 1-bit picture format,
+   * or already cut.
+   */
+  cutToInk(shape) {
+    if (NO_PANE_SHAPE || this._shape || !shape) return false;
+    const R = this.app.display.Render;
+    if (!R?.mono1 || !R.rgba32) return false;
+    this._shape = shape;
+    this._free(this._store);
+    this._store = null;
+    this._grow(this.rect.width, this.rect.height);
+    return true;
   }
 
   /** What a pane asks of its window's event selection: none of the pointer. */
@@ -336,6 +385,11 @@ export class X11PaneWindow {
     return true;
   }
 
+  /** Painted on a transparent ground, which the pane lays over `ground`. */
+  get paintsAlpha() {
+    return this._shape !== null;
+  }
+
   /** Whether a present is owed without a paint: a place to take, or pixels
    *  a blit moved. */
   get presentOwed() {
@@ -344,32 +398,89 @@ export class X11PaneWindow {
 
   getContext(name) {
     if (name !== '2d') return null;
-    return (this._ctx ??= this._pixmap.getContext('2d'));
+    const store = this._store;
+    return (this._ctx ??= (store.argb ?? store.buffer).getContext('2d'));
   }
 
-  /** A pixmap at least `width`×`height`, grown in steps and never shrunk. */
+  /** The pixmaps, at least `width`×`height`, grown in steps and never
+   *  shrunk. */
   _grow(width, height) {
-    const cur = this._pixmap;
+    const cur = this._store;
     if (cur && cur.width >= width && cur.height >= height) return;
     const up = (v) =>
       Math.max(PIXMAP_STEP, Math.ceil(v / PIXMAP_STEP) * PIXMAP_STEP);
-    const next = this.app.createPixmap({
-      parent: this.window,
-      width: up(Math.max(width, cur?.width ?? 0)),
-      height: up(Math.max(height, cur?.height ?? 0)),
-      depth: this.depth,
-      // the window's pixels, read through the window's visual
-      visual: this.window.visualId,
-    });
-    cur?.destroy();
-    this._pixmap = next;
+    const w = up(Math.max(width, cur?.width ?? 0));
+    const h = up(Math.max(height, cur?.height ?? 0));
+    const app = this.app;
+    const X = this.X;
+    const pixmap = (depth, visual) =>
+      app.createPixmap({
+        parent: this.window,
+        width: w,
+        height: h,
+        depth,
+        visual,
+      });
+    // the window's pixels, read through the window's visual
+    const store = {
+      width: w,
+      height: h,
+      buffer: pixmap(this.depth, this.window.visualId),
+    };
+    if (this._shape) {
+      const R = app.display.Render;
+      const picture = (drawable, format) => {
+        const id = X.AllocID();
+        R.CreatePicture(id, drawable.id, format);
+        return id;
+      };
+      store.bufferPicture = picture(
+        store.buffer,
+        this.depth === 32 ? R.rgba32 : R.rgb24,
+      );
+      store.argb = pixmap(32);
+      store.argbPicture = picture(store.argb, R.rgba32);
+      store.argbGc = X.AllocID();
+      X.CreateGC(store.argbGc, store.argb.id, { graphicsExposures: 0 });
+      store.mask = pixmap(1);
+      store.maskPicture = picture(store.mask, R.mono1);
+      // nothing painted yet is nothing shown
+      R.FillRectangles(
+        R.PictOp.Src,
+        store.maskPicture,
+        [0, 0, 0, 0],
+        [0, 0, w, h],
+      );
+    }
+    this._free(cur);
+    this._store = store;
     this._ctx = null;
-    // what the old pixmap held is gone: the pane is painted whole next
+    // what the old pixmaps held is gone: the pane is painted whole next
     this._painted = false;
   }
 
-  /** Where the next present puts the window. A new size may be a new
-   *  pixmap, which the pane paints whole anyway (`Pane.place`). */
+  _free(store) {
+    if (!store) return;
+    const R = this.app.display.Render;
+    try {
+      for (const id of [
+        store.bufferPicture,
+        store.argbPicture,
+        store.maskPicture,
+      ]) {
+        if (id) R.FreePicture(id);
+      }
+      if (store.argbGc) this.X.FreeGC(store.argbGc);
+    } catch {
+      // the connection is closing, and takes them with it
+    }
+    store.buffer.destroy();
+    store.argb?.destroy();
+    store.mask?.destroy();
+  }
+
+  /** Where the next present puts the window. A new size may be new
+   *  pixmaps, which the pane paints whole anyway (`Pane.place`). */
   setState(rect) {
     this._next = { ...rect };
     this._grow(rect.width, rect.height);
@@ -381,10 +492,20 @@ export class X11PaneWindow {
     this._painted = true;
   }
 
+  /** `rect` in whole pixels, cut to the pane's size — or null. */
+  _clamp(rect) {
+    const { width, height } = this._next ?? this.rect;
+    const x0 = Math.max(0, Math.floor(rect.x));
+    const y0 = Math.max(0, Math.floor(rect.y));
+    const x1 = Math.min(width, Math.ceil(rect.x + rect.width));
+    const y1 = Math.min(height, Math.ceil(rect.y + rect.height));
+    return x1 > x0 && y1 > y0 ? { x0, y0, x1, y1 } : null;
+  }
+
   /**
-   * `Window.scrollRegion`'s contract, on the pixmap: the band of `rect`
-   * (pane-local) that survives the shift moves, and all of `rect` is owed
-   * to the window at the next present.
+   * `Window.scrollRegion`'s contract, on the pixmap the children are
+   * painted in: the band of `rect` (pane-local) that survives the shift
+   * moves, and all of `rect` is owed to the window at the next present.
    */
   scrollRegion(rect, dx, dy) {
     if (!this._painted) return false;
@@ -395,21 +516,20 @@ export class X11PaneWindow {
     ) {
       return false;
     }
-    const { width, height } = this._next ?? this.rect;
-    const x0 = Math.max(0, Math.floor(rect.x));
-    const y0 = Math.max(0, Math.floor(rect.y));
-    const x1 = Math.min(width, Math.ceil(rect.x + rect.width));
-    const y1 = Math.min(height, Math.ceil(rect.y + rect.height));
+    const r = this._clamp(rect);
+    if (!r) return false;
+    const { x0, y0, x1, y1 } = r;
     const dstX0 = Math.max(x0, x0 + dx);
     const dstY0 = Math.max(y0, y0 + dy);
     const dstX1 = Math.min(x1, x1 + dx);
     const dstY1 = Math.min(y1, y1 + dy);
     if (dstX1 <= dstX0 || dstY1 <= dstY0) return false;
-    const id = this._pixmap.id;
+    const store = this._store;
+    const target = store.argb ?? store.buffer;
     this.X.CopyArea(
-      id,
-      id,
-      this._gc,
+      target.id,
+      target.id,
+      store.argbGc ?? this._gc,
       dstX0 - dx,
       dstY0 - dy,
       dstX0,
@@ -422,9 +542,13 @@ export class X11PaneWindow {
   }
 
   /**
-   * Show what was painted, where it goes: the ConfigureWindow of a new place,
-   * the map of a pane shown for the first time, and the copies of what was
-   * painted since, back to back — one batch the server applies together.
+   * Show what was painted, where it goes: the ConfigureWindow of a new
+   * place; where the pane is cut to its ink, the painted rects laid over the
+   * ground and their alpha into the mask, and the shape set from it; the
+   * map of a pane shown for the first time; and the copies of what was
+   * painted since — back to back, one batch the server applies together.
+   * The shape goes before the copies: a pixel it takes in shows what was
+   * under it, never the pane's old one, until its copy lands.
    */
   present() {
     const X = this.X;
@@ -440,16 +564,77 @@ export class X11PaneWindow {
       if (Object.keys(change).length !== 0) X.ConfigureWindow(this.id, change);
     }
     if (!this._painted) return;
+    const owed = [];
+    for (const rect of this._owed) {
+      const r = this._clamp(rect);
+      if (r) owed.push(r);
+    }
+    this._owed = [];
+    const store = this._store;
+    if (this._shape && owed.length !== 0) {
+      const R = this.app.display.Render;
+      const [r, g, b] = this.ground;
+      for (const { x0, y0, x1, y1 } of owed) {
+        const w = x1 - x0;
+        const h = y1 - y0;
+        R.FillRectangles(
+          R.PictOp.Src,
+          store.bufferPicture,
+          [r, g, b, 1],
+          [x0, y0, w, h],
+        );
+        R.Composite(
+          R.PictOp.Over,
+          store.argbPicture,
+          0,
+          store.bufferPicture,
+          x0,
+          y0,
+          0,
+          0,
+          x0,
+          y0,
+          w,
+          h,
+        );
+        R.Composite(
+          R.PictOp.Src,
+          store.argbPicture,
+          0,
+          store.maskPicture,
+          x0,
+          y0,
+          0,
+          0,
+          x0,
+          y0,
+          w,
+          h,
+        );
+      }
+      const S = this._shape;
+      S.Mask(S.Op.Set, S.Kind.Bounding, this.id, 0, 0, store.mask.id);
+    }
     if (this._shown && !this._mapped) {
       X.MapWindow(this.id);
       this._mapped = true;
     }
-    const owed = this._owed;
-    this._owed = [];
-    this._copy(owed);
+    for (const { x0, y0, x1, y1 } of owed) {
+      X.CopyArea(
+        store.buffer.id,
+        this.id,
+        this._gc,
+        x0,
+        y0,
+        x0,
+        y0,
+        x1 - x0,
+        y1 - y0,
+      );
+    }
   }
 
-  /** The pixmap's pixels at `rects` (pane-local), onto the window. */
+  /** The buffer's pixels at `rects` (pane-local), onto the window. */
   _copy(rects) {
     const { width, height } = this.rect;
     for (const r of rects) {
@@ -459,7 +644,7 @@ export class X11PaneWindow {
       const y1 = Math.min(height, Math.ceil(r.y + r.height));
       if (x1 <= x0 || y1 <= y0) continue;
       this.X.CopyArea(
-        this._pixmap.id,
+        this._store.buffer.id,
         this.id,
         this._gc,
         x0,
@@ -493,8 +678,8 @@ export class X11PaneWindow {
 
   destroy() {
     this.window.destroy?.();
-    this._pixmap?.destroy();
-    this._pixmap = null;
+    this._free(this._store);
+    this._store = null;
     this._ctx = null;
     try {
       this.X.FreeGC(this._gc);
@@ -511,12 +696,45 @@ export class X11PaneWindow {
  * the pane's own last frame rather than show anything under it.
  */
 function groundOf(props) {
+  const [r, g, b] = groundRgb(props);
+  const byte = (c) => Math.round(c * 255);
+  return `rgb(${byte(r)}, ${byte(g)}, ${byte(b)})`;
+}
+
+/** `groundOf` as straight [r, g, b] floats, for a pane that lays its
+ * children over it itself (`X11PaneWindow.present`). */
+function groundRgb(props) {
   const value = props.clearColor ?? 'black';
   const [r, g, b] = Array.isArray(value)
     ? value
     : (cssColorStraight(value) ?? [0, 0, 0, 1]);
-  const byte = (c) => Math.round(Math.max(0, Math.min(1, c)) * 255);
-  return `rgb(${byte(r)}, ${byte(g)}, ${byte(b)})`;
+  const clamp = (c) => Math.max(0, Math.min(1, c));
+  return [clamp(r), clamp(g), clamp(b)];
+}
+
+/**
+ * The SHAPE extension of an app's connection, asked once: resolves to it,
+ * or to null where the server has none — node-x11's in-process server, for
+ * one. Asked by the first overlay that makes X11 panes rather than at
+ * startup, so an app with no `<glarea>` children never asks.
+ */
+const shapeQueries = new WeakMap();
+function askShape(app) {
+  let pending = shapeQueries.get(app);
+  if (!pending) {
+    pending = new Promise((resolve) => {
+      try {
+        app.X.require('shape', (err, ext) =>
+          resolve(err ? null : (ext ?? null)),
+        );
+      } catch {
+        // a connection that cannot ask has none to give
+        resolve(null);
+      }
+    });
+    shapeQueries.set(app, pending);
+  }
+  return pending;
 }
 
 /**
@@ -654,6 +872,19 @@ export class GlOverlay {
     this.panes = [];
     // X11: each child's pane, kept by the child for as long as it has one
     this.byNode = new Map();
+    // X11: the SHAPE extension the panes are cut to their ink with — null
+    // until the server has answered, and for good where it has none
+    this.shape = null;
+    if (!this.composited && X11PaneWindow.usable(this.app)) {
+      askShape(this.app).then((shape) => {
+        if (!shape || this.destroyed) return;
+        this.shape = shape;
+        // panes made before the answer: cut now, painted whole next frame
+        for (const pane of this.panes) {
+          if (pane.wnd.cutToInk?.(shape)) this._lost(pane);
+        }
+      });
+    }
     // the children this frame's layout moved and nothing else, reported
     // rather than claimed (`GlAreaNode._absolutizeChild`) and settled after
     // the panes are (`settleMoves`)
@@ -775,7 +1006,7 @@ export class GlOverlay {
     else if (X11PaneWindow.usable(this.app)) {
       // a child window and its own double buffer, selecting nothing but the
       // exposures a pixmap answers — the pointer is the tree's
-      wnd = new X11PaneWindow(this.app, owner, rect);
+      wnd = new X11PaneWindow(this.app, owner, rect, this.shape);
     } else {
       // an app with no X connection to speak for itself — the headless mock
       // — makes its panes as plain windows
@@ -1071,8 +1302,12 @@ export class GlOverlay {
     const root = area.root;
     if (!root) return;
     // an opaque pane is filled with what the surface starts its frames from;
-    // a composited one is cleared, and shows the frame itself
-    const ground = pane.transparent ? null : groundOf(area.props);
+    // a composited one is cleared, and shows the frame itself; and one cut
+    // to its ink is cleared too, and lays the ground under what the children
+    // painted itself, where the frame is not shown (`X11PaneWindow`)
+    const alpha = pane.transparent || pane.wnd.paintsAlpha === true;
+    const ground = alpha ? null : groundOf(area.props);
+    if (pane.wnd.paintsAlpha) pane.wnd.ground = groundRgb(area.props);
     // one pass, drawn by a context in window coordinates
     const paintPass = (ctx, pass) => {
       ctx.save();
@@ -1134,6 +1369,7 @@ export class GlOverlay {
   }
 
   destroy() {
+    this.destroyed = true;
     for (const pane of this.panes) pane.destroy();
     this.panes = [];
     this.byNode.clear();

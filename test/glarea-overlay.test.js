@@ -27,8 +27,48 @@ const POINTER_INPUT =
   x11.eventMask.ButtonRelease |
   x11.eventMask.PointerMotion;
 
-async function createGlApp({ indirectContexts = true, appleDri = false } = {}) {
+/**
+ * A SHAPE extension for the in-process server, which has none: `Mask`
+ * recorded as the window's bounding shape — the bitmap read when the request
+ * arrives, as a real server reads it — and nothing else. Enough to see what
+ * a pane was cut to (src/gloverlay.js, `X11PaneWindow.cutToInk`).
+ */
+function shapeExtension(shapes) {
+  return {
+    handleRequest(server, client, minor, body) {
+      if (minor !== 2) return; // Mask; the rest are nothing core sends
+      const window = body.readUInt32LE(4);
+      const x = body.readInt16LE(8);
+      const y = body.readInt16LE(10);
+      const bitmap = body.readUInt32LE(12);
+      if (bitmap === 0) {
+        shapes.delete(window);
+        return;
+      }
+      const { raster } = server.getDrawable(bitmap);
+      const bits = new Uint8Array(raster.width * raster.height);
+      for (let j = 0; j < raster.height; j++) {
+        for (let i = 0; i < raster.width; i++) {
+          bits[j * raster.width + i] = raster.getPixel(i, j) & 1;
+        }
+      }
+      shapes.set(window, {
+        x,
+        y,
+        width: raster.width,
+        inside: (px, py) => bits[(py - y) * raster.width + (px - x)] === 1,
+      });
+    },
+  };
+}
+
+async function createGlApp({
+  indirectContexts = true,
+  appleDri = false,
+  shapes = null,
+} = {}) {
   const server = xserver.createServer({ width: 640, height: 480 });
+  if (shapes) server.registerExtension('SHAPE', shapeExtension(shapes));
   server.registerExtension(
     'GLX',
     createGlxExtension({
@@ -83,6 +123,15 @@ const stacking = (app, wid) =>
       err ? reject(err) : resolve(tree.children),
     ),
   );
+
+/** `[r, g, b]` at a point of a pane's window, as the server shows it. */
+function shownPixel(app, pane, x, y) {
+  return new Promise((resolve, reject) =>
+    app.X.GetImage(2, pane.wnd.id, x, y, 1, 1, 0xffffffff, (err, img) =>
+      err ? reject(err) : resolve([img.data[2], img.data[1], img.data[0]]),
+    ),
+  );
+}
 
 /** `[r, g, b]` at a point of a window's backing store, window-local. */
 function rgbOf(wnd, x, y) {
@@ -139,9 +188,18 @@ const whole = (r) => {
  */
 async function mount(
   build,
-  { indirectContexts = true, panes = null, appleDri = false } = {},
+  {
+    indirectContexts = true,
+    panes = null,
+    appleDri = false,
+    shapes = null,
+  } = {},
 ) {
-  const { app, server } = await createGlApp({ indirectContexts, appleDri });
+  const { app, server } = await createGlApp({
+    indirectContexts,
+    appleDri,
+    shapes,
+  });
   const root = await createRoot({ app });
   const close = async () => {
     await root.unmount();
@@ -436,6 +494,121 @@ test('on X11 a pane is opaque: what a child leaves unpainted is the surface’s 
       await rgbOf(pane.wnd, 20, 20),
       [136, 16, 24],
       'blended with the ground',
+    );
+  } finally {
+    await s.close();
+  }
+});
+
+test('with SHAPE a pane is cut to what its child paints, and the frame shows everywhere else', async () => {
+  // A child's reach is more than it paints — here a card inset in its box,
+  // with a handle out on the box's edge, the way a <Flow> card's canvas
+  // reaches past the card for its handles. As a rectangle the pane covered
+  // the GL frame with its ground over all of it; cut to its ink it covers
+  // the card and the handle, and the frame shows around them.
+  const shapes = new Map();
+  const s = await mount(
+    () =>
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          'glarea',
+          { style: { flexGrow: 1 }, clearColor: '#102030', onDraw: () => {} },
+          h(
+            'box',
+            {
+              style: {
+                position: 'absolute',
+                left: 40,
+                top: 30,
+                width: 120,
+                height: 80,
+              },
+            },
+            h('box', {
+              style: {
+                position: 'absolute',
+                left: 16,
+                top: 16,
+                width: 88,
+                height: 48,
+                borderRadius: 8,
+                backgroundColor: '#ff0000',
+              },
+            }),
+            h('box', {
+              style: {
+                position: 'absolute',
+                left: 10,
+                top: 34,
+                width: 12,
+                height: 12,
+                borderRadius: 6,
+                backgroundColor: '#0000ff',
+              },
+            }),
+          ),
+        ),
+      ),
+    { panes: 1, shapes },
+  );
+  try {
+    const [pane] = s.area()._overlay.panes;
+    await waitFor(() => shapes.has(pane.wnd.id), 'the pane cut to its ink');
+    const shape = shapes.get(pane.wnd.id);
+    // pane-local: the box is the pane, the card 16px in from its corner
+    assert.equal(shape.inside(60, 40), true, 'the card');
+    assert.equal(shape.inside(16 + 44, 16), true, 'the card’s top edge');
+    assert.equal(shape.inside(15, 40), true, 'the handle, off the card');
+    assert.equal(shape.inside(4, 4), false, 'the box around the card');
+    assert.equal(shape.inside(60, 72), false, 'under the card');
+    assert.equal(shape.inside(16, 16), false, 'the card’s rounded corner');
+    // what shows inside the cut is the child over the ground, as before
+    near(await shownPixel(s.app, pane, 60, 40), RED, 'the card, shown');
+    near(await shownPixel(s.app, pane, 15, 40), BLUE, 'the handle, shown');
+  } finally {
+    await s.close();
+  }
+});
+
+test('a pane cut to its ink keeps its cut through a move, and takes a new one when its child changes', async () => {
+  const shapes = new Map();
+  const card = (left, radius) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(
+        'glarea',
+        { style: { flexGrow: 1 }, clearColor: '#102030', onDraw: () => {} },
+        h('box', {
+          style: {
+            position: 'absolute',
+            left,
+            top: 40,
+            width: 60,
+            height: 40,
+            borderRadius: radius,
+            backgroundColor: '#ff0000',
+          },
+        }),
+      ),
+    );
+  const s = await mount(() => card(20, 10), { panes: 1, shapes });
+  try {
+    const [pane] = s.area()._overlay.panes;
+    await waitFor(() => shapes.has(pane.wnd.id), 'the pane cut');
+    const first = shapes.get(pane.wnd.id);
+    assert.equal(first.inside(1, 1), false, 'a rounded corner, cut');
+    // a move carries the window, and its shape with it: no new cut
+    await s.render(card(50, 10));
+    await waitFor(() => pane.rect.x === 50, 'the pane moved');
+    same(shapes.get(pane.wnd.id), first, 'the shape, kept through the move');
+    // a square card is a new ink: a new cut, corner and all
+    await s.render(card(50, 0));
+    await eventually(
+      async () => shapes.get(pane.wnd.id)?.inside(1, 1) === true,
+      'the square corner, taken in',
     );
   } finally {
     await s.close();
