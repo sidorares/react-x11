@@ -108,6 +108,9 @@ export class Node {
     this._floorAtW = undefined;
     this._floorMinW = undefined;
     this._floorMinH = undefined;
+    // this box's top and bottom margins as a column's floor sums them
+    // (`marginsDown`), with the style object they were read under
+    this._marginsDown = null;
     // the width mode yoga last measured this leaf in with no height on
     // offer — the question `_heightForWidth` repeats
     this._floorMeasureMode = null;

@@ -1041,6 +1041,34 @@ test('every spine measurement is the one the whole tree gives', async () => {
   });
 });
 
+test('a margin that changes down a column is summed as it now is', async () => {
+  // A spine sums its column's margins from what it read under the box's
+  // last style (\`marginsDown\`): a box given a new margin has to be read
+  // again. In the middle of the column, where its bottom margin counts —
+  // the last block's trailing margin falls outside the span.
+  await withTestElements(async () => {
+    const at = (n) =>
+      docTree({
+        blocks: [
+          ['p', 'a'],
+          ['box', 'c', n],
+          ['p', 'z'],
+        ],
+      });
+    const windowProps = { width: 120, height: 200 };
+    const scoped = await mount(at(5), windowProps);
+    const whole = await mount(at(5), windowProps);
+    for (const n of [15, 1, 30, 5]) {
+      await rerender(scoped.app, scoped.root, at(n), windowProps);
+      whole.node._floorsUnscoped = true;
+      await rerender(whole.app, whole.root, at(n), windowProps);
+      assertSameMeasurement(scoped.node, whole.node, `marginBottom ${n}`);
+    }
+    await scoped.root.unmount();
+    await whole.root.unmount();
+  });
+});
+
 test('a block that joins a long column is measured alone, and the tree laid out once', async () => {
   await withTestElements(async () => {
     const blocks = (n) =>

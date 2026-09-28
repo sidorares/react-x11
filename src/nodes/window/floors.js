@@ -340,8 +340,7 @@ export function columnHeightSpan(node) {
     if (!inFlow(child)) continue;
     const extent = child._floorH;
     if (extent === undefined) return undefined;
-    const top = marginDown(child.yoga, Yoga.EDGE_TOP);
-    const bottom = marginDown(child.yoga, Yoga.EDGE_BOTTOM);
+    const { top, bottom } = marginsDown(child);
     if (!(top >= 0 && bottom >= 0)) return undefined;
     span += count === 0 ? extent : trailing + top + extent;
     trailing = bottom;
@@ -358,6 +357,27 @@ export function columnHeightSpan(node) {
     yoga.getComputedBorder(Yoga.EDGE_TOP) +
     yoga.getComputedBorder(Yoga.EDGE_BOTTOM)
   );
+}
+
+/**
+ * `marginDown` for both edges of a box, kept on the box with the style object
+ * it was read under. A margin reaches yoga only from the style
+ * (`applyLayoutStyle`), and a style that changes is a new object, so while
+ * the object is the same, so are the margins. Asking yoga is up to six calls
+ * that each build an object, for every child of every column a spine sums,
+ * on every pass: 2 ms of an edit to a document of 1,700 blocks, for margins
+ * that had not changed.
+ */
+function marginsDown(child) {
+  const kept = child._marginsDown;
+  if (kept !== null && kept.style === child.style) return kept;
+  const read = {
+    style: child.style,
+    top: marginDown(child.yoga, Yoga.EDGE_TOP),
+    bottom: marginDown(child.yoga, Yoga.EDGE_BOTTOM),
+  };
+  child._marginsDown = read;
+  return read;
 }
 
 /**
