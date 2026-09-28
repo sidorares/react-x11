@@ -75,6 +75,7 @@ import {
 } from './registry.js';
 import { SvgNode, SvgChildNode } from './svgnodes.js';
 import { loadLayout } from './yoga.js';
+import { warmWidgetFaces } from './faces.js';
 
 // The renderer name and version DevTools shows. Read from package.json so
 // they cannot drift — but **guarded**, because a single-file bundle has no
@@ -880,6 +881,9 @@ export async function createRoot(options = {}) {
   const layout = loadLayout();
   const integrations = loadIntegrations(); // null when there is nothing to install
   const [app] = await Promise.all([connecting, layout, integrations]);
+  // The faces the widgets set text in beyond a family's four, matched now
+  // rather than in the first frame that sets one (src/faces.js).
+  warmWidgetFaces(app);
 
   const container = Renderer.createContainer(
     app,
