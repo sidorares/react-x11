@@ -1185,11 +1185,17 @@ both appearances with pressed/on states.
 
 Wiring, shaped as theme policy rather than per-widget forks:
 
-- `ThemeProvider` grows `controls: 'native' | 'drawn'` — default
-  `'native'` on the Cocoa backend, `'drawn'` (and the only legal value)
-  on X11. Per-instance escape hatch: `native={false}` on a control for
-  the odd custom-branded button. A drawn control on macOS keeps today's
-  themed rendering, so custom-designed apps lose nothing.
+- `ThemeProvider` grows `controls: 'auto' | 'native' | 'drawn'`. The
+  default, `'auto'`, takes bezels wherever the backend has them — the
+  Cocoa backend, and win32 while the desktop is light (`win32/bezels.js`
+  says why) — and the drawn controls everywhere else, X11 included.
+  `'native'` asks for them outright; on a backend without them it warns
+  once and draws, because an error would make the same app code illegal
+  on X11, which is the opposite of what a cross-backend widget set is
+  for. `'drawn'` is this library's rendering on every backend.
+  Per-instance escape hatch: `native={false}` on a control for the odd
+  custom-branded button. A drawn control on macOS keeps today's themed
+  rendering, so custom-designed apps lose nothing.
 - Components keep their exact public contracts (`checked`/`onChange`,
   the `changeEvent` shape, `useControl` states) and swap only the
   _bezel_: where the drawn variant renders well/track/thumb boxes, the
