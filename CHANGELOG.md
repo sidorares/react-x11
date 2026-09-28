@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.22.11](https://github.com/sidorares/react-x11/compare/v2.22.10...v2.22.11) (2026-09-28)
+
+
+### Bug Fixes
+
+* **cocoa:** a wrapped native button gets its bezel, on @windowkit/appkit 0.16.0 ([#725](https://github.com/sidorares/react-x11/issues/725)) ([a0bfecf](https://github.com/sidorares/react-x11/commit/a0bfecf9ea2d96f9250d915cf86b4ed13d990cf4))
+* **window:** a resize sends no position, and a move no size ([#726](https://github.com/sidorares/react-x11/issues/726)) ([65e7574](https://github.com/sidorares/react-x11/commit/65e7574b211c4331849ffc5bf65a8e96e08d12f2))
+
 ## [2.22.10](https://github.com/sidorares/react-x11/compare/v2.22.9...v2.22.10) (2026-09-28)
 
 
