@@ -388,6 +388,10 @@ Environment switches, in priority order:
   does Orca not see my app".
 - `AT_SPI_BUS_ADDRESS` — skip discovery and connect here. The seam
   sandboxes use, and the one the hermetic tests use.
+- `REACT_X11_A11Y_INTERVAL=<ms>` — how often changes are pushed to the
+  platform, 500 by default; `0` pushes every change. See
+  [How often the bridge speaks](#how-often-the-bridge-speaks), which also
+  applies to the Windows bridge.
 - `NO_AT_BRIDGE=1` — off; the ecosystem-wide switch every toolkit honours.
   `react-x11/test` sets it, so a test run on a desktop does not parade
   phantom applications through a running screen reader.
@@ -407,6 +411,36 @@ root's switch cannot unstart a bridge that is already up.
 
 A dead accessibility bus is not redialled — the same contract as
 [dbus.md](dbus.md): the app simply stops being accessible until restarted.
+
+## How often the bridge speaks
+
+A bridge mirrors the tree for a platform that reads it on its own schedule,
+and pushing the mirror on every commit is paid by everything that commits
+often: a scroll, a pan, a value ticking. That was mostly paid for nobody.
+An AT-SPI bus runs in most Linux sessions whether or not a screen reader
+does, and a 100,000-row `<Table>` flung through it exported, diffed and
+unexported every row that scrolled past: 31 frames a second against 38 with
+the bridge off. On Windows the same push was 1.6 ms of every frame of a
+graph pane's pan. So both bridges pace what they push (`src/a11ypace.js`),
+the way browsers do. Chromium batches non-interactive accessibility updates
+150 ms apart once a page has loaded, and bounds 500 ms apart, and serializes
+focus and selection at once.
+
+- **A change after a quiet spell is pushed at once.** A click or a key that
+  changes one thing is heard immediately.
+- **A stream of changes is pushed at most once per interval**, 500 ms by
+  default, and the last push carries the last state. A row that scrolls in
+  and out between two pushes is never exported at all, and an AT that was
+  never told of it is not told it left.
+- **What the user is waiting on is pushed at once, whatever the interval:**
+  focus moving, an announcement, and a change to the focused element itself,
+  such as the characters typed into it or its toggled state.
+- **Reads are never paced** (AT-SPI). A call from an AT first flushes
+  whatever the pacer is holding, so every object and interface it asks
+  about is as the tree has it now. Only the unsolicited signals wait.
+
+`REACT_X11_A11Y_INTERVAL` sets the interval in milliseconds, and `0` goes
+back to a push per change.
 
 ## For component libraries
 

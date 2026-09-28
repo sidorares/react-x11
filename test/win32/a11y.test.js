@@ -304,6 +304,9 @@ describe('win32 a11y: the diff', () => {
     );
     try {
       bridge.uiaListeners = true;
+      // the interval is src/a11ypace.js's (500 ms unless the environment
+      // says); this test's own keeps it short
+      a11y._pacer.interval = 100;
       a11y._dirty.add(win);
       a11y._commitFlush();
       assert.equal(
@@ -321,6 +324,41 @@ describe('win32 a11y: the diff', () => {
       assert.equal(bridge.uiaPushes.length, 2, 'and caught up once');
       const xs = bridge.uiaPushes[1].nodes.map((n) => n.x);
       assert.ok(xs.includes(14), 'with the last of it');
+    } finally {
+      a11y.bury();
+      await unmount();
+    }
+  });
+
+  it('a change to the focused element is pushed at once, mid-stream', async () => {
+    const { a11y, win, bridge, unmount } = await setup(
+      h(
+        'window',
+        null,
+        h('box', { role: 'button', 'aria-label': 'One' }),
+        h('box', { role: 'button', 'aria-label': 'Two' }),
+      ),
+    );
+    try {
+      bridge.uiaListeners = true;
+      a11y._pacer.interval = 10_000;
+      a11y._dirty.add(win);
+      a11y._commitFlush();
+      assert.equal(bridge.uiaPushes.length, 1, 'a commit after quiet pushes');
+      // something else changing is a stream the interval holds
+      win.children[1].abs = { x: 20, y: 0, width: 10, height: 10 };
+      a11y._touch(win.children[1], true);
+      a11y._commitFlush();
+      assert.equal(bridge.uiaPushes.length, 1, 'held');
+      // the focused element's own change is what a screen reader is waiting
+      // to hear — a toggled state, a typed character — and goes at once,
+      // with the held change in the same push
+      a11y._focused = win.children[0];
+      a11y._touch(win.children[0], true);
+      a11y._commitFlush();
+      assert.equal(bridge.uiaPushes.length, 2, 'pushed at once');
+      const xs = bridge.uiaPushes[1].nodes.map((n) => n.x);
+      assert.ok(xs.includes(20), 'with what the stream held');
     } finally {
       a11y.bury();
       await unmount();

@@ -62,6 +62,7 @@ import {
   diffChars,
 } from './a11y.js';
 import { onApp } from './trace-registry.js';
+import { A11yPacer } from './a11ypace.js';
 import { synthesizeClick } from './events.js';
 import { callHandler } from './errors.js';
 
@@ -100,6 +101,8 @@ const LAYER_WINDOW = 7;
 const ATSPI_VERSION = '2.1';
 
 const EVENT_SIGNATURE = 'siiva{sv}';
+/** D-Bus message type 1: a method call, which is how an AT reads. */
+const METHOD_CALL = 1;
 const CACHE_ITEM_SIGNATURE = '((so)(so)(so)iiassusau)';
 
 // --------------------------------------------------------------------------
@@ -765,7 +768,8 @@ class AtspiBridge {
     this.desktop = [REGISTRY_NAME, ROOT_PATH];
     this.appId = -1;
     this._unsubscribes = [];
-    // batched renderer notifications, flushed per commit / microtask
+    // batched renderer notifications, flushed in a microtask once the pacer
+    // says so (src/a11ypace.js), and at once for what the user waits on
     this._pending = {
       attach: new Set(),
       remove: [],
@@ -775,6 +779,17 @@ class AtspiBridge {
       window: [],
     };
     this._flushScheduled = false;
+    this._pacer = new A11yPacer();
+    /** The focused node, whose own changes are not paced. */
+    this._focused = null;
+    // Pushes are paced, reads are not: whatever the pacer is holding is
+    // flushed before dbus-native dispatches an AT's call, so the objects and
+    // interfaces it asks about exist as the tree has them now. A node React
+    // reused as a slider still exported a button's interfaces until the
+    // next push, and a Value read of it failed.
+    bus.connection?.prependListener?.('message', (msg) => {
+      if (msg.type === METHOD_CALL && this._hasPending()) this.flush();
+    });
   }
 
   // ---- refs and export -------------------------------------------------
@@ -1184,10 +1199,33 @@ class AtspiBridge {
 
   // ---- the queue -------------------------------------------------------
 
+  /**
+   * A change to tell the bus about, when the pacer allows: in this turn's
+   * microtask after a quiet spell, and otherwise once its interval is up,
+   * together with everything else that changed meanwhile. Rows that scroll
+   * in and out between two pushes are then never exported at all: the attach
+   * finds them gone, and the removal finds nothing the AT ever saw.
+   */
   _schedule() {
+    if (this._flushScheduled || this.dead) return;
+    if (this._pacer.ready(() => this.flush())) this._flushSoon();
+  }
+
+  _flushSoon() {
     if (this._flushScheduled || this.dead) return;
     this._flushScheduled = true;
     queueMicrotask(() => this.flush());
+  }
+
+  /**
+   * A change the user is waiting to hear: focus moving, or the focused
+   * element's own name, state or text, such as the characters typed into
+   * it. Chromium serializes these at once too. It takes everything pending
+   * with it, so the AT can resolve whatever the event names.
+   */
+  _urgent() {
+    this._pacer.cancel();
+    this._flushSoon();
   }
 
   /** Is this node under a toplevel the bridge is presenting? Detached
@@ -1214,38 +1252,47 @@ class AtspiBridge {
 
   queueProps(node) {
     this._pending.props.add(node);
-    this._schedule();
+    if (node === this._focused) this._urgent();
+    else this._schedule();
   }
 
   queueText(node) {
     this._pending.text.add(node);
-    this._schedule();
+    if (node === this._focused) this._urgent();
+    else this._schedule();
   }
 
   queueFocus(previous, next) {
     this._pending.focus.push({ previous, next });
-    this._schedule();
+    this._urgent();
   }
 
   queueWindowFocus(win, focused) {
     this._pending.window.push({ win, focused });
-    this._schedule();
+    this._urgent();
+  }
+
+  _hasPending() {
+    const p = this._pending;
+    return (
+      p.attach.size > 0 ||
+      p.remove.length > 0 ||
+      p.props.size > 0 ||
+      p.text.size > 0 ||
+      p.focus.length > 0 ||
+      p.window.length > 0
+    );
   }
 
   flush() {
     if (this.dead) return;
     this._flushScheduled = false;
     const p = this._pending;
-    if (
-      p.attach.size === 0 &&
-      p.remove.length === 0 &&
-      p.props.size === 0 &&
-      p.text.size === 0 &&
-      p.focus.length === 0 &&
-      p.window.length === 0
-    ) {
-      return;
-    }
+    if (!this._hasPending()) return;
+    // this push takes what a stream was owed, and the next interval runs
+    // from here
+    this._pacer.cancel();
+    this._pacer.pushed();
     this._pending = {
       attach: new Set(),
       remove: [],
@@ -1699,8 +1746,15 @@ class AtspiBridge {
       this.queueAttach(child);
     };
     hooks.detach = (parent, child) => {
-      if (!this.exported.has(child) && !this._live(parent)) return;
-      this.queueRemove(parent, child, a11yIndexIn(parent, child));
+      const exported = this.exported.has(child);
+      if (!exported && !this._live(parent)) return;
+      // the index is for the AT's children-changed, which only a child it
+      // saw is owed — and a row scrolled away was usually never exported
+      this.queueRemove(
+        parent,
+        child,
+        exported ? a11yIndexIn(parent, child) : -1,
+      );
     };
     hooks.propsChanged = (node) => {
       if (this.exported.has(node)) this.queueProps(node);
@@ -1720,12 +1774,15 @@ class AtspiBridge {
       if (this.exported.has(node)) this.queueText(node);
     };
     hooks.focus = (previous, next) => {
+      this._focused = next ?? null;
       this.queueFocus(previous, next);
     };
     hooks.windowFocus = (win, focused) => {
       this.queueWindowFocus(win, focused);
     };
-    hooks.commit = () => this.flush();
+    // a commit is one more change to pace, not a push of its own: every
+    // hook above has already asked for the one it needs
+    hooks.commit = () => this._schedule();
     hooks.announce = (text, opts) => {
       // spoken from the active window, which is the context the user is in
       const target =
@@ -1758,6 +1815,7 @@ class AtspiBridge {
   bury() {
     if (this.dead) return;
     this.dead = true;
+    this._pacer.cancel();
     for (const key of Object.keys(hooks)) hooks[key] = null;
     for (const unsubscribe of this._unsubscribes) unsubscribe();
     this._unsubscribes = [];
