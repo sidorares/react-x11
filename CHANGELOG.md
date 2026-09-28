@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.22.12](https://github.com/sidorares/react-x11/compare/v2.22.11...v2.22.12) (2026-09-28)
+
+
+### Bug Fixes
+
+* **style:** a row or column gap a style drops falls back to its gap ([#738](https://github.com/sidorares/react-x11/issues/738)) ([e2b756f](https://github.com/sidorares/react-x11/commit/e2b756fb15c88bf8cf3a852c66af64e8b6326f89))
+
+
+### Performance Improvements
+
+* **a11y:** the AT-SPI bridge says nothing with nobody listening ([#728](https://github.com/sidorares/react-x11/issues/728)) ([a3af75d](https://github.com/sidorares/react-x11/commit/a3af75dc00d4acab22e164af3b2c2af2f783a249))
+* **floors:** one stale collection a frame, and a column's styles read once ([#735](https://github.com/sidorares/react-x11/issues/735)) ([a7081d0](https://github.com/sidorares/react-x11/commit/a7081d0e76fc0f3f72c2af28920769767040b701))
+* **fonts:** a root warms the face its menus are set in as it connects ([#741](https://github.com/sidorares/react-x11/issues/741)) ([7dcca05](https://github.com/sidorares/react-x11/commit/7dcca05dd07cdc32ba596884e91a8409fd27e2b6))
+* **layout:** a column's floor reads its boxes' margins once per style ([#731](https://github.com/sidorares/react-x11/issues/731)) ([5a3429d](https://github.com/sidorares/react-x11/commit/5a3429d07866a4e9626538fc10fd8f5815880929))
+* **layout:** a pane's measure hands each box it read to the walk that places it ([#736](https://github.com/sidorares/react-x11/issues/736)) ([21ce0e1](https://github.com/sidorares/react-x11/commit/21ce0e12b6f1e861a4dc3e86e01b59424abdbf56))
+* **scroll:** a box whose children did not move keeps its content reach ([#734](https://github.com/sidorares/react-x11/issues/734)) ([38895b4](https://github.com/sidorares/react-x11/commit/38895b4e4378f04e8370137039aee98308f47c60))
+* **style:** applyLayoutStyle walks the keys the two styles carry ([#739](https://github.com/sidorares/react-x11/issues/739)) ([0f1adf1](https://github.com/sidorares/react-x11/commit/0f1adf18a2ef0e16242219e7107fe868b1b3eab2))
+* **yoga:** the layout engine is compiled from its bytes, not fetched ([#740](https://github.com/sidorares/react-x11/issues/740)) ([b359cbd](https://github.com/sidorares/react-x11/commit/b359cbda0444b00e418f300a6b46b7c5e83eec82))
+
 ## [2.22.11](https://github.com/sidorares/react-x11/compare/v2.22.10...v2.22.11) (2026-09-28)
 
 
