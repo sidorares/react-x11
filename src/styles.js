@@ -199,8 +199,8 @@ const LAYOUT_APPLIERS = {
   paddingStart: (n, v) => n.setPadding(Yoga.EDGE_START, v),
   paddingEnd: (n, v) => n.setPadding(Yoga.EDGE_END, v),
   gap: (n, v) => n.setGap(Yoga.GUTTER_ALL, v ?? 0),
-  rowGap: (n, v) => n.setGap(Yoga.GUTTER_ROW, v ?? 0),
-  columnGap: (n, v) => n.setGap(Yoga.GUTTER_COLUMN, v ?? 0),
+  rowGap: (n, v) => n.setGap(Yoga.GUTTER_ROW, v),
+  columnGap: (n, v) => n.setGap(Yoga.GUTTER_COLUMN, v),
   aspectRatio: (n, v) => n.setAspectRatio(v),
   display: (n, v) =>
     n.setDisplay(pick(DISPLAY, v, 'display') ?? Yoga.DISPLAY_FLEX),

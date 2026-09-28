@@ -148,6 +148,48 @@ test('style drives layout and paint; props stay semantic', async () => {
   await x11Root.unmount();
 });
 
+test('a row or column gap a style drops falls back to its gap', async () => {
+  // yoga takes a row or column gap over `gap` whenever one is set, so the
+  // one a style stops naming has to go back to unset: a reset to 0 closed
+  // the gap `gap` still asked for
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const spacing = async (style) => {
+    x11Root.render(
+      h(
+        'window',
+        { width: 200, height: 100, title: 'main' },
+        h(
+          'box',
+          { style },
+          h('box', { style: { width: 10, height: 10, flexShrink: 0 } }),
+          h('box', { style: { width: 10, height: 10, flexShrink: 0 } }),
+        ),
+      ),
+    );
+    await tick();
+    app.windows[0].flushFrame?.();
+    await tick();
+    const [a, b] = nodeOf(app).children[0].children;
+    return style.flexDirection === 'row'
+      ? b.abs.x - a.abs.x - 10
+      : b.abs.y - a.abs.y - 10;
+  };
+  // across a row, the column gap
+  assert.strictEqual(
+    await spacing({ flexDirection: 'row', gap: 8, columnGap: 5 }),
+    5,
+  );
+  assert.strictEqual(await spacing({ flexDirection: 'row', gap: 8 }), 8);
+  // down a column, the row gap
+  assert.strictEqual(
+    await spacing({ flexDirection: 'column', gap: 6, rowGap: 2 }),
+    2,
+  );
+  assert.strictEqual(await spacing({ flexDirection: 'column', gap: 6 }), 6);
+  await x11Root.unmount();
+});
+
 test('a hoisted style is skipped by identity on re-render', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });
