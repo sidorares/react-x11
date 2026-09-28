@@ -71,6 +71,9 @@ const NODE_PATH = '/org/a11y/atspi/accessible/';
 const NULL_PATH = '/org/a11y/atspi/null';
 const CACHE_PATH = '/org/a11y/atspi/cache';
 const REGISTRY_NAME = 'org.a11y.atspi.Registry';
+const REGISTRY_PATH = '/org/a11y/atspi/registry';
+const REGISTRY_IFACE = 'org.a11y.atspi.Registry';
+const DBUS_NAME = 'org.freedesktop.DBus';
 
 const IFACE = {
   ACCESSIBLE: 'org.a11y.atspi.Accessible',
@@ -754,6 +757,18 @@ const EditableTextImpl = {
 // The bridge
 // --------------------------------------------------------------------------
 
+/** What the renderer has said since the last push. */
+function emptyPending() {
+  return {
+    attach: new Set(),
+    remove: [],
+    props: new Set(),
+    text: new Set(),
+    focus: [],
+    window: [],
+  };
+}
+
 class AtspiBridge {
   constructor(bus, toolkitVersion) {
     this.bus = bus;
@@ -770,25 +785,32 @@ class AtspiBridge {
     this._unsubscribes = [];
     // batched renderer notifications, flushed in a microtask once the pacer
     // says so (src/a11ypace.js), and at once for what the user waits on
-    this._pending = {
-      attach: new Set(),
-      remove: [],
-      props: new Set(),
-      text: new Set(),
-      focus: [],
-      window: [],
-    };
+    this._pending = emptyPending();
     this._flushScheduled = false;
     this._pacer = new A11yPacer();
     /** The focused node, whose own changes are not paced. */
     this._focused = null;
+    /**
+     * Whether anything may be listening, and so whether the bridge speaks
+     * at all (`watchListeners`). True until the registry says nobody is.
+     */
+    this.audience = true;
+    /** Something has listened or asked, and the bridge speaks for good. */
+    this._heard = false;
+    /** The registry's unique name, once known: its calls are not an AT's. */
+    this._registryOwner = null;
+    /** Who has called in before the registry was asked who listens. */
+    this._callers = new Set();
     // Pushes are paced, reads are not: whatever the pacer is holding is
     // flushed before dbus-native dispatches an AT's call, so the objects and
     // interfaces it asks about exist as the tree has them now. A node React
     // reused as a slider still exported a button's interfaces until the
-    // next push, and a Value read of it failed.
+    // next push, and a Value read of it failed. A call is also how an AT
+    // that registered for nothing shows it is there.
     bus.connection?.prependListener?.('message', (msg) => {
-      if (msg.type === METHOD_CALL && this._hasPending()) this.flush();
+      if (msg.type !== METHOD_CALL) return;
+      if (msg.sender) this._calledBy(msg.sender);
+      if (this._hasPending()) this.flush();
     });
   }
 
@@ -1116,7 +1138,7 @@ class AtspiBridge {
   // ---- signals ---------------------------------------------------------
 
   _signal(path, iface, member, detail, detail1, detail2, anyData) {
-    if (this.dead) return;
+    if (this.dead || !this.audience) return;
     try {
       this.bus.sendSignal(path, iface, member, EVENT_SIGNATURE, [
         detail,
@@ -1172,7 +1194,7 @@ class AtspiBridge {
   }
 
   emitCacheAdd(node) {
-    if (this.dead) return;
+    if (this.dead || !this.audience) return;
     try {
       this.bus.sendSignal(
         CACHE_PATH,
@@ -1187,7 +1209,7 @@ class AtspiBridge {
   }
 
   emitCacheRemove(ref) {
-    if (this.dead) return;
+    if (this.dead || !this.audience) return;
     try {
       this.bus.sendSignal(CACHE_PATH, IFACE.CACHE, 'RemoveAccessible', '(so)', [
         ref,
@@ -1207,7 +1229,7 @@ class AtspiBridge {
    * finds them gone, and the removal finds nothing the AT ever saw.
    */
   _schedule() {
-    if (this._flushScheduled || this.dead) return;
+    if (this._flushScheduled || this.dead || !this.audience) return;
     if (this._pacer.ready(() => this.flush())) this._flushSoon();
   }
 
@@ -1240,34 +1262,43 @@ class AtspiBridge {
     return false;
   }
 
+  // Nothing is queued with nobody to tell: the tree an AT reads when it
+  // arrives is the live one, and it starts from there (`_silence`).
+
   queueAttach(node) {
+    if (!this.audience) return;
     this._pending.attach.add(node);
     this._schedule();
   }
 
   queueRemove(parent, child, index) {
+    if (!this.audience) return;
     this._pending.remove.push({ parent, child, index });
     this._schedule();
   }
 
   queueProps(node) {
+    if (!this.audience) return;
     this._pending.props.add(node);
     if (node === this._focused) this._urgent();
     else this._schedule();
   }
 
   queueText(node) {
+    if (!this.audience) return;
     this._pending.text.add(node);
     if (node === this._focused) this._urgent();
     else this._schedule();
   }
 
   queueFocus(previous, next) {
+    if (!this.audience) return;
     this._pending.focus.push({ previous, next });
     this._urgent();
   }
 
   queueWindowFocus(win, focused) {
+    if (!this.audience) return;
     this._pending.window.push({ win, focused });
     this._urgent();
   }
@@ -1288,19 +1319,12 @@ class AtspiBridge {
     if (this.dead) return;
     this._flushScheduled = false;
     const p = this._pending;
-    if (!this._hasPending()) return;
+    if (!this.audience || !this._hasPending()) return;
     // this push takes what a stream was owed, and the next interval runs
     // from here
     this._pacer.cancel();
     this._pacer.pushed();
-    this._pending = {
-      attach: new Set(),
-      remove: [],
-      props: new Set(),
-      text: new Set(),
-      focus: [],
-      window: [],
-    };
+    this._pending = emptyPending();
 
     // Removals first: a node that left and came back in one batch reads as
     // its add, never as a stale remove.
@@ -1723,8 +1747,118 @@ class AtspiBridge {
     );
     this.bus.signals.on(key, (body) => {
       const newOwner = body?.[2];
-      if (newOwner) this.embed().catch(() => {});
+      if (!newOwner) return;
+      // a restarted registry calls in under its new name, and is still
+      // not an AT
+      if (this._registryOwner !== null) this._registryOwner = newOwner;
+      this.embed().catch(() => {});
     });
+  }
+
+  // ---- nobody listening ------------------------------------------------
+
+  /**
+   * Speak only with somebody to hear it. An accessibility bus runs in most
+   * Linux sessions whether or not an assistive technology does, and with
+   * none there every signal the bridge sends, and every object it exports
+   * to name in them, is paid for by nobody: a quarter of the frame rate of
+   * a thumb dragged down a 100,000-row `<Table>`.
+   *
+   * The registry knows. An AT registers the events it wants with it
+   * (`RegisterEvent`), and it answers `GetRegisteredEvents` and announces
+   * each new listener (`EventListenerRegistered`), which is how GTK 4 and
+   * at-spi2-atk hold back the events nobody asked for. Both still send the
+   * cache's signals and children-changed regardless, because libatspi
+   * listens for those in every client without registering. So an empty list
+   * is not the whole answer. An AT that registered for nothing still has to
+   * call in to read anything, and a call from anybody but the registry
+   * counts as well.
+   *
+   * With neither, the bridge falls silent: nothing queued, nothing pushed,
+   * nothing exported. It speaks again for good at the first listener or the
+   * first call, and an AT arriving then reads the tree as it is, which is
+   * where it would start anyway. The one thing silence costs is an
+   * announcement, which `announce()` then reports as unheard.
+   */
+  async watchListeners() {
+    const bus = this.bus;
+    await bus.addMatch(
+      `type='signal',interface='${REGISTRY_IFACE}',` +
+        "member='EventListenerRegistered'",
+    );
+    bus.signals.on(
+      bus.mangle(REGISTRY_PATH, REGISTRY_IFACE, 'EventListenerRegistered'),
+      () => this._hearFrom(),
+    );
+    const owner = await bus.invoke({
+      destination: DBUS_NAME,
+      path: '/org/freedesktop/DBus',
+      interface: DBUS_NAME,
+      member: 'GetNameOwner',
+      signature: 's',
+      body: [REGISTRY_NAME],
+    });
+    const events = await bus.invoke({
+      destination: REGISTRY_NAME,
+      path: REGISTRY_PATH,
+      interface: REGISTRY_IFACE,
+      member: 'GetRegisteredEvents',
+    });
+    // A listener that registered after the answer was sent may already
+    // have been heard, in the same read as the reply.
+    if (this._heard || this.dead) return;
+    this._registryOwner = owner;
+    const asked = [...this._callers].some((sender) => this._isPeer(sender));
+    this._callers.clear();
+    if (asked || !Array.isArray(events) || events.length > 0) {
+      this._hearFrom();
+      return;
+    }
+    this._silence();
+  }
+
+  /** A method call has come in from `sender`. */
+  _calledBy(sender) {
+    if (this._heard) return;
+    if (this._registryOwner === null) this._callers.add(sender);
+    else if (this._isPeer(sender)) this._hearFrom();
+  }
+
+  /** Anybody but the registry, the bus, or this connection. */
+  _isPeer(sender) {
+    return (
+      sender !== this._registryOwner &&
+      sender !== DBUS_NAME &&
+      sender !== this.bus.name
+    );
+  }
+
+  /** Somebody listens or asks: speak, from now on. */
+  _hearFrom() {
+    this._heard = true;
+    this._callers.clear();
+    if (!this.audience && process.env.REACT_X11_A11Y) {
+      console.warn('react-x11: accessibility bridge speaking — heard an AT');
+    }
+    this.audience = true;
+  }
+
+  /**
+   * Nobody listens: stop. What the bus was shown before the registry
+   * answered goes too, so silence has nothing exported to keep in step and
+   * nothing to take back.
+   */
+  _silence() {
+    if (process.env.REACT_X11_A11Y) {
+      console.warn(
+        'react-x11: accessibility bridge quiet — nothing listens or asks yet',
+      );
+    }
+    this.audience = false;
+    this._pacer.cancel();
+    this._flushScheduled = false;
+    this._pending = emptyPending();
+    for (const node of [...this.exported.keys()]) this._unexport(node);
   }
 
   // ---- wiring into the renderer ---------------------------------------
@@ -1741,11 +1875,14 @@ class AtspiBridge {
       this.toplevels.splice(index, 1);
       this.queueRemove(null, win, index);
     };
+    // The walks below are skipped with nobody listening: silence exports
+    // nothing, so there is nothing a detach has to take back either.
     hooks.attached = (parent, child) => {
-      if (!this._live(parent)) return;
+      if (!this.audience || !this._live(parent)) return;
       this.queueAttach(child);
     };
     hooks.detach = (parent, child) => {
+      if (!this.audience) return;
       const exported = this.exported.has(child);
       if (!exported && !this._live(parent)) return;
       // the index is for the AT's children-changed, which only a child it
@@ -1760,6 +1897,7 @@ class AtspiBridge {
       if (this.exported.has(node)) this.queueProps(node);
     };
     hooks.textContent = (chunk) => {
+      if (!this.audience) return;
       let text = chunk.parent;
       while (text && text.kind === 'text' && text.isSpan) text = text.parent;
       if (!text) return;
@@ -1784,6 +1922,9 @@ class AtspiBridge {
     // hook above has already asked for the one it needs
     hooks.commit = () => this._schedule();
     hooks.announce = (text, opts) => {
+      // `announce()`'s false: nobody is listening, and the app may want to
+      // show it instead
+      if (!this.audience) return false;
       // spoken from the active window, which is the context the user is in
       const target =
         this.toplevels.find((win) => win.events?.windowFocused) ??
@@ -1989,6 +2130,9 @@ export async function start() {
     }
   }
   b.watchRegistry().catch(() => {});
+  // A registry that cannot say who listens is taken to have somebody
+  // listening, as GTK takes one it cannot ask.
+  b.watchListeners().catch(() => b._hearFrom());
   b.install();
   bridge = b;
   if (loud) {
