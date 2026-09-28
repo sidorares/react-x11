@@ -4,12 +4,20 @@
 // `process`. Kept import-light and JSX-free on purpose: it runs before
 // anything decided what loaders this process has.
 
+import { isMainThread } from 'node:worker_threads';
+
 import { runFrameChild } from './childmain.js';
 
 if (typeof process.send !== 'function') {
   console.error(
-    'react-x11: frame/child.js is the entry a <Frame> forks — it needs the ' +
-      'IPC channel fork() sets up, and cannot be run directly.',
+    isMainThread
+      ? 'react-x11: frame/child.js is the entry a <Frame> forks — it needs ' +
+          'the IPC channel fork() sets up, and cannot be run directly.'
+      : // the channel is the main thread's, and something moved the pane
+        // off it (src/cocoa/relaunch.js keeps a pane where it is)
+        'react-x11: frame/child.js is running on a worker thread, which ' +
+          'has no IPC channel — a <Frame> pane has to stay on the main ' +
+          'thread of its process.',
   );
   process.exit(1);
 }

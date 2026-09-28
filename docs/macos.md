@@ -972,17 +972,21 @@ command line asking for it. It needs a bridge with `runMain()`,
   builds and `require()` of the package. It declines, and the app keeps the
   pump, off macOS; with `REACT_X11_THREADED=0` or `REACT_X11_BACKEND=x11`;
   for a REPL or `-e`; in a single executable, whose entry is not a file a
-  worker can load; under a test runner; and when react-x11 is imported
-  after the app started running. It tells that last case by Node's
-  `performance.nodeTiming.loopStart`, -1 until the event loop turns, and in
-  Bun, which reports 1 there from the first line, by the entry's record in
-  the module cache, absent until the entry has run (both measured).
+  worker can load; in a `<Frame>` pane, which has no AppKit to keep and
+  talks to its host over the fork's IPC channel, the main thread's — a
+  worker has no `process.send` ([frame.md](frame.md)); under a test
+  runner; and when react-x11 is imported after the app started running. It
+  tells that last case by Node's `performance.nodeTiming.loopStart`, -1
+  until the event loop turns, and in Bun, which reports 1 there from the
+  first line, by the entry's record in the module cache, absent until the
+  entry has run (both measured).
 - **`react-x11/cocoa-main`** (`src/cocoa/main.js`) is the same move asked
   for by name — `node --import react-x11/cocoa-main app.js`,
   `bun --preload react-x11/cocoa-main app.jsx` — before the entry is loaded
   at all, which spares the main thread loading the entry's imports for
-  nothing, and without the checks. Off macOS, and inside a Worker the app
-  starts, it does nothing.
+  nothing, and without the checks — all but one: in a `<Frame>` pane,
+  which gets this `--import` whenever its host was started under it, it
+  does nothing, as it does off macOS and inside a Worker the app starts.
 - **The worker's side** (`bootstrapWorker`), set up by the same import on
   the worker, which recognises the shared state in its `workerData`; the
   pieces are `src/cocoa/threaded.js`'s. Stdout, stderr and the console

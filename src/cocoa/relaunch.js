@@ -67,6 +67,13 @@ export function relaunchVeto({
   if (env.REACT_X11_BACKEND && env.REACT_X11_BACKEND !== 'cocoa') {
     return `REACT_X11_BACKEND=${env.REACT_X11_BACKEND}`;
   }
+  // A `<Frame>` pane (REACT_X11_FRAME is what the host sets on the fork)
+  // has no AppKit for the main thread to keep — its pixels reach the host
+  // through shared IOSurfaces (src/cocoa/panewindow.js) — and its entry
+  // talks to the host over the IPC channel fork() sets up, which is the
+  // main thread's: on a worker there is no `process.send`, and the pane
+  // exited as it started (src/frame/child.js).
+  if (env.REACT_X11_FRAME === '1') return 'a <Frame> pane';
   // a REPL, `node -e`, or an entry that is not a file a worker can load
   if (!entry) return 'no entry script';
   // a single executable carries its entry inside the binary, where a worker
