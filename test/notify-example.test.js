@@ -22,6 +22,12 @@ import {
   textOf,
 } from '../src/testing/index.js';
 import { _resetNotifications } from '../src/notifications.js';
+import { offTheDesktopBus } from './helpers/with-bus.js';
+
+// The fake centre is the only one: on a desktop, a rung the example reaches
+// past it would otherwise find the real session bus and hold the file open
+// on it — a hang there, and a pass in CI, which has no bus.
+offTheDesktopBus();
 
 process.env.REACT_X11_NO_AUTORUN = '1';
 const { default: App, fixtureTransfers } =
