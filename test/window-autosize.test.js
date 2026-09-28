@@ -474,3 +474,36 @@ test('an app changing one axis does not lock the other', async () => {
   assert.strictEqual(wnd.height, 150, 'and the height is still tracking');
   await root.unmount();
 });
+
+test('a resize sends no position, and a move no size', async () => {
+  // ntk's `setState` sends whatever differs from what the server last
+  // reported, and under a reparenting window manager that is never the
+  // position the app asked for: it comes back in the frame's coordinates. So
+  // a resize handed the position along re-sent it, and the window jumped from
+  // wherever the manager had placed it, or the user had moved it, to the
+  // app's `x`/`y`. A move handed the size along did the same to a size the
+  // user had dragged.
+  const app = createMockApp();
+  const root = await createRoot({ app });
+  const at = (props) =>
+    h(
+      'window',
+      { x: 20, y: 40, height: 200, ...props },
+      box({ width: 10, height: 10 }),
+    );
+  root.render(at({ width: 300 }));
+  await tick();
+  const wnd = app.windows[0];
+  const states = [];
+  wnd.setState = (state) => states.push(state);
+
+  root.render(at({ width: 320 }));
+  await tick();
+  root.render(at({ width: 320, x: 60 }));
+  await tick();
+  assert.deepStrictEqual(states, [
+    { x: undefined, y: undefined, width: 320, height: 200 },
+    { x: 60, y: 40, width: undefined, height: undefined },
+  ]);
+  await root.unmount();
+});
