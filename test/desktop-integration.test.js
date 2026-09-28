@@ -174,7 +174,18 @@ describe('what turning a11y off actually stops', () => {
       ${source}
       console.log('bridge=' + (await startA11y()));
     `,
-      { REACT_X11_A11Y: '1', NO_AT_BRIDGE: '', ...env },
+      {
+        REACT_X11_A11Y: '1',
+        NO_AT_BRIDGE: '',
+        // Nothing of the desktop the suite runs on: on one with AT-SPI — any
+        // developer's Linux session — the climb finds the real bus, answers
+        // with a bridge rather than null, and the child exits before the
+        // reply lands, its bus socket being one that holds no process open.
+        // A bus that is not there is the answer this test is about.
+        DBUS_SESSION_BUS_ADDRESS: 'unix:path=/nonexistent/react-x11-test-bus',
+        AT_SPI_BUS_ADDRESS: '',
+        ...env,
+      },
     );
 
   test('the climb is loud without the switch, and silent with it', async () => {
