@@ -1014,6 +1014,30 @@ export class CocoaWindow {
   }
 
   /**
+   * Whether a `<glarea>` of this window has a frame queued on its clock —
+   * which keeps this window's frame on the clock too, where the early frame
+   * an input asks for would have painted it at once (src/frames.js).
+   *
+   * The clock pairs the two: a tick runs this window's frame and then its
+   * surfaces', so a GL frame goes out after the overlay its children were
+   * painted on (#641). An input painted early went around that — the
+   * window's frame, the overlay with it and the present, inside the input's
+   * own dispatch, and the GL frame the same input asked for a refresh or
+   * more later, on the clock. For that long the children were drawn over
+   * the frame before: a graph whose cards were a surface's children hid
+   * them for a wheel zoom that way, and showed its edges with nothing under
+   * them for 20–25ms, until the GL frame that drew the cards came. Such an
+   * input is answered on the clock, both halves in order. What it gives up
+   * is its 2D half's head start; the GL half never had one.
+   */
+  surfaceFrameOwed() {
+    for (const entry of this.app._rafQueue) {
+      if (entry.surface && entry.wnd === this) return true;
+    }
+    return false;
+  }
+
+  /**
    * The earliest moment this window's clock will hand out another frame,
    * for a gate of `interval` ms — the display's period by default, which
    * is the clock's own.
