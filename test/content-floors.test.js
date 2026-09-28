@@ -1319,3 +1319,112 @@ test('a window that sizes itself from its content still measures every width', a
     await root.unmount();
   });
 });
+
+// --- a floor that could never bind is not measured --------------------------
+
+/** Count the width passes a window runs, whole-tree or scoped. */
+function countWidthPasses(node) {
+  const counted = { passes: 0 };
+  for (const name of [
+    '_measureWidthFloors',
+    '_measureSpineRoot',
+    '_measureBoundary',
+  ]) {
+    const inner = node[name].bind(node);
+    node[name] = (...args) => {
+      if (name === '_measureWidthFloors' || args.includes('width')) {
+        counted.passes += 1;
+      }
+      return inner(...args);
+    };
+  }
+  return counted;
+}
+
+test('cells of a named width that neither shrink nor grow owe no width pass', async () => {
+  // A table's row: cells at their columns' widths, `flexShrink: 0`. The floor
+  // a width pass would write on each is the width it names, and flex never
+  // takes it below that, so a row scrolling in owes no such pass. It was
+  // measured all the same, and a `<Table>`'s fling spent half of every frame
+  // laying rows out alone for floors nobody read.
+  const cell = (width, inner) =>
+    box({ width, flexShrink: 0 }, box({ width: inner, height: 10 }));
+  const row = (i) =>
+    h(
+      'box',
+      { key: i, style: { flexDirection: 'row', flexShrink: 0 } },
+      cell(40, 60),
+      cell(80, 30),
+      cell(120, 200),
+    );
+  const table = (n) =>
+    box(
+      { overflow: 'scroll', height: 120 },
+      box({ flexShrink: 0 }, ...Array.from({ length: n }, (_, i) => row(i))),
+    );
+  const { app, root, node } = await mount(table(4));
+  const counted = countWidthPasses(node);
+  await rerender(app, root, table(5));
+  assert.strictEqual(counted.passes, 0, 'no width pass for the row');
+  // …and the layout is the one a floor would have given: each cell at the
+  // width it names, whatever is inside it
+  const cells = node.children[0].children[0].children[4].children;
+  assert.deepStrictEqual(
+    cells.map((c) => c.abs.width),
+    [40, 80, 120],
+  );
+  await root.unmount();
+});
+
+test('a named size that can grow keeps the floor it grew to', async () => {
+  // The other half of the rule, found by laying random trees out both ways: a
+  // measuring pass lays a growing item out at the size it grew to, the floor
+  // written from that joins the flex line's resolution, and the space the
+  // line hands out comes out differently without it. Taken off this
+  // `flexShrink: 0` item of a named height, its share of the column moved.
+  const grows = React.createRef();
+  const { root } = await mount(
+    box(
+      { height: 240 },
+      box(
+        { flexShrink: 0, width: 40 },
+        box(
+          { flexShrink: 0, flexBasis: 80, width: 90, padding: 5 },
+          box(
+            { flexShrink: 2, flexGrow: 1, flexBasis: 0, padding: 2 },
+            box({ flexShrink: 0, height: 100 }),
+          ),
+          box({ width: 160, height: 5 }),
+          h('box', {
+            ref: grows,
+            style: { flexShrink: 0, flexGrow: 1, height: 45 },
+          }),
+        ),
+      ),
+    ),
+  );
+  // 53 is what the floor gives, as it did before the rule; without it, 49
+  assert.strictEqual(size(grows)[1], 53);
+  await root.unmount();
+});
+
+test('an item sized by its content keeps its floor, however it is flexed', async () => {
+  // The third half of the rule, also found by the random trees: `flex:
+  // 'none'` cannot shrink or grow, but its basis is yoga's own measurement of
+  // its content, which sums the basis of a `flexBasis: 0` child rather than
+  // what that child holds. The floor is what holds the box open around it.
+  const outer = React.createRef();
+  const { root } = await mount(
+    box(
+      { height: 240 },
+      h(
+        'box',
+        { ref: outer, style: { flex: 'none' } },
+        box({ height: 20 }),
+        box({ flexBasis: 0 }, box({ height: 30, flexShrink: 0 })),
+      ),
+    ),
+  );
+  assert.strictEqual(size(outer)[1], 50);
+  await root.unmount();
+});

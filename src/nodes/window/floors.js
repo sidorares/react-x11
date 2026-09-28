@@ -104,8 +104,9 @@ export const mainAxisOf = (node) => {
 /**
  * Whether `child` is one the floors are **written on** along `axis`: a flex
  * item on its container's main axis whose author left the minimum to the
- * content. The same test `writeFloors` applies, asked ahead of time — it is
- * what decides whether a stale extent is one anybody will read.
+ * content, and which flex could squeeze below it. The same test
+ * `writeFloors` applies, asked ahead of time — it is what decides whether a
+ * stale extent is one anybody will read.
  */
 export function receivesFloor(child, axis) {
   const parent = child.parent;
@@ -118,7 +119,37 @@ export function receivesFloor(child, axis) {
     return false;
   }
   const own = axis === 'width' ? 'minWidth' : 'minHeight';
-  return typeof child.style[own] !== 'number';
+  return typeof child.style[own] !== 'number' && !floorIsNamedSize(child, axis);
+}
+
+/**
+ * Whether this item is its named size on `axis` in every pass, so that the
+ * floor a measurement would write is that same number and can never bind:
+ * a number for its size along the axis, as its flex basis (`flexBasis` unset
+ * or `'auto'`), `flexShrink: 0` and no `flexGrow`. Flex then takes its basis
+ * from that number and neither shrinks nor grows it, and measuring it is work
+ * nobody reads. A table's cells, at their columns' widths, are the case that
+ * paid: every row that scrolled into a `<Table>` was laid out alone for their
+ * floors before its frame could be, over half of a fling's frame time.
+ *
+ * A differential run over random trees, laid out with and without the
+ * rule, found why each clause is there. An auto basis is yoga's own
+ * measurement of the content, which can come out short of what the content
+ * needs, and the floor is what holds the item open. A named size that can
+ * grow is written as the size it grew to in the measuring pass, which the
+ * floor then keeps. And a `flexBasis` of its own is where the basis comes
+ * from instead of the size, and a percentage one is a different length in a
+ * measuring pass than in the real one.
+ */
+function floorIsNamedSize(child, axis) {
+  const style = child.style;
+  const basis = style.flexBasis;
+  return (
+    style.flexShrink === 0 &&
+    !(style.flexGrow > 0) &&
+    (basis === undefined || basis === 'auto') &&
+    typeof (axis === 'width' ? style.width : style.height) === 'number'
+  );
 }
 
 /**
@@ -848,7 +879,12 @@ export function writeFloors(node, axis) {
     // A floor of 0 is what yoga does anyway, and an author who named their
     // own `minWidth`/`minHeight` has already answered — overwriting it would
     // put a measurement of ours above a number they wrote.
-    if (axisIsMain && inFlow(child) && typeof child.style[own] !== 'number') {
+    if (
+      axisIsMain &&
+      inFlow(child) &&
+      typeof child.style[own] !== 'number' &&
+      !floorIsNamedSize(child, axis)
+    ) {
       const extent = horizontal ? child._floorW : child._floorH;
       if (extent > 0) floor = extent;
     }
