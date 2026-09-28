@@ -217,6 +217,7 @@ export class WindowFlush {
       // a subtree no pass reached and nothing scrolled in is where the last
       // walk left it (`_followParent`)
       layoutDiff.skipUnreached = !this._walkWhole;
+      layoutDiff.boxes = new Map();
       try {
         // `_absolutizeChildren`, not the loop it wraps: a `<window
         // style={{overflow: 'scroll'}}>` is a scroll container like any box,
@@ -225,6 +226,7 @@ export class WindowFlush {
       } finally {
         layoutDiff.sink = null;
         layoutDiff.skipUnreached = false;
+        layoutDiff.boxes = null;
       }
       this._walkWhole = false;
       // …and placed nodes against the arrangement that walk produced: where

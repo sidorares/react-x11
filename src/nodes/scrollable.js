@@ -17,7 +17,7 @@ import {
   XK_SPACE,
 } from '../keysyms.js';
 import { DAMAGE_SLOP, layoutDiff } from './damage.js';
-import { describeSize, offsetInParent } from './layout.js';
+import { describeSize, laidBox, offsetInParent } from './layout.js';
 import { insetRect, intersectRects, rectsOverlap } from './rects.js';
 import {
   SCROLLBAR_WIDTH,
@@ -62,17 +62,25 @@ function contentReach(node, top) {
   let left = Infinity;
   let right = -Infinity;
   let bottom = -Infinity;
+  // a child a layout algorithm placed sits in its slot (`offsetInParent`)
+  const hosted = node._host !== null;
+  const boxes = layoutDiff.boxes;
   for (const child of node.children) {
     if (child.isWindow || !child.yoga || child.hidden) continue;
-    const offset = offsetInParent(child);
-    left = Math.min(left, offset.x);
-    right = Math.max(right, offset.x + child.yoga.getComputedWidth());
-    bottom = Math.max(bottom, offset.y + child.yoga.getComputedHeight());
+    const box = child.yoga.getComputedLayout();
+    // …for the walk that places this child, later in the same one
+    boxes?.set(child, box);
+    const slot = hosted ? child._hostSlot : null;
+    const x = slot === null ? box.left : box.left + slot.x;
+    const y = slot === null ? box.top : box.top + slot.y;
+    left = Math.min(left, x);
+    right = Math.max(right, x + box.width);
+    bottom = Math.max(bottom, y + box.height);
     if (!child.clipsChildren()) {
       const inner = contentReach(child, false);
-      left = Math.min(left, offset.x + inner.left);
-      right = Math.max(right, offset.x + inner.right);
-      bottom = Math.max(bottom, offset.y + inner.bottom);
+      left = Math.min(left, x + inner.left);
+      right = Math.max(right, x + inner.right);
+      bottom = Math.max(bottom, y + inner.bottom);
     }
   }
   const reach = { left, right, bottom, children: node.children.length };
@@ -218,10 +226,11 @@ export const Scrollable = (Base) =>
     absolutize(originX, originY) {
       this._placed = true;
       if (!this.yoga) return;
-      const x = originX + this.yoga.getComputedLeft();
-      const y = originY + this.yoga.getComputedTop();
-      const width = this.yoga.getComputedWidth();
-      const height = this.yoga.getComputedHeight();
+      const box = laidBox(this);
+      const x = originX + box.left;
+      const y = originY + box.top;
+      const width = box.width;
+      const height = box.height;
       // a box that moved and changed nothing else claims where it was and
       // where it went, once — not once per node inside it (`Node`'s)
       const wasX = this.abs.x;

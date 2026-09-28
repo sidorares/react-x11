@@ -66,6 +66,13 @@ export const layoutDiff = {
   // asked to: a scroll moves boxes without a pass, and the walk is what
   // carries the offset down to them (`WindowNode._walkWhole`).
   skipUnreached: false,
+
+  // The boxes a scroll pane's measure read on this walk (`contentReach`),
+  // left for the `absolutize` that places each one later in the same walk
+  // (`laidBox`): no pass runs in between, so what yoga said is what it
+  // says. A Map for the length of the window's walk and null outside it,
+  // where a pane that re-measures (`_placeNodes` moving one) reads its own.
+  boxes: null,
 };
 
 // What an invalidate() may name as its reason — a small closed set, so the
