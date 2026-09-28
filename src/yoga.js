@@ -110,6 +110,50 @@ for (const name of ['Node', 'Config']) {
 let loading = null;
 
 /**
+ * The assembly, compiled from the bytes yoga-layout embeds — or null where
+ * they cannot be read off the disk (a bundle, a single executable: see
+ * docs/packaging.md), and `loadYoga()` loads it the stock way.
+ *
+ * yoga-layout ships its WebAssembly only as a base64 data URL inside its
+ * loader, and the loader, handed nothing, fetches that URL: Node loads undici
+ * for `fetch` and compiles the module through a streamed Response. That was
+ * 36–50 ms of every app's startup, where the same bytes handed over as
+ * `wasmBinary` compile in 9–13.
+ */
+async function embeddedAssembly() {
+  try {
+    const [{ createRequire }, { readFileSync }, path, { pathToFileURL }] =
+      await Promise.all([
+        import('node:module'),
+        import('node:fs'),
+        import('node:path'),
+        import('node:url'),
+      ]);
+    const src = path.dirname(
+      createRequire(import.meta.url).resolve('yoga-layout/load'),
+    );
+    const loader = path.join(src, '..', 'binaries', 'yoga-wasm-base64-esm.js');
+    const embedded =
+      /"data:application\/octet-stream;base64,([A-Za-z0-9+/=]+)"/.exec(
+        readFileSync(loader, 'utf8'),
+      );
+    if (!embedded) return null;
+    const [{ default: factory }, { default: wrapAssembly }] = await Promise.all(
+      [
+        import(pathToFileURL(loader).href),
+        import(pathToFileURL(path.join(src, 'wrapAssembly.js')).href),
+      ],
+    );
+    return wrapAssembly(
+      await factory({ wasmBinary: Buffer.from(embedded[1], 'base64') }),
+    );
+  } catch {
+    // a layout the next yoga-layout moved, or no disk to read it from
+    return null;
+  }
+}
+
+/**
  * Load the layout engine's WebAssembly. Idempotent, and resolves with the
  * same `Yoga` object this module exports — `createRoot()` awaits it, so
  * applications rarely call it themselves. A tree built without one (the
@@ -117,11 +161,13 @@ let loading = null;
  */
 export function loadLayout() {
   if (!loading) {
-    loading = loadYoga().then((assembly) => {
-      for (const name of ['Node', 'Config']) delete Yoga[name]; // drop the throwing getters
-      Object.assign(Yoga, assembly);
-      return Yoga;
-    });
+    loading = embeddedAssembly()
+      .then((assembly) => assembly ?? loadYoga())
+      .then((assembly) => {
+        for (const name of ['Node', 'Config']) delete Yoga[name]; // drop the throwing getters
+        Object.assign(Yoga, assembly);
+        return Yoga;
+      });
   }
   return loading;
 }
