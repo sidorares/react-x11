@@ -33,24 +33,21 @@ import {
 } from '../a11y.js';
 import { synthesizeClick } from '../events.js';
 import { onApp } from '../trace-registry.js';
+import { A11yPacer } from '../a11ypace.js';
 
 const TRACE = process.env.REACT_X11_TRACE_A11Y === '1';
 
-/**
- * How often commits may push the mirror, in ms. A commit that follows a
- * quiet spell pushes at once; a stream of them — a pan, a drag, a value
- * ticking — pushes once per interval, the last of them catching up.
- *
- * UIA's clients are almost always listening on a desktop Windows (the
- * touch keyboard, the text services and others ask for the tree), so the
- * push is not the rare case the listening gate makes it elsewhere: a walk
- * of the window and a marshalled diff, on every commit. For a graph pane
- * whose every item moves on every step of a pan that was 1.6 ms of each
- * frame. A screen reader reads positions on demand and does not need
- * sixty of them a second; a focus change, which it is waiting on, still
- * pushes at once (`hooks.focus`), as does an announcement.
- */
-const COMMIT_PUSH_MS = 100;
+// How often commits may push the mirror is src/a11ypace.js's to say, for
+// this bridge and the AT-SPI one alike: at once after a quiet spell, and for
+// a stream of commits (a pan, a drag, a value ticking) once per interval,
+// the last push catching up. UIA's clients are almost always listening on a
+// desktop Windows (the touch keyboard, the text services and others ask for
+// the tree), so pushing is not the rare case the listening gate makes it
+// elsewhere. For a graph pane whose every item moves on every step of a pan,
+// a push per commit was 1.6 ms of each frame. A screen reader reads positions
+// on demand and does not need sixty of them a second. What it does wait on
+// is pushed at once: a focus change (`hooks.focus`), an announcement, and a
+// change to the focused element itself (`_touch`).
 
 // --------------------------------------------------------------------------
 // The one translation that is Windows' own
@@ -316,9 +313,12 @@ export class Win32Accessibility {
     this._pushed = new Set();
     this._unsubscribes = [];
     this.dead = false;
-    /** When a commit last pushed, and the push a stream of commits owes. */
-    this._lastCommitPush = -Infinity;
-    this._trailing = null;
+    /** When commits may push (src/a11ypace.js). */
+    this._pacer = new A11yPacer();
+    /** The focused node, and whether a commit changed it: its own changes
+     *  are what a screen reader is waiting to hear, and are not paced. */
+    this._focused = null;
+    this._urgentPending = false;
   }
 
   _idOf(node) {
@@ -454,23 +454,21 @@ export class Win32Accessibility {
     }
   }
 
-  /** A commit's push, at most once per `COMMIT_PUSH_MS`. */
+  /** A commit's push, paced (src/a11ypace.js), and at once where it
+   *  changed the focused element. */
   _commitFlush() {
     if (this.dead || this._dirty.size === 0) return;
-    const now = performance.now();
-    const wait = this._lastCommitPush + COMMIT_PUSH_MS - now;
-    if (wait <= 0) {
-      this._lastCommitPush = now;
-      this.flush();
-      return;
+    const urgent = this._urgentPending;
+    this._urgentPending = false;
+    if (urgent) this._pacer.cancel();
+    if (urgent || this._pacer.ready(() => this._pacedFlush())) {
+      this._pacedFlush();
     }
-    if (this._trailing) return;
-    this._trailing = setTimeout(() => {
-      this._trailing = null;
-      this._lastCommitPush = performance.now();
-      this.flush();
-    }, wait);
-    this._trailing.unref?.();
+  }
+
+  _pacedFlush() {
+    this._pacer.pushed();
+    this.flush();
   }
 
   /** A window's HWND exists now, so what is owed for it can be pushed. */
@@ -501,9 +499,19 @@ export class Win32Accessibility {
     return root && this.toplevels.includes(root) ? root : null;
   }
 
-  _touch(node) {
+  /** `own`: the change is the node's own (its props or text), which is
+   *  urgent where the node is, or is inside, the focused element. */
+  _touch(node, own = false) {
     const win = this._toplevelOf(node);
-    if (win) this._dirty.add(win);
+    if (!win) return;
+    this._dirty.add(win);
+    if (!own || this._focused === null || this._urgentPending) return;
+    for (let n = node; n; n = n.parent) {
+      if (n === this._focused) {
+        this._urgentPending = true;
+        return;
+      }
+    }
   }
 
   // ---- what the shell asks for ------------------------------------------
@@ -594,10 +602,11 @@ export class Win32Accessibility {
     };
     hooks.attached = (parent) => this._touch(parent);
     hooks.detach = (parent) => this._touch(parent);
-    hooks.propsChanged = (node) => this._touch(node);
-    hooks.textContent = (chunk) => this._touch(chunk.parent ?? chunk);
-    hooks.textState = (node) => this._touch(node);
+    hooks.propsChanged = (node) => this._touch(node, true);
+    hooks.textContent = (chunk) => this._touch(chunk.parent ?? chunk, true);
+    hooks.textState = (node) => this._touch(node, true);
     hooks.focus = (previous, next) => {
+      this._focused = next ?? null;
       const win = this._toplevelOf(next ?? previous);
       if (!win) return;
       this._dirty.add(win);
@@ -637,8 +646,7 @@ export class Win32Accessibility {
   bury() {
     if (this.dead) return;
     this.dead = true;
-    if (this._trailing) clearTimeout(this._trailing);
-    this._trailing = null;
+    this._pacer.cancel();
     for (const key of Object.keys(hooks)) hooks[key] = null;
     for (const unsubscribe of this._unsubscribes) unsubscribe();
     this._unsubscribes = [];

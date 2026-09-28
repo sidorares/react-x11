@@ -1048,6 +1048,122 @@ describe('the AT-SPI bridge', { concurrency: 1, ...needsBroker }, () => {
     unregisterElement('minichart');
   });
 
+  // --- pacing (src/a11ypace.js) -------------------------------------------
+
+  /** A list whose items are `keys`, and a button to focus beside it. */
+  const paced = (keys) =>
+    h(
+      'window',
+      { title: 'Bridge Test', width: 320, height: 200 },
+      h('box', { role: 'button', focusable: true }, h('text', null, 'Go')),
+      h(
+        'box',
+        { role: 'list' },
+        ...keys.map((k) =>
+          h('box', { key: k, role: 'listitem', 'aria-label': `item ${k}` }),
+        ),
+      ),
+    );
+  const quiet = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const childEvents = (kind) =>
+    eventsNamed('ChildrenChanged').filter((s) => s.body[0] === kind);
+
+  test('a stream of changes is pushed once an interval, with only what stayed', async () => {
+    const { startA11y } = await import('../src/a11y.js');
+    const bridge = await startA11y();
+    bridge._pacer.interval = 300;
+    try {
+      x11Root.render(paced(['a']));
+      await settle();
+      // twice the interval: the change above may itself have been held, and
+      // a quiet spell counts from the push that took it
+      await quiet(650);
+      signals.length = 0;
+      x11Root.render(paced(['b']));
+      await settle();
+      assert.ok(childEvents('add').length > 0, 'a change after quiet: at once');
+
+      signals.length = 0;
+      for (const k of ['c', 'd', 'e']) {
+        x11Root.render(paced([k]));
+        await settle();
+      }
+      assert.equal(eventsNamed('ChildrenChanged').length, 0, 'a stream: held');
+      await until(() => childEvents('add').length > 0, 'the push it is owed');
+      // b leaving and e arriving; c and d came and went between two pushes,
+      // and an AT that was never told of them is not told they left
+      assert.equal(childEvents('add').length, 1, 'one arrival');
+      assert.equal(childEvents('remove').length, 1, 'one departure');
+    } finally {
+      bridge._pacer.interval = 500;
+    }
+  });
+
+  test('a read sees the tree as it is, whatever the pacer holds', async () => {
+    const { startA11y } = await import('../src/a11y.js');
+    const bridge = await startA11y();
+    bridge._pacer.interval = 10_000;
+    try {
+      bridge._pacer.pushed();
+      signals.length = 0;
+      x11Root.render(paced(['p', 'q', 'r']));
+      await settle();
+      assert.equal(eventsNamed('ChildrenChanged').length, 0, 'held');
+      const frame = await call(
+        appBus,
+        ROOT_PATH,
+        ACCESSIBLE,
+        'GetChildAtIndex',
+        'i',
+        [0],
+      );
+      const list = await call(
+        appBus,
+        frame[1],
+        ACCESSIBLE,
+        'GetChildAtIndex',
+        'i',
+        [1],
+      );
+      const items = await call(appBus, list[1], ACCESSIBLE, 'GetChildren');
+      const names = [];
+      for (const [, path] of items) {
+        names.push(await getProp(appBus, path, ACCESSIBLE, 'Name'));
+      }
+      assert.deepEqual(names, ['item p', 'item q', 'item r']);
+    } finally {
+      bridge._pacer.interval = 500;
+    }
+  });
+
+  test('focus moving is pushed at once, with what the stream held', async () => {
+    const { startA11y } = await import('../src/a11y.js');
+    const bridge = await startA11y();
+    bridge._pacer.interval = 10_000;
+    try {
+      bridge._pacer.pushed();
+      signals.length = 0;
+      x11Root.render(paced(['s']));
+      await settle();
+      assert.equal(eventsNamed('ChildrenChanged').length, 0, 'held');
+      // focus moved by the app, not by an AT's call, which would flush as a
+      // read does
+      const wnd = app.windows[0];
+      const button = wnd._reactX11Node.children[0];
+      button.focus();
+      await settle();
+      assert.ok(
+        eventsNamed('StateChanged').some(
+          (s) => s.body[0] === 'focused' && s.body[1] === 1,
+        ),
+        'the focus change',
+      );
+      assert.ok(childEvents('add').length > 0, 'and the held change with it');
+    } finally {
+      bridge._pacer.interval = 500;
+    }
+  });
+
   test('unmounting removes the tree and tells the cache', async () => {
     signals.length = 0;
     x11Root.render(null);

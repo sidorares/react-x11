@@ -1088,7 +1088,11 @@ under one lock and returns, and nothing ever waits on JS. A provider holds a
 window id and a node id and nothing else, so a client keeping an element
 across a re-render cannot make it read freed memory. `ITextProvider` and its
 ranges are the piece that is not there; a `<textinput>` exposes its value
-through `IValueProvider` instead.
+through `IValueProvider` instead. Commits push the mirror at the pace
+[accessibility.md](accessibility.md#how-often-the-bridge-speaks) describes
+for both bridges: at once after a quiet spell, once per interval through a
+stream, and at once for focus, announcements and the focused element's own
+changes.
 
 The alternative considered for the same shape was AccessKit, and the reason
 it was not taken is the build rather than the design: its C bindings put Rust
