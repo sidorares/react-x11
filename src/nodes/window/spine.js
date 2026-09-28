@@ -166,11 +166,11 @@ export function spineScope(root, sources, listOnly) {
   // Every other child of a summed column answers from the extent it carries.
   for (const column of spine) {
     for (const child of column.children) {
-      if (!inFlow(child) || roots.has(child) || spine.has(child)) continue;
-      if (child._floorH === undefined) return null;
-      if (MARGINS.some((key) => typeof child.style[key] === 'string')) {
-        return null;
-      }
+      if (!child.yoga || child.isWindow) continue;
+      if (roots.has(child) || spine.has(child)) continue;
+      const flags = styleFlags(child.style);
+      if (flags & OUT_OF_FLOW) continue;
+      if (child._floorH === undefined || flags & RELATIVE_MARGIN) return null;
     }
   }
   const depth = (node) => {
@@ -183,6 +183,33 @@ export function spineScope(root, sources, listOnly) {
     spine: [...spine].sort((a, b) => depth(b) - depth(a)),
     stops,
   };
+}
+
+const OUT_OF_FLOW = 1;
+const RELATIVE_MARGIN = 2;
+const STYLE_FLAGS = new WeakMap();
+
+/**
+ * What the summing asks of a block's style — out of its column's flow
+ * (`inFlow`'s half that is style), or a margin that is not a length — kept
+ * per style object. A resolved style is replaced when it changes, never
+ * edited (`_retarget`), and a column of 1,704 blocks is a handful of
+ * styles asked a dozen names each, most of them unset: 20,000 lookups of
+ * properties no block has, on every edit to a long document.
+ */
+function styleFlags(style) {
+  let flags = STYLE_FLAGS.get(style);
+  if (flags === undefined) {
+    flags =
+      (style.position === 'absolute' || style.display === 'none'
+        ? OUT_OF_FLOW
+        : 0) |
+      (MARGINS.some((key) => typeof style[key] === 'string')
+        ? RELATIVE_MARGIN
+        : 0);
+    STYLE_FLAGS.set(style, flags);
+  }
+  return flags;
 }
 
 /** The children of a node that gained or lost some: the ones yoga has a

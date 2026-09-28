@@ -287,6 +287,9 @@ export class WindowNode extends Scrollable(Node) {
     this._readEveryWidth = false;
     this._floorsScopeNow = null;
     this._floorsSpineNow = null;
+    // whether a flush's collection of what changed is still owed to the
+    // first pass that lays the tree out (`_collectOwedFloorStale`)
+    this._floorsCollectOwed = false;
     // whether the next layout walk must visit every box (`invalidate`)
     this._walkWhole = true;
     this._scopedFloorPasses = 0;

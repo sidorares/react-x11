@@ -161,9 +161,11 @@ export class WindowFlush {
     if (this._loopNodes.size && !this._loopWatch) this._watchLoops();
     this._advanceAnimations(now());
     if (this.needsLayout) {
-      // before `_refit` lays anything out: a pass clears yoga's record of
-      // which subtrees changed, and the floors are measured from that record
-      this._collectFloorStale();
+      // before anything lays the tree out: a pass clears yoga's record of
+      // which subtrees changed, and the floors are measured from that record.
+      // Owed to that pass rather than taken here (`_collectOwedFloorStale`),
+      // so a frame whose first pass is the floors' own collects once.
+      this._floorsCollectOwed = true;
       this._refit();
     }
     const width = this.window.width ?? this._requestedSize?.width ?? 0;
