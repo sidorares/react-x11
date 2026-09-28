@@ -40,10 +40,18 @@ test("a menu bar's first frame sets no face that was not warmed", async () => {
   // itself; anything else a menu bar sets has to be one the root warmed
   const source = defaultFontSource();
   const asked = [];
-  source.matchSorted = function (pattern) {
-    asked.push(pattern);
-    return Object.getPrototypeOf(this).matchSorted.call(this, pattern);
-  };
+  // a face's match asks for the best face alone where the source can answer
+  // it (ntk 8.14's `matchFirst`), and for the fallback chain otherwise, so
+  // what the bar set is what it asked either one for
+  const asks = ['matchSorted', 'matchFirst'].filter(
+    (name) => typeof source[name] === 'function',
+  );
+  for (const name of asks) {
+    source[name] = function (pattern) {
+      asked.push(pattern);
+      return Object.getPrototypeOf(this)[name].call(this, pattern);
+    };
+  }
   try {
     await renderX11(
       h(MenuBar, {
@@ -55,7 +63,7 @@ test("a menu bar's first frame sets no face that was not warmed", async () => {
       }),
     );
   } finally {
-    delete source.matchSorted;
+    for (const name of asks) delete source[name];
   }
   const four = (p) =>
     p.family === 'sans-serif' && [400, 700].includes(p.weight);
