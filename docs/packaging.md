@@ -532,7 +532,8 @@ To skip the cost, or the move:
 
 The move does not happen in a single executable (tier 3, and
 `bun build --compile`), whose entry is not a file a worker can load, so it
-runs on the pump; under a test runner; with `REACT_X11_THREADED=0` or
+runs on the pump; in a `<Frame>` pane, whose IPC channel to its host is
+the main thread's; under a test runner; with `REACT_X11_THREADED=0` or
 `REACT_X11_BACKEND=x11`; and when react-x11 is imported after the app has
 started running — a dynamic `import()` from a timer — where the worker
 would run again what the entry has already done.

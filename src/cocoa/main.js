@@ -17,6 +17,11 @@
 // import's). Anywhere else it does nothing, so one command line serves
 // every platform: on Linux the entry runs as it would without it, and so
 // does a Worker the app starts itself (it inherits this `--import`).
+//
+// Of the checks it skips, it keeps one: a `<Frame>` pane stays where it is.
+// The host forks the pane with the node flags it started with, this
+// `--import` among them, and a pane on a worker has no IPC channel to its
+// host (src/cocoa/relaunch.js, `relaunchVeto`).
 import { isMainThread, workerData } from 'node:worker_threads';
 
 import { loadNative } from './native.js';
@@ -24,7 +29,11 @@ import { bootstrapWorker, relaunch } from './relaunch.js';
 
 if (!isMainThread && workerData?.reactX11State) {
   bootstrapWorker(workerData.reactX11State);
-} else if (isMainThread && process.platform === 'darwin') {
+} else if (
+  isMainThread &&
+  process.platform === 'darwin' &&
+  process.env.REACT_X11_FRAME !== '1'
+) {
   const entry = process.argv[1];
   if (!entry) {
     throw new Error(

@@ -95,6 +95,13 @@ dev loader (tsx, the refresh loader) into it during development; a bundled
 application forks plain JavaScript and needs none. It connects to the
 display the host names in `display`, or `$DISPLAY` like everything else.
 
+On macOS a pane stays on its process's main thread, where an app moves onto
+a worker ([macos.md](macos.md#js-on-a-worker-a-ui-thread-of-the-bridges-own)):
+it has no AppKit for that thread to keep, and the IPC channel it talks to
+its host over is that thread's — a worker has no `process.send`. That holds
+under `--import react-x11/cocoa-main` too, which a pane inherits whenever its
+host was started under it.
+
 ## Props: a bag of data, and stubs for the functions in it
 
 `props` crosses by **structured clone** — Dates, Maps, TypedArrays and
