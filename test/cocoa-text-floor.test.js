@@ -343,18 +343,23 @@ describe(
       assert.ok(at(room) > room / 2, 'and used the room it was given');
     });
 
-    test('a paragraph offered a pixel still breaks inside its words', () => {
+    test('a paragraph offered less than its longest word breaks inside its words', () => {
       // The reason the text is broken in the engine rather than by asking
       // CoreText for a narrow line: below the floor, CoreText's breaker
-      // makes progress by splitting words, which is a floor of one
-      // character. ntk does the same under its own floor, so this is not a
+      // makes progress by splitting words, wherever a word's first cluster
+      // fits. ntk does the same under its own floor, so this is not a
       // disagreement — it is why zero cannot be spelled as "very small".
+      // Where not even the first cluster fits, a pixel say, both run the
+      // word on whole (windowkit/appkit#86, in 0.15.2), so a pixel's offer
+      // is the floor again and says nothing here: half the longest word is
+      // an offer every word's first letter fits in.
       const fonts = new CocoaFontManager(bridge);
-      const pixel = fonts.layout([{ text: TEXT }], base, { maxWidth: 1 });
       const floor = fonts.layout([{ text: TEXT }], base, { maxWidth: 0 });
+      const offer = floor.width / 2;
+      const narrow = fonts.layout([{ text: TEXT }], base, { maxWidth: offer });
       assert.ok(
-        pixel.width < floor.width / 3,
-        `a pixel offer measures ${pixel.width}, the floor is ${floor.width}`,
+        narrow.width <= offer,
+        `offered ${offer}, it measures ${narrow.width}; the floor is ${floor.width}`,
       );
     });
   },
