@@ -304,6 +304,17 @@ async function xserverApp() {
 const roundTrip = (app) =>
   new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
 
+// ntk 8.12 lets the fence clock keep two frames in flight (ntk#370), and
+// `frameInFlight()` shuts at the second. Whether the event after a press
+// paints on the spot is then up to the minimum interval between blits, which
+// is wall-clock time: ten events emitted back to back outlast it on a loaded
+// machine, and the second one paints too. One frame in flight keeps the gate
+// these tests are about a fact about the fence alone. (Before 8.12 there is
+// no setter, and one frame was the only limit there was.)
+const oneFrameInFlight = (wnd) => {
+  wnd.maxFramesInFlight = 1;
+};
+
 // A core input event as it arrives on ntk's raw stream: ButtonPress is 4,
 // and buttons 4-7 are what a wheel is in the core protocol.
 const buttonPress = (keycode) => ({ type: 4, x: 100, y: 100, keycode });
@@ -352,6 +363,7 @@ test('real ntk: the press paints, and the present shuts the gate behind it', asy
   await roundTrip(app);
 
   assert.ok(wnd?.id, 'the window exists');
+  oneFrameInFlight(wnd);
   assert.strictEqual(
     typeof wnd.frameInFlight,
     'function',
@@ -402,6 +414,7 @@ test('real ntk: a spun wheel paints twice, not ten times, and loses no notch', a
   await tick();
   await roundTrip(app);
   const pane = wnd._reactX11Node.children[1];
+  oneFrameInFlight(wnd);
 
   const passes = countPaints();
   // Ten notches of a spun wheel, all inside one round trip. This server has
