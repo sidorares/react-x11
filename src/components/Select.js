@@ -10,12 +10,12 @@ import {
   ABS_FILL,
   Bezel,
   NATIVE_BAND,
+  NATIVE_FOOTPRINT,
   NATIVE_MENU,
   NATIVE_RING,
   TITLE_BASELINE,
   bezelNatural,
   bezelShadow,
-  nativeFootprintStyle,
   nativeTitleStyle,
   pressWash,
   useNativeControls,
@@ -550,7 +550,7 @@ export function Select({
           },
         // The caller's style, on the trigger where the trigger is the whole
         // control. Under a native bezel it sizes the footprint below instead
-        // and the trigger keeps AppKit's height (`nativeFootprintStyle`).
+        // and the trigger keeps AppKit's height (`NATIVE_FOOTPRINT`).
         !nativeControls && style,
       ],
     },
@@ -677,6 +677,6 @@ export function Select({
   // around them is what a `height`, a `flexGrow` or a parent's align-stretch
   // is free to make taller, with the control centred in it (issue #510).
   return nativeControls
-    ? h('box', { theme, style: [nativeFootprintStyle(nat), style] }, trigger)
+    ? h('box', { theme, style: [NATIVE_FOOTPRINT, style] }, trigger)
     : trigger;
 }

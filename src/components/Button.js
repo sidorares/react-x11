@@ -8,11 +8,11 @@ import {
   ABS_FILL,
   Bezel,
   NATIVE_BAND,
+  NATIVE_FOOTPRINT,
   NATIVE_RING,
-  TITLE_BASELINE,
   bezelNatural,
   bezelShadow,
-  nativeFootprintStyle,
+  nativeTitleMargins,
   nativeTitleStyle,
   pressWash,
   useNativeControls,
@@ -23,6 +23,11 @@ const h = React.createElement;
 
 const VARIANTS = ['solid', 'outline', 'ghost'];
 const SIZES = ['medium', 'small'];
+
+// A label squeezed below its width wraps at its words, and the lines are
+// centred under one another, as AppKit centres a title that wrapped and a
+// browser a `<button>`'s. One line is as wide as its box, so it is not moved.
+const CENTRED_LINES = Object.freeze({ textAlign: 'center' });
 
 /**
  * <Button onPress variant size primary disabled …boxProps>label</Button> —
@@ -97,8 +102,8 @@ export function Button({
       {
         theme,
         // The footprint the caller's style sizes; the button below keeps
-        // AppKit's height inside it, centred (`nativeFootprintStyle`).
-        style: [nativeFootprintStyle(nat), style],
+        // its own height inside it, centred (`NATIVE_FOOTPRINT`).
+        style: [NATIVE_FOOTPRINT, style],
       },
       h(
         'box',
@@ -117,16 +122,23 @@ export function Button({
               gap: small ? 6 : 8,
               // AppKit's metrics, not the palette's: a native bezel is
               // designed at its own height, and stretching it is what this
-              // mode exists to avoid. Width still follows the label.
-              height: nat.height,
+              // mode exists to avoid. Width still follows the label — and
+              // so does the height, once there is not the width for the
+              // label: it wraps at its words, as a drawn one does, and the
+              // lines it grew by make the control taller. AppKit has a
+              // bezel for that button (src/cocoa/bezels.js); a title
+              // pinned to one line's height put its first line above the
+              // bezel instead.
+              minHeight: nat.height,
               paddingLeft: small ? 10 : 14,
               paddingRight: small ? 10 : 14,
               // The natural box is the bezel's footprint, shadow included;
-              // the body is what the title is placed against — and placed,
-              // not centred (`TITLE_BASELINE`). A label centred by its
-              // capitals sat 1pt low beside a native button.
+              // inside the shadow is the body, which an icon is centred on
+              // and the title is placed against — placed, not centred
+              // (`nativeTitleMargins`). A label centred by its capitals sat
+              // 1pt low beside a native button.
               paddingTop: shadow.top,
-              paddingBottom: shadow.bottom + TITLE_BASELINE[controlSize],
+              paddingBottom: shadow.bottom,
               // The keyboard ring is the renderer's, on this box — shaped by
               // the bezel's corners and hugging it, as AppKit's is
               // (`NATIVE_RING`), rather than the palette's offset rectangle.
@@ -151,7 +163,11 @@ export function Button({
           isDefault: primary && !disabled,
           style: ABS_FILL,
         }),
-        labelContent(children ?? label, nativeTitleStyle(controlSize)),
+        labelContent(children ?? label, [
+          nativeTitleStyle(controlSize),
+          nativeTitleMargins(nat, shadow, controlSize),
+          CENTRED_LINES,
+        ]),
         // The press answer. Last child on purpose: `:active` marks the
         // pressed node and its ancestors, and the topmost child is what the
         // press lands on. No hover tint — AppKit buttons have none.
@@ -271,6 +287,6 @@ export function Button({
         style,
       ],
     },
-    labelContent(children ?? label),
+    labelContent(children ?? label, CENTRED_LINES),
   );
 }

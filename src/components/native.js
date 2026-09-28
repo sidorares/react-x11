@@ -19,7 +19,7 @@
 
 import React, { useCallback, useRef } from 'react';
 import { useAppOrNull } from '../appcontext.js';
-import { useTheme } from './theme.js';
+import { capBand, useTheme } from './theme.js';
 
 const h = React.createElement;
 
@@ -102,15 +102,46 @@ export function nativeTitleStyle(controlSize = 'regular') {
 }
 
 /**
+ * Where a push button's title goes in a control whose padding is only the
+ * bezel's shadow — so the box inside it is the body, and an icon beside the
+ * title is centred on the body as AppKit centres an image. The title is a
+ * margin box inside that: `TITLE_BASELINE` under its last baseline, and over
+ * its capitals the room a one-line title leaves there in a body of the
+ * bezel's own height. So a title that fits sits exactly where the cell puts
+ * it, filling the body to the pixel, and one that wrapped keeps the same
+ * margins round the lines it grew by: the control is taller by those lines,
+ * and so is the bezel drawn to it (src/cocoa/bezels.js, the flexible push).
+ * AppKit's own flexible push starts a wrapped title's capitals within half a
+ * point of here (4.5pt under the body's top edge at the regular size, 4 at
+ * the small) and ends it 2.5pt nearer the bottom edge at the regular size:
+ * the one-line baseline is kept instead, so a title does not move when it
+ * wraps, and a wrapped button is that much taller than AppKit's.
+ *
+ * The capitals are measured the way the title will be, `capBand` of the
+ * control font size, so the two cancel: a face whose trimmed caps round to
+ * the band — every UI face measured — fills the body exactly and never
+ * grows the control by a line it does not have.
+ */
+export function nativeTitleMargins(nat, shadow, controlSize = 'regular') {
+  const body = nat.height - shadow.top - shadow.bottom;
+  const baseline = TITLE_BASELINE[controlSize];
+  const caps = capBand(CONTROL_FONT_SIZE[controlSize]);
+  return {
+    marginTop: Math.max(0, body - baseline - caps),
+    marginBottom: baseline,
+  };
+}
+
+/**
  * The **footprint** a native control sits in: the box the caller's style
  * sizes, with the control — bezel, title and press wash, one unit at
  * AppKit's own metrics — centred inside it.
  *
  * Two boxes rather than one, because the title is *placed* and not centred:
  * it rides `TITLE_BASELINE` above the bezel body's bottom edge, and that is
- * only where the cell puts it while the box is exactly `bezelNatural` tall.
- * The caller's style is applied last and flex stretches a box regardless, so
- * it was not always: `style={{ height: 44 }}`, a `height: '100%'` in a taller
+ * only where the cell puts it while the box is the control's own height. The
+ * caller's style is applied last and flex stretches a box regardless, so it
+ * was not always: `style={{ height: 44 }}`, a `height: '100%'` in a taller
  * parent and a bare `flexGrow: 1` each made the box taller, and the two
  * halves — the bezel absolutely filling it, the title glued to its bottom —
  * came apart, the label landing below the control it names (issue #510). The
@@ -118,20 +149,20 @@ export function nativeTitleStyle(controlSize = 'regular') {
  * control is merely roomy, where a stretched native one was broken.
  *
  * So the height a caller can move belongs to a box the control sits in, and
- * the control keeps AppKit's. The default here is exactly today's box — an
- * untouched control lays out as it always did, and the explicit height still
- * resists a row's align-stretch — and the caller's style, applied after it,
- * moves the footprint alone. The control stretches across it (align-stretch,
- * the default), so a footprint given a width is a bezel that wide.
+ * the control keeps its own. Untouched, the footprint is exactly as tall as
+ * the control — AppKit's height, or a button's taller one when its label
+ * wrapped — and the caller's style, applied after it, moves the footprint
+ * alone. A row's align-stretch moves it too, and the control stays centred
+ * in the slot, which is where a control that cannot stretch belongs beside a
+ * taller neighbour. The control stretches across it (align-stretch, the
+ * default), so a footprint given a width is a bezel that wide.
  *
  * The control, not the footprint, stays the *control*: the role, the
  * handlers, the focus ring and the ref go on it, so a press in the slack
  * above a 22pt popup in a 46pt hole does nothing at all — as it does in
  * AppKit — rather than firing a button with no visible answer to the press.
  */
-export function nativeFootprintStyle(nat) {
-  return { height: nat.height, justifyContent: 'center' };
-}
+export const NATIVE_FOOTPRINT = Object.freeze({ justifyContent: 'center' });
 
 /**
  * The rest of what a native control's own box says about its size: nothing

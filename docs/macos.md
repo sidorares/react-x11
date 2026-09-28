@@ -1205,6 +1205,18 @@ Wiring, shaped as theme policy rather than per-widget forks:
   ended up below the control it names (#510). The role, the handlers, the
   focus ring and the ref stay on the control, so the slack around it is
   slack — a press there does nothing, as it does in AppKit.
+- A `<Button>` label **wraps** when its row is too narrow for it, as a drawn
+  one does, and the control grows by the lines it gained — so a push button
+  is AppKit's height only while its title is one line. A push bezel is one
+  height (asked for a taller frame, AppKit draws its own 22pt centred in
+  it), so a box taller than that is drawn as `NSBezelStyleFlexiblePush`:
+  the same button stretched to its frame, which AppKit gives a title that
+  wraps and WebKit and Gecko draw a tall push button with. At one line the
+  two are the same pixels, except the default button's accent, which is
+  flat in the flexible bezel where the push has a sheen. A bridge that
+  predates the kind keeps the push and says so once, in development
+  (`src/cocoa/bezels.js`, "Taller than one line"). Pinning the title to one
+  line's height put its first line above the bezel instead.
 - The palette gains a macOS system theme whose tokens read semantic
   `NSColor`s (accent, text, separators) so _drawn_ content — cards,
   tables, custom widgets — sits harmoniously beside native bezels, and

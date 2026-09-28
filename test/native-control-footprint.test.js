@@ -116,6 +116,20 @@ const CASES = [
     wrap: (control) =>
       h('box', { style: { height: 90 } }, control({ flexGrow: 1 })),
   },
+  {
+    // the footprint is the control's height by default rather than a named
+    // one, so a row's align-stretch reaches it like any box — and the
+    // control is centred in the slot, not left at its top
+    name: 'beside a 40pt neighbour in a stretching row',
+    box: 40,
+    wrap: (control) =>
+      h(
+        'box',
+        { style: { flexDirection: 'row' } },
+        h('box', { style: { width: 10, height: 40 } }),
+        control({}),
+      ),
+  },
 ];
 
 for (const { name, box, wrap } of CASES) {
