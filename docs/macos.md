@@ -2265,6 +2265,27 @@ renderer's own and are listed at the end.
   after it. Only the wheel: a resize paints into a pair it has just made,
   and gating its ticks cost the live resize a frame after the drag
   (`resize` in the presenter gate caught it). `test/cocoa-frames.test.js`.
+- **A `<glarea>`'s frame and its overlay go out together**
+  (`CocoaWindow.surfaceFrameOwed`, `CocoaApp._tickFrames`). Two things
+  let the overlay a surface's children are painted on reach the screen
+  ahead of the GL frame it was painted for, while #641 had ordered the
+  two within a tick. An input answered at once, a press, a key or a wheel
+  notch, flushed the window inside its dispatch, overlay and all, and left
+  the GL frame the same input asked for on the clock, a refresh or more
+  later. And inside a tick the two were still two commits: the overlay is
+  flipped in a transaction of its own in the window's flush, the GL frame
+  after its draw, and a frame that rebuilt its scene put 10–16ms between
+  them. `<Flow>` over 400 widget bodies (react-x11-components'
+  `flow-stress` example) showed it: the first notch of a zoom took the
+  bodies and their cards off the overlay 20–25ms before the GL frame that
+  drew the cards in their place, and for that long the graph showed its
+  edges with nothing under them.
+  Now a window whose surface has a frame queued is left to the clock by the
+  early flush, and a tick runs such a window's frame and its surfaces'
+  inside one transaction, committed with the window's size, so every layer
+  the two changed lands in one commit. What an input gives up is the head
+  start of its 2D half on such a window; its GL half never had one.
+  `test/cocoa-glarea.test.js`.
 
 **What was left, in order of what it cost** — the three items of #445,
 measured in the pass below: a full relayout of a large tree (44ms at 3,600

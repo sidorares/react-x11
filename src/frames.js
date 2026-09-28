@@ -53,6 +53,12 @@ export function clearPendingFrame(node) {
  *  - **Every window answers for itself.** The set is app-wide, so a click
  *    that dirtied both a menu and the window under it paints both, each
  *    gated on its own window's frame clock.
+ *  - **Nor while a `<glarea>` of it waits on the clock.** A window's frame
+ *    paints the overlay a surface's children are drawn on, and the clock
+ *    draws the surface's own frame after it, in the same tick (#641). A
+ *    window that says it owes one (`surfaceFrameOwed`) keeps its paced
+ *    frame: painted now, the overlay would go out a refresh or more ahead
+ *    of the GL frame it was painted for.
  *
  * A window whose scheduled frame this pays off keeps that scheduled
  * callback; it runs and finds `needsPaint` false, which is already a cheap
@@ -68,6 +74,7 @@ export function flushPendingFrames() {
     // Same for a headless mock window that models no frame clock at all.
     if (typeof wnd?.frameInFlight !== 'function') continue;
     if (wnd.frameInFlight()) continue;
+    if (wnd.surfaceFrameOwed?.()) continue;
     node.flush();
   }
 }

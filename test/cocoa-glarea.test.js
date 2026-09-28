@@ -402,6 +402,222 @@ test('a GL frame goes out after the overlay painted in the same tick (#641)', as
   assert.deepEqual(order, ['overlay', 'gl']);
 });
 
+/**
+ * The outermost transaction each call in `calls` was made inside — a
+ * number that is the same for calls one commit put on glass together, and
+ * null for a call made outside any.
+ */
+function commitsOf(calls) {
+  let depth = 0;
+  let id = 0;
+  return calls.map(({ name }) => {
+    if (name === 'txBegin' && depth++ === 0) id += 1;
+    else if (name === 'txCommit') depth -= 1;
+    return depth > 0 ? id : null;
+  });
+}
+
+test('a GL frame and the overlay painted before it go out in one commit', async () => {
+  // Ordered in the tick (#641), the two were still two commits: the overlay
+  // is flipped in a transaction of its own inside the window's flush, the
+  // GL frame in one of its own after its draw, and the draw came between
+  // them. A frame that rebuilt its scene — 10ms and more — let the overlay
+  // reach the screen a refresh or two before the frame it was painted for:
+  // a graph's cards gone from the overlay for a zoom, and the GL frame that
+  // draws them in their place still to come, showed its edges bare.
+  const tree = (width) =>
+    h(
+      'window',
+      { width: 200, height: 120 },
+      h(
+        'box',
+        { style: { flexGrow: 1, padding: 10 } },
+        h(
+          'glarea',
+          { key: 'gl', style: { flexGrow: 1 } },
+          legend({ style: { position: 'absolute', left: 5, top: 5, width } }),
+        ),
+      ),
+    );
+  const { native, root, wnd, node, frame } = await mountGLArea({
+    children: legend(),
+  });
+  root.render(tree(20));
+  await tick();
+  frame();
+  const gl = node.window.layer;
+  const overlay = wnd._layer.sublayers.find((l) => l.props.zPosition > 1e7);
+  node.requestFrame();
+  root.render(tree(40));
+  await tick();
+  const from = native.calls.length;
+  frame(performance.now() + 1000);
+  const calls = native.calls.slice(from);
+  const commits = commitsOf(calls);
+  const at = (match) => {
+    const i = calls.findIndex(match);
+    assert.ok(i !== -1, 'it went out');
+    return commits[i];
+  };
+  const overlayCommit = at(
+    ({ name, args }) => name === 'surfaceToLayer' && args[1] === overlay,
+  );
+  const glCommit = at(
+    ({ name, args }) => name === 'setLayerContentsIOSurface' && args[0] === gl,
+  );
+  assert.notEqual(glCommit, null, 'the GL frame is flipped inside one');
+  assert.equal(overlayCommit, glCommit, 'the same one as the overlay');
+});
+
+/**
+ * A surface over a 200x120 window with one child a press widens, mounted
+ * and drawn. `askFrame` makes the press ask the surface for a frame as
+ * well, the way a scene answers a zoom; without it the press changes the
+ * child alone, and the surface's own props hold still. `presents()` is
+ * what reached the overlay's layer and the surface's since the last call,
+ * in order.
+ */
+async function mountPressable({ askFrame }) {
+  let area = null;
+  const ref = (node) => {
+    area = node;
+  };
+  function Legend() {
+    const [width, setWidth] = React.useState(20);
+    return legend({
+      style: { position: 'absolute', left: 5, top: 5, width, height: 40 },
+      onMouseDown: () => {
+        if (askFrame) area.requestFrame();
+        setWidth((w) => w + 20);
+      },
+      // a zoom's notch: a frame of the surface, and a child claimed in the
+      // same dispatch — what a scene that commits its children inside the
+      // gesture does
+      onWheel: (ev) => {
+        area.requestFrame();
+        ev.target.invalidate(false, ev.target, 'props');
+      },
+    });
+  }
+  const { native, app } = fakeCocoaApp();
+  const runtime = fakeGLRuntime();
+  app._cocoaGL = runtime;
+  app._cocoaGLPromise = Promise.resolve(runtime);
+  const root = await createRoot({ app });
+  roots.push(root);
+  // the surface's element is made once: a render of it would ask for a
+  // frame by itself (`GlAreaNode.applyProps`)
+  const surface = h(
+    'glarea',
+    { key: 'gl', ref, style: { flexGrow: 1 } },
+    h(Legend),
+  );
+  root.render(
+    h(
+      'window',
+      { width: 200, height: 120 },
+      h('box', { style: { flexGrow: 1, padding: 10 } }, surface),
+    ),
+  );
+  await tick();
+  const wnd = [...app._windows.values()][0];
+  wnd._refreshFrameInterval();
+  const node = findGLArea(wnd._reactX11Node);
+  for (let i = 0; i < 10 && !node.window; i++) await tick();
+  assert.ok(node.window, 'the surface was created');
+  const frame = (now) => {
+    app._tickFrames(now);
+    app._presentAll();
+  };
+  frame();
+  // the mount's frame closed the swap gate; a press comes well after it
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  frame();
+  const gl = node.window.layer;
+  const overlay = wnd._layer.sublayers.find((l) => l.props.zPosition > 1e7);
+  assert.ok(overlay, 'the child is on an overlay');
+  let from = native.calls.length;
+  const presents = () => {
+    const out = native.calls
+      .slice(from)
+      .filter(
+        ({ name, args }) =>
+          (name === 'surfaceToLayer' && args[1] === overlay) ||
+          (name === 'setLayerContentsIOSurface' && args[0] === gl),
+      )
+      .map(({ name }) => (name === 'surfaceToLayer' ? 'overlay' : 'gl'));
+    from = native.calls.length;
+    return out;
+  };
+  return { app, frame, presents, child: node.children[0] };
+}
+
+test('a press painted at once takes the GL frame it asked for along, after the overlay (#641)', async () => {
+  // A press, a key and a wheel notch are painted inside their own dispatch
+  // (src/frames.js, `CocoaApp._afterInput`): the window's frame, the
+  // overlay a surface's children are painted on with it, and the present.
+  // The GL frame the same input asked for waited on the clock, a refresh or
+  // more — and for that long the children were drawn over the frame
+  // before. A graph whose cards were a surface's children hid them for a
+  // zoom that way, and showed its edges bare until the GL frame came.
+  const { app, frame, presents, child } = await mountPressable({
+    askFrame: true,
+  });
+  pointerOver(app, child, { press: true });
+  const early = presents();
+  assert.ok(
+    early.length === 0 || early[early.length - 1] === 'gl',
+    `an overlay on glass has its GL frame after it: ${JSON.stringify(early)}`,
+  );
+  frame(performance.now() + 1000);
+  assert.deepEqual(
+    early.concat(presents()),
+    ['overlay', 'gl'],
+    'both go out, the GL frame after the overlay',
+  );
+});
+
+test('a press that asks nothing of the surface is still painted at once', async () => {
+  const { app, presents, child } = await mountPressable({ askFrame: false });
+  pointerOver(app, child, { press: true });
+  assert.deepEqual(presents(), ['overlay'], 'inside the press, on its own');
+});
+
+test('a wheel notch painted at once takes the GL frame it asked for along, after the overlay (#641)', async () => {
+  // The wheel's own early frame (`CocoaApp._routeWheel`), the one a zoom's
+  // first notch gets: the case that showed a graph's edges bare.
+  const { app, frame, presents, child } = await mountPressable({
+    askFrame: true,
+  });
+  const wnd = child.root.window;
+  const s = wnd.scale;
+  const x = (child.abs.x + child.abs.width / 2) / s;
+  const y = (child.abs.y + child.abs.height / 2) / s;
+  app._route({
+    type: 'wheel',
+    windowNumber: wnd.windowNumber,
+    x,
+    y,
+    gx: wnd.x / s + x,
+    gy: wnd.y / s + y,
+    dx: 0,
+    dy: 1,
+    precise: false,
+    time: performance.now(),
+  });
+  const early = presents();
+  assert.ok(
+    early.length === 0 || early[early.length - 1] === 'gl',
+    `an overlay on glass has its GL frame after it: ${JSON.stringify(early)}`,
+  );
+  frame(performance.now() + 1000);
+  assert.deepEqual(
+    early.concat(presents()),
+    ['overlay', 'gl'],
+    'both go out, the GL frame after the overlay',
+  );
+});
+
 test('the surface comes and goes without an implicit animation', async () => {
   const { native, root, node } = await mountGLArea();
   const layer = node.window.layer;

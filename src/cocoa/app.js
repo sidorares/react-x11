@@ -965,6 +965,7 @@ export class CocoaApp {
     // which is more than a display frame when the change costs layout
     // (issue #641). The Wayland backend orders them the same way
     // (`requestSurfaceFrame`).
+    const frames = [];
     const surfaces = [];
     for (const entry of queue) {
       // A window whose last flip has not reached its layer yet (threaded
@@ -993,10 +994,36 @@ export class CocoaApp {
         this._rafQueue.push(entry);
         continue;
       }
-      if (entry.surface) surfaces.push(entry);
-      else runFrame(entry, now);
+      (entry.surface ? surfaces : frames).push(entry);
     }
-    for (const entry of surfaces) runFrame(entry, now);
+    // …and in one commit with them. The overlay and the GL frame are two
+    // layers, each flipped in a transaction of its own — the overlay's in
+    // the window's flush, the GL frame's after its draw — and the draw came
+    // between the two commits: a frame that rebuilt its scene let the
+    // overlay reach the screen a refresh or more before the frame it was
+    // painted for. So a window with a surface drawing in this tick has its
+    // frame and theirs inside one transaction, which puts every layer the
+    // two changed on glass at once; committed with the window's size, as
+    // the frame a worker's resize handshake waits for (`_flip`).
+    const joined = new Set();
+    for (const entry of surfaces) if (entry.wnd) joined.add(entry.wnd);
+    for (const entry of frames) {
+      if (!joined.has(entry.wnd)) runFrame(entry, now);
+    }
+    for (const wnd of joined) {
+      this._native.txBegin({ disableActions: true });
+      try {
+        for (const entry of frames) {
+          if (entry.wnd === wnd) runFrame(entry, now);
+        }
+        for (const entry of surfaces) {
+          if (entry.wnd === wnd) runFrame(entry, now);
+        }
+      } finally {
+        this._native.txCommit(wnd._frameSize?.());
+      }
+    }
+    for (const entry of surfaces) if (!entry.wnd) runFrame(entry, now);
     this._armFrameTimer(soonest, now);
   }
 
