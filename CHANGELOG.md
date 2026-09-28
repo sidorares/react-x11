@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.22.10](https://github.com/sidorares/react-x11/compare/v2.22.9...v2.22.10) (2026-09-28)
+
+
+### Bug Fixes
+
+* **button:** a native label that wraps grows the button, and the bezel with it ([#723](https://github.com/sidorares/react-x11/issues/723)) ([9165e97](https://github.com/sidorares/react-x11/commit/9165e97d183c1958ab49231ddb737ab0465ebf23))
+* **cocoa:** a &lt;glarea&gt;'s frame and its overlay go out together ([#722](https://github.com/sidorares/react-x11/issues/722)) ([ff901db](https://github.com/sidorares/react-x11/commit/ff901db8a2ebe3e46e31550184ad7cfeb6559f1f))
+
+
+### Performance Improvements
+
+* **a11y:** both bridges pace what they push, and reads are never stale ([#719](https://github.com/sidorares/react-x11/issues/719)) ([193c1b6](https://github.com/sidorares/react-x11/commit/193c1b6b4c3c504d43c9bdb4e5f0a96de5570183))
+* **layout:** a named size that neither shrinks nor grows is floored by nothing ([#721](https://github.com/sidorares/react-x11/issues/721)) ([287b548](https://github.com/sidorares/react-x11/commit/287b548836e9eee885b56d67f8187f070506fbbc))
+
 ## [2.22.9](https://github.com/sidorares/react-x11/compare/v2.22.8...v2.22.9) (2026-09-28)
 
 
