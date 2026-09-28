@@ -385,7 +385,8 @@ Environment switches, in priority order:
 
 - `REACT_X11_A11Y=0` — off. Any other value forces the climb **and makes
   it loud**: each rung prints why it stopped, which is the answer to "why
-  does Orca not see my app".
+  does Orca not see my app", and the bridge says when it goes quiet and when
+  it wakes ([with nobody listening](#with-nobody-listening)).
 - `AT_SPI_BUS_ADDRESS` — skip discovery and connect here. The seam
   sandboxes use, and the one the hermetic tests use.
 - `REACT_X11_A11Y_INTERVAL=<ms>` — how often changes are pushed to the
@@ -441,6 +442,34 @@ focus and selection at once.
 
 `REACT_X11_A11Y_INTERVAL` sets the interval in milliseconds, and `0` goes
 back to a push per change.
+
+### With nobody listening
+
+Pacing bounds what a push costs. It does not help when nobody hears the
+push, which is the usual case: the bus runs whether or not a screen reader
+does. Dragging a scrollbar thumb down a 100,000-row `<Table>` ran at 19
+frames a second with the AT-SPI bridge on and 24 with it off, and nothing on
+that desktop was listening. So the bridge asks the registry.
+
+An AT registers the events it wants with the registry. The registry answers
+`GetRegisteredEvents` and announces each new listener, and GTK 4 and
+at-spi2-atk use that to hold back the events nobody asked for. Both still
+send the cache's signals and `children-changed` regardless, because libatspi
+listens for those in every client without registering. So an empty list is
+not the whole answer. An AT that registered for nothing still has to call in
+to read anything, and a call from anybody but the registry counts too.
+
+- **With no listener and no caller, the bridge falls silent.** Nothing is
+  queued, pushed or exported, and what it had exported before the registry
+  answered is withdrawn. The tree still answers every read, starting from the
+  application root.
+- **The first listener or the first call wakes it for good.** The AT reads
+  the tree as it is, which is where it would start anyway, and every change
+  after that is pushed as above.
+- **An announcement made during the silence goes unheard**, and
+  `announce()` returns `false` for it, as it does with no bridge at all.
+- **A registry that cannot say who listens** is taken to have someone
+  listening, as GTK 4 does with one it cannot ask.
 
 ## For component libraries
 
