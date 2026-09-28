@@ -83,6 +83,20 @@ export function offsetInParent(node) {
   };
 }
 
+/**
+ * Where layout put `node`'s box — yoga's `{ left, top, width, height }`,
+ * in one call where four getters cost four crossings into the wasm module —
+ * or the box a scroll pane's measure already read on this walk
+ * (`layoutDiff.boxes`), which no pass has touched since. A pane that
+ * measures its content reads every box in it, and the walk that places
+ * them read each one again: on an edit to a 600 KB document, 1,704 blocks'
+ * worth of numbers read twice every frame.
+ */
+export function laidBox(node) {
+  const box = layoutDiff.boxes?.get(node);
+  return box === undefined ? node.yoga.getComputedLayout() : box;
+}
+
 /** What a leaf a width pass reads nothing from answers with. */
 const UNREAD_SIZE = Object.freeze({ width: 0, height: 0 });
 
@@ -206,10 +220,11 @@ export class NodeLayout {
     // its own — counts as on screen too
     this._placed = true;
     if (!this.yoga) return;
-    const x = originX + this.yoga.getComputedLeft();
-    const y = originY + this.yoga.getComputedTop();
-    const width = this.yoga.getComputedWidth();
-    const height = this.yoga.getComputedHeight();
+    const box = laidBox(this);
+    const x = originX + box.left;
+    const y = originY + box.top;
+    const width = box.width;
+    const height = box.height;
     const wasX = this.abs.x;
     const wasY = this.abs.y;
     const move = this._beginRigidMove(x, y, width, height);
