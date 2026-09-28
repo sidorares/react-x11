@@ -353,7 +353,12 @@ test('panes follow the layout, and go with the children they held', async () => 
   }
 });
 
-test('children that overlap share a pane, painted in their order', async () => {
+test('children that overlap keep a pane each, the upper one holding the lower where they meet', async () => {
+  // A pane holds its child and what is under it, never what is over it: a
+  // child dragged over another moves its own pane and leaves the other's
+  // alone (src/gloverlay.js). So two that overlap are two panes, stacked in
+  // their order, and the upper one blends over the lower one's pixels where
+  // they meet — over the ground everywhere else.
   const box = (key, left, top, backgroundColor) =>
     h('box', {
       key,
@@ -373,18 +378,26 @@ test('children that overlap share a pane, painted in their order', async () => {
         { width: 320, height: 240 },
         h(
           'glarea',
-          { style: { flexGrow: 1 }, onDraw: () => {} },
+          { style: { flexGrow: 1 }, clearColor: '#000000', onDraw: () => {} },
           box('under', 20, 20, '#ff0000'),
-          box('over', 50, 40, '#0000ff'),
+          box('over', 50, 40, 'rgba(0, 0, 255, 0.5)'),
         ),
       ),
-    { panes: 1 },
+    { panes: 2 },
   );
   try {
-    const [pane] = s.area()._overlay.panes;
-    assert.deepEqual(pane.rect, { x: 20, y: 20, width: 90, height: 60 });
-    near(await rgbOf(pane.wnd, 5, 5), RED, 'the one underneath, alone');
-    near(await rgbOf(pane.wnd, 45, 30), BLUE, 'the overlap: the later one');
+    const [under, over] = s.area()._overlay.panes;
+    assert.deepEqual(under.rect, { x: 20, y: 20, width: 60, height: 40 });
+    assert.deepEqual(over.rect, { x: 50, y: 40, width: 60, height: 40 });
+    // stacked in their order, the upper one over the lower
+    const ids = await stacking(s.app, s.windowNode.window.id);
+    assert.ok(ids.indexOf(over.wnd.id) > ids.indexOf(under.wnd.id));
+    // the lower one holds itself alone, where the upper one is too
+    near(await rgbOf(under.wnd, 45, 30), RED, 'under, beneath the overlap');
+    // the upper one blends over the lower one where they meet…
+    near(await rgbOf(over.wnd, 5, 5), [128, 0, 128], 'the overlap');
+    // …and over the ground where they do not
+    near(await rgbOf(over.wnd, 50, 30), [0, 0, 128], 'over, alone');
   } finally {
     await s.close();
   }
@@ -886,28 +899,53 @@ function paneDiff(a, b, width) {
   return { count, box };
 }
 
+/** Every pixel of a pane's window, as the server has it. */
+function shownOf(app, pane) {
+  const { width, height } = pane.rect;
+  return new Promise((resolve, reject) =>
+    app.X.GetImage(
+      2,
+      pane.wnd.id,
+      0,
+      0,
+      width,
+      height,
+      0xffffffff,
+      (err, img) => (err ? reject(err) : resolve(Buffer.from(img.data))),
+    ),
+  );
+}
+
 /**
- * `build()` twice, on two servers: the first as it ships, the second with no
- * pane able to move pixels — the reference, which repaints. `step(element)`
- * renders an element into both and runs each frame at once, and `check`
- * compares their panes pixel for pixel. `blits` counts the first one's
- * pane moves and `painted` the pixels its passes cover, since the last
- * `step`.
+ * `build()` twice, on two servers: the first as it ships, the second the
+ * reference — every pane painted whole every frame, and none able to move
+ * pixels. `step(element)` renders an element into both and runs each frame
+ * at once, and `check` compares their panes pixel for pixel: what each pane
+ * was painted with, and what its window shows. `blits` counts the first
+ * one's moves on a pane and `painted` the pixels its passes cover, since
+ * the last `step`.
  */
-async function twins(build) {
-  const a = await mount(build, { panes: 1 });
-  const b = await mount(build, { panes: 1 });
+async function twins(build, { panes = 2 } = {}) {
+  const a = await mount(build, { panes });
+  const b = await mount(build, { panes });
   const overlayA = a.area()._overlay;
   const overlayB = b.area()._overlay;
-  const [paneA] = overlayA.panes;
-  const [paneB] = overlayB.panes;
-  paneB.wnd.scrollRegion = undefined;
-  const counts = { blits: 0, painted: 0 };
-  const scrollRegion = paneA.wnd.scrollRegion.bind(paneA.wnd);
-  paneA.wnd.scrollRegion = (...args) => {
-    counts.blits += 1;
-    return scrollRegion(...args);
+  const panesA = [...overlayA.panes];
+  const panesB = [...overlayB.panes];
+  for (const pane of panesB) pane.wnd.scrollRegion = undefined;
+  const paintB = overlayB.paint.bind(overlayB);
+  overlayB.paint = (damage) => {
+    for (const pane of overlayB.panes) pane.full = true;
+    return paintB(damage);
   };
+  const counts = { blits: 0, painted: 0 };
+  for (const pane of panesA) {
+    const scrollRegion = pane.wnd.scrollRegion.bind(pane.wnd);
+    pane.wnd.scrollRegion = (...args) => {
+      counts.blits += 1;
+      return scrollRegion(...args);
+    };
+  }
   const paintPane = overlayA._paintPane.bind(overlayA);
   overlayA._paintPane = (pane, passes) => {
     for (const pass of passes) counts.painted += pass.width * pass.height;
@@ -921,7 +959,7 @@ async function twins(build) {
   return {
     a,
     b,
-    paneA,
+    paneA: panesA[0],
     counts,
     async step(element) {
       counts.blits = 0;
@@ -929,21 +967,49 @@ async function twins(build) {
       await frame(a, element);
       await frame(b, element);
       // the same panes all along: a new one would be painted whole
-      same(overlayA.panes[0], paneA, 'the pane');
-      same(overlayB.panes[0], paneB, 'the reference’s pane');
+      panesA.forEach((pane, i) => same(overlayA.panes[i], pane, `pane ${i}`));
+      panesB.forEach((pane, i) =>
+        same(overlayB.panes[i], pane, `the reference’s pane ${i}`),
+      );
     },
     async check(what) {
-      const diff = paneDiff(
-        await pixelsOf(paneA),
-        await pixelsOf(paneB),
-        paneA.rect.width,
-      );
-      assert.equal(
-        diff.count,
-        0,
-        `${what}: ${diff.count} pixels differ from a repaint, in ` +
-          JSON.stringify(diff.box),
-      );
+      for (let i = 0; i < panesA.length; i++) {
+        const [paneA, paneB] = [panesA[i], panesB[i]];
+        assert.deepEqual(paneA.rect, paneB.rect, `${what}: pane ${i}'s place`);
+        // …and the window is there on the server, not just in the pane's
+        // record of it
+        const geometry = await new Promise((resolve, reject) =>
+          a.app.X.GetGeometry(paneA.wnd.id, (err, g) =>
+            err ? reject(err) : resolve(g),
+          ),
+        );
+        assert.deepEqual(
+          {
+            x: geometry.xPos,
+            y: geometry.yPos,
+            width: geometry.width,
+            height: geometry.height,
+          },
+          paneA.rect,
+          `${what}: pane ${i}'s window on the server`,
+        );
+        for (const [kind, read] of [
+          ['painted', (s, pane) => pixelsOf(pane)],
+          ['shown', (s, pane) => shownOf(s.app, pane)],
+        ]) {
+          const diff = paneDiff(
+            await read(a, paneA),
+            await read(b, paneB),
+            paneA.rect.width,
+          );
+          assert.equal(
+            diff.count,
+            0,
+            `${what}: pane ${i}, ${kind}: ${diff.count} pixels differ ` +
+              `from a repaint, in ${JSON.stringify(diff.box)}`,
+          );
+        }
+      }
     },
     async close() {
       await a.close();
@@ -1104,10 +1170,11 @@ test('a scroll pane inside a moved child, laid out again as it moves, is repaint
   }
 });
 
-test('children that move together move their pane, and are repainted', async () => {
-  // On X11 a pane is as big as what it holds, so two children moving as one
-  // take their pane with them — and what a pane holds is in its own corner,
-  // not the window's: nothing in it is a shift away, and both are claimed.
+test('children that move together take their panes along, and repaint only where they meet', async () => {
+  // On X11 a pane is its child's, so two children moving as one take a pane
+  // each with them, and the window's move carries their pixels. What it
+  // does not carry right is the lower one's pixels in the upper one's pane,
+  // which that pane repaints where they meet — and nothing else is painted.
   const pair = (left) =>
     h(
       'window',
@@ -1115,7 +1182,7 @@ test('children that move together move their pane, and are repainted', async () 
       h(
         'glarea',
         { style: { flexGrow: 1 }, clearColor: '#102030', onDraw: () => {} },
-        ['#ff0000', '#0000ff'].map((backgroundColor, i) =>
+        ['#ff0000', 'rgba(0, 0, 255, 0.5)'].map((backgroundColor, i) =>
           h('box', {
             key: i,
             style: {
@@ -1133,8 +1200,77 @@ test('children that move together move their pane, and are repainted', async () 
   const t = await twins(() => pair(20));
   try {
     await t.step(pair(26));
-    assert.equal(t.counts.blits, 0, 'nothing moved inside the pane');
+    assert.equal(t.counts.blits, 0, 'nothing moved inside a pane');
     await t.check('moved together');
+    // the overlap is 30x20, and the upper pane is owed it before and after
+    assert.ok(
+      t.counts.painted <= 2 * 60 * 40,
+      `painted ${t.counts.painted} pixels`,
+    );
+    assert.ok(t.counts.painted > 0, 'the overlap was repainted');
+  } finally {
+    await t.close();
+  }
+});
+
+test('a child dragged over another moves its own pane, and the other’s is left alone', async () => {
+  // The drag this layout exists for: one card through a row of others. The
+  // dragged one is last, so it is over the rest, and its pane goes with it;
+  // no other pane is painted, since none of them holds it.
+  const cards = (x) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(
+        'glarea',
+        { style: { flexGrow: 1 }, clearColor: '#102030', onDraw: () => {} },
+        [0, 1, 2].map((i) =>
+          h('box', {
+            key: `still-${i}`,
+            style: {
+              position: 'absolute',
+              left: 10 + i * 100,
+              top: 40,
+              width: 80,
+              height: 50,
+              borderRadius: 6,
+              backgroundColor: TINTS[i],
+            },
+          }),
+        ),
+        h('box', {
+          key: 'dragged',
+          style: {
+            position: 'absolute',
+            left: x,
+            top: 60,
+            width: 80,
+            height: 50,
+            borderRadius: 6,
+            backgroundColor: 'rgba(255, 255, 255, 0.75)',
+          },
+        }),
+      ),
+    );
+  let x = 0;
+  const t = await twins(() => cards(x), { panes: 4 });
+  const still = t.a.area()._overlay.panes.slice(0, 3);
+  const fills = still.map(() => 0);
+  still.forEach((pane, i) => {
+    const ctx = pane.context();
+    const fillRect = ctx.fillRect;
+    ctx.fillRect = function (...args) {
+      fills[i] += 1;
+      return fillRect.apply(this, args);
+    };
+  });
+  try {
+    for (const dx of [7, 13, 30, 45, -20, 60, 60]) {
+      x += dx;
+      await t.step(cards(x));
+      await t.check(`dragged to ${x}`);
+    }
+    assert.deepEqual(fills, [0, 0, 0], 'no pane under it was painted');
   } finally {
     await t.close();
   }
