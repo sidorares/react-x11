@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.22.13](https://github.com/sidorares/react-x11/compare/v2.22.12...v2.22.13) (2026-09-28)
+
+
+### Bug Fixes
+
+* **cocoa:** a &lt;Frame&gt; pane stays on its main thread, with its IPC channel ([#747](https://github.com/sidorares/react-x11/issues/747)) ([fe20807](https://github.com/sidorares/react-x11/commit/fe20807ce199781569305d80a860103de9f54668))
+
 ## [2.22.12](https://github.com/sidorares/react-x11/compare/v2.22.11...v2.22.12) (2026-09-28)
 
 
