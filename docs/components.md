@@ -482,12 +482,21 @@ ignores them.
 Under a native bezel, `style` sizes the box the control _sits in_ rather
 than the control itself. A `<Button>` or a `<Select>` keeps AppKit's own
 height and is centred in whatever footprint the layout gives it, so
-`style={{ height: 44 }}`, a `height: '100%'` in a taller parent or a
-`flexGrow: 1` leave a 22pt control in a 44pt slot instead of stretching a
-bezel the system draws at one size. The slack around it is not part of the
-control: a press up there does nothing, as it does in AppKit. Drawn controls
-stretch as they always have — their chrome is drawn to the box and their
-label is centred in it, so a stretched drawn control is merely roomy.
+`style={{ height: 44 }}`, a `height: '100%'` in a taller parent, a
+`flexGrow: 1` or a taller neighbour in a stretching row leave a 22pt
+control in a 44pt slot instead of stretching a bezel the system draws at
+one size. The slack around it is not part of the control: a press up there
+does nothing, as it does in AppKit. Drawn controls stretch as they always
+have — their chrome is drawn to the box and their label is centred in it,
+so a stretched drawn control is merely roomy.
+
+The one thing that makes a native button taller is its own label. Squeezed
+narrower than its label, a `<Button>` wraps it at its words — native or
+drawn — and grows by the lines it gained, which on macOS is drawn with
+AppKit's flexible-height push bezel, the one it has for a title that wraps.
+A row that should never wrap its buttons wants `flexWrap: 'wrap'` on the
+row instead, so the buttons move to a second row rather than their labels
+to a second line.
 
 ### The press state
 
@@ -579,6 +588,12 @@ border _width_, so a mixed row lines up to the pixel.
 metric. It is derived from the palette, so a theme that moves `paddingY`
 moves both sizes together, which a hand-made `style={{ height: 22 }}` would
 not.
+
+A label with less room than it needs wraps at its words, the lines centred
+under one another, and the button grows to hold them — a row too narrow
+for its buttons squeezes each to its longest word first, as it would any
+paragraph ([Native bezels](#native-bezels) has what that does to a native
+button).
 
 An **element** child inherits the resolved label colour — the ink is set on
 the button's box and `color` inherits ([styling.md](styling.md)) — so an

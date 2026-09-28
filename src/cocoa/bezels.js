@@ -31,8 +31,23 @@
 // caller draws what it had meanwhile. A bezel drawn at rest brings its
 // pressed twin along, so the press — the input whose answer is the bezel —
 // never waits for one (AGENTS.md, "Answer the input").
+//
+// ## Taller than one line
+//
+// A push bezel is one height. Asked to fill a taller frame, AppKit draws its
+// own 22pt bezel centred in it — and a `<Button>` whose label wrapped is a
+// taller frame. What AppKit has for that button is the *flexible* push,
+// `NSBezelStyleFlexiblePush`: the same bezel stretched to its frame, the one
+// AppKit gives a title that wraps, and what WebKit and Gecko draw a push
+// button taller than a push button with. At one line the two are the same
+// pixels, the default button's accent aside (the push has a sheen, the
+// flexible one is flat), so a push box keeps its bezel at its own height and
+// is drawn as the flexible push above it (`TALLER`). A bridge that predates
+// the kind keeps the push (`_draws`).
 
 const KINDS = ['push', 'checkbox', 'radio', 'popup', 'slider', 'switch'];
+// what a kind is drawn as in a box taller than its bezel
+const TALLER = Object.freeze({ push: 'flexiblePush' });
 // the sizes the widget set lays its controls out at (components/native.js)
 const SIZES = ['regular', 'small'];
 // the fullest state, so the scan sees the whole footprint
@@ -55,6 +70,7 @@ export class BezelStore {
     this._scanning = new Map(); // kind|size|scale → the scan in flight
     this._cache = new Map(); // full param key → { surface, sx, sy, sw, sh }
     this._drawing = new Map(); // full param key → callbacks awaiting it
+    this._drawable = new Map(); // kind → whether the bridge draws it
     this._gen = 0;
     this._MAX = 160;
   }
@@ -118,9 +134,13 @@ export class BezelStore {
    * each scan running the first time it is asked for.
    */
   prefetch(scale) {
+    const kinds = [
+      ...KINDS,
+      ...Object.values(TALLER).filter((kind) => this._draws(kind)),
+    ];
     const jobs = [];
     for (const s of new Set([2, scale])) {
-      for (const kind of KINDS) {
+      for (const kind of kinds) {
         for (const size of SIZES) jobs.push(this._scanLater(kind, size, s));
       }
     }
@@ -132,9 +152,13 @@ export class BezelStore {
    * Returns `{ surface, sx, sy, sw, sh }` — draw with the 9-arg
    * `ctx.drawImage` so the ink region lands exactly on the box. On a worker
    * a bezel not drawn yet is null, and `onReady` is called once it is in.
+   * A push box taller than a push bezel is drawn as the flexible push
+   * ("Taller than one line").
    */
   get(params, w, h, scale, onReady = null) {
     const controlSize = params.controlSize ?? 'regular';
+    const kind = this._kindAt(params.kind, controlSize, h / scale);
+    if (kind !== params.kind) params = { ...params, kind };
     const key = JSON.stringify([
       params.kind,
       controlSize,
@@ -168,6 +192,50 @@ export class BezelStore {
     });
     this._store(key, frame.entry);
     return frame.entry;
+  }
+
+  /** The kind that draws a `kind` box `height` logical px tall: itself, or
+   * above its bezel's own height the kind `TALLER` names for it, where the
+   * bridge draws that. On a worker, before `prefetch`, a kind whose height
+   * is not in yet is itself. */
+  _kindAt(kind, controlSize, height) {
+    const taller = TALLER[kind];
+    if (!taller) return kind;
+    const natural = this.natural(kind, controlSize);
+    if (!natural || height <= natural.height) return kind;
+    return this._draws(taller) ? taller : kind;
+  }
+
+  /**
+   * Whether the bridge draws `kind` at all. One that predates it throws
+   * "unknown control kind" as it reads the parameters — on either thread,
+   * before anything is measured or dispatched — so the question costs one
+   * measure, once. A no keeps the kind it would have replaced, which is a
+   * button whose bezel stops short of its label: broken rather than
+   * degraded, so development hears about it, once.
+   */
+  _draws(kind) {
+    let known = this._drawable.get(kind);
+    if (known !== undefined) return known;
+    try {
+      // off the main thread the callback is how the bridge answers at all;
+      // on it, the call answers in place
+      if (this._answersLater()) this._native.measureControl({ kind }, () => {});
+      else this._native.measureControl({ kind });
+      known = true;
+    } catch {
+      known = false;
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn(
+          `react-x11: this @windowkit/appkit has no '${kind}' bezel, so a ` +
+            'native <Button> whose label wrapped is drawn over a one-line ' +
+            'bezel that stops short of it. Update @windowkit/appkit to the ' +
+            'version react-x11 lists in its optionalDependencies.',
+        );
+      }
+    }
+    this._drawable.set(kind, known);
+    return known;
   }
 
   /** A surface padded out by the kind's insets, and the region of it a box
