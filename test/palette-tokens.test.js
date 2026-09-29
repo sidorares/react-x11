@@ -19,7 +19,9 @@ import { test } from 'node:test';
 import React from 'react';
 
 import { Checkbox, Select, ThemeProvider, createRoot } from '../src/index.js';
+import { setAppearanceForTests } from '../src/appearance.js';
 import {
+  baseTheme,
   DarkTheme,
   DefaultTheme,
   paletteFor,
@@ -143,6 +145,29 @@ test('the desktop accent moves the accent family and nothing else', () => {
 // A desktop that names its whole palette is merged over the scheme's the way
 // a provider's value is: its colours, the scheme's shape, and the inks and
 // pressed steps `resolveTheme` derives for whatever it did not name.
+test('the same snapshot of the desktop is answered with the same palette, by identity', () => {
+  // baseTheme() asks for every node created, and a frozen snapshot is
+  // replaced whole when the desktop changes, so the last one is remembered
+  setAppearanceForTests({ colorScheme: 'dark', accent: '#f7821b' });
+  const first = baseTheme();
+  assert.equal(baseTheme(), first);
+  assert.equal(first.scheme, 'dark');
+  assert.equal(first.accent, '#f7821b');
+  // …and a new snapshot is a new question, whatever was asked before
+  setAppearanceForTests({ colorScheme: 'light', accent: '#1f9ede' });
+  const second = baseTheme();
+  assert.notEqual(second, first);
+  assert.equal(second.scheme, 'light');
+  assert.equal(second.accent, '#1f9ede');
+  // an appearance that is not frozen could change under the same object,
+  // so it is answered each time rather than remembered
+  const loose = { colorScheme: 'dark', accent: '#e01b24' };
+  assert.equal(paletteFor(loose).accent, '#e01b24');
+  loose.accent = '#26a269';
+  assert.equal(paletteFor(loose).accent, '#26a269');
+  setAppearanceForTests(null);
+});
+
 test('a desktop palette is merged whole over the scheme', () => {
   const system = {
     background: '#323232',
