@@ -56,7 +56,7 @@ export function captureLeafHeights(node, out) {
  * is back to meaning only how eagerly the space *above* the floor is given
  * up.
  */
-function namesOwnFloor(node, axis) {
+export function namesOwnFloor(node, axis) {
   const style = node.style;
   if (style.overflow === 'scroll' || style.overflow === 'hidden') return true;
   return (

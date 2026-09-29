@@ -2,7 +2,7 @@
 // floors, laying the root out, deferring floors during a live resize and
 // catching up after, and refitting the window to what it holds.
 
-import { measuringExactly } from '../../styles.js';
+import { exactLayoutConfig, measuringExactly } from '../../styles.js';
 import { availableArea } from '../../screens.js';
 import { Yoga } from '../../yoga.js';
 import {
@@ -11,6 +11,7 @@ import {
   columnHeightSpan,
   markUnreadLeaves,
   declaresOwnMinimum,
+  namesOwnFloor,
   dirtyOutside,
   floorBoundaryOf,
   probeHeightFloors,
@@ -327,12 +328,18 @@ export class WindowSize {
 
   /**
    * One spine root's floors, measured with it laid out alone — at the width
-   * it has in each of the passes over the whole tree (`spine.js`), and with
-   * no height on offer in either height pass, because down a column whose
-   * height is its content's the pass over the whole tree has none to offer
-   * it either. Its own extents are written here: unlike a box that sizes
-   * itself, a root's are its content's, and the column it sits in is summed
-   * from them (`_sumSpine`).
+   * it has in each of the passes over the whole tree (`spine.js`), and, for
+   * its heights, as the one item of a column that offers it what each of
+   * those passes does: no height in the first, and in the collapse what
+   * the column it sits in offers there (`frameFor`), which is 0 under the
+   * window. Laid out as an item rather than as a root, it is resolved as
+   * its column resolves it there — a basis counts, a floor of its own is
+   * given way to — and what it holds is laid out in the bound yoga passes
+   * down, which squashes a pane in it that names a floor: laid out with no
+   * height at all, a <Tree>'s pane came out as tall as its 100,000 rows.
+   * Its own extents are written here: unlike a box that sizes itself, a
+   * root's are its content's, and the column it sits in is summed from
+   * them (`_sumSpine`).
    */
   _measureSpineRoot(root, widths, axis, probe = false) {
     onExactCopy(root, () =>
@@ -356,33 +363,50 @@ export class WindowSize {
       restoreShrink(shrunk);
       return;
     }
-    this._scopedFloorPasses += 1;
-    yoga.calculateLayout(widths.width, undefined, dir);
-    if (probe) {
-      const hit = { marked: false, owed: false };
-      probeHeightFloors(root, this, hit, root);
-      if (hit.marked) {
-        this._writeFloors('height');
-        this._scopedFloorPasses += 1;
-        yoga.calculateLayout(widths.width, undefined, dir);
+    // the column it is laid out in (`frameFor`), as wide as the one it sits in
+    const column = Yoga.Node.create(exactLayoutConfig());
+    if (widths.frame.scrolls) column.setOverflow(Yoga.OVERFLOW_SCROLL);
+    column.insertChild(yoga, 0);
+    const pass = (height) => {
+      this._scopedFloorPasses += 1;
+      column.calculateLayout(widths.width, height, dir);
+    };
+    try {
+      pass(undefined);
+      if (probe) {
+        const hit = { marked: false, owed: false };
+        probeHeightFloors(root, this, hit, root);
+        if (hit.marked) {
+          this._writeFloors('height');
+          pass(undefined);
+        }
       }
+      const intrinsic = new Map();
+      captureLeafHeights(root, intrinsic);
+      const frozen = [];
+      freezeWidths(root, frozen);
+      const shrunk = [];
+      setMeasuringShrink(root, axis, shrunk);
+      // …and gives way in it as `setMeasuringShrink` has everything else
+      // give way: to a floor it names, and to nothing else
+      const shrink = namesOwnFloor(root, axis) ? 1 : 0;
+      if ((root.style.flexShrink ?? 1) !== shrink) {
+        yoga.setFlexShrink(shrink);
+        shrunk.push(root);
+      }
+      pass(widths.frame.height);
+      const span = contentSpan(root, axis, intrinsic, this);
+      root._floorH = declaresOwnMinimum(root, axis)
+        ? yoga.getComputedHeight()
+        : span;
+      root._floorAtW = yoga.getComputedWidth();
+      this._floorsMeasured += 1;
+      restoreWidths(frozen);
+      restoreShrink(shrunk);
+    } finally {
+      column.removeChild(yoga);
+      column.free();
     }
-    const intrinsic = new Map();
-    captureLeafHeights(root, intrinsic);
-    const frozen = [];
-    freezeWidths(root, frozen);
-    const shrunk = [];
-    setMeasuringShrink(root, axis, shrunk);
-    this._scopedFloorPasses += 1;
-    yoga.calculateLayout(widths.width, undefined, dir);
-    const span = contentSpan(root, axis, intrinsic, this);
-    root._floorH = declaresOwnMinimum(root, axis)
-      ? yoga.getComputedHeight()
-      : span;
-    root._floorAtW = yoga.getComputedWidth();
-    this._floorsMeasured += 1;
-    restoreWidths(frozen);
-    restoreShrink(shrunk);
   }
 
   /** The columns of this frame's spines, deepest first, summed from their

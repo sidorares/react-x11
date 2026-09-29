@@ -15,8 +15,13 @@
 //
 // - Down a column whose height is its content's, the measuring passes have
 //   no free space to squash into, so a block in it is laid out at its
-//   content height in every pass. Laid out alone with no height on offer,
-//   it comes out the same.
+//   content height in every pass. What it holds is laid out in the height
+//   the pass offers the column, though — none under a pane that scrolls,
+//   and 0 under the window, which the collapse lays out at 0 and every box
+//   on the way down passes on as a bound — and a bound is not nothing: a
+//   pane in the block that names a floor is squashed to it, and a basis
+//   counts. Laid out alone as the one item of a column that offers the
+//   same (`frameFor`), the block comes out the same.
 // - Across, a block stretched over its column is as wide as the column's
 //   content box, in every pass: now, at the width the heights are measured
 //   for, and in the width pass, whose width the way down from the root
@@ -30,7 +35,12 @@
 // Anything else — a row on the way, a margin or a width that is not a
 // length — is not a spine, and the tree is measured whole.
 
-import { declaresOwnMinimum, inFlow, mainAxisOf } from './floors.js';
+import {
+  declaresOwnMinimum,
+  inFlow,
+  mainAxisOf,
+  namesOwnFloor,
+} from './floors.js';
 import { Yoga } from '../../yoga.js';
 
 const LENGTHS_ACROSS = [
@@ -149,7 +159,7 @@ export function spineScope(root, sources, listOnly) {
       if (!child.yoga || child.isWindow || child.style.display === 'none') {
         continue;
       }
-      const widths = rootWidths(child, offered);
+      const widths = rootWidths(child, offered, node);
       if (widths === null) return null;
       roots.set(child, widths);
     }
@@ -161,6 +171,11 @@ export function spineScope(root, sources, listOnly) {
     return false;
   };
   for (const node of [...roots.keys()]) if (within(node)) roots.delete(node);
+  // …and one that is not has to be laid out alone as the whole tree lays it
+  // out, which only the pass knows for some (`frameFor`)
+  for (const [node, widths] of roots) {
+    if (!heightHolds(node, widths.frame)) return null;
+  }
   for (const node of [...spine]) {
     if (roots.has(node) || within(node)) spine.delete(node);
   }
@@ -184,6 +199,121 @@ export function spineScope(root, sources, listOnly) {
     spine: [...spine].sort((a, b) => depth(b) - depth(a)),
     stops,
   };
+}
+
+/**
+ * The column a root is laid out alone as the one item of, for its heights
+ * (`_measureSpineRoot`): one that lays it out in what the collapse pass
+ * over the whole tree offers the column it sits in.
+ *
+ * - `COLLAPSED` under the window, which that pass lays out at 0, and under
+ *   a stop that only names its floors or clips when every box on the way
+ *   up from it passes that 0 on (`passesBound`). Every column the spine
+ *   sums passes it on too, having no height of its own — unless it names
+ *   a basis or an aspect ratio to lay out what it holds in instead.
+ * - `UNBOUNDED` in a column under a pane that scrolls, which measures what
+ *   it holds with no bound. The column is laid out at its content's height,
+ *   as long as the pane's own item on the way has no basis to start from.
+ * - An item of the pane itself is laid out in the pane's height: 0 when
+ *   the pane is squashed to nothing, as a pane under the window is, which
+ *   the frame copies by scrolling too (`SQUASHED_PANE`); in any other
+ *   pane's, which only the pass knows (`OPEN_PANE`).
+ *
+ * `null` where a box on the way lays out what it holds in a height of its
+ * own, which only the pass knows too.
+ */
+function frameFor(column, stop) {
+  if (stop.style.overflow === 'scroll') {
+    if (column === stop) {
+      return boundFrom(stop) ? SQUASHED_PANE : OPEN_PANE;
+    }
+    for (let node = column; node !== stop; node = node.parent) {
+      if (node.style.aspectRatio > 0) return null;
+      if (node.parent === stop && basisOf(node.style) !== 'auto') return null;
+    }
+    return UNBOUNDED;
+  }
+  for (let node = column; node !== stop; node = node.parent) {
+    if (!passesBound(node)) return null;
+  }
+  return boundFrom(stop) ? COLLAPSED : null;
+}
+
+const COLLAPSED = Object.freeze({ height: 0, scrolls: false });
+const UNBOUNDED = Object.freeze({ height: undefined, scrolls: false });
+const SQUASHED_PANE = Object.freeze({ height: 0, scrolls: true });
+// laid out with no bound, as `UNBOUNDED` — for the roots that nothing about
+// the pane's height decides (`heightHolds`)
+const OPEN_PANE = Object.freeze({ height: undefined, scrolls: false });
+
+/** Whether the collapse's 0 reaches what `node` holds: no box from it up to
+ *  the window has a height of its own to replace it with, and none above
+ *  it scrolls, measuring what it holds with no bound. */
+function boundFrom(node) {
+  for (let n = node; !n.isWindow; n = n.parent) {
+    if (!n.parent) return false;
+    if (n !== node && n.style.overflow === 'scroll') return false;
+    if (!passesBound(n)) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether a box lays out what it holds in the bound it is laid out in
+ * itself: no height of its own named, no floor above nothing, no basis but
+ * 0 and no aspect ratio to take one from. Asked of the style, as everything
+ * here is — yoga's getters are a call into the engine and an object each,
+ * and a fling asks this of every box up to the window — and it is the
+ * style's floor that counts: the one the floors wrote is taken off a box a
+ * change is inside before anything is measured (`collectFloorStale`), and
+ * every box asked here is one.
+ */
+function passesBound(node) {
+  const style = node.style;
+  if (style.height !== undefined && style.height !== 'auto') return false;
+  if (style.minHeight !== undefined && style.minHeight !== 0) return false;
+  const basis = basisOf(style);
+  if (share(basis) || basis > 0) return false;
+  return !(style.aspectRatio > 0);
+}
+
+/** A length given as a share of something — a percentage — rather than as
+ *  a number or `auto`. */
+const share = (value) => typeof value === 'string' && value !== 'auto';
+
+/** The basis a style gives a flex item, as yoga takes it: the longhand, or
+ *  the shorthand's — 0 for a number, `auto` for either keyword. */
+function basisOf(style) {
+  if (style.flexBasis !== undefined) return style.flexBasis;
+  return typeof style.flex === 'number' ? 0 : 'auto';
+}
+
+/**
+ * Whether a root laid out alone in `frame` comes out as the whole tree lays
+ * it out: there is a frame; no length on its height axis is a share of the
+ * column it is not laid out in here; and in a pane that is not squashed,
+ * whose height only the pass knows, the root's own height is not decided
+ * by it — it does not grow into it, give way to it with a floor, or start
+ * from a basis.
+ */
+function heightHolds(root, frame) {
+  if (frame === null) return false;
+  const style = root.style;
+  const basis = basisOf(style);
+  if (
+    share(style.height) ||
+    share(style.minHeight) ||
+    share(style.maxHeight) ||
+    share(basis)
+  ) {
+    return false;
+  }
+  if (frame !== OPEN_PANE) return true;
+  return !(
+    root.yoga.getFlexGrow() > 0 ||
+    namesOwnFloor(root, 'height') ||
+    basis !== 'auto'
+  );
 }
 
 const OUT_OF_FLOW = 1;
@@ -240,7 +370,7 @@ function staleChildren(node) {
  * that is not a length, a percentage or `auto`, ends one: `auto` centres the
  * box instead of stretching it.
  */
-function rootWidths(node, offered) {
+function rootWidths(node, offered, stop) {
   const style = node.style;
   const parent = node.parent;
   if (!parent || !inFlow(node) || node._host !== null) return null;
@@ -249,12 +379,13 @@ function rootWidths(node, offered) {
   if (!stretched(node)) return null;
   if (MARGINS.some((key) => typeof style[key] === 'string')) return null;
   if (PADDINGS.some((key) => typeof style[key] === 'string')) return null;
-  return offered.in(parent);
+  return offered.in(parent, stop);
 }
 
 /**
  * The widths a column offers the roots in it (`rootWidths`), worked out once
- * a column rather than once a root.
+ * a column rather than once a root — and the column they are laid out in
+ * for their heights (`frameFor`), the same for every root in it.
  *
  * Every root in a column is offered the same two, and working out the width
  * pass's walks the way up to the window, with four yoga reads a box for its
@@ -272,14 +403,16 @@ class OfferedWidths {
     this.passWidths = new Map();
   }
 
-  /** `{ width, widthPass }` for a root in `column`: its content box now,
-   *  and in the width pass over the whole tree. */
-  in(column) {
+  /** `{ width, widthPass, frame }` for a root in `column`: its content box
+   *  now, and in the width pass over the whole tree; and the column it is
+   *  laid out in, under `stop`. */
+  in(column, stop) {
     let offer = this.offers.get(column);
     if (offer === undefined) {
       offer = {
         width: Math.max(0, column.yoga.getComputedWidth() - this.inset(column)),
         widthPass: this.passContent(column),
+        frame: frameFor(column, stop),
       };
       this.offers.set(column, offer);
     }
