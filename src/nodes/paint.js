@@ -135,9 +135,9 @@ export class NodePaint {
    * wherever nothing inside it overlaps.
    */
   _paintGroup(ctx, opacity) {
-    const rect = this._groupRect();
+    let rect = this._groupRect();
     if (!rect) return;
-    const surface = this._groupSurfaceFor(rect.width, rect.height);
+    let surface = this._groupSurfaceFor(rect.width, rect.height);
     const alpha = ctx.globalAlpha ?? 1;
     if (!surface) {
       ctx.globalAlpha = alpha * opacity;
@@ -148,17 +148,32 @@ export class NodePaint {
       }
       return;
     }
-    surface.render((sctx) => {
-      sctx.clearRect(0, 0, rect.width, rect.height);
-      sctx.translate(-rect.x, -rect.y);
-      const damage = this.root?._paintDamage;
-      if (damage) {
-        sctx.beginPath();
-        sctx.rect(damage.x, damage.y, damage.width, damage.height);
-        sctx.clip();
-      }
-      this._paintNode(sctx);
-    });
+    const draw = () =>
+      surface.render((sctx) => {
+        sctx.clearRect(0, 0, rect.width, rect.height);
+        sctx.translate(-rect.x, -rect.y);
+        const damage = this.root?._paintDamage;
+        if (damage) {
+          sctx.beginPath();
+          sctx.rect(damage.x, damage.y, damage.width, damage.height);
+          sctx.clip();
+        }
+        this._paintNode(sctx);
+      });
+    draw();
+    // A paragraph learns how far its ink reaches past its box by drawing
+    // (`TextNode._keepInkReach`). One its paint lays out at a width nothing
+    // measured it at — a box of no width is drawn unwrapped — learns it only
+    // here, after the surface was sized, which cut its overflow off on the
+    // first frame and drew it whole on every frame after. Drawn once more,
+    // at the size it turned out to need: the one time it is not known.
+    const after = this._groupRect();
+    if (after && !rectContains(rect, after)) {
+      rect = after;
+      surface = this._groupSurfaceFor(rect.width, rect.height);
+      if (!surface) return;
+      draw();
+    }
     ctx.globalAlpha = alpha * opacity;
     try {
       ctx.drawImage(surface, rect.x, rect.y);
@@ -520,6 +535,16 @@ export class NodePaint {
     }
     return false;
   }
+}
+
+/** Whether `outer` holds all of `inner`. */
+function rectContains(outer, inner) {
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.height <= outer.y + outer.height
+  );
 }
 
 /** WindowNode's half of the paint walk, installed onto `WindowNode.prototype` by window/window.js. */

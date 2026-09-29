@@ -208,6 +208,59 @@ test('a word overflowing inside a translucent box shows its overflow from its fi
   assert.ok(first.equals(repainted));
 });
 
+test('a label its box leaves no width, inside a translucent box, shows its overflow from its first frame', async (t) => {
+  // The surface a fade draws into is sized before the subtree draws, and a
+  // paragraph in a box of no width is drawn unwrapped — at a width no
+  // measure laid it out at — so the ink past its box was not known until
+  // it drew, after the surface was cut to the box. The first frame lost the
+  // overflow, and every frame after drew it.
+  const app = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
+  t.after(async () => {
+    await x11Root.unmount();
+    await app.close();
+  });
+  const root = (
+    await new Promise((resolve) =>
+      x11Root.render(
+        h(
+          'window',
+          { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+          h(
+            'box',
+            { style: { padding: 10 } },
+            h(
+              'box',
+              { style: { width: 20, opacity: 0.8 } },
+              h(
+                'box',
+                { style: { width: 0 } },
+                h(
+                  'text',
+                  { style: { color: '#20304a', fontSize: 16 } },
+                  'Supercalifragilistic',
+                ),
+              ),
+            ),
+          ),
+        ),
+        resolve,
+      ),
+    )
+  )._reactX11Node;
+  const frame = async () => {
+    root._scheduled = false;
+    root.flush();
+    await settle(app);
+  };
+  await frame();
+  const first = await readPixels(root._ctx);
+  root.invalidate(false);
+  await frame();
+  const repainted = await readPixels(root._ctx);
+  assert.ok(first.equals(repainted), 'the first frame is what a repaint draws');
+});
+
 test('a label squeezed to no height, moved along by a sibling, leaves no old glyphs', async (t) => {
   // A row too short for its padding leaves its children no height, and a
   // paragraph with none still draws its lines — below a box of no area,
