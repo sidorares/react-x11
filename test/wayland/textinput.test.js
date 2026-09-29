@@ -486,6 +486,12 @@ test(
     await until(() => textInput.entered === surface.surface.id, {
       what: 're-enter',
     });
+    // The enter syncs the focused field at once — enable, surrounding text,
+    // content type, caret, commit — and `entered` is set before any of it
+    // reaches the compositor. Counted from here, whatever of it was still
+    // on the socket arrived with the roundtrip below and read as five
+    // requests the other window's sync had sent, on a loaded machine.
+    await conn.roundtrip();
     const before = requestCount();
     textInput.sync(other);
     await conn.roundtrip();
