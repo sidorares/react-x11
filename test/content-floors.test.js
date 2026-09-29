@@ -19,6 +19,7 @@ import { createRoot } from '../src/index.js';
 import { createStyles } from '../src/styles.js';
 import { registerElement, unregisterElement } from '../src/host.js';
 import { Node } from '../src/node.js';
+import { spineScope } from '../src/nodes/window/spine.js';
 import { createMockApp, spinWheel } from './helpers/mock-app.js';
 import { renderX11, screen, cleanup } from '../src/testing/index.js';
 
@@ -1088,6 +1089,43 @@ test('a block that joins a long column is measured alone, and the tree laid out 
       node._floorsMeasured - measured <= 3,
       `${node._floorsMeasured - measured} extents measured`,
     );
+    await root.unmount();
+  });
+});
+
+test('the roots in a column are offered its widths once, not once a root', async () => {
+  // Every root in a column is offered the same two widths, and working out
+  // the width pass's walks the way up to the window through yoga's getters.
+  // Asked for each root, a fling down a list read them for every row that
+  // arrived: 1.8 ms of a 5.9 ms frame (spine.js, `OfferedWidths`).
+  await withTestElements(async () => {
+    const blocks = Array.from({ length: 60 }, (_, i) => ['l', `l${i}`, 20 + i]);
+    const { root, node } = await mount(docTree({ blocks }));
+    const column = node.children[0].children[0];
+    // as if every block in the column had just arrived
+    for (const child of column.children) child._floorH = undefined;
+    const proto = Object.getPrototypeOf(column.yoga);
+    const read = proto.getComputedPadding;
+    let reads = 0;
+    proto.getComputedPadding = function (...args) {
+      reads++;
+      return read.apply(this, args);
+    };
+    try {
+      const scope = spineScope(node, [column], () => true);
+      assert.strictEqual(scope.roots.size, 60, 'every block a root');
+      const [first, ...rest] = scope.roots.values();
+      assert.ok(first.widthPass !== null, 'a width the width pass knows');
+      assert.ok(
+        rest.every(
+          (w) => w.width === first.width && w.widthPass === first.widthPass,
+        ),
+        'the same widths for every root in the column',
+      );
+      assert.ok(reads < 20, `${reads} padding reads for 60 roots`);
+    } finally {
+      proto.getComputedPadding = read;
+    }
     await root.unmount();
   });
 });

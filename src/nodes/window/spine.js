@@ -118,6 +118,7 @@ export function spineScope(root, sources, listOnly) {
   const roots = new Map();
   const spine = new Set();
   const stops = new Set();
+  const offered = new OfferedWidths(root);
   for (const source of sources) {
     const list = listOnly(source);
     // the way up to where the change stops mattering
@@ -148,7 +149,7 @@ export function spineScope(root, sources, listOnly) {
       if (!child.yoga || child.isWindow || child.style.display === 'none') {
         continue;
       }
-      const widths = rootWidths(child, root);
+      const widths = rootWidths(child, offered);
       if (widths === null) return null;
       roots.set(child, widths);
     }
@@ -239,7 +240,7 @@ function staleChildren(node) {
  * that is not a length, a percentage or `auto`, ends one: `auto` centres the
  * box instead of stretching it.
  */
-function rootWidths(node, root) {
+function rootWidths(node, offered) {
   const style = node.style;
   const parent = node.parent;
   if (!parent || !inFlow(node) || node._host !== null) return null;
@@ -248,10 +249,67 @@ function rootWidths(node, root) {
   if (!stretched(node)) return null;
   if (MARGINS.some((key) => typeof style[key] === 'string')) return null;
   if (PADDINGS.some((key) => typeof style[key] === 'string')) return null;
-  return {
-    width: contentWidth(parent),
-    widthPass: widthPassContent(parent, root),
-  };
+  return offered.in(parent);
+}
+
+/**
+ * The widths a column offers the roots in it (`rootWidths`), worked out once
+ * a column rather than once a root.
+ *
+ * Every root in a column is offered the same two, and working out the width
+ * pass's walks the way up to the window, with four yoga reads a box for its
+ * padding and border across (`insetAcross`). Asked afresh for each root, a
+ * fling down a list of rows — a dozen arriving a frame, every one of them a
+ * root in the same column — spent 1.8 ms of a 5.9 ms frame on it. Kept for
+ * one `spineScope` call, which lays nothing out, so nothing it has read can
+ * move under it.
+ */
+class OfferedWidths {
+  constructor(root) {
+    this.root = root;
+    this.offers = new Map();
+    this.insets = new Map();
+    this.passWidths = new Map();
+  }
+
+  /** `{ width, widthPass }` for a root in `column`: its content box now,
+   *  and in the width pass over the whole tree. */
+  in(column) {
+    let offer = this.offers.get(column);
+    if (offer === undefined) {
+      offer = {
+        width: Math.max(0, column.yoga.getComputedWidth() - this.inset(column)),
+        widthPass: this.passContent(column),
+      };
+      this.offers.set(column, offer);
+    }
+    return offer;
+  }
+
+  inset(node) {
+    let inset = this.insets.get(node);
+    if (inset === undefined) {
+      inset = insetAcross(node);
+      this.insets.set(node, inset);
+    }
+    return inset;
+  }
+
+  /** `widthPassWidth`, once a box. */
+  passWidth(node) {
+    let width = this.passWidths.get(node);
+    if (width === undefined) {
+      width = widthPassWidth(node, this);
+      this.passWidths.set(node, width);
+    }
+    return width;
+  }
+
+  /** …and the content box inside it. */
+  passContent(node) {
+    const width = this.passWidth(node);
+    return width === null ? null : Math.max(0, width - this.inset(node));
+  }
 }
 
 /** Stretched across its parent's column — `alignSelf`, or the column's
@@ -277,11 +335,6 @@ function insetAcross(node) {
   );
 }
 
-/** A box's content width in the last pass. */
-function contentWidth(node) {
-  return Math.max(0, node.yoga.getComputedWidth() - insetAcross(node));
-}
-
 /**
  * How wide `node` is in the width pass over the whole tree
  * (`_measureContentSpans('width')`), worked out on the way down rather than
@@ -291,8 +344,8 @@ function contentWidth(node) {
  * the way down is anything else: a row, whose children are as wide as the
  * pass decides.
  */
-function widthPassWidth(node, root) {
-  if (node === root) return insetAcross(node);
+function widthPassWidth(node, offered) {
+  if (node === offered.root) return offered.inset(node);
   const style = node.style;
   let width;
   if (typeof style.width === 'number') width = style.width;
@@ -300,7 +353,7 @@ function widthPassWidth(node, root) {
   else {
     if (!inFlow(node) || !stretched(node)) return null;
     if (MARGINS.some((key) => typeof style[key] === 'string')) return null;
-    const inner = widthPassContent(node.parent, root);
+    const inner = offered.passContent(node.parent);
     if (inner === null) return null;
     const yoga = node.yoga;
     width =
@@ -314,11 +367,5 @@ function widthPassWidth(node, root) {
   if (typeof style.minWidth === 'number')
     width = Math.max(width, style.minWidth);
   else if (style.minWidth !== undefined) return null;
-  return Math.max(width, insetAcross(node));
-}
-
-/** …and the content box inside it. */
-function widthPassContent(node, root) {
-  const width = widthPassWidth(node, root);
-  return width === null ? null : Math.max(0, width - insetAcross(node));
+  return Math.max(width, offered.inset(node));
 }
