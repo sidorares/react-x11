@@ -37,6 +37,9 @@ const STRIP_COVERAGE = 0.45;
 
 const textStripBelow = new WeakMap();
 
+/** `TextNode._trim`'s answer, per layout. */
+const trims = new WeakMap();
+
 /** The size under which this connection's text is painted as strips. */
 export function setTextStripBelow(app, below) {
   if (below === undefined) return;
@@ -410,13 +413,24 @@ export class TextNode extends Node {
     if (!fonts) return null; // mock container in tests: no text metrics
     const maxLines = this._maxLines();
     const overflow = this.style.textOverflow;
-    // Both truncation options are inputs to the shaping, so both belong in
-    // the key. They can only change with the style, which clears the whole
-    // map on its way past — but a cache keyed on less than it depends on is
-    // one refactor away from answering with the wrong paragraph, and the
-    // wrong paragraph here is glyphs on screen that no error mentions.
-    const key = `${maxWidth}|${maxLines}|${overflow ?? ''}`;
-    let layout = this._layouts.get(key);
+    // Both truncation options are inputs to the shaping, so a hit has to
+    // match them as well as the width. They can only change with the style,
+    // which clears the whole map on its way past — but a cache keyed on less
+    // than it depends on is one refactor away from answering with the wrong
+    // paragraph, and the wrong paragraph here is glyphs on screen that no
+    // error mentions.
+    //
+    // The width is the key as the number it is, and the other two are
+    // checked on the entry, rather than all three spelled into one string: a
+    // layout pass measures every label several times over, and turning a
+    // fractional width into text cost more than the rest of a hit together.
+    const entry = this._layouts.get(maxWidth);
+    let layout =
+      entry !== undefined &&
+      entry.maxLines === maxLines &&
+      entry.overflow === overflow
+        ? entry.layout
+        : null;
     if (!layout) {
       const spans = this.collectSpans([]);
       const base = this.resolvedTextStyle();
@@ -440,7 +454,7 @@ export class TextNode extends Node {
         direction: this.direction,
       });
       if (this._layouts.size > 32) this._layouts.clear();
-      this._layouts.set(key, layout);
+      this._layouts.set(maxWidth, { layout, maxLines, overflow });
     }
     return layout;
   }
@@ -482,6 +496,22 @@ export class TextNode extends Node {
     if (this.style.textBoxTrim !== 'cap-alphabetic') return null;
     const lines = layout?.lines;
     if (!lines?.length) return null;
+    // Once per layout rather than once per measure, which a layout pass asks
+    // for several times over. A layout never changes once it is shaped, and
+    // the face and size read below are the ones it was shaped in: a style
+    // that moves either drops every layout on its way past
+    // (`_textContentChanged`), so the answer cannot go stale while its layout
+    // is still being handed out.
+    let trim = trims.get(layout);
+    if (trim === undefined) {
+      trim = this._trimOf(layout, lines);
+      trims.set(layout, trim);
+    }
+    return trim;
+  }
+
+  /** `_trim`'s answer, worked out. */
+  _trimOf(layout, lines) {
     const base = this.resolvedTextStyle();
     const font = this.app?.fonts?.match?.(base.family, {
       weight: base.weight,
