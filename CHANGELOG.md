@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.23.2](https://github.com/sidorares/react-x11/compare/v2.23.1...v2.23.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* **damage:** a box of no area with an outline or a shadow claims them when it moves ([#776](https://github.com/sidorares/react-x11/issues/776)) ([d0b7abd](https://github.com/sidorares/react-x11/commit/d0b7abd8de7c5537bb704f00de2d9ece7a844421))
+* **damage:** a box that starts clipping claims what its children drew past it ([#775](https://github.com/sidorares/react-x11/issues/775)) ([b1670b8](https://github.com/sidorares/react-x11/commit/b1670b8ad31b58bd4ea88abb89a06a63db4b61e9))
+* **damage:** a paragraph claims the ink it will be drawn with once layout has run ([#777](https://github.com/sidorares/react-x11/issues/777)) ([6db0a1c](https://github.com/sidorares/react-x11/commit/6db0a1ca0a5b25e099c5e295f1b678a8e20e017f))
+* **damage:** a paragraph that moves claims its ink past its box ([#774](https://github.com/sidorares/react-x11/issues/774)) ([02a52df](https://github.com/sidorares/react-x11/commit/02a52df9b12ddfa0fcff60b0ac543f59ed820092))
+* **damage:** a paragraph's ink past its box is known before its first paint ([#772](https://github.com/sidorares/react-x11/issues/772)) ([ca59f53](https://github.com/sidorares/react-x11/commit/ca59f5341b8c687dedc1937ab4510b7c698761c8))
+* **damage:** a paragraph's ink past its box is part of what it claims and paints ([#768](https://github.com/sidorares/react-x11/issues/768)) ([f21dfca](https://github.com/sidorares/react-x11/commit/f21dfca481cfb8aa6a665b66be29d71b688bd8d1))
+* **damage:** a resize that changes a box's clamped radius claims the whole box ([#773](https://github.com/sidorares/react-x11/issues/773)) ([774c290](https://github.com/sidorares/react-x11/commit/774c290eb5af5a8c295dec08d94b182568576e02))
+* **damage:** a text's characters or span arriving or leaving repaints the text ([#766](https://github.com/sidorares/react-x11/issues/766)) ([b9eef3d](https://github.com/sidorares/react-x11/commit/b9eef3d5298e128651a5d5c4b737e48590874102))
+* **frame:** a composited pane's cursor is shown over it ([#767](https://github.com/sidorares/react-x11/issues/767)) ([45e072b](https://github.com/sidorares/react-x11/commit/45e072b9c5cccc13843b0e66faa15c8f66dc1bd9))
+* **scrollbar:** a pane thinner than its bar shows none across it ([#770](https://github.com/sidorares/react-x11/issues/770)) ([81daf47](https://github.com/sidorares/react-x11/commit/81daf478225f63be5226b21b90de4a4eb3c1af8c))
+
 ## [2.23.1](https://github.com/sidorares/react-x11/compare/v2.23.0...v2.23.1) (2026-09-29)
 
 
