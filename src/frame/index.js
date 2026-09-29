@@ -45,6 +45,7 @@ import React, {
 
 import { useAppOrNull } from '../appcontext.js';
 import { canEmbed } from '../embedding.js';
+import { WHEEL_NOTCH_PX } from '../events.js';
 import { FrameEnv } from './env.js';
 import { CallbackTable, PROTOCOL } from './protocol.js';
 
@@ -607,9 +608,13 @@ function PaneHostView({
     onMouseDown: forward('mousedown', (ev) => ({ keycode: ev.button ?? 1 })),
     onMouseUp: forward('mouseup', (ev) => ({ keycode: ev.button ?? 1 })),
     onMouseMove: forward('mousemove', () => ({})),
+    // The host's event is in pixels — events.js turned each notch into
+    // WHEEL_NOTCH_PX of them — and the pane's window turns what it is sent
+    // into pixels again, so it is sent notches: sent the pixels, one notch
+    // scrolled a page 2304 of them.
     onWheel: forward('wheel', (ev) => ({
-      deltaX: ev.deltaX ?? 0,
-      deltaY: ev.deltaY ?? 0,
+      deltaX: (ev.deltaX ?? 0) / WHEEL_NOTCH_PX,
+      deltaY: (ev.deltaY ?? 0) / WHEEL_NOTCH_PX,
       deltaMode: ev.deltaMode ?? 'line',
       smooth: Boolean(ev.smooth),
       source: 'forwarded',
