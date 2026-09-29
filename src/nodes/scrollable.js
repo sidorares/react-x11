@@ -67,6 +67,8 @@ function contentReach(node, top) {
   const boxes = layoutDiff.boxes;
   for (const child of node.children) {
     if (child.isWindow || !child.yoga || child.hidden) continue;
+    // not laid out, and not there: see `absolutize`
+    if (child.style.display === 'none') continue;
     const box = child.yoga.getComputedLayout();
     // …for the walk that places this child, later in the same one
     boxes?.set(child, box);
@@ -239,12 +241,20 @@ export const Scrollable = (Base) =>
       try {
         this._assignAbs(x, y, width, height);
         if (this.props.onLayout) this._reportLayout();
-        this._absolutizeChildren(
-          this.abs.x,
-          this.abs.y,
-          this.abs.x - wasX,
-          this.abs.y - wasY,
-        );
+        // A `display: 'none'` subtree takes part in no layout: yoga leaves
+        // its children where the last pass that reached them did — and a
+        // child inserted or moved while it was hidden with no layout at all,
+        // NaN, which a scroll pane in there measured its content from and
+        // threw on, out of the frame. The box itself has its empty rect;
+        // what is inside is placed when it is shown and laid out again.
+        if (this.style.display !== 'none') {
+          this._absolutizeChildren(
+            this.abs.x,
+            this.abs.y,
+            this.abs.x - wasX,
+            this.abs.y - wasY,
+          );
+        }
       } finally {
         if (move) {
           layoutDiff.shift = null;
