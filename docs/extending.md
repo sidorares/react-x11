@@ -560,6 +560,20 @@ _forgotten_ rather than left, exactly as one that unmounts while focused is,
 so anything with a lifetime behind the highlight is released in
 `destroySubtree` as well.
 
+**The cursor is the point's.** `defaultCursor` is one cursor for the whole
+element. An element that draws a document, a graph or an editor has one per
+part — a link, a handle, text — and names it with `cursorAt(x, y)`, asked on
+every motion over it with the pointer in device pixels, the unit `abs` is
+in. It answers a cursor name, or null for nothing in particular, which falls
+through to `defaultCursor` and then to the parent. A `cursor` style on the
+element still wins, and a capture freezes the cursor with the rest of hover.
+
+```js
+cursorAt(x, y) {
+  return this.linkAt(x - this.abs.x, y - this.abs.y) ? 'pointer' : 'text';
+}
+```
+
 **The wheel that is not a scroll.** `canScroll`/`scrollBy`
 ([below](#scrolling-content-you-painted)) route the wheel for content that
 scrolls, and they hand the element deltas only — which is the whole of the

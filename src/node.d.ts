@@ -700,6 +700,15 @@ export declare class Node {
    * otherwise — `'text'` for something editable. A `cursor` style wins. */
   defaultCursor?: string;
   /**
+   * The cursor for a point inside this element, for one that draws parts
+   * only it can tell apart — a link in a document, a handle in a graph, the
+   * text in an editor. Asked on every motion over it, with the pointer in
+   * device pixels, the unit `abs` is in. Null says nothing in particular is
+   * there, and `defaultCursor` answers. A `cursor` style still wins, and a
+   * capture holding the pointer freezes the cursor with the rest of hover.
+   */
+  cursorAt?(x: number, y: number): string | null;
+  /**
    * The ARIA role this element is when the application writes none — the
    * registered-element counterpart of `<textinput>` defaulting to
    * `textbox`. A `role` prop still wins, and an unknown name warns in
