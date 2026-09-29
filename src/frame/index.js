@@ -569,10 +569,20 @@ function PaneHostView({
       if (msg?.type === 'pane-present') {
         host.setRect(node.abs);
         host.present(msg.id);
+      } else if (msg?.type === 'pane-cursor') {
+        // The pane names its cursor as an element that draws names one for
+        // a point: this box is the node the host's pointer is over, so the
+        // cursor is its default — a `cursor` style on the <Frame> still
+        // wins — and it is shown now, because the motion that changed it
+        // was answered in the host before the pane had said
+        node.defaultCursor = msg.cursor ?? undefined;
+        node.root?.events?.refreshCursor();
       }
     });
     return () => {
       off();
+      node.defaultCursor = undefined;
+      node.root?.events?.refreshCursor();
       node.absolutize = origAbsolutize;
       if (origShift) node._shiftAbs = origShift;
       if (s.paneHost === host) s.paneHost = null;

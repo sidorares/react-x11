@@ -1322,6 +1322,19 @@ export class EventManager {
     callHandler(node, 'unstable_onAttention', handler, ev);
   }
 
+  /**
+   * Apply the cursor again with no motion: for a node whose cursor changed
+   * under a pointer standing still — a `<Frame>` pane's, which arrives from
+   * the pane's process after the motion that changed it was answered here.
+   * A point cursor is not asked again, as there is no new point: each node
+   * keeps what it last named. Nothing, once the window is gone — a pane's
+   * box lets go of its cursor as it unmounts.
+   */
+  refreshCursor() {
+    if (this.node.destroyed || !this.node.window) return;
+    this._updateCursor(this.hoverPath);
+  }
+
   /** Apply the deepest hovered node's cursor to the window: its `cursor`
    * style, or what it says of the point under the pointer (`cursorAt`), or
    * its `defaultCursor` — and failing all three, its parent's. Asked on

@@ -316,6 +316,7 @@ async function mountPane(children, { width = 100, height = 80 } = {}) {
     node,
     flushes,
     presents,
+    sent,
     deliver: (m) => onMessage(m),
   };
 }
@@ -1264,6 +1265,35 @@ test('a pane frame after a full one starts from it, not from the frame its buffe
     [['copy', 'all', full, partial]],
     'the partial frame drew over the full one',
   );
+});
+
+test('a pane sends the host the cursor its tree names, once per change', async () => {
+  // The pointer is over the host's window, not the pane's, so the host
+  // shows the cursor and the pane has to say which: a link's pointer in a
+  // document the pane draws was never shown.
+  const { sent, deliver } = await mountPane(
+    h(
+      'box',
+      { style: { flexGrow: 1, flexDirection: 'row' } },
+      box({ width: 50, cursor: 'pointer' }),
+      box({ flexGrow: 1 }),
+    ),
+  );
+  // what the host forwards: device pixels in the pane, 2x here
+  const move = (x, y) =>
+    deliver({
+      type: 'pane-event',
+      name: 'mousemove',
+      ev: { x, y, rootx: x, rooty: y, buttons: 0, time: Date.now() },
+    });
+  const cursors = () =>
+    sent.filter((m) => m.type === 'pane-cursor').map((m) => m.cursor);
+  move(40, 40);
+  assert.deepEqual(cursors(), ['pointer']);
+  move(60, 40);
+  assert.deepEqual(cursors(), ['pointer'], 'the same cursor is not sent again');
+  move(160, 40);
+  assert.deepEqual(cursors(), ['pointer', null], 'and none is the default');
 });
 
 test('the host adds, places and removes the pane with implicit animations off', () => {

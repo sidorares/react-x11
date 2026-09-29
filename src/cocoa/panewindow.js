@@ -12,8 +12,8 @@
 // What the node tree sees is the ordinary window contract: getContext,
 // present, scrollRegion, noteFrameDamage, requestAnimationFrame, events
 // via emit. Geometry and input arrive as channel messages (the host owns
-// layout and hit-testing — this is CPU offloading, not isolation), and the
-// only outbound traffic is pane-present.
+// layout and hit-testing — this is CPU offloading, not isolation), and what
+// goes out is pane-present, and pane-cursor for the cursor the host shows.
 import { BackendContext2D } from '../backend/context2d.js';
 
 let nextPaneId = 1;
@@ -94,6 +94,17 @@ export class CocoaPaneWindow {
   focus() {}
 
   setTitle() {}
+
+  /**
+   * The cursor this pane's tree names, sent to the host. A pane has no
+   * window the pointer is over — the host's window is — so the host shows
+   * it (`<Frame>`'s pane box, src/frame/index.js). Core asks only when the
+   * cursor changes, so this is a message per change, not per motion.
+   */
+  setCursor(name) {
+    if (this.destroyed) return;
+    this.app._paneSend?.({ type: 'pane-cursor', cursor: name ?? null });
+  }
 
   requestAnimationFrame(cb) {
     return this.app._requestFrame(cb);

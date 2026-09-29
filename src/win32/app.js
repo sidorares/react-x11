@@ -416,7 +416,7 @@ export class Win32App {
 
   /**
    * The pane process's end of the frame channel: geometry and input in,
-   * presents out. Feature-detected by the pane bootstrap
+   * presents and the cursor out. Feature-detected by the pane bootstrap
    * (src/frame/childmain.js), and a no-op in a process that is not a pane.
    */
   attachPaneChannel(channel) {
