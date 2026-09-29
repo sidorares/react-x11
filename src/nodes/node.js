@@ -66,6 +66,9 @@ const NO_SELF_DAMAGED = new Set();
  * `_nonYogaKids` counts, so the count stays right for a parent that has no
  * box of its own either. */
 const outsideYoga = (child) => !child.yoga || child.isWindow;
+// Drawn by the box it is in: a `<text>`'s characters, a span. A popup has no
+// box here either, but draws in a window of its own.
+const isBoxless = (child) => !child.yoga && !child.isPopup;
 
 export class Node {
   get ownerDocument() {
@@ -392,8 +395,9 @@ export class Node {
     // nothing vacating — the child being added had no pixels — and the
     // layout diff claims where it lands, so it names no region at all. A
     // child already here is a move, and says so (`_childListFine`).
-    const fine = this._childListFine(child.parent !== this);
-    const before = fine ? null : this._childListBefore();
+    const boxless = isBoxless(child);
+    const fine = !boxless && this._childListFine(child.parent !== this);
+    const before = fine || boxless ? null : this._childListBefore();
     // a move has to leave the yoga tree too — yoga aborts on insertChild of
     // a node that still has a parent
     if (child.parent === this && this._joinsYoga(child)) {
@@ -422,7 +426,8 @@ export class Node {
     // against the app's, and only now can see the `scale` props above it.
     child._rescaleSubtree(mounting);
     this._textContentChanged();
-    this._childListChanged(before, fine);
+    if (boxless) this._boxlessChildChanged();
+    else this._childListChanged(before, fine);
     a11yHooks.attached?.(this, child);
   }
 
@@ -535,10 +540,13 @@ export class Node {
     // captured while the child is still attached, so it covers the rect the
     // child is about to stop occupying — the child's own, for a viewport
     // mid-blit, where this node's box is the whole scrolled band
-    const fine = this._childListFine(true);
-    const before = fine
-      ? (child._claimBounds() ?? NO_DAMAGE)
-      : this._childListBefore();
+    const boxless = isBoxless(child);
+    const fine = !boxless && this._childListFine(true);
+    const before = boxless
+      ? null
+      : fine
+        ? (child._claimBounds() ?? NO_DAMAGE)
+        : this._childListBefore();
     this.children.splice(index, 1);
     if (outsideYoga(child)) this._nonYogaKids--;
     if (this._joinsYoga(child)) {
@@ -557,7 +565,30 @@ export class Node {
       child.yoga = null;
     }
     this._textContentChanged();
-    this._childListChanged(before, fine);
+    if (boxless) this._boxlessChildChanged();
+    else this._childListChanged(before, fine);
+  }
+
+  /**
+   * A child with no box of its own — a `<text>`'s run of characters, or a
+   * `<text>` nested in one — arrived or left. It is drawn by the nearest box
+   * above it, so what changed is that box's pixels, and no rect: the box
+   * claims where it is now and again once layout has run, the way a string
+   * that changes in place claims (`TextChunkNode.setText`).
+   *
+   * Not through `_childListChanged`. Under a scroll pane its claims are the
+   * finer ones (`_childListFine`): the leaving child's own rect, and the
+   * layout diff's claim of where an arriving one lands. A boxless child has
+   * neither, so a label emptied or filled inside a pane claimed nothing, and
+   * its old glyphs stayed on the screen. And a span that gains a child has
+   * no rect of its own to claim either.
+   */
+  _boxlessChildChanged() {
+    this._clearHitBounds();
+    let owner = this;
+    while (owner && !owner.yoga) owner = owner.parent;
+    if (owner) owner._invalidateLayout('text');
+    else this.root?.invalidate(true, null, 'text');
   }
 
   /** Destroy real resources (X windows) in this subtree. Yoga nodes are
