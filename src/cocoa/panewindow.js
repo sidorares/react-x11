@@ -252,7 +252,6 @@ export class CocoaPaneWindow {
     this._dirty = false;
     const shown = this._ring[this._drawIndex];
     this._native.surfaceUnlock(shown.handle);
-    const damage = this._flushDamage;
     this._flushDamage = null;
     this.app._paneSend?.({
       type: 'pane-present',
@@ -270,16 +269,17 @@ export class CocoaPaneWindow {
     this._surface = next.handle;
     this._surfaceGen++;
     this._native.surfaceLock(next.handle);
-    // A full-repaint frame overwrites everything next, so no catch-up is
-    // needed. A partial frame paints only its damage, so `next` must first
-    // hold the last complete frame underneath — and the WHOLE of it, not
-    // just this frame's rects, because in a three-buffer ring `next` was
-    // last drawn two presents ago and is stale everywhere. A full copy of
-    // the just-shown buffer is the complete background; the safe target is
-    // what triple buffering buys.
-    if (damage !== 'full' && damage) {
-      this._native.copySurfaceRegion(shown.handle, next.handle, null);
-    }
+    // The next frame may paint only its damage, so `next` must first hold
+    // the last complete frame underneath — and the WHOLE of it, not just
+    // this frame's rects, because in a three-buffer ring `next` was last
+    // drawn two presents ago and is stale everywhere. A full copy of the
+    // just-shown buffer is the complete background; the safe target is what
+    // triple buffering buys. After a full frame as much as a partial one:
+    // what a frame was says nothing of what the next will be, and skipping
+    // the copy there had a partial frame after a full one — a status line,
+    // a hover's underline — drawn over the page as it was two frames back.
+    // The copy is wasted only where the next frame is full as well.
+    this._native.copySurfaceRegion(shown.handle, next.handle, null);
   }
 
   snapshot() {
