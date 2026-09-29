@@ -7,21 +7,36 @@
 // fling down a `<Tree>` asked a hundred thousand times. What is cached has to
 // stay exactly what it was, though, and that is most of what is asserted.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import React from 'react';
 
 import xserver from 'x11/lib/xserver/index.js';
-import { createClient } from 'ntk';
+import { createClient, StaticFontSource } from 'ntk';
 
 import { createRoot } from '../src/index.js';
 
 const h = React.createElement;
+const require = createRequire(import.meta.url);
+const fontDir = join(
+  dirname(require.resolve('katex/package.json')),
+  'dist',
+  'fonts',
+);
 
 async function mountLabels(t, labels) {
   const server = xserver.createServer({ width: 400, height: 400 });
   const [serverEnd, clientEnd] = xserver.createStreamPair();
   server.addClientStream(serverEnd);
-  const app = await createClient({ stream: clientEnd });
+  // one face with a cap height, whatever this machine has installed
+  const fontSource = new StaticFontSource();
+  fontSource.add(readFileSync(join(fontDir, 'KaTeX_Main-Regular.ttf')), {
+    family: 'Test Main',
+  });
+  fontSource.alias('sans-serif', 'Test Main');
+  const app = await createClient({ stream: clientEnd, fontSource });
   const root = await createRoot({ app });
   t.after(async () => {
     await root.unmount();
