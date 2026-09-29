@@ -142,3 +142,83 @@ test('an entry shaped with other truncation options is not handed back', async (
   });
   assert.ok(node._layoutFor(80) !== stale, 'nor for another overflow');
 });
+
+// What a layout reads off the width: where its lines break and where each
+// line sits.
+const linesOf = (layout) => ({
+  width: layout.width,
+  height: layout.height,
+  lines: layout.lines.map((line) => [
+    line.x,
+    line.y,
+    line.width,
+    line.start,
+    line.end,
+  ]),
+});
+
+function shapedAfresh(app, node, maxWidth) {
+  return app.fonts.layout(node.collectSpans([]), node.resolvedTextStyle(), {
+    maxWidth,
+    align: node.style.textAlign,
+    maxLines: Number.isFinite(node._maxLines()) ? node._maxLines() : undefined,
+    overflow: node.style.textOverflow,
+    direction: node.direction,
+  });
+}
+
+const PARAGRAPH =
+  'The quick brown fox jumps over the lazy dog, and a supercalifragilistic ' +
+  'word too wide for the box is cut inside itself.';
+
+test('a paragraph already shaped wider is not shaped again at a width it fits', async (t) => {
+  const { app, texts } = await mountLabels(t, [
+    h('text', { key: 'p', style: { fontSize: 14 } }, PARAGRAPH),
+    h('text', { key: 'l', style: { fontSize: 14 } }, 'Quarterly report'),
+  ]);
+  for (const node of texts()) {
+    for (const wide of [180, Infinity]) {
+      node._layouts.clear();
+      const layout = node._layoutFor(wide);
+      const widest = Math.max(...layout.lines.map((line) => line.width));
+      const narrower = Math.ceil(widest);
+      if (!(narrower < wide)) continue;
+      // the paint's question: the box the text measured into
+      assert.ok(node._layoutFor(narrower) === layout, `${wide} → ${narrower}`);
+      assert.deepEqual(
+        linesOf(layout),
+        linesOf(shapedAfresh(app, node, narrower)),
+        'and it is what shaping it at that width gives',
+      );
+    }
+  }
+});
+
+test('a layout the width would move is shaped again', async (t) => {
+  const { app, texts } = await mountLabels(t, [
+    h('text', { key: 'c', style: { textAlign: 'center' } }, PARAGRAPH),
+    h('text', { key: 'e', style: { textOverflow: 'ellipsis' } }, PARAGRAPH),
+    h(
+      'box',
+      { key: 'r', style: { direction: 'rtl' } },
+      h('text', {}, PARAGRAPH),
+    ),
+    h('text', { key: 'n' }, PARAGRAPH),
+  ]);
+  const [centred, elided, rtlBox, plain] = texts();
+  const rtl = rtlBox.children[0];
+  for (const node of [centred, elided, rtl, plain]) {
+    node._layouts.clear();
+    const layout = node._layoutFor(180);
+    const widest = Math.max(...layout.lines.map((line) => line.width));
+    // `plain`: a width one of its lines does not fit breaks elsewhere
+    const narrower =
+      node === plain ? Math.floor(widest) - 1 : Math.ceil(widest);
+    const again = node._layoutFor(narrower);
+    assert.ok(again !== layout, `${node.style.textAlign ?? node.direction}`);
+    assert.deepEqual(
+      linesOf(again),
+      linesOf(shapedAfresh(app, node, narrower)),
+    );
+  }
+});

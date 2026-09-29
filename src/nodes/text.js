@@ -432,6 +432,10 @@ export class TextNode extends Node {
         ? entry.layout
         : null;
     if (!layout) {
+      layout = this._shapedWider(maxWidth, maxLines, overflow);
+      if (layout) this._layouts.set(maxWidth, { layout, maxLines, overflow });
+    }
+    if (!layout) {
       const spans = this.collectSpans([]);
       const base = this.resolvedTextStyle();
       layout = fonts.layout(spans, base, {
@@ -457,6 +461,47 @@ export class TextNode extends Node {
       this._layouts.set(maxWidth, { layout, maxLines, overflow });
     }
     return layout;
+  }
+
+  /**
+   * A layout this paragraph already has at a wider width that shaping it at
+   * `maxWidth` would come out the same as, or null.
+   *
+   * ntk fills lines greedily: a line takes tokens while they fit. So if
+   * every line a wider layout made fits `maxWidth` as well, the narrower
+   * layout breaks at the same tokens — each line was the longest run that
+   * fit the wider width, and so is the longest that fits a narrower one it
+   * still fits in — and a word too wide for either is cut at the same
+   * cluster. Past the breaks, only two things read the width, and both are
+   * ruled out here: placing a line anywhere but at the left edge (centred,
+   * right-aligned, or the start of a right-to-left paragraph), and eliding
+   * one. A line within a thousandth of a pixel of the width is left to be
+   * shaped, since the sum the fill tests and the width the line reports are
+   * added up in different orders.
+   *
+   * The paint's request is the common one: a label is laid out in a box the
+   * width it measured, a pixel or less narrower than the width it was
+   * measured at, and was shaped again for it — 37% of the layouts a fling
+   * down a <Tree> built.
+   *
+   * ntk's layouts only. CoreText and DirectWrite break lines their own way,
+   * and their layouts carry no `baseLevel`.
+   */
+  _shapedWider(maxWidth, maxLines, overflow) {
+    if (overflow === 'ellipsis') return null;
+    const align = this.style.textAlign;
+    if (align !== undefined && align !== 'start' && align !== 'left') {
+      return null;
+    }
+    const fits = maxWidth - 0.001;
+    for (const [width, entry] of this._layouts) {
+      if (!(width > maxWidth)) continue;
+      if (entry.maxLines !== maxLines || entry.overflow !== overflow) continue;
+      const layout = entry.layout;
+      if (layout?.baseLevel !== 0) continue;
+      if (layout.lines.every((line) => line.width <= fits)) return layout;
+    }
+    return null;
   }
 
   /**
