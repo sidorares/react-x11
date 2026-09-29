@@ -231,6 +231,8 @@ export class TextNode extends Node {
       return;
     }
     this._layouts.clear();
+    // the ink goes with the layout it was placed from (`_ownPaintBounds`)
+    this._clearPaintBounds();
     if (this.yoga) this.yoga.markDirty();
   }
 
@@ -250,6 +252,7 @@ export class TextNode extends Node {
       return;
     }
     this._layouts.clear();
+    this._clearPaintBounds();
   }
 
   /**
@@ -422,7 +425,10 @@ export class TextNode extends Node {
     return this._elides() ? maxWidth : Infinity;
   }
 
-  _layoutFor(maxWidth) {
+  /** The layout at `maxWidth`: kept, or shaped now. With `shape` false, only
+   *  a kept one — for a question that must not cost a shaping, such as how
+   *  far a paragraph not yet painted will ink (`_inkPlaced`). */
+  _layoutFor(maxWidth, shape = true) {
     const fonts = this.app?.fonts;
     if (!fonts) return null; // mock container in tests: no text metrics
     const maxLines = this._maxLines();
@@ -449,6 +455,7 @@ export class TextNode extends Node {
       layout = this._shapedWider(maxWidth, maxLines, overflow);
       if (layout) this._layouts.set(maxWidth, { layout, maxLines, overflow });
     }
+    if (!layout && !shape) return null;
     if (!layout) {
       const spans = this.collectSpans([]);
       const base = this.resolvedTextStyle();
@@ -599,9 +606,12 @@ export class TextNode extends Node {
    * a differently-placed layout is a caret in the wrong place, and nothing
    * about it would look like a bug in this function.
    */
-  _placedLayout() {
+  _placedLayout(shape = true) {
     const content = this.contentBox();
-    const layout = this._layoutFor(this._wrapWidth(content.width || Infinity));
+    const layout = this._layoutFor(
+      this._wrapWidth(content.width || Infinity),
+      shape,
+    );
     if (!layout) return null;
     // the box was shortened from the top, so the glyphs come up with it
     const trim = this._trim(layout);
@@ -678,9 +688,19 @@ export class TextNode extends Node {
    * the old colour, or stayed after the word was gone.
    */
   _ownPaintBounds() {
-    const bounds = super._ownPaintBounds();
-    const ink = this.root?._laidOut ? this._inkPlaced() : this._inkOnScreen();
-    return ink ? unionRect(bounds, ink) : bounds;
+    let bounds = super._ownPaintBounds();
+    // Both, whenever it is asked. A claim made before this frame's layout
+    // wants the ink on the screen, one made after it the ink about to be
+    // drawn — and so does everything the paint sizes from these bounds,
+    // which asks before this paragraph has ever drawn: an ancestor's
+    // `opacity` draws the subtree into a surface this big, and one sized
+    // before the ink was known cut a word's overflow off at the box, on the
+    // first frame only. The union is never smaller than either.
+    const shown = this._inkOnScreen();
+    if (shown) bounds = unionRect(bounds, shown);
+    const placed = this._inkPlaced();
+    if (placed) bounds = unionRect(bounds, placed);
+    return bounds;
   }
 
   /** The rect the lines of a placed layout cover, in window coordinates. */
@@ -703,8 +723,14 @@ export class TextNode extends Node {
 
   /** The ink the frame will draw, where it reaches past the box. */
   _inkPlaced() {
-    const placed = this._placedLayout();
-    return placed ? outside(this._inkOf(placed), this.abs) : null;
+    // a paragraph not laid out yet has no box to be placed in
+    const box = this.abs;
+    if (!(box.width > 0 || box.height > 0)) return null;
+    // Only from a layout already made: a claim at the commit would otherwise
+    // shape every string a batch of input passes through, painted or not.
+    // By the paint, the layout pass has made the one it will draw.
+    const placed = this._placedLayout(false);
+    return placed ? outside(this._inkOf(placed), box) : null;
   }
 
   /** The ink on the screen, where it reaches past the box: kept by the last
