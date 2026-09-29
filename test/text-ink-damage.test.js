@@ -224,3 +224,24 @@ test('a label squeezed to no height, moved along by a sibling, leaves no old gly
     await frameMatchesRepaint(t, squeezed, { before: 20 }, { before: 0 }),
   );
 });
+
+test('a label its box leaves no width is drawn where it is claimed', async (t) => {
+  // A box of no width is drawn unwrapped, which is not the layout the
+  // measure pass made at no width, so the ink it would be drawn with was in
+  // no layout yet when the frame claimed where the label had moved to.
+  const narrowing = ({ width = 60 }) =>
+    h(
+      'box',
+      { style: { width, padding: 8, backgroundColor: '#26a269' } },
+      h(
+        'box',
+        { style: { borderWidth: 3, borderColor: '#20304a', height: 30 } },
+        h(
+          'text',
+          { style: { color: '#f6d32d', fontSize: 12 } },
+          'a longer label that wraps somewhere',
+        ),
+      ),
+    );
+  assert.ok(await frameMatchesRepaint(t, narrowing, {}, { width: 20 }));
+});
