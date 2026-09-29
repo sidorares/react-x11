@@ -503,6 +503,25 @@ const desktopPalettes = new Map();
  * `'no-preference'` means *use your own default*, which is the light one.
  */
 export function paletteFor(appearance) {
+  // An appearance is a frozen snapshot, replaced whole when the desktop
+  // changes (appearance.js), so the last one asked about answers by
+  // identity. `baseTheme()` asks with the same snapshot for every node
+  // created — each one detached, with no theme above it yet — and spelling
+  // the key to the palettes below was 200 ns of each on a desktop with an
+  // accent: a thousand rows scrolling into a table, a document mounting.
+  if (appearance === lastAppearance) return lastPalette;
+  const palette = paletteOf(appearance);
+  if (Object.isFrozen(appearance)) {
+    lastAppearance = appearance;
+    lastPalette = palette;
+  }
+  return palette;
+}
+
+let lastAppearance = null;
+let lastPalette = null;
+
+function paletteOf(appearance) {
   const scheme = appearance.colorScheme === 'dark' ? DarkTheme : DefaultTheme;
   if (appearance.palette) return withDesktopPalette(scheme, appearance.palette);
   const { accent, accentText, selection } = appearance;
