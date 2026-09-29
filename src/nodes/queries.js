@@ -7,6 +7,7 @@ import {
   localTextStyleChanged,
   containerAnswers,
 } from '../styles.js';
+import { reportStyleProblem } from '../errors.js';
 import { DEV } from './util.js';
 
 /** How many extra layout passes a flush spends settling `@container` blocks
@@ -193,7 +194,25 @@ export class NodeQueries {
       // catch-up looks the dirty flags are spent and no leaf's height moved
       // — so the floor of a card that turned from a row into a column would
       // stay the row's, and yoga would squeeze the column down to it.
-      if (applyLayoutStyle(this.yoga, this.style, before) && this.root) {
+      //
+      // This runs in a frame, so a value the layout refuses is dropped and
+      // reported rather than thrown: nothing would catch it.
+      const refused = [];
+      const moved = applyLayoutStyle(this.yoga, this.style, before, refused);
+      for (const { key, value, error } of refused) {
+        // an enum's own message already says what it is and what it takes
+        const said = error.message.startsWith('react-x11:')
+          ? error.message
+          : `react-x11: invalid ${key} ${JSON.stringify(value)} ` +
+            `(${error.message})`;
+        reportStyleProblem(
+          this,
+          `${said} in <${this.kind} style>, applied when a query block ` +
+            'started matching',
+          'The declaration is dropped, as CSS drops one it cannot parse',
+        );
+      }
+      if (moved && this.root) {
         this.root._floorsDirty = true;
         this.root._floorsContentDirty = true;
         this.root._floorsSources.add(this);

@@ -8,6 +8,7 @@ import {
   createLayoutNode,
   isMeasuringExactly,
   measuringExactly,
+  setLayoutValue,
 } from '../styles.js';
 import { Yoga } from '../yoga.js';
 import {
@@ -342,11 +343,11 @@ export class NodeLayoutHost {
     // A floor written while it was a flex item means nothing to a layout,
     // which sizes the child itself — and would outlast it as a minimum.
     if (child._floorMinW != null) {
-      cy.setMinWidth(child.style.minWidth);
+      setLayoutValue(cy, 'minWidth', child.style.minWidth);
       child._floorMinW = undefined;
     }
     if (child._floorMinH != null) {
-      cy.setMinHeight(child.style.minHeight);
+      setLayoutValue(cy, 'minHeight', child.style.minHeight);
       child._floorMinH = undefined;
     }
     child._hostSlot = null;
