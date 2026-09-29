@@ -629,7 +629,8 @@ before taking focus itself. To _draw_ that rather than read it, there is a
 ([styling.md](styling.md#inline-pseudo-states)), which is what a row
 containing a field wants. `focus()` hands the node back, so a component
 can forward it straight out of an imperative handle. Focusing a node inside a
-scroll container scrolls it into view. Mousedown focuses the nearest
+scroll container scrolls it into view — unless a press focused it, since
+the node is under the pointer. Mousedown focuses the nearest
 focusable ancestor of the hit node; Tab / Shift+Tab cycle through focusable
 nodes in tree order. Keyboard
 events route to the focused node's ancestor chain. `disabled` opts a node

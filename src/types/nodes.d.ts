@@ -148,7 +148,8 @@ export interface ScrollableNode extends DrawnNode {
   canScroll(dx: number, dy: number): boolean;
   /**
    * Scroll the minimum amount on both axes that makes a descendant fully
-   * visible. Safe to call right after that node mounts — the request is
+   * visible; one larger than the viewport is left where it covers it and
+   * otherwise brought in by its nearer edge (CSSOM View's `nearest`). Safe to call right after that node mounts — the request is
    * resolved on the next layout pass, when it has geometry, and `onScroll`
    * reports the move once that pass is over.
    */

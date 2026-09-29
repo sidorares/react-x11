@@ -1211,7 +1211,8 @@ box you do not scroll.
 
 `scrollTo(y)` takes a number for the vertical axis; `scrollTo({x, y})` moves
 either, leaving alone whichever you omit. `scrollBy` matches.
-`scrollIntoView(node)` scrolls the minimum amount on both axes.
+`scrollIntoView(node)` scrolls the minimum amount on both axes, and a node
+larger than the viewport that already covers it not at all.
 `canScroll(dx, dy)` answers whether there is room to move on the axis a delta
 names — what the wheel asks each node on its way out, and the one method an
 element of your own implements to be asked it too
@@ -1242,7 +1243,9 @@ size off the ref. `Table` is built on it. `onLayout`
 `onViewport` adds the content size a scroller measures.
 
 `scrollIntoView(node)` scrolls the minimum amount that makes a descendant
-node fully visible, and is safe to call from an effect right after that
+node fully visible — for one larger than the viewport, CSSOM View's
+`block: nearest`: left where it covers the viewport, and otherwise brought
+in by the edge that moves it least — and is safe to call from an effect right after that
 node mounts: the request is resolved on the next layout pass, when the
 node actually has geometry.
 

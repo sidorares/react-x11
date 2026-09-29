@@ -1705,7 +1705,11 @@ export class EventManager {
       // …and nothing scrolls to meet it either: the node is coming back to
       // the arrangement it left, and this reveal's layout has not run, so a
       // scroll here would be computed from a rect that does not exist yet.
-      if (!restoring) this._scrollIntoView(node);
+      // Nor for a press: the node is under the pointer, so the part that
+      // matters is on screen already, and a document taller than its pane
+      // was scrolled to its top by every click on it — the drag that
+      // followed selecting from there.
+      if (!restoring && reason !== 'pointer') this._scrollIntoView(node);
       if (this.keyboardFocused) {
         this._defaultFocusOn = true;
         node.defaultFocus?.({ reason, backwards });
