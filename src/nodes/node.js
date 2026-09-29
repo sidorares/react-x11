@@ -31,7 +31,7 @@ import { dropVisibleSelection, selectionSurfaceOf } from '../textselection.js';
 import { NodeAnimation } from './animation.js';
 import { NodeBoxPaint } from './boxpaint.js';
 import { NodeCascade } from './cascade.js';
-import { NO_DAMAGE } from './damage.js';
+import { DAMAGE_SLOP, NO_DAMAGE } from './damage.js';
 import { NodeHitTest } from './hittest.js';
 import { installMethods } from './install.js';
 import { NodeInvalidate } from './invalidate.js';
@@ -40,6 +40,7 @@ import { NodeLayout } from './layout.js';
 import { NodeLayoutHost } from './layouthost.js';
 import { NodeMoveBlit } from './moveblit.js';
 import { NodePaint } from './paint.js';
+import { unionRect } from './rects.js';
 import { NodePosition } from './position.js';
 import { NodeQueries } from './queries.js';
 import { NodeScrollBlit } from './scrollblit.js';
@@ -654,7 +655,10 @@ export class Node {
     // factor. The walk restyles this node too, so the call after it hits
     // the identity check and costs nothing twice.
     if (newProps.scale !== prev.scale) this._rescaleSubtree();
+    // asked of the style still in force: see `_clipStarted`
+    const clipped = this.clipsChildren();
     const style = this._syncStyle(newProps);
+    if (!clipped && this.clipsChildren()) this._clipStarted();
     let layoutChanged = false;
     // hoisted styles hit the identity check and skip the whole update
     if (this.yoga && style !== prevStyle) {
@@ -725,6 +729,34 @@ export class Node {
     }
     if (DEV) devCheckA11yProps(this);
     a11yHooks.propsChanged?.(this);
+  }
+
+  /**
+   * This node started clipping what it holds (`overflow: 'hidden'` or
+   * `'scroll'`), so whatever its children drew past its box is gone, and
+   * nothing moved for the layout diff to notice. Its own claims are made
+   * after the new style is in, when its paint bounds already stop at its
+   * box, so the old reach is claimed here: what the children drew, which is
+   * theirs, and the same whether or not this node clips them.
+   *
+   * The other way — a box that stops clipping — needs nothing of its own:
+   * the claim once layout has run reaches as far as the children now do.
+   */
+  _clipStarted() {
+    let reach = null;
+    for (const child of this.children) {
+      if (child.isWindow || !child.yoga || child.hidden) continue;
+      if (child.style?.display === 'none') continue;
+      const bounds = child._subtreeBounds();
+      reach = reach ? unionRect(reach, bounds) : bounds;
+    }
+    if (!reach) return;
+    this.invalidate(false, {
+      x: reach.x - DAMAGE_SLOP,
+      y: reach.y - DAMAGE_SLOP,
+      width: reach.width + 2 * DAMAGE_SLOP,
+      height: reach.height + 2 * DAMAGE_SLOP,
+    });
   }
 
   /**
