@@ -1207,6 +1207,120 @@ test('a block whose margin stops being a length ends the spine it sits in', asyn
   });
 });
 
+test('a block inset across its column is still measured alone, and as the whole tree measures it', async () => {
+  // A list whose rows are inset from its edges — a menu's, a tree's, so that
+  // a selected row's wash reads as a mark on a row rather than a stripe
+  // across the pane — is a column of blocks with a margin across each. Laid
+  // out alone, a block with no width of its own is as wide as the width on
+  // offer less its margins, which is what stretching it across the column
+  // makes it (spine.js, `rootWidths`): so it is still a spine, and still
+  // measures what the whole tree does. The paragraphs here wrap to a second
+  // line when a margin takes five pixels off either side of the column, so
+  // a block measured at the wrong width comes out the wrong height. A margin
+  // that is not a length is not taken off the same way — `auto` centres the
+  // block instead of stretching it — and keeps the whole tree's measurement.
+  await withTestElements(async () => {
+    const inset = (key, margins, n) =>
+      h(
+        'box',
+        { key, style: { padding: 3, ...margins } },
+        h('paragraph'),
+        box(
+          { flexDirection: 'row', gap: 2 },
+          h('label', { length: n }),
+          h('label', { length: 30 }),
+        ),
+      );
+    // a <Tree>'s row: a row of its own, inset, that never shrinks
+    const row = (key, n) =>
+      h(
+        'box',
+        {
+          key,
+          style: {
+            flexDirection: 'row',
+            flexShrink: 0,
+            marginStart: 4,
+            marginEnd: 4,
+            paddingEnd: 8,
+          },
+        },
+        h('label', { length: n }),
+        h('paragraph'),
+      );
+    const doc = (blocks) =>
+      box(
+        { overflow: 'scroll', flexGrow: 1 },
+        box({ padding: 6, gap: 4 }, h('paragraph', { key: 'top' }), ...blocks),
+      );
+    const a = inset('a', { marginStart: 5, marginEnd: 5 }, 40);
+    const b = inset('b', { marginLeft: 9, marginRight: 9 }, 60);
+    const c = inset('c', { marginLeft: 2, marginRight: 12 }, 20);
+    const d = inset('d', { margin: 3 }, 10);
+    const e = inset('e', { marginStart: -4, marginEnd: -4 }, 50);
+    // [blocks, whether the frame is on a spine]
+    const steps = [
+      [[a], true],
+      [[a, b], true],
+      [[inset('a', { marginStart: 5, marginEnd: 5 }, 70), b], true],
+      [[inset('a', { marginStart: 1, marginEnd: 1 }, 70), b], true],
+      [[a, b, c], true],
+      [[a, b, c, d], true],
+      [[a, b, c, d, e], true],
+      [[a, b, c, d, e, row('r1', 30)], true],
+      [[a, b, c, d, e, row('r1', 30), row('r2', 90)], true],
+      [[a, b, c, e, row('r1', 60), row('r2', 90)], true],
+      // a margin across that is not a length ends it, and so does one
+      // beside the change
+      [[a, b, inset('f', { marginStart: '10%' }, 30)], false],
+      [
+        [
+          inset('a', { marginStart: 5, marginEnd: 5 }, 90),
+          b,
+          inset('f', { marginStart: '10%' }, 30),
+        ],
+        false,
+      ],
+      [
+        [a, b, inset('g', { marginLeft: 'auto', marginRight: 'auto' }, 30)],
+        false,
+      ],
+      [[a, b, row('r1', 60)], null],
+      [[a, b, row('r1', 20)], true],
+    ];
+    const windowProps = { width: 120, height: 400 };
+    const scoped = await mount(doc([]), windowProps);
+    const whole = await mount(doc([]), windowProps);
+    for (const [i, [blocks, spine]] of steps.entries()) {
+      const before = scoped.node._layoutPasses;
+      await rerender(scoped.app, scoped.root, doc(blocks), windowProps);
+      if (spine !== null) {
+        assert.strictEqual(
+          scoped.node._layoutPasses - before === 1,
+          spine,
+          `step ${i}: on a spine`,
+        );
+      }
+      whole.node._floorsUnscoped = true;
+      await rerender(whole.app, whole.root, doc(blocks), windowProps);
+      assertSameMeasurement(scoped.node, whole.node, `step ${i}`);
+      // and at the width the whole tree measured each block at
+      const column = (win) => win.children[0].children[0].children;
+      const scopedBlocks = column(scoped.node);
+      const wholeBlocks = column(whole.node);
+      for (let k = 0; k < scopedBlocks.length; k++) {
+        assert.strictEqual(
+          scopedBlocks[k]._floorAtW,
+          wholeBlocks[k]._floorAtW,
+          `step ${i}: block ${k}'s width`,
+        );
+      }
+    }
+    await scoped.root.unmount();
+    await whole.root.unmount();
+  });
+});
+
 test('every scoped measurement is the one the whole tree gives', async () => {
   // Two windows, the same frames: one measures what each change is confined
   // to, the other is made to measure the whole tree (`_floorsUnscoped`, the
