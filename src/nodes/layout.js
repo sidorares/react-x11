@@ -510,6 +510,8 @@ export class NodeLayout {
       return;
     }
     this.abs = { x, y, width, height };
+    const placed = this._absAssigned;
+    this._absAssigned = true;
     // moving or resizing changes where this subtree can be hit, and the
     // cached unions all the way up with it
     this._clearHitBounds();
@@ -517,10 +519,16 @@ export class NodeLayout {
       // the reach `_ownPaintBounds` names, ring and shadow alike: a card
       // pushed down by a row above it leaves its old shadow on the surface
       // unless the claim for where it was covers that shadow too
-      const grow =
-        Math.max(this._outlineExtent(), this._shadowExtent()) + DAMAGE_SLOP;
+      const reach = Math.max(this._outlineExtent(), this._shadowExtent());
+      const grow = reach + DAMAGE_SLOP;
       const shift = layoutDiff.shift;
-      const had = old.width > 0 && old.height > 0;
+      // A rect of no area has no pixels of its own — but an outline or a
+      // shadow is drawn round it all the same, and a box of no height
+      // arriving with a ring round it claimed nothing, and was never drawn.
+      // The old rect counts only once layout has placed the node at all:
+      // before that it is the origin, where it never was.
+      const had =
+        (old.width > 0 && old.height > 0) || (reach > 0 && placed === true);
       if (shift) {
         // Riding a blit (issue #398): the rect this node *would* have had if
         // nothing but the scroll had happened. Landing there is the blit's
@@ -555,7 +563,7 @@ export class NodeLayout {
           return;
         }
         if (had) layoutDiff.sink(insetRect(was, -grow), this);
-        if (width > 0 && height > 0) {
+        if ((width > 0 && height > 0) || reach > 0) {
           layoutDiff.sink(insetRect(this.abs, -grow), this);
         }
         return;
@@ -573,7 +581,7 @@ export class NodeLayout {
       if (had) {
         layoutDiff.sink(insetRect(old, -grow), this);
       }
-      if (width > 0 && height > 0) {
+      if ((width > 0 && height > 0) || reach > 0) {
         layoutDiff.sink(insetRect(this.abs, -grow), this);
       }
     }
