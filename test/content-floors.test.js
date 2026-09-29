@@ -1245,6 +1245,179 @@ test('a block whose margin stops being a length ends the spine it sits in', asyn
   });
 });
 
+test('a list whose own box changes with its rows keeps its pane the height of its column', async () => {
+  // A virtual list — a <Tree> — is a box that grows into its column, and in
+  // it a scroll pane that grows too, from a basis of 0, naming its own
+  // minimum: a spacer, a window of rows inset from its edges, and a spacer.
+  // A jump down it replaces the rows and resizes the spacers, and the list
+  // restyles its own box in the same frame, so the change reaches past the
+  // pane to the window and the list's box is measured alone. Laid out with
+  // no height on offer — where the pass over the whole tree lays it out in
+  // the 0 it collapses the window to — the pane had no height to take its
+  // basis from and came out as tall as everything it holds: 2,200,000
+  // pixels for 100,000 rows. It names its own floor, so that was its floor;
+  // the floor climbed to the window, the pane no longer scrolled, and the
+  // list, told the viewport was that tall, built every row.
+  await withTestElements(async () => {
+    const pane = React.createRef();
+    const row = (key) =>
+      h(
+        'box',
+        {
+          key,
+          style: {
+            flexDirection: 'row',
+            flexShrink: 0,
+            marginStart: 4,
+            marginEnd: 4,
+          },
+        },
+        h('label', { length: 30 }),
+      );
+    // the list's own box changes with its rows — a <Tree> restyles it as it
+    // scrolls — so the change reaches up past the pane, to the window
+    const list = (above, from, below) =>
+      box(
+        { flexGrow: 1, padding: 8 },
+        box(
+          { flexGrow: 1, minHeight: 0, paddingTop: from % 2 },
+          h(
+            'box',
+            {
+              ref: pane,
+              style: {
+                overflow: 'scroll',
+                flexGrow: 1,
+                flexBasis: 0,
+                minHeight: 0,
+                minWidth: 0,
+              },
+            },
+            h('box', { key: 'above', style: { height: above, flexShrink: 0 } }),
+            ...Array.from({ length: 12 }, (_, i) => row(`r${from + i}`)),
+            h('box', { key: 'below', style: { height: below, flexShrink: 0 } }),
+          ),
+        ),
+      );
+    const windowProps = { width: 200, height: 300 };
+    const { app, root, node } = await mount(list(0, 0, 50000), windowProps);
+    assert.strictEqual(pane.current.abs.height, 284, 'mounted');
+    for (const [i, [above, from, below]] of [
+      [20000, 1001, 30000],
+      [45000, 2250, 5000],
+      [100, 5, 49900],
+    ].entries()) {
+      const before = node._scopedFloorPasses;
+      await rerender(app, root, list(above, from, below), windowProps);
+      assert.strictEqual(
+        pane.current.abs.height,
+        284 - (from % 2),
+        `step ${i}: the pane is the column's height, not its content's`,
+      );
+      assert.ok(pane.current.contentHeight > 50000, `step ${i}: and scrolls`);
+      assert.ok(node._scopedFloorPasses > before, `step ${i}: still scoped`);
+    }
+  });
+});
+
+test('a root laid out alone is laid out in what its column offers it', async () => {
+  // A spine root is laid out alone as the one item of a column that offers
+  // it what the collapse pass over the whole tree does (spine.js's
+  // `frameFor`): 0 under the window, passed down every column on the way,
+  // and no bound in a column under a pane that scrolls — whose own items
+  // it lays out in its height, 0 for a pane squashed to nothing. Each of
+  // these came out otherwise laid out alone with no height on offer, and
+  // each is measured alone still: the differential below holds every frame
+  // to the whole tree's, and that it was scoped.
+  await withTestElements(async () => {
+    const pane = (from) =>
+      h(
+        'box',
+        {
+          style: {
+            overflow: 'scroll',
+            flexGrow: 1,
+            flexBasis: 0,
+            minHeight: 0,
+            minWidth: 0,
+          },
+        },
+        h('box', { key: 'above', style: { height: from * 10 } }),
+        ...Array.from({ length: 4 }, (_, i) =>
+          h('label', { key: `r${from + i}`, length: 30 }),
+        ),
+      );
+    const tall = (from) => box({ height: 50 + (from % 3) });
+    const scroller = (...children) =>
+      box(
+        { overflow: 'scroll', flexGrow: 1, minHeight: 0, minWidth: 0 },
+        ...children,
+      );
+    const column = (...children) =>
+      box({ flexGrow: 1, padding: 8 }, ...children);
+    const cases = {
+      // under the window
+      'a floor below what it holds': (f) =>
+        column(box({ minHeight: 20, paddingTop: f % 2 }, tall(f))),
+      'a pane in a box that grows': (f) =>
+        column(box({ flexGrow: 1, minHeight: 0, paddingTop: f % 2 }, pane(f))),
+      'a pane in a box that does not': (f) =>
+        column(box({ paddingTop: f % 2 }, pane(f))),
+      'a basis': (f) =>
+        column(box({ flexBasis: 100, paddingTop: f % 2 }, pane(f))),
+      'a height it gives way from': (f) =>
+        column(box({ height: 150, minHeight: 10, paddingTop: f % 2 }, pane(f))),
+      'a ceiling': (f) =>
+        column(box({ maxHeight: 400, paddingTop: f % 2 }, tall(f), pane(f))),
+      'an aspect ratio': (f) =>
+        column(box({ aspectRatio: 4, paddingTop: f % 2 }, pane(f))),
+      'a row of a clip': (f) =>
+        column(
+          box(
+            { flexDirection: 'row', paddingTop: f % 2 },
+            box({ overflow: 'hidden' }, tall(f)),
+            h('label', { length: 20 }),
+          ),
+        ),
+      'under a clip': (f) =>
+        box(
+          { overflow: 'hidden', flexGrow: 1, minHeight: 0, minWidth: 0 },
+          box(
+            { padding: 4 },
+            box({ minHeight: 0, paddingTop: f % 2 }, pane(f)),
+          ),
+        ),
+      // under a pane that scrolls
+      "the pane's own item, with a floor": (f) =>
+        scroller(box({ minHeight: 0, paddingTop: f % 2 }, tall(f))),
+      "an aspect ratio in the pane's column": (f) =>
+        scroller(
+          box(
+            { padding: 4 },
+            box({ aspectRatio: 4, paddingTop: f % 2 }, pane(f)),
+          ),
+        ),
+    };
+    const windowProps = { width: 200, height: 300 };
+    for (const [name, tree] of Object.entries(cases)) {
+      const scoped = await mount(tree(0), windowProps);
+      const whole = await mount(tree(0), windowProps);
+      let took = 0;
+      for (const from of [1001, 2250, 5]) {
+        const before = scoped.node._scopedFloorPasses;
+        await rerender(scoped.app, scoped.root, tree(from), windowProps);
+        if (scoped.node._scopedFloorPasses > before) took++;
+        whole.node._floorsUnscoped = true;
+        await rerender(whole.app, whole.root, tree(from), windowProps);
+        assertSameMeasurement(scoped.node, whole.node, `${name}, at ${from}`);
+      }
+      assert.strictEqual(took, 3, `${name}: every frame was scoped`);
+      await scoped.root.unmount();
+      await whole.root.unmount();
+    }
+  });
+});
+
 test('a block inset across its column is still measured alone, and as the whole tree measures it', async () => {
   // A list whose rows are inset from its edges — a menu's, a tree's, so that
   // a selected row's wash reads as a mark on a row rather than a stripe

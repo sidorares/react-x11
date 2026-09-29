@@ -1626,7 +1626,16 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     extent nobody reads unmeasured anyway. `test/content-floors.test.js`
     holds every spine frame to the whole tree's answer, and fails if the sum
     drops a gap or a margin, if a root is squashed, or if it is measured at
-    the wrong width in the width pass.
+    the wrong width in the width pass. **A root is laid out alone as the one
+    item of a column that offers it what the collapse offers the column it
+    sits in** (`frameFor`): 0 under the window, which every box on the way
+    down passes on as a bound, and none in a column under a scroll pane,
+    whose own items it resolves in its height — 0 when the pane is squashed
+    to nothing. A bound is not nothing: yoga takes a basis only from a
+    column with a height, and a floor gives way only to one, so a root laid
+    out with no height at all had a `<Tree>`'s pane in it come out as tall
+    as its 100,000 rows. A stop that lays out what it holds in a height of
+    its own, which only the pass knows, measures the whole tree.
   - **a box measured alone is measured on copies** (`exactcopy.js`): its
     subtree copied into a second yoga config that never rounds, laid out,
     read and freed. Switching the renderer's config off the grid
