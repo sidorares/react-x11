@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.23.1](https://github.com/sidorares/react-x11/compare/v2.23.0...v2.23.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **cocoa:** a pane frame after a full one is drawn over it, not over the frame before ([#763](https://github.com/sidorares/react-x11/issues/763)) ([35308a3](https://github.com/sidorares/react-x11/commit/35308a38f5323bb25240573f10bb6c685ef9c1bb))
+* **styles:** a colour no backend can parse is an error at the commit, and dropped at the paint instead of thrown from it ([#749](https://github.com/sidorares/react-x11/issues/749)) ([ce23aae](https://github.com/sidorares/react-x11/commit/ce23aaef87b8a7c06090b87db111b72cafb81af5))
+
+
+### Performance Improvements
+
+* **floors:** a block inset across its column by a length is still a spine root ([#761](https://github.com/sidorares/react-x11/issues/761)) ([0a40de9](https://github.com/sidorares/react-x11/commit/0a40de9f95db3c577c9717b1f5cf446b89976e40))
+* **floors:** work out the widths a column offers its spine roots once a column ([#764](https://github.com/sidorares/react-x11/issues/764)) ([c2688ab](https://github.com/sidorares/react-x11/commit/c2688ab25fb8310da8afb0a4ab733fefa093379e))
+* **text:** answer a measure at a width already shaped for without a string key or a font lookup ([#758](https://github.com/sidorares/react-x11/issues/758)) ([0075f11](https://github.com/sidorares/react-x11/commit/0075f11cbf6b8173604fe3f73fb4a6e1985f0eb5))
+* **text:** reuse a paragraph's wider layout at a narrower width all its lines fit ([#765](https://github.com/sidorares/react-x11/issues/765)) ([c994fed](https://github.com/sidorares/react-x11/commit/c994fed1bfba27588e63d1becaf7bb266e7e9dad))
+
 ## [2.23.0](https://github.com/sidorares/react-x11/compare/v2.22.13...v2.23.0) (2026-09-29)
 
 
