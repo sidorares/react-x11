@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.24.0](https://github.com/sidorares/react-x11/compare/v2.23.2...v2.24.0) (2026-09-29)
+
+
+### Features
+
+* **damage:** an element says how far it draws past its box (paintOverhang) ([#781](https://github.com/sidorares/react-x11/issues/781)) ([694a9d4](https://github.com/sidorares/react-x11/commit/694a9d4b782143922958c2d4309ea397ea400191))
+
+
+### Bug Fixes
+
+* **damage:** a frame whose claims all lie outside the window paints nothing ([#778](https://github.com/sidorares/react-x11/issues/778)) ([b75d557](https://github.com/sidorares/react-x11/commit/b75d55708fc89d233a3165427a1d645f51a3dd9a))
+* **paint:** cull a child by what it paints, not by its box ([#779](https://github.com/sidorares/react-x11/issues/779)) ([578a5d1](https://github.com/sidorares/react-x11/commit/578a5d1e4efefa53780d0b944b2a25a5974a9155))
+
 ## [2.23.2](https://github.com/sidorares/react-x11/compare/v2.23.1...v2.23.2) (2026-09-29)
 
 
