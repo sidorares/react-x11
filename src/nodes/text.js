@@ -762,10 +762,13 @@ export class TextNode extends Node {
     // a paragraph not laid out yet has no box to be placed in
     const box = this.abs;
     if (!(box.width > 0 || box.height > 0)) return null;
-    // Only from a layout already made: a claim at the commit would otherwise
+    // Shaped only once this frame's layout has run, when the paint is about
+    // to need the very same layout: before it, a claim at the commit would
     // shape every string a batch of input passes through, painted or not.
-    // By the paint, the layout pass has made the one it will draw.
-    const placed = this._placedLayout(false);
+    // The measure pass does not always make the one the paint draws — a
+    // box of no width is drawn unwrapped — and a paragraph moved into one
+    // claimed none of its new ink.
+    const placed = this._placedLayout(this.root?._laidOut === true);
     return placed ? outside(this._inkOf(placed), box) : null;
   }
 
