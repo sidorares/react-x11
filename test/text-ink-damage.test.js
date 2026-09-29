@@ -159,3 +159,51 @@ test('a repaint under a word’s overflow paints the word over it again', async 
     );
   assert.ok(await frameMatchesRepaint(t, under, {}, { fill: '#f6d32d' }));
 });
+
+test('a word overflowing inside a translucent box shows its overflow from its first frame', async (t) => {
+  // `opacity` draws the subtree into a surface the size of its paint
+  // bounds, and those were measured before the paragraph had ever drawn —
+  // before the ink past its box was known — so the first frame cut the
+  // overflow off at the box, and a repaint later drew it.
+  const app = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
+  t.after(async () => {
+    await x11Root.unmount();
+    await app.close();
+  });
+  const root = (
+    await new Promise((resolve) =>
+      x11Root.render(
+        h(
+          'window',
+          { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+          h(
+            'box',
+            { style: { padding: 10 } },
+            h(
+              'box',
+              { style: { width: 6, opacity: 0.5 } },
+              h(
+                'text',
+                { style: { color: '#20304a', fontSize: 16 } },
+                'Overflowing',
+              ),
+            ),
+          ),
+        ),
+        resolve,
+      ),
+    )
+  )._reactX11Node;
+  const frame = async () => {
+    root._scheduled = false;
+    root.flush();
+    await settle(app);
+  };
+  await frame();
+  const first = await readPixels(root._ctx);
+  root.invalidate(false);
+  await frame();
+  const repainted = await readPixels(root._ctx);
+  assert.ok(first.equals(repainted));
+});
