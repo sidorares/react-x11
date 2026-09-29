@@ -52,6 +52,72 @@ function outside(ink, box) {
 /** `TextNode._trim`'s answer, per layout. */
 const trims = new WeakMap();
 
+/** {@link glyphInk}'s answer, per layout. */
+const glyphInks = new WeakMap();
+
+/**
+ * Where a layout's glyphs put ink past its lines' boxes, from its origin —
+ * or null where the engine cannot say. A glyph inks past its advance: a `j`
+ * that starts a line hooks back over the line's start and an `f` that ends
+ * one reaches past its end, by their own boxes (`glyphExtents`, ntk's). And
+ * a line set tighter than its face has ascenders over its top and
+ * descenders under its bottom, by the face's own reach (`metrics`).
+ *
+ * Found once per layout, and only where it can leave the layout's box: at a
+ * line's two ends, and over the first line and under the last. A glyph an
+ * em inside a line's ends reaches neither end, and measuring every glyph
+ * cost about as much again as laying the paragraph out.
+ */
+function glyphInk(layout) {
+  const known = glyphInks.get(layout);
+  if (known !== undefined) return known;
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  const lines = layout.lines;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const outer = i === 0 || i === lines.length - 1;
+    const start = line.x;
+    const end = line.x + line.width;
+    for (const placed of line.runs ?? []) {
+      const run = placed.run;
+      if (!run?.glyphs) continue;
+      if (outer) {
+        const m = run.font?.metrics?.(run.size);
+        if (m && m.ascent >= 0 && m.descent >= 0) {
+          top = Math.min(top, line.baseline - m.ascent);
+          bottom = Math.max(bottom, line.baseline + m.descent);
+        }
+      }
+      // the pen as `layout.draw` moves it
+      let pen = line.x + placed.x;
+      for (const glyph of run.glyphs) {
+        const gx = pen + glyph.dx;
+        const gy = line.baseline - glyph.dy;
+        pen += glyph.ax;
+        if (gx - run.size > start && gx + run.size < end) continue;
+        // a face that cannot say leaves its glyphs to the lines' boxes, and
+        // a blank glyph — a space — has no ink to reach anywhere with
+        const face = glyph.font ?? run.font;
+        const e = face?.glyphExtents?.(glyph.id, run.size);
+        if (!e || !(e.maxX > e.minX && e.maxY > e.minY)) continue;
+        left = Math.min(left, gx + e.minX);
+        right = Math.max(right, gx + e.maxX);
+        if (outer) {
+          top = Math.min(top, gy + e.minY);
+          bottom = Math.max(bottom, gy + e.maxY);
+        }
+      }
+    }
+  }
+  const ink =
+    left <= right || top <= bottom ? { left, top, right, bottom } : null;
+  glyphInks.set(layout, ink);
+  return ink;
+}
+
 /** The size under which this connection's text is painted as strips. */
 export function setTextStripBelow(app, below) {
   if (below === undefined) return;
@@ -739,7 +805,8 @@ export class TextNode extends Node {
     if (placed) layoutDiff.sink(insetRect(placed, -DAMAGE_SLOP), this);
   }
 
-  /** The rect the lines of a placed layout cover, in window coordinates. */
+  /** The rect the lines of a placed layout cover, and their glyphs' ink
+   *  where it reaches past them, in window coordinates. */
   _inkOf({ layout, x, y }) {
     const lines = layout.lines;
     if (!lines?.length) return null;
@@ -749,11 +816,21 @@ export class TextNode extends Node {
       left = Math.min(left, line.x);
       right = Math.max(right, line.x + line.width);
     }
+    let top = 0;
+    let bottom = layout.height;
+    const glyphs = glyphInk(layout);
+    if (glyphs) {
+      // each is ±Infinity where nothing was found to reach that way
+      left = Math.min(left, glyphs.left);
+      right = Math.max(right, glyphs.right);
+      top = Math.min(top, glyphs.top);
+      bottom = Math.max(bottom, glyphs.bottom);
+    }
     return {
       x: x + left,
-      y,
+      y: y + top,
       width: right - left,
-      height: layout.height,
+      height: bottom - top,
     };
   }
 

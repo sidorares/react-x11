@@ -116,6 +116,18 @@ const trimmed = ({ color = '#26a269', word = 'gypsy jog' }) =>
     ),
   );
 
+// A glyph whose ink reaches past its own advance, at a line's end: a `j`
+// that starts a line hooks back over the line's start, and an `f` that ends
+// one reaches past its end — past the box, by more than a damage rect's
+// slop at this size.
+const hooked = ({ color = '#26a269', before = 0, word = 'jog' }) =>
+  h(
+    'box',
+    { style: { padding: 10, flexDirection: 'row' } },
+    h('box', { style: { width: before } }),
+    h('text', { style: { color, fontSize: 32 } }, word),
+  );
+
 test('a word wider than its box is recoloured past the box', async (t) => {
   assert.ok(
     await frameMatchesRepaint(t, overflowing, {}, { color: '#e01b24' }),
@@ -132,6 +144,36 @@ test('a trimmed label is recoloured down to its descenders', async (t) => {
 
 test('a trimmed label, changed, leaves none of the old descenders', async (t) => {
   assert.ok(await frameMatchesRepaint(t, trimmed, {}, { word: 'HALT' }));
+});
+
+test('a label whose glyphs reach past its box is recoloured to their tips', async (t) => {
+  assert.ok(await frameMatchesRepaint(t, hooked, {}, { color: '#e01b24' }));
+  assert.ok(
+    await frameMatchesRepaint(
+      t,
+      hooked,
+      { word: 'if' },
+      {
+        word: 'if',
+        color: '#e01b24',
+      },
+    ),
+  );
+});
+
+test('a label whose glyphs reach past its box, moved, leaves none of them', async (t) => {
+  assert.ok(await frameMatchesRepaint(t, hooked, {}, { before: 7 }));
+  assert.ok(
+    await frameMatchesRepaint(
+      t,
+      hooked,
+      { word: 'if' },
+      {
+        word: 'if',
+        before: 7,
+      },
+    ),
+  );
 });
 
 test('a repaint under a word’s overflow paints the word over it again', async (t) => {
