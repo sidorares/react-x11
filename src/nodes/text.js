@@ -11,6 +11,7 @@ import { hooks as a11yHooks } from '../a11y.js';
 import { codePointAtOffset, codeUnitOffsets } from '../textrange.js';
 import { NO_DAMAGE } from './damage.js';
 import { Node } from './node.js';
+import { unionRect } from './rects.js';
 
 /**
  * Yoga's measure modes, in words. Indexed by the integer yoga hands a
@@ -36,6 +37,17 @@ const STRIP_BELOW_BASELINE = 0.1;
 const STRIP_COVERAGE = 0.45;
 
 const textStripBelow = new WeakMap();
+
+/** `ink`, when any of it lies outside `box`; else null. */
+function outside(ink, box) {
+  if (!ink) return null;
+  return ink.x < box.x ||
+    ink.y < box.y ||
+    ink.x + ink.width > box.x + box.width ||
+    ink.y + ink.height > box.y + box.height
+    ? ink
+    : null;
+}
 
 /** `TextNode._trim`'s answer, per layout. */
 const trims = new WeakMap();
@@ -186,6 +198,8 @@ export class TextNode extends Node {
     super('text', props, app, { yoga: !span });
     this.isSpan = span;
     this._layouts = new Map();
+    // how far the ink of the last paint reached past the box (`_keepInkReach`)
+    this._inkReach = null;
   }
 
   /** Height for a width: the paragraph shaped into whatever is on offer.
@@ -641,12 +655,98 @@ export class TextNode extends Node {
   paintContent(ctx) {
     const placed = this._placedLayout();
     if (!placed) return;
+    this._keepInkReach(placed);
     this._paintSelection(ctx);
     if (this._paintsStrip()) {
       this._paintStrip(ctx, placed);
       return;
     }
     placed.layout.draw(ctx, placed.x, placed.y);
+  }
+
+  /**
+   * Where this paragraph puts ink, when that is outside its box: the box
+   * grown by the ink it has on the screen now, before a layout pass, and by
+   * the ink the frame is about to draw, after one.
+   *
+   * The glyphs are drawn where the layout puts them, and two things put them
+   * past the box. A word too wide for the box and with nowhere to break is
+   * drawn whole, across the box's edge. And a box trimmed to its capitals
+   * (`textBoxTrim`) leaves every descender and every ascender taller than a
+   * capital outside it, by design. A change that repaints the paragraph —
+   * its colour, its characters — claimed the box, so the ink outside it kept
+   * the old colour, or stayed after the word was gone.
+   */
+  _ownPaintBounds() {
+    const bounds = super._ownPaintBounds();
+    const ink = this.root?._laidOut ? this._inkPlaced() : this._inkOnScreen();
+    return ink ? unionRect(bounds, ink) : bounds;
+  }
+
+  /** The rect the lines of a placed layout cover, in window coordinates. */
+  _inkOf({ layout, x, y }) {
+    const lines = layout.lines;
+    if (!lines?.length) return null;
+    let left = Infinity;
+    let right = -Infinity;
+    for (const line of lines) {
+      left = Math.min(left, line.x);
+      right = Math.max(right, line.x + line.width);
+    }
+    return {
+      x: x + left,
+      y,
+      width: right - left,
+      height: layout.height,
+    };
+  }
+
+  /** The ink the frame will draw, where it reaches past the box. */
+  _inkPlaced() {
+    const placed = this._placedLayout();
+    return placed ? outside(this._inkOf(placed), this.abs) : null;
+  }
+
+  /** The ink on the screen, where it reaches past the box: kept by the last
+   *  paint as distances from the box's edges, so it rides a scroll's shift
+   *  with the box. */
+  _inkOnScreen() {
+    const reach = this._inkReach;
+    if (!reach) return null;
+    const box = this.abs;
+    return {
+      x: box.x - reach.left,
+      y: box.y - reach.top,
+      width: box.width + reach.left + reach.right,
+      height: box.height + reach.top + reach.bottom,
+    };
+  }
+
+  /** Remember how far past the box this paint's ink reaches. A reach that
+   *  changed is a changed paint bound, so the cached ones above it go. */
+  _keepInkReach(placed) {
+    const ink = outside(this._inkOf(placed), this.abs);
+    const box = this.abs;
+    const reach = ink && {
+      left: Math.max(0, box.x - ink.x),
+      top: Math.max(0, box.y - ink.y),
+      right: Math.max(0, ink.x + ink.width - (box.x + box.width)),
+      bottom: Math.max(0, ink.y + ink.height - (box.y + box.height)),
+    };
+    const was = this._inkReach;
+    if (
+      reach === was ||
+      (reach &&
+        was &&
+        reach.left === was.left &&
+        reach.top === was.top &&
+        reach.right === was.right &&
+        reach.bottom === was.bottom)
+    ) {
+      return;
+    }
+    this._inkReach = reach;
+    this._clearPaintBounds();
   }
 
   /**
