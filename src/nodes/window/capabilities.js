@@ -8,6 +8,7 @@ import {
   transparencyDisabled,
   watchCompositing,
 } from '../../compositing.js';
+import { isColor } from '../../styles.js';
 import { DEV } from '../util.js';
 
 /**
@@ -129,9 +130,17 @@ export class WindowCapabilities {
    * window that cannot be transparent is a square opaque one, not a broken
    * one — and the alternative, black corners, is worse than square.
    */
-  /** What this window paints as its background — its own, or the palette's. */
+  /**
+   * What this window paints as its background — its own, or the palette's.
+   * A colour that does not parse is not one named (`isColor`), and a window
+   * has to answer with one: an opaque window cannot paint nothing, since
+   * whatever it skipped would show the last frame's pixels.
+   */
   _windowBackground() {
-    return this.style.backgroundColor || this.theme.background;
+    const own = this.style.backgroundColor;
+    if (isColor(own)) return own;
+    const palette = this.theme.background;
+    return isColor(palette) ? palette : 'white';
   }
 
   /**

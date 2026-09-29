@@ -4,6 +4,7 @@
 
 import {
   DEFAULT_FOCUS_RING,
+  isColor,
   resolveBorderWidths,
   resolveBorderColors,
 } from '../styles.js';
@@ -22,11 +23,14 @@ import { ntkRoot, x11Ntk } from '../ntkroot.js';
 import { isFocusable as a11yFocusable } from '../a11y.js';
 import { DEV } from './util.js';
 
-/** CSS's `transparent` keyword means "paint nothing". ntk's colour parser
- *  does not know it and throws deep inside the 2d context, taking the whole
- *  frame with it, so filter it out at the source alongside null/''. */
+/** Whether a style's colour paints anything. CSS's `transparent` keyword
+ *  means "paint nothing" and is filtered out at the source alongside
+ *  null/'', and so is a value that is not a colour at all (`isColor`): ntk
+ *  throws on one deep inside the 2d context, taking the whole frame with
+ *  it. Everything that plans a paint asks this too — the blits deciding
+ *  what a box covers — so a colour that is dropped is dropped everywhere. */
 export function isPaintedColor(color) {
-  return Boolean(color) && color !== 'transparent';
+  return Boolean(color) && color !== 'transparent' && isColor(color);
 }
 
 /**

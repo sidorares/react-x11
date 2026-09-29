@@ -1657,6 +1657,16 @@ can be looked at without stopping the compositor for the whole session. See
   process down. A value that only turns out wrong in a frame — a `$token`
   resolving to one — is dropped there and reported, the way CSS drops a
   declaration it cannot parse, and the rest of the block still applies.
+- **A colour that does not parse is dropped, not painted.**
+  `backgroundColor: 'nonsense'`, `7` or `'#12'` is an error at the commit in
+  development, naming the property — in the style, in a state block, as a
+  gradient stop or as a shadow's colour. `''`, like `undefined`, means
+  unset. Where one gets past that — a `$token` whose palette entry is not a
+  colour, or any value in a production build — the paint drops it the way
+  CSS drops a declaration it cannot parse: no fill and no stroke, no
+  gradient or shadow at all rather than half of one, and the inherited ink
+  for text. On X11 it used to throw from the frame, where no error boundary
+  could catch it, and the other backends painted it black.
 
 ## Elements that are not styled
 

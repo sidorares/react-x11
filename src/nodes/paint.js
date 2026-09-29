@@ -681,7 +681,7 @@ export class WindowPaint {
     // repainting the background only where it is about to be drawn over is
     // the other half of the win: a full-window fill is a full-window
     // composite however little changed
-    fill(backgroundColor || this.theme.background, false);
+    fill(this._windowBackground(), false);
     if (gradient) fill(gradient, false);
   }
 }

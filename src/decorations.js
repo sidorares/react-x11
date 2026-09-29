@@ -34,6 +34,7 @@
 // derives is the padding a coverage surface has to carry. Both are pure
 // functions — no connection, nothing drawn — so this module stays testable
 // without a server.
+import { cssColorStraight } from 'ntk/color';
 import { shadowReach, shadowSigma } from 'ntk/shadow-math';
 
 /** A number, with or without the `px` CSS wants and this vocabulary does not. */
@@ -199,11 +200,33 @@ function readStop(part, value) {
   if (pieces.length > 1 && (PERCENT.test(last) || LENGTH.test(last))) {
     pieces.pop();
     return {
-      color: pieces.join(' '),
+      color: stopColor(pieces.join(' '), value),
       position: { value: number(last), unit: PERCENT.test(last) ? '%' : 'px' },
     };
   }
-  return { color: part, position: null };
+  return { color: stopColor(part, value), position: null };
+}
+
+/** A stop's colour, which RENDER is handed as written — and ntk throws on
+ *  one it cannot parse from inside the frame, where nothing can catch it. */
+function stopColor(color, value) {
+  if (isColorOrToken(color)) return color;
+  throw new Error(
+    `react-x11: backgroundImage ${JSON.stringify(value)} has a colour stop ` +
+      `that is not a colour ("${color}"; expected one like '#2980b9', ` +
+      "'tomato' or 'rgba(0, 0, 0, .4)', or a $token, before its position)",
+  );
+}
+
+/**
+ * Whether a piece of a gradient or a shadow can stand where its colour does.
+ * One that mentions a `$token` is let through where the style is written,
+ * since the token means nothing yet; the paint parses the value it resolves
+ * to, and a colour that is still not one drops the whole decoration there
+ * rather than throwing (see "memoized parsing" below).
+ */
+function isColorOrToken(color) {
+  return color.includes('$') || cssColorStraight(color) !== null;
 }
 
 /**
@@ -366,6 +389,9 @@ function readShadow(part, value) {
     color = piece;
   }
   if (lengths.length < 2) throw bad('needs an x and a y offset');
+  if (color !== null && !isColorOrToken(color)) {
+    throw bad(`has "${color}", which is neither a length nor a colour`);
+  }
   const [dx, dy, blur = 0, spread = 0] = lengths;
   if (blur < 0) throw bad('has a negative blur radius');
   return { dx, dy, blur, spread, color };

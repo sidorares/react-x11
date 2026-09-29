@@ -42,6 +42,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { cssColor } from 'ntk/color';
 import { Image as NtkImage } from 'ntk/image';
 import { Path2D } from 'ntk/path';
 import { glDevice } from './device.js';
@@ -238,62 +239,18 @@ const BLACK = Object.freeze([0, 0, 0, 1]);
 const CLEAR = Object.freeze([0, 0, 0, 0]);
 const OPAQUE = Object.freeze([1, 1, 1, 1]);
 
+// ntk's parser, which is the one the other backends read a colour with, so
+// one spelling paints one colour everywhere: this context had a parser of its
+// own, which knew fifteen names and painted `tomato` black. What is not a
+// colour is black here, as it is in the shared context, and core does not
+// hand one over from a style (`isColor` in src/styles.js).
 function parseColorUncached(value) {
   const s = value.trim();
-  if (s[0] === '#') {
-    const h = s.slice(1);
-    const n = h.length;
-    const q = (i, len) =>
-      parseInt(len === 1 ? h[i] + h[i] : h.slice(i * 2, i * 2 + 2), 16) / 255;
-    if (n === 3 || n === 4)
-      return premul(q(0, 1), q(1, 1), q(2, 1), n === 4 ? q(3, 1) : 1);
-    if (n === 6 || n === 8)
-      return premul(q(0, 2), q(1, 2), q(2, 2), n === 8 ? q(3, 2) : 1);
-  }
-  const m = s.match(/^rgba?\(([^)]+)\)$/i);
-  if (m) {
-    const p = m[1].split(/[,\s/]+/).filter(Boolean);
-    const chan = (v) =>
-      (v.endsWith('%') ? parseFloat(v) * 2.55 : parseFloat(v)) / 255;
-    const alpha =
-      p.length > 3
-        ? p[3].endsWith('%')
-          ? parseFloat(p[3]) / 100
-          : parseFloat(p[3])
-        : 1;
-    return premul(
-      chan(p[0] || '0'),
-      chan(p[1] || '0'),
-      chan(p[2] || '0'),
-      Number.isFinite(alpha) ? alpha : 1,
-    );
-  }
-  if (s === 'transparent' || s === 'none') return CLEAR;
-  const named = NAMED[s.toLowerCase()];
-  if (named) return named;
-  return BLACK;
+  // SVG's word for no paint, which this context has always read as clear
+  if (s === 'none') return CLEAR;
+  const c = cssColor(s);
+  return c ? Object.freeze(c) : BLACK;
 }
-
-function premul(r, g, b, a) {
-  return Object.freeze([r * a, g * a, b * a, a]);
-}
-
-const NAMED = {
-  black: BLACK,
-  white: premul(1, 1, 1, 1),
-  red: premul(1, 0, 0, 1),
-  green: premul(0, 128 / 255, 0, 1),
-  blue: premul(0, 0, 1, 1),
-  gray: premul(128 / 255, 128 / 255, 128 / 255, 1),
-  grey: premul(128 / 255, 128 / 255, 128 / 255, 1),
-  yellow: premul(1, 1, 0, 1),
-  orange: premul(1, 165 / 255, 0, 1),
-  purple: premul(128 / 255, 0, 128 / 255, 1),
-  cyan: premul(0, 1, 1, 1),
-  magenta: premul(1, 0, 1, 1),
-  silver: premul(192 / 255, 192 / 255, 192 / 255, 1),
-  currentcolor: BLACK,
-};
 
 /**
  * A gradient: stops, and a 256-texel ramp texture baked from them on first

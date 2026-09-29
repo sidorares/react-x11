@@ -4,6 +4,7 @@
 
 import {
   applyLayoutStyle,
+  isColor,
   textStyleFrom,
   DEFAULT_TEXT_STYLE,
   localTextStyleChanged,
@@ -332,7 +333,9 @@ export class NodeCascade {
       return this._textScaled.style;
     }
     const theme = this.theme;
-    const color = theme.text;
+    // a palette is app-written, and an ink no engine parses would throw from
+    // every paragraph's draw (`isColor`)
+    const color = isColor(theme.text) ? theme.text : DEFAULT_TEXT_STYLE.color;
     // A palette can reach a node as a bare `theme` **prop** rather than a
     // resolved one — `<box theme={{ text: 'red' }}>` merges and derives
     // nothing (styling.md) — so neither of these is guaranteed to be there.
