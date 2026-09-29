@@ -1213,7 +1213,7 @@ export class EventManager {
       n.props.onMouseEnter?.(this._makeEvent('mouseEnter', native, n));
     }
     this.hoverPath = newPath;
-    this._updateCursor(newPath);
+    this._updateCursor(newPath, native);
   }
 
   /**
@@ -1322,14 +1322,32 @@ export class EventManager {
     callHandler(node, 'unstable_onAttention', handler, ev);
   }
 
-  /** Apply the deepest hovered node's `cursor` prop to the window.
-   * Feature-detected: needs ntk with Window.setCursor (> 3.1.0). */
-  _updateCursor(path) {
+  /** Apply the deepest hovered node's cursor to the window: its `cursor`
+   * style, or what it says of the point under the pointer (`cursorAt`), or
+   * its `defaultCursor` — and failing all three, its parent's. Asked on
+   * every motion. Feature-detected: needs ntk with Window.setCursor
+   * (> 3.1.0). */
+  _updateCursor(path, native = null) {
     const wnd = this.node.window;
     if (typeof wnd.setCursor !== 'function') return;
+    // An element that draws what is inside it — a document, a graph, an
+    // editor — is one node with many cursors, and only it knows which part
+    // is a link, a handle or text: it answers for the point, in the device
+    // pixels `abs` is in, as `textIndexAt` does. While a capture holds the
+    // pointer it is not asked — hover is frozen for the gesture and the
+    // point may be anywhere — and keeps what it named where the gesture
+    // began, while a style the press changed still shows.
+    const asking = native != null && !this._captured();
+    const named = (this._pointCursors ??= new WeakMap());
     let cursor = null;
     for (let i = path.length - 1; i >= 0; i--) {
-      const c = path[i].style.cursor ?? path[i].defaultCursor;
+      const node = path[i];
+      let c = node.style.cursor;
+      if (c == null && node.cursorAt) {
+        if (asking) named.set(node, node.cursorAt(native.x, native.y) ?? null);
+        c = named.get(node) ?? null;
+      }
+      c ??= node.defaultCursor;
       if (c != null) {
         cursor = c;
         break;
