@@ -66,6 +66,12 @@ export function scrollbarGeometry({
   // carries `scale` so the track, the hit slop and the thumb's corner
   // radius downstream draw from the same number.
   const barWidth = SCROLLBAR_WIDTH * scale;
+  // …and never wider than the pane across: a pane thinner than the bar and
+  // its inset shows none. Laid a bar's width in from its far edge, the bar
+  // of a pane four pixels tall stood four pixels above it, painted past the
+  // pane's box where none of the pane's claims reach — the same stray ink as
+  // a thumb run past its track, below, the other way round.
+  if (crossSize < barWidth + inset) return null;
   const rtl = direction === 'rtl';
   // Never longer than the track: a pane shorter than the minimum gets a
   // thumb that fills it and has no travel. The bar paints outside the

@@ -205,3 +205,144 @@ test('a pane shorter than the minimum thumb keeps its thumb inside it', async ()
     await app.close();
   }
 });
+
+/**
+ * `cardTree`, squeezed further: the card's 42 leaves the pane 4px tall, and
+ * its rows are wider than it, so it scrolls both ways. Thinner than the
+ * horizontal bar and its inset, the pane has no room for that bar.
+ */
+function thinTree(step, paneRef) {
+  return h(
+    'window',
+    { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+    h(
+      'box',
+      {
+        style: {
+          position: 'absolute',
+          left: 20 + step * 7,
+          top: 20 + step * 5,
+          width: 90,
+          height: 42,
+          backgroundColor: '#dfe6e9',
+        },
+      },
+      h('box', { style: { height: 38, backgroundColor: '#74b9ff' } }),
+      h(
+        'box',
+        { ref: paneRef, style: { height: 20, overflow: 'scroll' } },
+        ...Array.from({ length: 4 }, (_, i) =>
+          h('box', {
+            key: i,
+            style: {
+              width: 200,
+              height: 16,
+              flexShrink: 0,
+              backgroundColor: i % 2 ? '#fab1a0' : '#55efc4',
+            },
+          }),
+        ),
+      ),
+    ),
+  );
+}
+
+/** Every bar the pane shows is inside its box — here, possibly none: the
+ *  vertical track is shortened for the corner the two bars share, and at 4px
+ *  there is none of it left. */
+function barsInside(pane, label) {
+  const box = pane.abs;
+  for (const bar of pane._scrollbars()) {
+    assert.ok(
+      bar.x >= box.x &&
+        bar.y >= box.y &&
+        bar.x + bar.width <= box.x + box.width &&
+        bar.y + bar.height <= box.y + box.height,
+      `${label}: the ${bar.axis} bar leaves the pane`,
+    );
+  }
+}
+
+test('a pane thinner than its bar shows none across it', async () => {
+  // Laid a bar's width in from the pane's far edge, the horizontal bar of a
+  // pane 4px tall stood 4px above the pane, where none of its claims reach.
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const paneRef = React.createRef();
+    const { setState } = await mountStateful(x11Root, (step) =>
+      thinTree(step, paneRef),
+    );
+    const pane = paneRef.current;
+    const root = pane.root;
+    root.flush();
+    assert.strictEqual(pane.abs.height, 4, 'the card squeezes the pane');
+    assert.ok(pane.contentWidth > pane.abs.width, 'the rows overflow across');
+    assert.strictEqual(pane._scrollbar('x'), null, 'no room for the bar');
+    barsInside(pane, 'mounted');
+
+    for (const step of [1, 2, 3]) {
+      const { frames, diff } = await paintBothWays(app, root, () =>
+        setState(step),
+      );
+      assert.ok(
+        frames.length > 0 && frames.every((frame) => frame.box),
+        `step ${step}: the move must not repaint the window`,
+      );
+      assert.equal(diff, 0, `step ${step}: ${diff} pixels differ`);
+      barsInside(pane, `step ${step}`);
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test('a thin pane narrowed until its rows overflow paints what a repaint paints', async () => {
+  // the arrangement the differential found: the pane's own width change is
+  // what makes its rows overflow, in the same frame, and its bar appears
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const paneRef = React.createRef();
+    const { setState } = await mountStateful(x11Root, (narrow) =>
+      h(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+        h(
+          'box',
+          { style: { margin: 20, height: 20, padding: 8 } },
+          h(
+            'box',
+            {
+              ref: paneRef,
+              style: {
+                overflow: 'scroll',
+                height: 50,
+                backgroundColor: '#ffffff',
+                ...(narrow ? { width: 40 } : {}),
+              },
+            },
+            ...Array.from({ length: 4 }, (_, i) =>
+              h('box', {
+                key: i,
+                style: {
+                  width: 60,
+                  height: 10,
+                  flexShrink: 0,
+                  backgroundColor: i % 2 ? '#fab1a0' : '#55efc4',
+                },
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    const root = paneRef.current.root;
+    root.flush();
+    const { diff } = await paintBothWays(app, root, () => setState(1));
+    assert.equal(diff, 0, `${diff} pixels differ`);
+    barsInside(paneRef.current, 'narrowed');
+  } finally {
+    await app.close();
+  }
+});
