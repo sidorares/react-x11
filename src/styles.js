@@ -11,7 +11,7 @@ import {
   GRID_CONTAINER_PROPS,
   GRID_ITEM_PROPS,
 } from './grid.js';
-import { Yoga } from './yoga.js';
+import { Yoga, layoutLoaded } from './yoga.js';
 
 const FLEX_DIRECTION = {
   row: Yoga.FLEX_DIRECTION_ROW,
@@ -913,6 +913,26 @@ function validateValue(key, value, where) {
     }
     return;
   }
+  // A layout value the layout cannot take — `width: 'hidden'`, `padding:
+  // 'auto'`, `flexDirection: 'sideways'` — throws where it is applied, and
+  // inside a query block that is a frame, not a commit: a block that starts
+  // matching on a resize took the process down. So it is asked here, of the
+  // same appliers, wherever it is written. A `$token` is not a length until
+  // it resolves, and is answered by the frame then (`_sizeQueriesChanged`).
+  const refused =
+    isToken(value) || mentionsToken(value) ? null : layoutRefusal(key, value);
+  if (refused) {
+    // an enum's own message lists the choices; yoga's names only itself
+    if (refused.message.startsWith('react-x11:')) {
+      refused.message += `\n  in ${where}`;
+      throw refused;
+    }
+    const auto = layoutRefusal(key, 'auto') === null ? ", or 'auto'" : '';
+    throw new Error(
+      `react-x11: invalid ${key} ${JSON.stringify(value)} in ${where} ` +
+        `(expected a number of pixels or a percentage like '50%'${auto})`,
+    );
+  }
   const grid = GRID_VALUES.has(key);
   if (!grid && key !== 'backgroundImage' && key !== 'boxShadow') return;
   try {
@@ -1566,11 +1586,15 @@ const TOKEN_IN_VALUE = /\$[A-Za-z_][A-Za-z0-9_-]*/g;
 const mentionsToken = (v) =>
   typeof v === 'string' && v.charCodeAt(0) !== 36 && v.includes('$');
 
-/** The nested blocks a token can hide in, one level down: a state block,
- *  whose values are style values, and `animation`, whose values are the
- *  per-property declarations *whose* values are style values. Both are
- *  walked by everything that looks for a `$name`, so a themed loop resolves
- *  by the same rules as a themed hover. */
+/** The nested blocks a token can hide in, one level down: a state block or
+ *  a query block, whose values are style values, and `animation`, whose
+ *  values are the per-property declarations *whose* values are style
+ *  values. All are walked by everything that looks for a `$name`, so a
+ *  themed loop resolves by the same rules as a themed hover — and a themed
+ *  wide layout too. The query blocks were missed: `'@width >= 600':
+ *  { padding: '$gutter' }` handed yoga the string `'$gutter'` the moment
+ *  it matched, which threw from the frame. */
+const holdsStyle = (key) => isState(key) || isQuery(key);
 const animationBlocks = (style) =>
   style.animation && typeof style.animation === 'object'
     ? Object.values(style.animation).filter((e) => e && typeof e === 'object')
@@ -1580,7 +1604,7 @@ export function styleUsesTokens(style) {
   for (const key of Object.keys(style)) {
     const v = style[key];
     if (isToken(v) || mentionsToken(v)) return true;
-    if (key.charCodeAt(0) === 58 && v && styleUsesTokens(v)) return true;
+    if (holdsStyle(key) && v && styleUsesTokens(v)) return true;
   }
   return animationBlocks(style).some(styleUsesTokens);
 }
@@ -1594,7 +1618,7 @@ export function tokenNames(style, out = new Set()) {
     if (isToken(v)) out.add(v);
     else if (mentionsToken(v))
       for (const m of v.match(TOKEN_IN_VALUE) ?? []) out.add(m);
-    else if (key.charCodeAt(0) === 58 && v) tokenNames(v, out);
+    else if (holdsStyle(key) && v) tokenNames(v, out);
   }
   for (const block of animationBlocks(style)) tokenNames(block, out);
   return out;
@@ -1624,7 +1648,7 @@ export function stripTokens(style) {
     if (key === 'animation' && animationBlocks(style).some(styleUsesTokens)) {
       continue;
     }
-    out[key] = key.charCodeAt(0) === 58 && v ? stripTokens(v) : v;
+    out[key] = holdsStyle(key) && v ? stripTokens(v) : v;
   }
   return out;
 }
@@ -1691,7 +1715,7 @@ export function resolveTokens(
       else if (strict) {
         found.push(unknownToken(unknown, theme, `${where} ${key}`));
       }
-    } else if (key.charCodeAt(0) === 58 && v) {
+    } else if (holdsStyle(key) && v) {
       out[key] = resolveTokens(v, theme, `${where} ${key}`, strict, found);
     } else if (key === 'animation' && v && typeof v === 'object') {
       const loops = {};
@@ -2011,9 +2035,22 @@ const NO_STYLE = Object.freeze({});
  * name of both styles was most of the cost of a node that mounts — a
  * virtualized list replaces its rows at input rate.
  *
+ * `problems` is for a caller React is not under — a query block that
+ * starts matching mid-frame — where a throw would leave the frame and take
+ * the process with it. A value the layout cannot take is then dropped, the
+ * property going back to its default as CSS drops a declaration it cannot
+ * parse, and `{ key, value, error }` is pushed for the caller to report.
+ * Without it the value throws, which is what a commit wants: React routes
+ * it to a boundary.
+ *
  * @returns true if any layout-affecting prop changed
  */
-export function applyLayoutStyle(yogaNode, props, oldProps = NO_STYLE) {
+export function applyLayoutStyle(
+  yogaNode,
+  props,
+  oldProps = NO_STYLE,
+  problems = null,
+) {
   let changed = false;
   // A placed node's insets — sticky's thresholds, or whatever a registered
   // position reads them as — are the placement's, never offsets: yoga gets
@@ -2030,7 +2067,12 @@ export function applyLayoutStyle(yogaNode, props, oldProps = NO_STYLE) {
         ? !samePosition(props.position, oldProps.position)
         : props[key] !== oldProps[key];
     if (!moved && !(flipped && inset)) continue;
-    applier(yogaNode, placed && inset ? undefined : props[key]);
+    const value = placed && inset ? undefined : props[key];
+    // `null` is unset, the way a conditional writes it — `wide ? 240 :
+    // null` — and as it is for every other property in this vocabulary;
+    // yoga's own setters throw on it
+    if (problems === null) applier(yogaNode, value ?? undefined);
+    else applyOrDrop(applier, yogaNode, key, value ?? undefined, problems);
     changed = true;
   }
   // …and the ones the new style dropped, which go back to yoga's default
@@ -2049,6 +2091,72 @@ export function applyLayoutStyle(yogaNode, props, oldProps = NO_STYLE) {
   // An inset neither style names is unset in yoga already, and a flip is a
   // change to `position` itself, so it is counted above.
   return changed;
+}
+
+/**
+ * One layout property set on its own — a width put back after the content
+ * floors pinned it, a minimum restored under a floor — by the rules
+ * `applyLayoutStyle` sets it by: `null` is unset, and a value the layout
+ * refuses is dropped. A refused one was reported where it was first
+ * applied, and throwing here would throw from inside a layout pass.
+ */
+export function setLayoutValue(yogaNode, key, value) {
+  const applier = LAYOUT_APPLIER_OF.get(key);
+  try {
+    applier(yogaNode, value ?? undefined);
+  } catch {
+    applier(yogaNode, undefined);
+  }
+}
+
+/** One declaration, dropped rather than thrown when the layout refuses it
+ *  (`applyLayoutStyle`'s `problems`). */
+function applyOrDrop(applier, yogaNode, key, value, problems) {
+  try {
+    applier(yogaNode, value);
+  } catch (error) {
+    applier(yogaNode, undefined);
+    problems.push({ key, value, error });
+  }
+}
+
+// A yoga node no layout runs on, for development to ask whether a value is
+// one the layout can take: the question the frame asks, so the two cannot
+// disagree about what a length is.
+let scratchNode = null;
+
+// What the layout has already taken, per property, so development asks
+// yoga once per spelling rather than once per style it checks: a list of a
+// thousand rows checks the same six values a thousand times, and a setter
+// is a call into WebAssembly. A property that takes one number takes them
+// all — a length, a factor — and one that refuses them is an enum, so
+// numbers are remembered as one entry.
+const takenValues = new Map(
+  [...LAYOUT_APPLIER_OF.keys()].map((key) => [key, new Set()]),
+);
+const NUMBERS = Symbol('numbers');
+const TAKEN_MAX = 256;
+
+/** What applying `value` to `key` throws, or null when the layout takes
+ *  it — and for a key that is not a layout property. */
+function layoutRefusal(key, value) {
+  const taken = takenValues.get(key);
+  if (taken === undefined || value == null) return null;
+  if (taken.has(typeof value === 'number' ? NUMBERS : value)) return null;
+  if (scratchNode === null) {
+    // `createStyles` validates at module scope, before `createRoot` has
+    // loaded the engine — and the commit validates the same style again
+    if (!layoutLoaded()) return null;
+    scratchNode = Yoga.Node.create();
+  }
+  try {
+    LAYOUT_APPLIER_OF.get(key)(scratchNode, value);
+  } catch (error) {
+    return error;
+  }
+  if (typeof value === 'number') taken.add(NUMBERS);
+  else if (taken.size < TAKEN_MAX) taken.add(value);
+  return null;
 }
 
 /** Two `position` values asking for the same thing. A registered one written

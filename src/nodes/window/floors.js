@@ -3,6 +3,7 @@
 // minimums. Free functions over nodes; WindowNode drives them from size.js,
 // and a layout host from layouthost.js.
 
+import { setLayoutValue } from '../../styles.js';
 import { Yoga } from '../../yoga.js';
 import { NO_CHILDREN } from '../util.js';
 
@@ -688,7 +689,9 @@ export function freezeWidths(node, out) {
 
 /** …and back to the width the style asks for, on exactly what was pinned. */
 export function restoreWidths(frozen) {
-  for (const child of frozen) child.yoga.setWidth(child.style.width);
+  for (const child of frozen) {
+    setLayoutValue(child.yoga, 'width', child.style.width);
+  }
 }
 
 /**
@@ -909,14 +912,9 @@ export function writeFloors(node, axis) {
       if (extent > 0) floor = extent;
     }
     if ((horizontal ? child._floorMinW : child._floorMinH) === floor) continue;
-    const value = floor ?? child.style[own];
-    if (horizontal) {
-      child.yoga.setMinWidth(value);
-      child._floorMinW = floor;
-    } else {
-      child.yoga.setMinHeight(value);
-      child._floorMinH = floor;
-    }
+    setLayoutValue(child.yoga, own, floor ?? child.style[own]);
+    if (horizontal) child._floorMinW = floor;
+    else child._floorMinH = floor;
   }
 }
 

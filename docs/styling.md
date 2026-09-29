@@ -824,7 +824,10 @@ theme. Without them a palette has to be threaded to every element that
 paints (`style={[s.card, { backgroundColor: theme.panel }]}`).
 
 Tokens are not colour-only; `padding: '$gutter'` resolves a number just as
-well.
+well. And they resolve wherever a style value is written: in a state block, in
+an `animation` declaration, and in a size, container or capability query block
+— `'@width >= 600': { padding: '$gutter' }` is the wide layout's gutter from
+the same palette.
 
 Three of them are read with no `$` anywhere, because they are what text falls
 back to rather than something a style asked for: **`text`, `fontFamily` and
@@ -1636,6 +1639,16 @@ can be looked at without stopping the compositor for the whole session. See
   places from the left, once, and each slot is mirrored across the box when
   it reads right to left — the way yoga mirrors a flex row, so no layout can
   forget to.
+- **`null` is unset, and a layout value the layout cannot take is an error
+  where it is written.** `width: wide ? 240 : null` leaves the width to the
+  layout, as `undefined` does — yoga's own setters threw on `null`.
+  `width: 'hidden'`, `padding: 'auto'` or `flexDirection: 'sideways'` is an
+  error at the commit in development, naming the property, and that includes
+  a query block that does not match yet: the block is applied when it starts
+  matching, which is inside a frame, and a throw from there used to take the
+  process down. A value that only turns out wrong in a frame — a `$token`
+  resolving to one — is dropped there and reported, the way CSS drops a
+  declaration it cannot parse, and the rest of the block still applies.
 
 ## Elements that are not styled
 
