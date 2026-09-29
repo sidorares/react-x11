@@ -115,6 +115,26 @@ export class NodeInvalidate {
   }
 
   /**
+   * How far this element's own drawing reaches past its box — device
+   * pixels, on every side — or 0, the default, for one that stays inside
+   * it. Core claims and culls the element, and sizes a fade's surface, by
+   * the box grown by it, as it does for an outline or a shadow. Drawing
+   * past the box without saying so, an element was claimed by its box
+   * alone: an edit left the old ink's edge behind and drew the new one's
+   * without it, and a row scrolled just out of view lost the ink it still
+   * put in. A code chip padded past the run it sits behind is the case —
+   * at the start of a line the pad is outside the box.
+   *
+   * Read whenever the cached paint bounds are rebuilt, which a claim of the
+   * node does: answer a bound that holds for anything the element may
+   * draw, not for what it drew last, or the claim after a change stops
+   * covering what the frame before put down.
+   */
+  paintOverhang() {
+    return 0;
+  }
+
+  /**
    * A layout-affecting change confined to this node: claim the subtree as
    * it stands now, and queue it for a second claim once layout has run —
    * the same before/after protocol `_childListChanged` uses. Anything
@@ -206,7 +226,8 @@ export class NodeInvalidate {
 
   /**
    * This node's own rect, grown by anything it draws outside it — the
-   * outline and the shadow, the only two. Per node rather than once at the
+   * outline and the shadow, and whatever an element says it draws past its
+   * box (`paintOverhang`). Per node rather than once at the
    * top, because either can belong to any node and the bound has to cover it
    * wherever it is; and the outline is counted even when the ring is
    * currently *off*, because the frame that erases it is claimed after the
@@ -219,7 +240,11 @@ export class NodeInvalidate {
    * instead, where both the old style and the new one are in hand.
    */
   _ownPaintBounds() {
-    const extent = Math.max(this._outlineExtent(), this._shadowExtent());
+    const extent = Math.max(
+      this._outlineExtent(),
+      this._shadowExtent(),
+      this.paintOverhang() || 0,
+    );
     if (extent <= 0) return this.abs;
     return {
       x: this.abs.x - extent,

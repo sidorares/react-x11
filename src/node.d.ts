@@ -516,6 +516,16 @@ export declare class Node {
    */
   opaqueRect(): Rect | null;
   /**
+   * How far this element's own drawing reaches past its box, in device
+   * pixels on every side — 0, the default, for an element that stays inside
+   * it. Core claims and culls the element by its box grown by this, as it
+   * does for an outline or a shadow; an element that paints past its box
+   * without saying so leaves the old ink's edge behind when it changes. Read
+   * when the cached paint bounds are rebuilt: answer a bound for anything
+   * the element may draw, not for what it drew last.
+   */
+  paintOverhang(): number;
+  /**
    * The rect this paint pass is repainting, or null when it is repainting
    * the whole window — and null outside a paint, which means the same
    * thing: nothing is bounding you, so draw everything.

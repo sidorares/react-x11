@@ -112,6 +112,7 @@ that only draws needs a constructor and a `paint`. What you may override:
 | `paint(ctx)`                   | draw. Call `super.paint(ctx)` first for background, border and clip, then draw inside `this.abs`.            |
 | `paintContent(ctx)`            | draw _between_ the background and the children — where the built-ins draw, and what a scroller needs (below) |
 | `opaqueRect()`                 | the rect you cover with opaque pixels on every paint, so a pass inside it skips the fills under you (below)  |
+| `paintOverhang()`              | how far you draw past your box, so claims and culls cover it (below)                                         |
 | `applyProps(next, prev)`       | props changed. Call `super.applyProps(next, prev)`; invalidate if you cache anything derived.                |
 | `paintChanged(next, prev)`     | did anything you draw change? Only for an element that claims its own damage (below)                         |
 | `measureContent(constraints)`  | your content has a size of its own (below). Leaves only — an element that measures has no children.          |
@@ -1545,6 +1546,30 @@ on X11, four: a rounded card's corners and the strip it uncovered are
 already five — the move is repainted where it was and where it went, as
 it always was. `REACT_X11_NO_SCROLL_BLIT=1` turns the copy off with the
 other blits ([debugging.md](debugging.md#react_x11_no_scroll_blit1)).
+
+### An element that draws past its box
+
+Core claims a node's damage, culls it out of a pass and sizes a fade's
+surface by its box — grown by its outline and its shadow, the two things a
+box draws outside itself. An element that draws anything else out there has
+to say how far, or it is claimed by its box alone: when it changes, the old
+ink's edge outside the box stays on the screen and the new one's is not
+drawn, and scrolled just out of a pane it drops the ink it still puts in.
+
+```js
+class RichTextNode extends Node {
+  // a code chip is padded two pixels past the run behind it, and at the
+  // start of a line that is outside the box
+  paintOverhang() {
+    return Math.round(2 * this.scale);
+  }
+}
+```
+
+Device pixels, every side. It is read when core rebuilds its cached paint
+bounds, which a claim of the node does, so answer a bound for anything the
+element may draw rather than for what it drew last — the claim after a
+change is what has to cover the frame before's ink.
 
 ### Drawing once instead of every frame
 
