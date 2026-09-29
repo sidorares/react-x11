@@ -27,8 +27,8 @@
 //   are left unmeasured, which is what the floors do with every extent
 //   nobody reads (`collectFloorStale`).
 //
-// Anything else — a row on the way, a margin across the block, a width
-// that is not a length — is not a spine, and the tree is measured whole.
+// Anything else — a row on the way, a margin or a width that is not a
+// length — is not a spine, and the tree is measured whole.
 
 import { declaresOwnMinimum, inFlow, mainAxisOf } from './floors.js';
 import { Yoga } from '../../yoga.js';
@@ -225,11 +225,19 @@ function staleChildren(node) {
 
 /**
  * The widths a box is measured alone at, or null when it cannot be: in flow
- * and stretched across its column with no margin, width or ceiling of its
- * own across it, so that it is exactly as wide as the column's content box.
- * `width` is that box now — the width its heights are for — and
- * `widthPass` the one the width pass over the whole tree would give it
+ * and stretched across its column with no width or ceiling of its own
+ * across it, so that it is as wide as the column's content box less its
+ * margins across. `width` is that box now — the width its heights are for —
+ * and `widthPass` the one the width pass over the whole tree would give it
  * (`widthPassWidth`), null where only a pass knows.
+ *
+ * Both are the width the box is laid out *in*, not its own: yoga lays a
+ * root with no width of its own out at the width on offer less its margins,
+ * which is what stretching it across the column does. So a margin across is
+ * a number the layout takes off either way — a list whose rows are inset
+ * from its edges, as a menu's are, is still a spine — and only a margin
+ * that is not a length, a percentage or `auto`, ends one: `auto` centres the
+ * box instead of stretching it.
  */
 function rootWidths(node, root) {
   const style = node.style;
@@ -238,11 +246,6 @@ function rootWidths(node, root) {
   if (style.width !== undefined || style.maxWidth !== undefined) return null;
   if (typeof style.minWidth === 'string') return null;
   if (!stretched(node)) return null;
-  if (
-    LENGTHS_ACROSS.some((key) => style[key] !== undefined && style[key] !== 0)
-  ) {
-    return null;
-  }
   if (MARGINS.some((key) => typeof style[key] === 'string')) return null;
   if (PADDINGS.some((key) => typeof style[key] === 'string')) return null;
   return {
