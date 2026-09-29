@@ -9,9 +9,9 @@ import {
 import { cssColorStraight } from 'ntk/color';
 import { hooks as a11yHooks } from '../a11y.js';
 import { codePointAtOffset, codeUnitOffsets } from '../textrange.js';
-import { NO_DAMAGE } from './damage.js';
+import { DAMAGE_SLOP, NO_DAMAGE, layoutDiff } from './damage.js';
 import { Node } from './node.js';
-import { unionRect } from './rects.js';
+import { insetRect, unionRect } from './rects.js';
 
 /**
  * Yoga's measure modes, in words. Indexed by the integer yoga hands a
@@ -701,6 +701,42 @@ export class TextNode extends Node {
     const placed = this._inkPlaced();
     if (placed) bounds = unionRect(bounds, placed);
     return bounds;
+  }
+
+  /**
+   * A paragraph that moved claims its ink past its box, where it was and
+   * where it lands, beside the claims the box makes (`Node._assignAbs`).
+   *
+   * Those are the box's rect, grown by its outline and shadow, and a rect
+   * of no area claims nothing — there were, or will be, no pixels there. A
+   * paragraph squeezed to no height by the row it sits in still draws its
+   * lines, though, below a box of none: moved along by a sibling, it left
+   * its old glyphs on the screen and drew its new ones nowhere.
+   */
+  _assignAbs(x, y, width, height) {
+    const old = this.abs;
+    const shown = this._inkOnScreen();
+    super._assignAbs(x, y, width, height);
+    if (this.abs === old || !layoutDiff.sink) return;
+    const shift = layoutDiff.shift;
+    // riding a blit: the ink moved with the pixels, and claims nothing
+    if (
+      shift &&
+      old.x + shift.x === x &&
+      old.y + shift.y === y &&
+      old.width === width &&
+      old.height === height
+    ) {
+      return;
+    }
+    if (shown) {
+      const was = shift
+        ? { ...shown, x: shown.x + shift.x, y: shown.y + shift.y }
+        : shown;
+      layoutDiff.sink(insetRect(was, -DAMAGE_SLOP), this);
+    }
+    const placed = this._inkPlaced();
+    if (placed) layoutDiff.sink(insetRect(placed, -DAMAGE_SLOP), this);
   }
 
   /** The rect the lines of a placed layout cover, in window coordinates. */

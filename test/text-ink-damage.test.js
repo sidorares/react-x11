@@ -207,3 +207,20 @@ test('a word overflowing inside a translucent box shows its overflow from its fi
   const repainted = await readPixels(root._ctx);
   assert.ok(first.equals(repainted));
 });
+
+test('a label squeezed to no height, moved along by a sibling, leaves no old glyphs', async (t) => {
+  // A row too short for its padding leaves its children no height, and a
+  // paragraph with none still draws its lines — below a box of no area,
+  // which claims nothing where it was or where it lands.
+  const squeezed = ({ before = 0 }) =>
+    h(
+      'box',
+      { style: { flexDirection: 'row', height: 10, padding: 8 } },
+      h('box', { style: { width: before, backgroundColor: '#1c71d8' } }),
+      h('text', { style: { color: '#20304a', fontSize: 20 } }, 'Ünïcødé'),
+    );
+  assert.ok(await frameMatchesRepaint(t, squeezed, {}, { before: 20 }));
+  assert.ok(
+    await frameMatchesRepaint(t, squeezed, { before: 20 }, { before: 0 }),
+  );
+});
