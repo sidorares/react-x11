@@ -1222,6 +1222,50 @@ test('the host drops a present of a buffer the pane has since retired, and shows
   wnd.destroy();
 });
 
+test('a pane frame after a full one starts from it, not from the frame its buffer last held', async () => {
+  // A partial frame paints its damage over what its buffer holds, and in a
+  // ring of three that is the frame from two presents ago. After a partial
+  // frame the pane caught the next buffer up to the one just shown; after a
+  // full one it did not, and the next partial frame — the browser example's
+  // status line, a hover's underline — was drawn over a stale page: the
+  // host showed the page as it was two frames back, around a fresh line.
+  let setColor;
+  function Pane() {
+    const [color, set] = React.useState('#ff0000');
+    setColor = set;
+    return h(
+      'box',
+      { style: { flexGrow: 1 } },
+      box({ width: 10, height: 10, backgroundColor: color }),
+    );
+  }
+  const { native, app, node, flushes, presents } = await mountPane(h(Pane));
+  app._presentAll();
+  node.invalidate(false, null, 'resize');
+  const fullFrames = flushes.full;
+  app._tickFrames();
+  // the catch-up is the present's, into the buffer the next frame draws in
+  const from = native.calls.length;
+  app._presentAll();
+  assert.equal(flushes.full, fullFrames + 1, 'a full frame');
+  const full = presents().at(-1).id;
+  setColor('#00ff00');
+  for (let i = 0; i < 5; i += 1) await tick();
+  app._tickFrames();
+  app._presentAll();
+  assert.equal(flushes.full, fullFrames + 1, 'and then a partial one');
+  const partial = presents().at(-1).id;
+  assert.notEqual(partial, full);
+  const copies = native.calls
+    .slice(from)
+    .filter((c) => c[0] === 'copy' && c[3] === partial);
+  assert.deepEqual(
+    copies,
+    [['copy', 'all', full, partial]],
+    'the partial frame drew over the full one',
+  );
+});
+
 test('the host adds, places and removes the pane with implicit animations off', () => {
   // The layer is the host's, not a presenter's, so no frame's transaction
   // covers it: each set opens its own with actions off, or Core Animation
