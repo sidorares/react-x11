@@ -600,6 +600,19 @@ export class NodeLayout {
     const style = this.style;
     if (style.backgroundImage) return null;
     if (style.opacity !== undefined && style.opacity < 1) return null;
+    // A radius the box is too small for is drawn at half its shorter side
+    // (`roundedCorners`), so a resize that moves that moves all four
+    // corners — and their outline and shadow with them — and the ones at the
+    // edges that held are in no band along the edges that moved.
+    const radius = style.borderRadius ?? 0;
+    const now = this.abs;
+    if (
+      radius > 0 &&
+      Math.min(radius, old.width / 2, old.height / 2) !==
+        Math.min(radius, now.width / 2, now.height / 2)
+    ) {
+      return null;
+    }
     const bw = resolveBorderWidths(style, this.direction);
     const reach =
       Math.max(
@@ -610,7 +623,6 @@ export class NodeLayout {
         bw.left,
         grow,
       ) + DAMAGE_SLOP;
-    const now = this.abs;
     const bands = [];
     const oldBottom = old.y + old.height;
     const newBottom = now.y + now.height;
