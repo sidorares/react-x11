@@ -889,14 +889,8 @@ export const Scrollable = (Base) =>
           ? this.yoga.getComputedWidth() - left - w
           : left;
       const far = near + w;
-      if (bottom > this.scrollY + this.abs.height) {
-        this.scrollY = bottom - this.abs.height;
-      }
-      if (top < this.scrollY) this.scrollY = top;
-      if (far > this.scrollX + this.abs.width) {
-        this.scrollX = far - this.abs.width;
-      }
-      if (near < this.scrollX) this.scrollX = near;
+      this.scrollY = nearestScroll(this.scrollY, this.abs.height, top, bottom);
+      this.scrollX = nearestScroll(this.scrollX, this.abs.width, near, far);
     }
 
     paint(ctx) {
@@ -1034,6 +1028,23 @@ export const Scrollable = (Base) =>
       super.defaultMouseUp(ev);
     }
   };
+
+/**
+ * Where one axis of a viewport scrolls to bring `[start, end)` into view,
+ * the way CSSOM View's `block: nearest` does it: a span already inside, or
+ * one that covers the viewport, leaves it where it is — nothing more of it
+ * can be shown — and one partly or wholly out comes in by the edge that
+ * moves it least, which is its near edge where it fits and its far edge
+ * where it is the larger. A document taller than its pane was scrolled to
+ * its top, wherever it had been read to.
+ */
+function nearestScroll(scroll, size, start, end) {
+  const before = start < scroll;
+  const after = end > scroll + size;
+  if (before === after) return scroll;
+  const larger = end - start > size;
+  return before !== larger ? start : end - size;
+}
 
 // An arrow key scrolls by a wheel notch — literally the one events.js
 // converts a notch into, so the two input routes agree about what one step
