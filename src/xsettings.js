@@ -127,6 +127,9 @@ class XSettingsSession {
     this.stopped = false;
     this._selectionAtom = 0;
     this._propertyAtom = 0;
+    /** What `stop` takes off the connection: the event listeners and the
+     *  XFixes address window `watchOwner` put on it. */
+    this._teardown = [];
   }
 
   _set(values) {
@@ -150,6 +153,17 @@ class XSettingsSession {
   stop() {
     this.stopped = true;
     this.listeners.clear();
+    // Taken off, not just ignored: a listener that checks `stopped` and
+    // returns still runs for every event on the connection, and an app that
+    // mounts one root after another — a test suite, a hot reload — gained a
+    // listener and a window a root.
+    for (const undo of this._teardown.splice(0)) {
+      try {
+        undo();
+      } catch {
+        // a connection already gone takes all of it with it
+      }
+    }
   }
 }
 
@@ -238,8 +252,12 @@ async function readSettings(session) {
 async function watchOwner(session) {
   const app = session.app;
   const X = app.X;
+  // Started without being awaited, so a root unmounted in the meantime has
+  // already stopped the session — and a listener added now would be one
+  // `stop` never saw.
+  if (session.stopped) return;
 
-  X.on('event', (ev) => {
+  const onProperty = (ev) => {
     if (session.stopped) return;
     if (
       ev.type === PROPERTY_NOTIFY &&
@@ -251,7 +269,9 @@ async function watchOwner(session) {
         () => {},
       );
     }
-  });
+  };
+  X.on('event', onProperty);
+  session._teardown.push(() => X.removeListener('event', onProperty));
 
   const fixes = await requireExtension(app, 'fixes');
   if (!fixes || session.stopped) return;
@@ -261,11 +281,17 @@ async function watchOwner(session) {
   X.CreateWindow(id, app.display.screen[0].root, -10, -10, 1, 1, 0, 0, 2, 0, {
     eventMask: 0,
   });
-  X.on('event', (ev) => {
+  const onOwner = (ev) => {
     if (session.stopped) return;
     if (ev.type !== fixes.firstEvent) return;
     if (ev.selection !== session._selectionAtom) return;
     latch(session).catch(() => {});
+  };
+  X.on('event', onOwner);
+  session._teardown.push(() => {
+    X.removeListener('event', onOwner);
+    // the selection input goes with the window it was addressed to
+    X.DestroyWindow(id);
   });
   fixes.SelectSelectionInput(
     id,

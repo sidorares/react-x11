@@ -40,6 +40,9 @@ class CompositingSession {
     this.stopped = false;
     this._window = null;
     this._selection = null;
+    /** What `stop` takes off the connection: the listener and the XFixes
+     *  address window `watchSelection` put on it. */
+    this._teardown = [];
   }
 
   _set(supported) {
@@ -64,6 +67,16 @@ class CompositingSession {
   stop() {
     this.stopped = true;
     this.listeners.clear();
+    // Taken off, not just ignored — the same as XSETTINGS's session: an app
+    // that mounts one root after another on one connection gained a
+    // listener and a window a root.
+    for (const undo of this._teardown.splice(0)) {
+      try {
+        undo();
+      } catch {
+        // a connection already gone takes all of it with it
+      }
+    }
   }
 }
 
@@ -144,13 +157,20 @@ async function watchSelection(app, session, atom) {
     fixes.SelectionEventMask.SetSelectionOwner |
     fixes.SelectionEventMask.SelectionWindowDestroy |
     fixes.SelectionEventMask.SelectionClientClose;
-  X.on('event', (ev) => {
+  const onOwner = (ev) => {
     if (session.stopped) return;
     // XFixes events carry a server-assigned type above the core range, so
     // this cannot be confused with core SelectionNotify (31)
     if (ev.type !== fixes.firstEvent) return;
     if (ev.selection !== atom) return;
     session._set(Boolean(ev.owner));
+  };
+  X.on('event', onOwner);
+  session._teardown.push(() => {
+    X.removeListener('event', onOwner);
+    // the selection input goes with the window it was addressed to
+    X.DestroyWindow(id);
+    session._window = null;
   });
   fixes.SelectSelectionInput(id, atom, mask);
 }
