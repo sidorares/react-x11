@@ -138,8 +138,14 @@ export class NodeAnimation {
     }
     // A grid reads its tracks off the style, where yoga never sees them, so
     // a change to one asks the algorithm again — and gives one that threw
-    // another go.
-    if (this.yoga && gridContainerMoved(displayed, this.style)) {
+    // another go. Asked of a layout host alone, the only node it acts on:
+    // seven properties read off two styles of every shape is a scan every
+    // node paid on each of the several swaps a mount makes, 3% of it.
+    if (
+      this.yoga &&
+      (this._host !== null || this._layoutAbandoned !== null) &&
+      gridContainerMoved(displayed, this.style)
+    ) {
       if (this._host !== null) this._hostChanged();
       else if (this._layoutAbandoned !== null) {
         this._layoutAbandoned = null;
