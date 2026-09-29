@@ -1,7 +1,11 @@
 // <text> and its chunks: shaped, wrapped and elided text, the line bands a
 // selection paints, and the glyph strip.
 
-import { localTextStyleChanged, TEXT_REMEASURE } from '../styles.js';
+import {
+  lineHeightOf,
+  localTextStyleChanged,
+  TEXT_REMEASURE,
+} from '../styles.js';
 import { cssColorStraight } from 'ntk/color';
 import { hooks as a11yHooks } from '../a11y.js';
 import { codePointAtOffset, codeUnitOffsets } from '../textrange.js';
@@ -419,7 +423,7 @@ export class TextNode extends Node {
       layout = fonts.layout(spans, base, {
         maxWidth: Number.isFinite(maxWidth) ? maxWidth : undefined,
         align: this.style.textAlign,
-        lineHeight: this.style.lineHeight,
+        lineHeight: lineHeightOf(this.style.lineHeight),
         maxLines: Number.isFinite(maxLines) ? maxLines : undefined,
         // 'clip' is ntk's default, so an unset property and the CSS default
         // are the same request rather than two paths through the layout.

@@ -682,6 +682,14 @@ box is not something a descendant has. `<Icon>`'s `size` does not inherit either
 drawing rather than a letter, so it takes its default from the palette's
 `fontSize` and stays put when a label around it shrinks.
 
+**A value that is not one inherits.** `fontSize: '20px'`, `fontStyle: 7`,
+`fontWeight: 1200` or `lineHeight: '24px'` is an error at the commit in
+development, naming the property; where one gets past that — a `$token`, or
+a production build — the text sets as though it had not been written, the way
+CSS inherits past a declaration it cannot parse. Numbers may be numeric
+strings (`fontSize: '20'`), as they always could. Before, the first set no
+text at all and the others threw from inside a frame.
+
 ## A font file of your own
 
 An app that ships a face, or that shows one — a picker, a specimen, a

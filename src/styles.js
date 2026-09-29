@@ -855,6 +855,19 @@ const GRID_VALUES = new Set([...GRID_CONTAINER_PROPS, ...GRID_ITEM_PROPS]);
  * grammar is concerned), so this checks the shape and never the colours.
  */
 function validateValue(key, value, where) {
+  const text = TEXT_VALUE_CHECKS.get(key);
+  if (text !== undefined) {
+    // unset, the way a conditional writes it
+    if (value == null || value === '' || isToken(value)) return;
+    const [valid, expected] = text;
+    if (!valid(value)) {
+      throw new Error(
+        `react-x11: invalid ${key} ${JSON.stringify(value)} in ${where} ` +
+          `(expected ${expected})`,
+      );
+    }
+    return;
+  }
   if (key === 'letterSpacing') {
     if (
       value != null &&
@@ -2206,16 +2219,81 @@ export function paintPropsChanged(props, oldProps = {}) {
   );
 }
 
+// The text values a style can get wrong in a way the engines do not survive:
+// a `fontStyle` of `7` threw from inside ntk's face matching, a `lineHeight`
+// of `'24px'` made a paragraph NaN pixels tall — thrown from the layout
+// pass, where nothing catches it — and a `fontSize` of `'20px'` set no text
+// at all. A number is a number or a numeric string, the way the coercion
+// these always went through read one; anything else is not the property,
+// and text inherits past it, as CSS inherits past a declaration it cannot
+// parse. Development says so where the style is written (`validateValue`).
+const NUMERIC_TEXT = /^\s*[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?\s*$/i;
+const numericOf = (v) =>
+  typeof v === 'number'
+    ? v
+    : typeof v === 'string' && NUMERIC_TEXT.test(v)
+      ? Number(v)
+      : NaN;
+const FONT_WEIGHT_WORDS = new Set(['normal', 'bold', 'bolder', 'lighter']);
+const FONT_STYLE = /^(?:normal|italic|oblique)\b/;
+
+const isFontSize = (v) => {
+  const n = numericOf(v);
+  return n >= 0 && n < Infinity;
+};
+const isFontWeight = (v) => {
+  if (FONT_WEIGHT_WORDS.has(v)) return true;
+  const n = numericOf(v);
+  return n >= 1 && n <= 1000;
+};
+const isFontStyle = (v) => typeof v === 'string' && FONT_STYLE.test(v);
+const isFontFamily = (v) => typeof v === 'string' && v.trim() !== '';
+
+/** A `lineHeight` a layout can multiply by, or undefined for the font's own. */
+export function lineHeightOf(value) {
+  const n = numericOf(value);
+  return n >= 0 && n < Infinity ? n : undefined;
+}
+
+/** What each of them is, for development's message. */
+const TEXT_VALUE_CHECKS = new Map([
+  ['fontSize', [isFontSize, 'a number of pixels, like fontSize: 14']],
+  [
+    'fontWeight',
+    [
+      isFontWeight,
+      "a weight from 1 to 1000, like 600, or 'normal', 'bold', 'bolder' or " +
+        "'lighter'",
+    ],
+  ],
+  ['fontStyle', [isFontStyle, "'normal', 'italic' or 'oblique'"]],
+  [
+    'fontFamily',
+    [isFontFamily, "a family's name, like 'Inter' or 'monospace'"],
+  ],
+  [
+    'lineHeight',
+    [
+      (v) => lineHeightOf(v) !== undefined,
+      "a multiple of the font's own line height, like lineHeight: 1.5",
+    ],
+  ],
+]);
+
 /** Resolved text style (TextLayout base style) from props + inherited. */
 export function textStyleFrom(props, inherited) {
   const variantNumeric = props.fontVariantNumeric ?? inherited.variantNumeric;
   const featureSettings =
     props.fontFeatureSettings ?? inherited.featureSettings;
   return {
-    family: props.fontFamily ?? inherited.family,
-    size: props.fontSize ?? inherited.size,
-    weight: props.fontWeight ?? inherited.weight,
-    style: props.fontStyle ?? inherited.style,
+    family: isFontFamily(props.fontFamily)
+      ? props.fontFamily
+      : inherited.family,
+    size: isFontSize(props.fontSize) ? props.fontSize : inherited.size,
+    weight: isFontWeight(props.fontWeight)
+      ? props.fontWeight
+      : inherited.weight,
+    style: isFontStyle(props.fontStyle) ? props.fontStyle : inherited.style,
     // ntk's name for it is `variations`; the prop is spelled after the CSS
     // property, like every other name in this vocabulary
     variations: props.fontVariationSettings ?? inherited.variations,
