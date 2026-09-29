@@ -138,6 +138,14 @@ export class WindowFlush {
         if (!this.destroyed) this._scheduleFrame();
       }
     }
+    // A frame that laid out may have moved what is under a pointer that did
+    // not move — a scroll does, every frame of it — and hover follows the
+    // content (`EventManager.refreshHover`). After the frame: what hover
+    // changes is the next frame's to paint.
+    if (this._hoverRecheck) {
+      this._hoverRecheck = false;
+      if (!this.destroyed) this.events?.refreshHover();
+    }
   }
 
   /** The frame itself. True when it painted or presented something. */
@@ -289,7 +297,11 @@ export class WindowFlush {
     // like `presentFrame`; an ntk window has no such half.
     this.window.prepareFrame?.(this, layoutRan);
     // any node this pass laid out may be what an open popup is anchored to
-    if (layoutRan) this._notifyAnchorChange();
+    // — or what a pointer that has not moved is over now (`flush`)
+    if (layoutRan) {
+      this._notifyAnchorChange();
+      this._hoverRecheck = true;
+    }
     // A subtree that only moved and covers its box opaquely is copied where
     // it went, and the frame paints around the copy — or its move is
     // claimed, where it was and where it is (nodes/moveblit.js). Once every

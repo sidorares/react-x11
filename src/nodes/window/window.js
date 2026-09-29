@@ -185,6 +185,9 @@ export class WindowNode extends Scrollable(Node) {
     // over and its cost is known (`flush`)
     this._inFlush = false;
     this._claimAfterFlush = false;
+    // a frame laid out, so what is under the pointer may have moved
+    // (`flush`, `EventManager.refreshHover`)
+    this._hoverRecheck = false;
     // the nodes answering `opaqueRect()`, and — during a paint pass one of
     // them covers — that node with its ancestors, whose fills are skipped
     // (`_coverFor`, `Node._paintBackground`)

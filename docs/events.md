@@ -60,6 +60,17 @@ frames apart. What makes the wait free is that ntk coalesces a scroll by
 _adding it up_ rather than keeping the newest, so a frame's event carries the
 whole distance and the pacing costs a paint, never a pixel.
 
+**Hover follows content.** A scroll moves content under a pointer that did
+not move, and so can a layout that reflows it. After a frame that laid out
+— every frame of a scroll does — the window asks again what is under the
+pointer's last position, as a browser asks at the frame after a scroll:
+`:hover`, `onMouseEnter` and `onMouseLeave` change as a motion would change
+them, and the node under the pointer hears `defaultMouseMove` at that point,
+so an element that paints its own hover (a document, a graph) re-reads what
+it is over. `onMouseMove` is not called — the pointer did not move — and
+nothing changes while a press or a capture holds the pointer, or after the
+pointer has left the window.
+
 Bursts of discrete input stay bounded by the same mechanism. While the
 server has not acknowledged the last frame, the response goes back to the
 paced path: click twice quickly and the first press paints immediately while
@@ -196,7 +207,7 @@ field as it arrived, and `MOD` in `react-x11/keysyms` names its bits
 | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `onClick`                                                         | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks                                                                       |
 | `onMouseDown` / `onMouseUp` / `onMouseMove`                       | move is coalesced to once per frame by ntk                                                                                                                  |
-| `onMouseEnter` / `onMouseLeave`                                   | do not propagate; synthesized by hover-path diffing                                                                                                         |
+| `onMouseEnter` / `onMouseLeave`                                   | do not propagate; synthesized by hover-path diffing, on motion and when a scroll moves content under a still pointer                                        |
 | `onWheel`                                                         | pixels, from the device or from X buttons 4–7; default action scrolls the nearest scroll container with somewhere to go                                     |
 | `onContextMenu`                                                   | right-click (button 3), after `onMouseDown`; default action opens the element's menu                                                                        |
 | `onKeyDown` / `onKeyUp`                                           | delivered to the focused node (or the window); Space/Enter click an `onClick`, [accelerators](#accelerators) fire and Tab cycles focus, unless it took them |
