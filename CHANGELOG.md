@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.23.0](https://github.com/sidorares/react-x11/compare/v2.22.13...v2.23.0) (2026-09-29)
+
+
+### Features
+
+* **events:** a drawn element names the cursor for the point under the pointer ([#757](https://github.com/sidorares/react-x11/issues/757)) ([feeed72](https://github.com/sidorares/react-x11/commit/feeed72e56a59dfa24d1331c496e59f872bcd173))
+
+
+### Bug Fixes
+
+* **focus:** a press focuses without scrolling, and a node larger than its viewport scrolls the least ([#756](https://github.com/sidorares/react-x11/issues/756)) ([e4f888e](https://github.com/sidorares/react-x11/commit/e4f888ecc3f3b669c92cad4f461f99b539d20e16))
+* **frame:** a wheel notch over a composited pane scrolls it one notch ([#755](https://github.com/sidorares/react-x11/issues/755)) ([9d65a43](https://github.com/sidorares/react-x11/commit/9d65a43aa9b10093f7db0462a5519bffc29eaf9f))
+* **styles:** a layout value the layout cannot take is an error where it is written, and never a throw from the frame ([#750](https://github.com/sidorares/react-x11/issues/750)) ([1d8b873](https://github.com/sidorares/react-x11/commit/1d8b873a6109d4de4716eded727913b51326de33))
+* **text:** a text value no engine can set type with is an error where it is written, and inherited past where it is not ([#751](https://github.com/sidorares/react-x11/issues/751)) ([06f5f23](https://github.com/sidorares/react-x11/commit/06f5f23bdb96cc247acc62dba9fb58149d70a221))
+
+
+### Performance Improvements
+
+* **animation:** ask whether a grid's tracks moved only of a layout host ([#754](https://github.com/sidorares/react-x11/issues/754)) ([83701f9](https://github.com/sidorares/react-x11/commit/83701f92b79e84d36c3523adbdec43f1d17f9294))
+* **palette:** answer the same snapshot of the desktop with the same palette by identity ([#753](https://github.com/sidorares/react-x11/issues/753)) ([7f65b1e](https://github.com/sidorares/react-x11/commit/7f65b1e4ac46efdab4d44a68ac873c639bb4b78d))
+
 ## [2.22.13](https://github.com/sidorares/react-x11/compare/v2.22.12...v2.22.13) (2026-09-28)
 
 
