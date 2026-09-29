@@ -205,6 +205,15 @@ export class Win32PaneWindow {
     this.title = title;
   }
 
+  /** The cursor this pane's tree names, sent to the host, which shows it:
+   *  the pointer is over the host's window, not this one (the Cocoa pane's
+   *  `setCursor`). */
+  setCursor(name) {
+    this.cursor = name;
+    if (this.destroyed) return;
+    this.app._paneSend?.({ type: 'pane-cursor', cursor: name ?? null });
+  }
+
   setSizeHints() {}
 
   /** The host sizes a pane, not the pane itself: a `<Frame>`'s box is laid

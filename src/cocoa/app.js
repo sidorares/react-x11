@@ -762,7 +762,7 @@ export class CocoaApp {
   /**
    * The pane's end of the frame channel (childmain hands it over,
    * feature-detected so the X11 pane path never notices): geometry and
-   * input come in, pane-present goes out.
+   * input come in, pane-present and pane-cursor go out.
    */
   attachPaneChannel(channel) {
     if (!this._paneMode) return;

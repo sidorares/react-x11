@@ -243,6 +243,14 @@ the pane are the pane's without the host ever seeing them; keys follow
 the host's handlers see every key first, and what they do not consume is
 forwarded.
 
+On Cocoa and Windows the pointer can never be over a pane's window,
+because the pane has none. The host hit-tests the frame's box and forwards
+the input over the channel. The cursor travels the other way. The pane's
+tree names its cursor as a window's would, the pane sends it
+(`pane-cursor`), and the host shows it over the box. It is the box's
+default cursor, so a `cursor` in the frame's `style` still wins. On X11 the
+pane's own window carries its cursor, as any window does.
+
 `backgroundColor` in the frame's `style` is what shows before the pane's
 first frame and after one dies — the same server-painted rectangle
 `<foreign>` documents.

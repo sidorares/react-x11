@@ -15,7 +15,7 @@ import { describe, it } from 'node:test';
 import React from 'react';
 
 import { Frame, createRoot } from '../src/index.js';
-import { createMockApp, spinWheel } from './helpers/mock-app.js';
+import { createMockApp, moveMouse, spinWheel } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const settle = async () => {
@@ -135,6 +135,67 @@ describe('<Frame>: input forwarded to a composited pane', () => {
       [0, 1, false],
       [0, -0.25, true],
     ]);
+    await root.unmount();
+  });
+});
+
+describe('<Frame>: the cursor of a composited pane', () => {
+  // The pointer is over the host's window, so the host shows the cursor the
+  // pane's tree names (`pane-cursor`). It arrives after the motion that
+  // changed it was answered here, which is why it is applied on arrival.
+  async function mountPane(frameStyle = {}) {
+    const app = createMockApp();
+    app.createPaneHost = () => ({ setRect() {}, present() {}, destroy() {} });
+    const listeners = [];
+    const transport = () => ({
+      send() {},
+      onMessage: (cb) => {
+        listeners.push(cb);
+        setImmediate(() => cb({ type: 'ready', windowId: 1 }));
+        return () => listeners.splice(listeners.indexOf(cb) >>> 0, 1);
+      },
+      onExit: () => () => {},
+      pid: -1,
+    });
+    const root = await createRoot({ app });
+    root.render(
+      h(
+        'window',
+        { width: 200, height: 120 },
+        h(Frame, {
+          src: PANE,
+          transport,
+          style: { flexGrow: 1, ...frameStyle },
+        }),
+      ),
+    );
+    await settle();
+    const wnd = app.windows[0];
+    wnd.flushFrame?.();
+    const fromPane = (msg) => {
+      for (const cb of [...listeners]) cb(msg);
+    };
+    return { root, wnd, fromPane };
+  }
+
+  it('shows the cursor the pane names, when it names it', async () => {
+    const { root, wnd, fromPane } = await mountPane();
+    moveMouse(wnd, 50, 50);
+    assert.equal(wnd.cursor ?? null, null);
+    fromPane({ type: 'pane-cursor', cursor: 'pointer' });
+    assert.equal(wnd.cursor, 'pointer', 'with no motion after it');
+    moveMouse(wnd, 60, 50);
+    assert.equal(wnd.cursor, 'pointer', 'and as the pointer goes on over it');
+    fromPane({ type: 'pane-cursor', cursor: null });
+    assert.equal(wnd.cursor, null, 'none is the default');
+    await root.unmount();
+  });
+
+  it('a cursor style on the <Frame> wins over the pane', async () => {
+    const { root, wnd, fromPane } = await mountPane({ cursor: 'crosshair' });
+    moveMouse(wnd, 50, 50);
+    fromPane({ type: 'pane-cursor', cursor: 'pointer' });
+    assert.equal(wnd.cursor, 'crosshair');
     await root.unmount();
   });
 });
