@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.24.1](https://github.com/sidorares/react-x11/compare/v2.24.0...v2.24.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **floors:** a root measured alone is laid out in what its column offers it ([#787](https://github.com/sidorares/react-x11/issues/787)) ([aee3e51](https://github.com/sidorares/react-x11/commit/aee3e517203ba9c23b14e35061d4fe6f401fbd3b))
+* **layout:** a hidden subtree is not walked, so a pane in a hidden tab cannot throw ([#784](https://github.com/sidorares/react-x11/issues/784)) ([afb2b08](https://github.com/sidorares/react-x11/commit/afb2b082f9c95b05cc4e9ae2c9d888d5945b1eb1))
+* **paint:** a fade's surface is drawn again when its first paint finds ink past its size ([#785](https://github.com/sidorares/react-x11/issues/785)) ([6ab3946](https://github.com/sidorares/react-x11/commit/6ab394601ed17b944d609d36e328e0e7add7ef59))
+* **teardown:** a root's XSETTINGS and compositing watches leave with it ([#782](https://github.com/sidorares/react-x11/issues/782)) ([392c3b7](https://github.com/sidorares/react-x11/commit/392c3b750b3df613bf25e4fffce2d6dc1533fcb1))
+* **text:** a paragraph claims its glyphs' ink past its lines, not only the lines ([#786](https://github.com/sidorares/react-x11/issues/786)) ([7ee61f6](https://github.com/sidorares/react-x11/commit/7ee61f6e368207c87c62a491ad154420bd3d2383))
+
 ## [2.24.0](https://github.com/sidorares/react-x11/compare/v2.23.2...v2.24.0) (2026-09-29)
 
 
