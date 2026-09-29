@@ -129,6 +129,8 @@ export class Node {
     this.destroyed = false;
     // absolute rect within the owning window, filled by absolutize()
     this.abs = { x: 0, y: 0, width: 0, height: 0 };
+    // whether layout has ever given this node a rect (`_assignAbs`)
+    this._absAssigned = false;
     // node states that style blocks can react to, owned by EventManager
     this.states = {
       ':hover': false,
