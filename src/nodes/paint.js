@@ -355,11 +355,15 @@ export class NodePaint {
   }
 
   /** `order` painted in turn, each child culled against the window, its
-   *  clipping ancestors and the pass. */
+   *  clipping ancestors and the pass — by what it paints, not by its box: a
+   *  row scrolled just out of a pane still reaches into it with whatever
+   *  hangs off it, a descender past a trimmed line box or a child that
+   *  overflows it, and culled by its box it drew none of that in a full
+   *  repaint while a scroll's copy carried it. */
   _paintChildList(ctx, order) {
     for (const child of order) {
       if (child._promoted) continue; // on a layer of its own: a hole here
-      if (child._offscreen(child.abs, DAMAGE_SLOP)) continue;
+      if (child._offscreen(child._subtreeBounds(), DAMAGE_SLOP)) continue;
       if (child._outsideDamage()) continue;
       child.paint(ctx);
     }
@@ -371,8 +375,9 @@ export class NodePaint {
    */
   _paintsInto(rect) {
     if (this._promoted) return false;
-    if (!rectsOverlap(this._subtreeBounds(), rect, DAMAGE_SLOP)) return false;
-    return !this._offscreen(this.abs, DAMAGE_SLOP);
+    const reach = this._subtreeBounds();
+    if (!rectsOverlap(reach, rect, DAMAGE_SLOP)) return false;
+    return !this._offscreen(reach, DAMAGE_SLOP);
   }
 
   /**
