@@ -54,23 +54,23 @@ test('an angle is degrees clockwise from up', () => {
 
 test('turn, rad and grad are the same angle in other units', () => {
   assert.equal(
-    parseLinearGradient('linear-gradient(0.25turn, #a, #b)').angle,
+    parseLinearGradient('linear-gradient(0.25turn, #aaa, #bbb)').angle,
     90,
   );
   near(
-    parseLinearGradient('linear-gradient(1.5708rad, #a, #b)').angle,
+    parseLinearGradient('linear-gradient(1.5708rad, #aaa, #bbb)').angle,
     90,
     0.01,
   );
   assert.equal(
-    parseLinearGradient('linear-gradient(100grad, #a, #b)').angle,
+    parseLinearGradient('linear-gradient(100grad, #aaa, #bbb)').angle,
     90,
   );
 });
 
 test('to top / right / bottom / left', () => {
   const angle = (side) =>
-    parseLinearGradient(`linear-gradient(to ${side}, #a, #b)`).angle;
+    parseLinearGradient(`linear-gradient(to ${side}, #aaa, #bbb)`).angle;
   assert.deepEqual(
     ['top', 'right', 'bottom', 'left'].map(angle),
     [0, 90, 180, 270],
@@ -78,19 +78,19 @@ test('to top / right / bottom / left', () => {
 });
 
 test('a corner keyword is resolved against the box, not fixed at 45°', () => {
-  const spec = parseLinearGradient('linear-gradient(to top right, #a, #b)');
+  const spec = parseLinearGradient('linear-gradient(to top right, #aaa, #bbb)');
   assert.equal(spec.corner, 'top right');
   assert.equal(spec.angle, null, 'the angle needs the box to exist');
   // a square gives 45°; a wide box leans towards `to right`, which is what
   // makes the end colours land on the corners rather than near them
-  const square = line('linear-gradient(to top right, #a, #b)', {
+  const square = line('linear-gradient(to top right, #aaa, #bbb)', {
     x: 0,
     y: 0,
     width: 100,
     height: 100,
   });
   near(Math.atan2(square.x1 - square.x0, square.y0 - square.y1), Math.PI / 4);
-  const wide = line('linear-gradient(to top right, #a, #b)', {
+  const wide = line('linear-gradient(to top right, #aaa, #bbb)', {
     x: 0,
     y: 0,
     width: 400,
@@ -105,9 +105,9 @@ test('a corner keyword is resolved against the box, not fixed at 45°', () => {
 test('the gradient line is the box’s projection onto it', () => {
   // 90° over a 100x50 box: the line is the width. A diagonal is longer than
   // either side, which is the whole reason CSS defines it this way.
-  const across = line('linear-gradient(90deg, #a, #b)', BOX, 0);
+  const across = line('linear-gradient(90deg, #aaa, #bbb)', BOX, 0);
   near(Math.hypot(across.x1 - across.x0, across.y1 - across.y0), 100);
-  const diagonal = line('linear-gradient(45deg, #a, #b)', BOX, 0);
+  const diagonal = line('linear-gradient(45deg, #aaa, #bbb)', BOX, 0);
   near(
     Math.hypot(diagonal.x1 - diagonal.x0, diagonal.y1 - diagonal.y0),
     (100 + 50) / Math.SQRT2,
@@ -117,7 +117,7 @@ test('the gradient line is the box’s projection onto it', () => {
 // --- stops -----------------------------------------------------------------
 
 test('stops with no position are spread evenly between the ones that have one', () => {
-  const g = line('linear-gradient(#a, #b, #c, #d)', BOX, 0);
+  const g = line('linear-gradient(#aaa, #bbb, #ccc, #ddd)', BOX, 0);
   assert.deepEqual(
     g.stops.map(([offset]) => Number(offset.toFixed(4))),
     [0, 0.3333, 0.6667, 1],
@@ -125,17 +125,17 @@ test('stops with no position are spread evenly between the ones that have one', 
 });
 
 test('percentages and pixels both place a stop on the line', () => {
-  const g = line('linear-gradient(180deg, #a, #b 25%, #c)', BOX, 0);
+  const g = line('linear-gradient(180deg, #aaa, #bbb 25%, #ccc)', BOX, 0);
   assert.equal(g.stops[1][0], 0.25);
   // the line is the box height here, so 10px is a fifth of it
-  const px = line('linear-gradient(180deg, #a, #b 10px, #c)', BOX, 0);
+  const px = line('linear-gradient(180deg, #aaa, #bbb 10px, #ccc)', BOX, 0);
   near(px.stops[1][0], 0.2);
 });
 
 test('a stop that goes backwards is pulled up to the one before it', () => {
   // which is what keeps a hard colour break — two stops at one offset —
   // expressible, and what stops a typo inverting the ramp
-  const g = line('linear-gradient(#a 60%, #b 20%, #c)', BOX, 0);
+  const g = line('linear-gradient(#aaa 60%, #bbb 20%, #ccc)', BOX, 0);
   assert.deepEqual(
     g.stops.map(([offset]) => offset),
     [0.6, 0.6, 1],
@@ -156,13 +156,13 @@ test('a colour with spaces in it is one stop, not several', () => {
 // --- the pad that stands in for RepeatPad ---------------------------------
 
 test('the line is extended past the box and the end colours pinned to it', () => {
-  const g = line('linear-gradient(180deg, #a, #b)', BOX, 4);
+  const g = line('linear-gradient(180deg, #aaa, #bbb)', BOX, 4);
   // 4px beyond each end of a 50px line
   near(g.y0, -4);
   near(g.y1, 54);
   assert.equal(g.stops.length, 4, 'two authored stops plus the two clamps');
-  assert.deepEqual(g.stops[0], [0, '#a']);
-  assert.deepEqual(g.stops[g.stops.length - 1], [1, '#b']);
+  assert.deepEqual(g.stops[0], [0, '#aaa']);
+  assert.deepEqual(g.stops[g.stops.length - 1], [1, '#bbb']);
   // and the authored stops sit where the box is, not where the line now ends
   near(g.stops[1][0], 4 / 58);
   near(g.stops[2][0], 54 / 58);
@@ -170,7 +170,7 @@ test('the line is extended past the box and the end colours pinned to it', () =>
 
 test('a box with no area has no gradient line', () => {
   assert.equal(
-    line('linear-gradient(#a, #b)', { x: 0, y: 0, width: 0, height: 10 }),
+    line('linear-gradient(#aaa, #bbb)', { x: 0, y: 0, width: 0, height: 10 }),
     null,
   );
 });
@@ -180,12 +180,20 @@ test('a box with no area has no gradient line', () => {
 test('an unusable backgroundImage names itself and the fix', () => {
   const bad = (value, expected) =>
     assert.throws(() => parseLinearGradient(value), expected, value);
-  bad('radial-gradient(#a, #b)', /not supported.*linear-gradient/s);
+  bad('radial-gradient(#aaa, #bbb)', /not supported.*linear-gradient/s);
   bad('url(bg.png)', /<image src>/);
-  bad('linear-gradient(#a)', /at least two colour stops/);
-  bad('linear-gradient(to nowhere, #a, #b)', /unusable direction/);
-  bad('linear-gradient(#a, 40%, #b)', /colour hint/);
-  bad('linear-gradient(#a, #b', /closing parenthesis/);
+  bad('linear-gradient(#aaa)', /at least two colour stops/);
+  bad('linear-gradient(to nowhere, #aaa, #bbb)', /unusable direction/);
+  bad('linear-gradient(#aaa, 40%, #bbb)', /colour hint/);
+  bad('linear-gradient(#aaa, #bbb', /closing parenthesis/);
+  // a stop RENDER could not be handed: ntk would throw on it from the frame
+  bad('linear-gradient(nonsense, #fff)', /not a colour \("nonsense";/);
+  bad('linear-gradient(#a, #fff 40%)', /not a colour \("#a";/);
+});
+
+test('a stop that names a token is left for the token to answer', () => {
+  const spec = parseLinearGradient('linear-gradient($accent 20%, #fff)');
+  assert.equal(spec.stops[0].color, '$accent');
 });
 
 test('none and a missing value are simply no gradient', () => {
@@ -225,6 +233,12 @@ test('an unusable boxShadow names itself and the fix', () => {
   // rejected rather than quietly painted as an outer shadow, which is a bug
   // whose cause is invisible from the style
   assert.throws(() => parseBoxShadow('inset 0 2px 4px #000'), /inset/);
+  assert.throws(
+    () => parseBoxShadow('0 2px 4px nonsense'),
+    /"nonsense", which is neither a length nor a colour/,
+  );
+  // …where a token is the palette's to answer, once it resolves
+  assert.equal(parseBoxShadow('0 2px 4px $shadow')[0].color, '$shadow');
 });
 
 // --- the blur, and what it costs in damage --------------------------------

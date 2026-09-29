@@ -841,6 +841,20 @@ function queryMatches(q, size, supports, containers) {
 
 const GRID_VALUES = new Set([...GRID_CONTAINER_PROPS, ...GRID_ITEM_PROPS]);
 
+// The properties whose value is one colour.
+const COLOR_PROPS = new Set([
+  'backgroundColor',
+  'borderColor',
+  'borderTopColor',
+  'borderRightColor',
+  'borderBottomColor',
+  'borderLeftColor',
+  'borderStartColor',
+  'borderEndColor',
+  'outlineColor',
+  'color',
+]);
+
 /**
  * The style values that are a small language rather than a number — a
  * gradient, a shadow, and grid's track lists, areas and lines — and
@@ -851,8 +865,13 @@ const GRID_VALUES = new Set([...GRID_CONTAINER_PROPS, ...GRID_ITEM_PROPS]);
  * instead of as a blank panel three commits later. A grid value goes through
  * the parser the layout itself runs (src/grid.js), so the two agree.
  *
+ * A colour is the smallest of these languages and is checked the same way,
+ * on its own and inside a gradient or a shadow: `'nonsense'` or `7` used to
+ * pass here and throw from the frame, where no boundary could catch it.
  * Tokens are still unresolved here (`$accent` is a colour as far as the
- * grammar is concerned), so this checks the shape and never the colours.
+ * grammar is concerned), so a colour is checked only where it is written
+ * out; one a token resolves to is dropped at the paint if it does not parse
+ * (`isColor`), since a theme is not a call site.
  */
 function validateValue(key, value, where) {
   const text = TEXT_VALUE_CHECKS.get(key);
@@ -867,6 +886,17 @@ function validateValue(key, value, where) {
       );
     }
     return;
+  }
+  if (COLOR_PROPS.has(key)) {
+    // unset, the way a conditional writes it — `on ? accent : undefined`,
+    // or `''`, which has always painted nothing
+    if (value == null || value === '') return;
+    if (isColor(value) || isToken(value) || mentionsToken(value)) return;
+    throw new Error(
+      `react-x11: invalid ${key} ${JSON.stringify(value)} in ${where} ` +
+        "(expected a CSS colour — '#2980b9', 'tomato', 'rgba(0, 0, 0, 0.5)' " +
+        "or 'transparent' — or a $token)",
+    );
   }
   if (key === 'letterSpacing') {
     if (
@@ -1567,6 +1597,34 @@ export function tint(color, alpha) {
   const c = cssColorStraight(color);
   if (!c) return color;
   return rgba([c[0], c[1], c[2], c[3] * alpha]);
+}
+
+// The answer per spelling, kept apart from the parse's own cache because
+// this is asked once a fill on every paint and wants no copy of the
+// components. Bounded and dropped whole, like that one: a palette is a few
+// dozen strings.
+const colorAnswers = new Map();
+const COLOR_ANSWERS_MAX = 512;
+
+/**
+ * Whether `value` is a colour the backends can paint: a string ntk's parser
+ * reads, which is the grammar every context here parses with.
+ *
+ * What is not one is dropped where a style is painted, as CSS drops a
+ * declaration it cannot parse — no fill, no stroke, the inherited ink for
+ * text. The alternatives were worse and differed per backend: ntk throws
+ * from the frame, taking the process with it, and the shared context paints
+ * black. Development says so at the commit instead (`validateValue`).
+ */
+export function isColor(value) {
+  if (typeof value !== 'string') return false;
+  let known = colorAnswers.get(value);
+  if (known === undefined) {
+    known = cssColorStraight(value) !== null;
+    if (colorAnswers.size >= COLOR_ANSWERS_MAX) colorAnswers.clear();
+    colorAnswers.set(value, known);
+  }
+  return known;
 }
 
 // ease-out cubic: fast to start, settles gently — the shape almost every UI
@@ -2298,7 +2356,9 @@ export function textStyleFrom(props, inherited) {
     // property, like every other name in this vocabulary
     variations: props.fontVariationSettings ?? inherited.variations,
     textRendering: props.textRendering ?? inherited.textRendering,
-    color: props.color ?? inherited.color,
+    // an ink no engine can parse is not an ink: the one above is inherited,
+    // as CSS inherits past a `color` it could not read
+    color: isColor(props.color) ? props.color : inherited.color,
     letterSpacing: props.letterSpacing ?? inherited.letterSpacing,
     // Inherited apart, as CSS inherits the two properties apart — a child's
     // `fontVariantNumeric` replaces the keyword above it and leaves an
