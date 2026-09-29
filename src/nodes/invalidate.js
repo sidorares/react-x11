@@ -550,15 +550,6 @@ export class WindowInvalidate {
   }
 
   /**
-   * The rects this frame will repaint, or null for the whole window.
-   *
-   * Clamped to the window: damage is recorded when a node invalidates, and
-   * the window may have been resized since. A region that no longer
-   * intersects the window means there is nothing to do, but the frame still
-   * has to clear the flag, so it degrades to a full repaint rather than
-   * painting nothing.
-   */
-  /**
    * How many rects a frame's damage may hold before `addDamageRect` merges
    * the closest pair. Four on X11 (`MAX_DAMAGE_RECTS`), where every pass
    * costs the server a clip mask; a backend whose pass is a client-side
@@ -571,6 +562,17 @@ export class WindowInvalidate {
     return Number.isInteger(cap) && cap > 0 ? cap : MAX_DAMAGE_RECTS;
   }
 
+  /**
+   * The rects this frame will repaint, or null for the whole window.
+   *
+   * Clamped to the window: damage is recorded when a node invalidates, and
+   * the window may have been resized since — or the node drew past its
+   * edge, where a claim lands whole. A frame whose every claim lies outside
+   * the window has nothing to repaint and paints nothing, as a frame whose
+   * claims were all answered on layers does; it used to repaint the whole
+   * window, so a card dragged past the edge of a graph, or a pan that
+   * claimed only its far side, cost a full frame.
+   */
   _takeDamage(width, height) {
     const damage = this._damage;
     this._damage = null;
@@ -608,7 +610,11 @@ export class WindowInvalidate {
       if (clamped === FULL_DAMAGE) return null;
       if (clamped) rects.push(clamped);
     }
-    if (!rects.length) return null;
+    if (!rects.length) {
+      this._lastDamageRects = [];
+      this._lastDamage = { x: 0, y: 0, width: 0, height: 0 };
+      return [];
+    }
     this._lastDamageRects = damageToPaint(rects);
     this._lastDamage = rectsBounds(this._lastDamageRects);
     return this._lastDamageRects;
