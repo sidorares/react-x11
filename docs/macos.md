@@ -622,7 +622,12 @@ implements it over CoreText, the optional `coverage()` (#673) included:
   `systemFontOfSize`, which also finally answers the fontconfig-on-macOS
   wrong-font issue #86 for this backend — the right fix on the native
   path is not having fontconfig in it at all). `opsz` behaves (SF's
-  optical sizing is CoreText-native).
+  optical sizing is CoreText-native). `-apple-system` and
+  `BlinkMacSystemFont` — the system font's names in WebKit and Gecko, and
+  in Blink, from before CSS called it `system-ui` — are `system-ui` here,
+  in any case, so a stack written for the web that leads with them is set
+  in SF rather than in the first fallback that happens to be installed.
+  Only on this backend: they name the Mac's face and nothing on X11.
 - **Shaping/wrapping/bidi/truncation**: `CTFramesetter` over an
   attributed string built from the same span list (spans map to
   attribute ranges — the nested-`<text>` model transfers directly).
