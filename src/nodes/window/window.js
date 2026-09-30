@@ -190,6 +190,9 @@ export class WindowNode extends Scrollable(Node) {
     // (`_coverFor`, `Node._paintBackground`)
     this._opaqueNodes = new Set();
     this._coverChain = null;
+    // the nodes answering `viewportFixedRects()`, whose rects a scroll pane
+    // they are in repairs when it blits (`_viewportFixedPins`)
+    this._viewportFixedNodes = new Set();
     // Nodes that want the `attention` event (ntk#37) — an
     // `unstable_onAttention` prop,
     // an `:attention` block, or both. Built before the EventManager so the

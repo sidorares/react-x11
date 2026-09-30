@@ -112,6 +112,7 @@ that only draws needs a constructor and a `paint`. What you may override:
 | `paint(ctx)`                   | draw. Call `super.paint(ctx)` first for background, border and clip, then draw inside `this.abs`.            |
 | `paintContent(ctx)`            | draw _between_ the background and the children — where the built-ins draw, and what a scroller needs (below) |
 | `opaqueRect()`                 | the rect you cover with opaque pixels on every paint, so a pass inside it skips the fills under you (below)  |
+| `viewportFixedRects()`         | what you draw fixed to your scroll pane's viewport, so its scroll's blit repaints it rather than copying it  |
 | `paintOverhang()`              | how far you draw past your box, so claims and culls cover it (below)                                         |
 | `applyProps(next, prev)`       | props changed. Call `super.applyProps(next, prev)`; invalidate if you cache anything derived.                |
 | `paintChanged(next, prev)`     | did anything you draw change? Only for an element that claims its own damage (below)                         |
@@ -1179,6 +1180,47 @@ An element that draws its content live rather than into a surface asks for
 the window-side half directly, with
 [`scrollContents`](#panning-a-scene-you-drew) — the same shift, one layer
 out.
+
+#### Drawing what stays put while the pane scrolls
+
+That window-side blit copies everything in the pane's viewport with its
+content, which is right for everything that scrolls. An element that
+paints part of itself **against the pane's viewport** rather than against
+its own box has pixels the copy gets wrong: a document with a fixed
+background or a `position: fixed` header, drawn by one element inside a
+`<box overflow="scroll">`, had its header dragged along with the text and
+its background scrolling away. `viewportFixedRects()` is the element's word
+for those parts: window coordinates, device pixels, like `abs`, or `null`,
+the default.
+
+```js
+class DocumentNode extends Node {
+  _viewport() {
+    // the nearest scroll pane: the one whose scroll the answer is about
+    let pane = this.parent;
+    while (pane && !pane.isWindow && !pane.isScroller()) pane = pane.parent;
+    return pane && !pane.isWindow ? pane.contentBox() : null;
+  }
+
+  viewportFixedRects() {
+    const viewport = this._viewport();
+    return viewport && [{ ...viewport, height: HEADER }];
+  }
+
+  paintContent(ctx) {
+    // …the document, at `this.abs`, and the header over it where the
+    // viewport is, from the same geometry the answer came from
+  }
+}
+```
+
+A scroll of the pane that blits repaints those rects where they are and
+where the copy dragged their image, as it does the corners of a rounded box
+around the pane; one that pins most of the viewport — a fixed background
+behind all of it — makes the scroll a repaint, which draws it right. Only
+the nearest scroll pane asks: a pane further out moves the inner one with
+its content, and what is fixed to it with it. The answer is read on each
+scroll the pane blits, after layout, and nowhere else.
 
 ### Drawing a scene into one node
 

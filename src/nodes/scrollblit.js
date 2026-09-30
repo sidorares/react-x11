@@ -218,6 +218,13 @@ function unionIsBox(a, b) {
   );
 }
 
+/** Two lists of pins as one, either of which may be null. */
+function joinPins(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return [...a, ...b];
+}
+
 /** Is `rect` inside one of `pins`, the furniture an element blit pinned —
  * repaired whole after the copy, whatever changed in it (issue #682)? */
 function insidePinned(rect, pins) {
@@ -862,7 +869,13 @@ export class WindowScrollBlit {
     // (issue #691) and repaired below, where they are and where the copy
     // dragged their image. Refused instead, a list or a document inside a
     // rounded frame repainted its whole viewport on every step of a scroll.
-    const corners = this._cornerPins(node, vp, target.top);
+    // …and so is what an element in the pane draws fixed to its viewport
+    // (`viewportFixedRects()`): a document's fixed background or header,
+    // which the copy would drag along with the text under it
+    const corners = joinPins(
+      this._cornerPins(node, vp, target.top),
+      this._viewportFixedPins(node, vp),
+    );
     if (!this._scrollBlitSafe(node, vp, target.top, null, corners)) return;
     // The band the scrolled bar's thumb travels in is repaired on its own.
     // The thumb's rects are thin and run along the viewport's edge, and a
@@ -1189,6 +1202,30 @@ export class WindowScrollBlit {
    * Ancestors below `upTo`, the node the blit's surface belongs to
    * (`_blitTarget`): a pane is a rectangle no corner above it clips.
    */
+  /**
+   * What the elements in scroll pane `node` draw fixed to its viewport
+   * (`viewportFixedRects()`), inside `vp` and out to whole pixels: pinned
+   * like a rounded ancestor's corners, repaired where they are and where the
+   * blit dragged their image. Asked only of an element whose nearest scroll
+   * pane is `node` — a pane further in moves with the content, and whatever
+   * is fixed to it with it — and not of one hidden or gone.
+   */
+  _viewportFixedPins(node, vp) {
+    let out = null;
+    for (const fixed of this._viewportFixedNodes ?? []) {
+      if (fixed.destroyed || fixed.hidden || fixed.root !== this) continue;
+      let pane = fixed.parent;
+      while (pane && !pane.isWindow && !pane.isScroller?.()) pane = pane.parent;
+      if (pane !== node) continue;
+      for (const rect of fixed.viewportFixedRects() ?? []) {
+        if (!rectsOverlap(rect, vp)) continue;
+        const inside = intersectRects(outerPixels(rect), vp);
+        if (inside) (out ??= []).push(inside);
+      }
+    }
+    return out;
+  }
+
   _cornerPins(node, vp, upTo = this) {
     let out = null;
     for (let n = node.parent; n && n !== upTo; n = n.parent) {

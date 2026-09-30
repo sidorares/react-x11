@@ -115,6 +115,29 @@ export class NodeInvalidate {
   }
 
   /**
+   * What this element draws that stays put in the viewport of the scroll
+   * pane it is in while the pane scrolls, as rects in window coordinates,
+   * device pixels, like `abs` — or null, the default, for an element
+   * whose drawing moves with the content. A document's fixed background or
+   * `position: fixed` header is drawn where the pane's viewport is, not
+   * where the content under it is, and a scroll's blit copies the pane's
+   * pixels with the content: it dragged the header along, and left the
+   * background scrolling with the text.
+   *
+   * A pane scroll that blits repaints what these rects answer where they
+   * are and where the copy dragged their image, as it does the corners of
+   * a rounded box around the pane; one that covers most of the viewport
+   * makes the scroll a repaint. Only the nearest scroll pane's scroll is
+   * asked about: a pane further out moves the inner one, and what is fixed
+   * to it, with its content. Read on each scroll the pane blits, after
+   * layout, so it may follow `abs` and the pane's `contentBox()`; the
+   * element draws those rects in its `paint` from the same geometry.
+   */
+  viewportFixedRects() {
+    return null;
+  }
+
+  /**
    * How far this element's own drawing reaches past its box — device
    * pixels, on every side — or 0, the default, for one that stays inside
    * it. Core claims and culls the element, and sizes a fade's surface, by

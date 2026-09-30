@@ -516,6 +516,17 @@ export declare class Node {
    */
   opaqueRect(): Rect | null;
   /**
+   * What this element draws that stays put in the viewport of the scroll
+   * pane it is in while the pane scrolls — a document's fixed background, a
+   * `position: fixed` header — as rects in window coordinates, device
+   * pixels, or null, the default, for drawing that moves with the content.
+   * A scroll of that pane that blits repaints them where they are and where
+   * the copy dragged their image; one that covers most of the viewport
+   * makes the scroll a repaint. Only the nearest scroll pane asks. Read on
+   * each scroll the pane blits, after layout.
+   */
+  viewportFixedRects(): Rect[] | null;
+  /**
    * How far this element's own drawing reaches past its box, in device
    * pixels on every side — 0, the default, for an element that stays inside
    * it. Core claims and culls the element by its box grown by this, as it
