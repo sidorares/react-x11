@@ -150,6 +150,31 @@ function unpackLines(lineData = NO_GEOMETRY, runData = NO_GEOMETRY) {
   return lines;
 }
 
+/**
+ * The one line of an empty paragraph, placed the way the native places a
+ * line with text in it: a `lineHeight` multiplies the face's natural line,
+ * and the leading is split either side of the glyphs (CSS half-leading,
+ * which ntk and `@windowkit/appkit` >= 0.15 both follow).
+ */
+function blankLine(metrics, lineHeight, x) {
+  const { ascent, descent } = metrics;
+  const natural = metrics.lineHeight ?? ascent + descent;
+  const multiple = lineHeight >= 0 && lineHeight < Infinity ? lineHeight : 1;
+  const height = natural * multiple;
+  return {
+    x,
+    y: 0,
+    width: 0,
+    height,
+    baseline: (height - (ascent + descent)) / 2 + ascent,
+    ascent,
+    descent,
+    start: 0,
+    end: 0,
+    runs: [],
+  };
+}
+
 /** Whether two spans read the same, field for field. */
 function sameSpan(a, b) {
   if (a === b) return true;
@@ -302,6 +327,19 @@ class CocoaTextLayout {
     ctx._drawLayout(this, x, y);
   }
 
+  /**
+   * An empty paragraph as ntk lays it out: one line with no runs, as tall as
+   * a line of the face it would have been set in. CoreText sets no line for
+   * no text, and a layout with no lines has no height and a caret of none —
+   * so an empty field's caret was its three-pixel mark padding either side
+   * of nothing, and grew to the line the moment the first letter arrived.
+   */
+  _setBlank(line) {
+    this.lines = [line];
+    this.height = line.height;
+    this._blank = line;
+  }
+
   /** Code point boundary nearest the point, in layout coordinates. */
   indexAt(x, y) {
     return this._cpOf(this._native.layoutIndexAt(this._handle, x, y));
@@ -309,6 +347,13 @@ class CocoaTextLayout {
 
   /** Caret rect for a code-point index: { x, y, height }. */
   caretPosition(cp) {
+    // the rect the native gives a caret on a line with text in it — the
+    // line's box — so typing the first letter moves the caret and nothing
+    // else
+    const blank = this._blank;
+    if (blank) {
+      return { x: blank.x, y: blank.y, height: blank.height, line: 0 };
+    }
     return this._native.layoutCaret(this._handle, this._cuOf(cp));
   }
 
@@ -1315,6 +1360,24 @@ export class CocoaFontManager {
       minContent ? laid.map((span) => span.text).join('') : text,
     );
     layout._contextInk = contextInk;
+    if (!text) {
+      const first = spans[0] ?? {};
+      const size = first.size ?? base.size ?? 14;
+      const face = first.font ?? base.font;
+      const metrics = (
+        typeof face?.metrics === 'function'
+          ? face
+          : this.match(first.family ?? base.family, {
+              weight: first.weight ?? base.weight,
+              style: first.style ?? base.style,
+            })
+      ).metrics(size);
+      const container =
+        Number.isFinite(maxWidth) && maxWidth > 0 ? maxWidth : 0;
+      layout._setBlank(
+        blankLine(metrics, lineHeight, flushFor(align, direction) * container),
+      );
+    }
     if (!minContent) {
       const runs = new Map();
       layout._hangRuns(sources, (i, rtl) => {

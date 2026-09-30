@@ -659,7 +659,13 @@ implements it over CoreText, the optional `coverage()` (#673) included:
 - **Carets/hit/selection**: `CTLineGetStringIndexForPosition`,
   `CTLineGetOffsetForStringIndex`, line origins → `indexAt`,
   `caretPosition`, `rangeBands` — the `<textinput>`/selection surface,
-  method-for-method.
+  method-for-method. **An empty paragraph is one empty line**, as tall as a
+  line of the face it would have been set in and aligned as one, because
+  that is ntk's answer and every caret is measured from it. CoreText sets
+  no line for no text, so the engine makes that one itself
+  (`blankLine`, test/cocoa-empty-paragraph.test.js). Without it an empty
+  field's caret was its mark padding alone, and an empty `<textarea>`'s was
+  nothing.
 - **Raster**: draw the frame into a bitmap for the node's layer
   (`contentsScale`-aware); glyph-run-level drawing
   (`CTFontDrawGlyphs`) backs the `drawGlyphs`/`positioned` context
