@@ -259,6 +259,12 @@ export class CocoaApp {
         ? new CocoaFilePanels(this)
         : null;
 
+    // A window that is not the active one does not track the pointer here:
+    // no `:hover`, no enter or leave, no motion, until it is the active one
+    // again (`EventManager.hoverLive`). The platform's convention and not
+    // X11's, where every toolkit hovers in a window without the keyboard.
+    this.hoverNeedsActiveWindow = true;
+
     // AppKit-rendered control bezels. Its *presence* is the capability:
     // `useSupports('nativeControls')` and the widget set's `controls:
     // 'auto'` policy both test for this property, so a backend without it

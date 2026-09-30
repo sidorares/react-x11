@@ -71,6 +71,31 @@ it is over. `onMouseMove` is not called — the pointer did not move — and
 nothing changes while a press or a capture holds the pointer, or after the
 pointer has left the window.
 
+**Hover belongs to the active window, on macOS.** Nothing in CSS or the
+DOM ties hover to focus — `:hover` is "while the user designates an element
+with a pointing device", and a `mousemove` is owed whenever the pointer moves
+over an element — but the platform does. A window there that is not the
+active one does not track the pointer: AppKit's own controls roll over in
+the key window alone, and a browser drops the moves over a window that is
+neither key nor main and tells the page the pointer left. So on the Cocoa
+backend a window that loses the keyboard hears `onMouseLeave` down its hover
+path, `:hover` comes off, an element that paints its own hover hears
+`defaultMouseLeave`, and no motion, enter, cursor or attention follows until
+the window is the active one again — when the hover comes back at the point
+the pointer is at, without waiting for it to move. `<window onMouseOut>` is
+not called: the pointer is still over it.
+
+"Active" is the focus's answer, as it is for the caret
+([below](#window-focus)): a window whose `<Dialog>` holds the keyboard still
+hovers. A `<popup>` nothing manages — a menu, a dropdown, a popover under a
+tray item — always does, since it is on the screen because the user asked
+for it, in an application that may have no active window at all. A press
+still lands where it was aimed, as the first click on a window always has
+here, and its gesture runs on; the wheel scrolls a background window as the
+platform has it. On X11, Wayland and Windows nothing changes: every toolkit
+there hovers in a window without the keyboard, and with focus-follows-mouse
+the question hardly arises.
+
 Bursts of discrete input stay bounded by the same mechanism. While the
 server has not acknowledged the last frame, the response goes back to the
 paced path: click twice quickly and the first press paints immediately while

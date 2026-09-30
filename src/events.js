@@ -647,6 +647,12 @@ export class EventManager {
     // …and the focused node hears the focus group's answer, not this
     // window's, whichever of them the X focus just moved between
     manager._syncDefaultFocus();
+    // …and so does hover, where the platform keeps it to the active window:
+    // this window's, and the top-level's whose answer it is — a dialog
+    // taking the keyboard is what puts its owner's hover back
+    const top = this.topLevelManager;
+    this._syncHover(native);
+    if (top !== this) top._syncHover(native);
     if (!changed) return;
     // …and the things that keep a window of their own open on the strength
     // of this one having focus — a menu, a dropdown — which the focused node
@@ -1014,6 +1020,12 @@ export class EventManager {
       inspectHandler('move', this._hit(native), native);
       return;
     }
+    // a window the pointer does not hover in hears no motion (`hoverLive`);
+    // a gesture that began in it is the pointer's own business and runs on
+    if (!this.hoverLive && !this._gesture()) {
+      this._dropHover(native);
+      return;
+    }
     runWithPriority(ContinuousEventPriority, () => {
       // an active drag owns the pointer: drag-path diffing replaces hover,
       // onDrag replaces mousemove. Below the threshold this falls through.
@@ -1086,6 +1098,77 @@ export class EventManager {
    * AT-SPI FOCUSABLE state. */
   _isFocusable(node) {
     return isFocusable(node);
+  }
+
+  /**
+   * Whether the pointer hovers in this window at all.
+   *
+   * Nothing in CSS or in the DOM's events ties hover to focus: `:hover` is
+   * "while the user designates an element with a pointing device", and a
+   * `mousemove` is owed whenever the pointer moves over an element. What
+   * ties them is the platform. On macOS a window that is not the active one
+   * does not track the pointer — AppKit's own controls roll over in the key
+   * window alone, and a browser there drops the moves over a window that is
+   * neither key nor main and tells the page the pointer left — while on
+   * X11, Wayland and Windows every toolkit hovers in a window that does not
+   * have the keyboard, and with focus-follows-mouse the question hardly
+   * arises. So the backend says which it is (`app.hoverNeedsActiveWindow`),
+   * and only the Cocoa one does.
+   *
+   * It is also half enforced there already, which is how this was found:
+   * a cursor set by an application that is not the active one is ignored by
+   * the window server, so a link in a background window lit up and the
+   * pointer over it stayed an arrow.
+   *
+   * "Active" is the top-level's answer for everything sharing its focus
+   * (`keyboardFocused`), so a window whose dialog has the keyboard still
+   * hovers, as a main window does under a key panel. A popup nothing
+   * manages — a menu, a dropdown, a popover under a tray item — is on the
+   * screen because the user just asked for it, in an application that may
+   * have no active window at all, and always hovers.
+   */
+  get hoverLive() {
+    if (!this.node.app?.hoverNeedsActiveWindow) return true;
+    if (this.node.isPopup && this.node.attributes?.overrideRedirect === true) {
+      return true;
+    }
+    return this.topLevelManager.keyboardFocused;
+  }
+
+  /** A press, a capture or a drag holds the pointer. */
+  _gesture() {
+    return Boolean(this._captured() || this.downNode || this._dragArmed);
+  }
+
+  /**
+   * The pointer is over the window and hovers nothing in it: what its
+   * leaving does to hover, less the leaving. `_pointer` stays, so the hover
+   * comes back at that point when the window does (`_syncHover`), and
+   * `<window onMouseOut>` is not called, since the pointer is still in it.
+   */
+  _dropHover(native) {
+    if (!this.hoverPath.length && !this.attentionNode) return;
+    runWithPriority(ContinuousEventPriority, () => {
+      this._updateHover([], native);
+      if (this._attentionNodes.size !== 0) {
+        this._attentionSamples.length = 0;
+        this._setAttention(null, native);
+      }
+    });
+  }
+
+  /**
+   * The keyboard moved between windows: hover goes with it where the
+   * platform has it follow (`hoverLive`). A window that stopped being the
+   * active one drops its hover as if the pointer had left; one that became
+   * it is asked what is under the pointer, which did not move to say so.
+   * Not during a gesture, which keeps what it has until it ends.
+   */
+  _syncHover(native) {
+    if (!this.node.app?.hoverNeedsActiveWindow) return;
+    if (this.node.destroyed || this._gesture()) return;
+    if (this.hoverLive) this.refreshHover();
+    else this._dropHover({ ...native, ...this._pointer });
   }
 
   _onMouseOut(native) {
@@ -1211,7 +1294,7 @@ export class EventManager {
   refreshHover() {
     const at = this._pointer;
     if (!at || inspectHandler || this.node.destroyed) return;
-    if (this._captured() || this.downNode || this._dragArmed) return;
+    if (this._gesture() || !this.hoverLive) return;
     runWithPriority(ContinuousEventPriority, () => {
       const target = this._hit(at);
       const path = this._path(target);

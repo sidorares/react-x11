@@ -618,6 +618,11 @@ function PaneHostView({
     onMouseDown: forward('mousedown', (ev) => ({ keycode: ev.button ?? 1 })),
     onMouseUp: forward('mouseup', (ev) => ({ keycode: ev.button ?? 1 })),
     onMouseMove: forward('mousemove', () => ({})),
+    // …and the pointer leaving, which the pane has no window to hear for
+    // itself: without it what the pointer last crossed in the pane stayed
+    // hovered once it was over the host, or the host was no longer the
+    // active window (`EventManager.hoverLive`)
+    onMouseLeave: forward('mouseout', () => ({})),
     // The host's event is in pixels — events.js turned each notch into
     // WHEEL_NOTCH_PX of them — and the pane's window turns what it is sent
     // into pixels again, so it is sent notches: sent the pixels, one notch
