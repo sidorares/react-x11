@@ -76,13 +76,30 @@ function woffToSfnt(woff) {
   return out;
 }
 
+/**
+ * The system font's two names from before CSS gave it one: `-apple-system`
+ * is WebKit's and Gecko's, `BlinkMacSystemFont` is Blink's, and a stack
+ * written for the web leads with both — GitHub's is `-apple-system,
+ * BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial,
+ * sans-serif`. CSS Fonts 4 standardised them as `system-ui`, the name the
+ * bridge knows. As families of their own neither exists, so the list moved
+ * on to the first one that does and a page written for SF was set in
+ * Helvetica. They name this platform's face and mean nothing on another,
+ * which is why they are resolved here and not in the X11 engine.
+ */
+const SYSTEM_UI_ALIASES = new Set(['-apple-system', 'blinkmacsystemfont']);
+
 /** family list string -> array: 'Inter, "SF Pro", sans-serif' */
 function familyList(family) {
-  if (Array.isArray(family)) return family;
-  return String(family ?? 'sans-serif')
-    .split(',')
-    .map((f) => f.trim().replace(/^["']|["']$/g, ''))
-    .filter(Boolean);
+  const names = Array.isArray(family)
+    ? family
+    : String(family ?? 'sans-serif')
+        .split(',')
+        .map((f) => f.trim().replace(/^["']|["']$/g, ''))
+        .filter(Boolean);
+  return names.map((name) =>
+    SYSTEM_UI_ALIASES.has(String(name).toLowerCase()) ? 'system-ui' : name,
+  );
 }
 
 function numericWeight(weight) {
@@ -519,6 +536,7 @@ const GENERIC_FAMILIES = new Set([
   'system-ui',
   'ui-sans-serif',
   'ui-monospace',
+  ...SYSTEM_UI_ALIASES,
 ]);
 
 /** The size a face is probed at when the question has no size in it. */
