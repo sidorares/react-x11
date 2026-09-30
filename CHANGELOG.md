@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.25.0](https://github.com/sidorares/react-x11/compare/v2.24.1...v2.25.0) (2026-09-30)
+
+
+### Features
+
+* **events:** hover follows content that moves under a still pointer ([#793](https://github.com/sidorares/react-x11/issues/793)) ([b701475](https://github.com/sidorares/react-x11/commit/b701475c2bfaececf864d350fb5d6c75af0659c0))
+* **node:** an element says what it draws fixed to its scroll pane's viewport, and the pane's blit repaints it ([#795](https://github.com/sidorares/react-x11/issues/795)) ([533a8b8](https://github.com/sidorares/react-x11/commit/533a8b846158804a1020350cb33595f3112e1079))
+
+
+### Performance Improvements
+
+* **backend:** a rect's or a rounded rect's shadow is drawn from a tile made once ([#794](https://github.com/sidorares/react-x11/issues/794)) ([2a5ec35](https://github.com/sidorares/react-x11/commit/2a5ec35e976de85e07a05c4a4e103c2b17cb9843))
+* **deps:** dbus-native 0.16.0, whose introspection XML loads with the first proxy ([#791](https://github.com/sidorares/react-x11/issues/791)) ([718dd32](https://github.com/sidorares/react-x11/commit/718dd32a6ef8ec290fd2f297ec01234244bdef30))
+
 ## [2.24.1](https://github.com/sidorares/react-x11/compare/v2.24.0...v2.24.1) (2026-09-29)
 
 
