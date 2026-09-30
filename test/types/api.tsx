@@ -1121,6 +1121,16 @@ function Widgets() {
           onChange={(ev) => void ev.value.toFixed()}
         />
         <Select options={['plain', 'values']} />
+        {/* a select in someone else's look is the widget restyled */}
+        <Select
+          options={['a', 'b']}
+          style={{ borderWidth: 0, paddingLeft: 0, paddingRight: 0 }}
+          labelStyle={[
+            { color: '#222222', fontSize: 13 },
+            { fontWeight: 'bold' },
+          ]}
+          chevronStyle={{ display: 'none' }}
+        />
       </box>
 
       <PasswordInput

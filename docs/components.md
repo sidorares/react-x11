@@ -705,6 +705,39 @@ import { Select } from 'react-x11';
 | `name`                  | field name, for form libraries            |
 | `placeholder`           | trigger text when nothing is selected     |
 | `style` + any box props | forwarded to the trigger box              |
+| `labelStyle`            | the caption's style, over `text`          |
+| `chevronStyle`          | the chevron's style, over `textMuted`     |
+
+The two style slots restyle what is inside the trigger, and `style` restyles
+the trigger itself, so a select that has to wear somebody else's look — a
+toolbar's, or a web page's — is the widget restyled and keeps the menu, the
+keyboard, type-ahead and the focus ring. A borderless select that sits in a
+line of text:
+
+```jsx
+<Select
+  value={sort}
+  options={['Newest', 'Oldest', 'Most replies']}
+  onChange={(ev) => setSort(ev.value)}
+  style={{
+    borderWidth: 0,
+    paddingLeft: 0,
+    paddingRight: 0,
+    backgroundColor: 'transparent',
+    ':hover': { backgroundColor: 'transparent' },
+  }}
+  labelStyle={{ color: theme.accent, fontWeight: 'bold' }}
+  chevronStyle={{ color: theme.accent }}
+/>
+```
+
+The caption's `fontSize`, as a number, is the one the chevron is sized
+against, since the chevron is as tall as the capitals beside it and an
+`<Icon>`'s size does not inherit. `chevronStyle={{ display: 'none' }}` leaves
+it out, for a trigger whose arrow is drawn by something else. A select with
+either slot is drawn, where `controls: 'auto'` would otherwise use the
+platform's popup bezel, whose pixels no style reaches. The menu is not
+restyled: it is the same surface a menu is.
 
 Behavior: the menu opens on the **press** — Space and Enter toggle it too;
 Escape, focus loss, or picking closes it; the option list scrolls when taller
