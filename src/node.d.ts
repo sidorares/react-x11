@@ -48,6 +48,10 @@ export interface ImageDataLike {
  * Anything ntk documents beyond this is reachable at runtime and is
  * ntk's to change.
  */
+/** One corner's radius for `roundRect`: circular, or elliptical as a
+ * `DOMPointInit`. */
+export type RoundRectRadius = number | { x?: number; y?: number };
+
 export interface Context2D {
   fillStyle: string | CanvasGradientLike;
   strokeStyle: string | CanvasGradientLike;
@@ -125,12 +129,16 @@ export interface Context2D {
     anticlockwise?: boolean,
   ): void;
   rect(x: number, y: number, width: number, height: number): void;
+  /** Canvas's `roundRect`: a radius for every corner, a `{ x, y }` point
+   * for an elliptical one, or a list of one to four of either, clockwise
+   * from the top left. A shadowed `fill` of one — or of a `rect` less one,
+   * filled `'evenodd'` — is drawn from a shadow tile made once. */
   roundRect(
     x: number,
     y: number,
     width: number,
     height: number,
-    radii: number | number[],
+    radii: RoundRectRadius | RoundRectRadius[],
   ): void;
   fill(fillRule?: 'nonzero' | 'evenodd'): void;
   stroke(): void;

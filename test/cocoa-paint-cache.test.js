@@ -215,7 +215,7 @@ test('a mono drawing bakes its colour: one entry per colour, each drawn in it', 
   assert.deepEqual(blueFills.at(-1).slice(2), [0, 0, 1, 1]);
 });
 
-test('a blurred shadow stays live: coverage-only work has no argb32 form here', async () => {
+test('a blurred shadow is no entry: the context draws it from a tile of its own', async () => {
   const { native, node, repaint } = await mount([
     h('box', {
       style: {
@@ -235,10 +235,17 @@ test('a blurred shadow stays live: coverage-only work has no argb32 form here', 
   await repaint();
   assert.equal(cache.entries.size, 1, 'the icons, and nothing for the shadow');
   assert.equal(cache.stats.failed, 0, 'and no render was even attempted');
-  assert.equal(
-    native.of('createSurface').length,
-    1,
-    'one surface: the icon entry',
+  // Coverage-only work has no argb32 form on this backend, so the cache
+  // leaves the shadow to the context — whose own shadow draws a rounded
+  // rect's from a tile (src/backend/shadowtiles.js), made once and drawn
+  // on every repaint after.
+  const surfaces = native.of('createSurface');
+  assert.equal(surfaces.length, 2, 'the icon entry, and the shadow tile');
+  const icons = [...cache.entries.values()][0].surface._surfaceHandle.id;
+  const tile = surfaces.find((c) => c[1] !== icons)[1];
+  assert.ok(
+    native.of('ctxDrawSurface').filter((c) => c[2] === tile).length >= 9 * 3,
+    'the tile drawn on every paint, in its nine pieces',
   );
 });
 

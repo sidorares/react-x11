@@ -267,8 +267,40 @@ export class NodeBoxPaint {
         ctx.fillShadow(rect, r, shadow.blur, color);
         continue;
       }
+      // No X server to bake a blur on — CoreGraphics, Direct2D: the
+      // context's own shadow, which draws a rounded rect's from a tile it
+      // keeps (src/backend/shadowtiles.js). The coverage route below needs
+      // RENDER and drew nothing there.
+      if (!this.app?.display?.Render) {
+        this._paintShadowOnContext(ctx, rect, r, shadow.blur, color);
+        continue;
+      }
       this._paintBlurredShadow(ctx, rect, r, shadow.blur, color);
     }
+  }
+
+  /**
+   * One blurred shadow through the context's `shadowBlur`: the rounded rect
+   * filled clear of the surface to its left, and its shadow thrown back by
+   * as much, so that only the shadow lands. Offsets are device pixels and
+   * the shape moves in the context's own units, hence the scale between.
+   */
+  _paintShadowOnContext(ctx, rect, radius, blur, color) {
+    if (!('shadowBlur' in ctx) || typeof ctx.roundRect !== 'function') return;
+    const m = ctx.getTransform?.() ?? { a: 1, e: 0 };
+    const reach = Math.ceil(blur * 1.5) + 1;
+    const away =
+      Math.ceil(Math.abs(rect.x) + rect.width + Math.abs(m.e) + reach) + 1;
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = blur;
+    ctx.shadowOffsetX = away * m.a;
+    ctx.shadowOffsetY = 0;
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    ctx.roundRect(rect.x - away, rect.y, rect.width, rect.height, radius);
+    ctx.fill();
+    ctx.restore();
   }
 
   /**

@@ -1495,6 +1495,59 @@ vocabulary is smaller, which is what the feature detection is for — in
 CI, and, where the real bridge loads, that the blit and the draw are
 pixel-identical.
 
+### A shadow from a tile
+
+CoreGraphics blurs a shadow on every fill that has one set, and what it
+costs is the shape's area times the blur's width: a page header's
+`box-shadow: inset 0 0 100px`, repainted by each strip a scroll exposed, was
+130 to 380 ms at 2x, and a card's 200px hover shadow 110 ms — every frame
+the header or the card was in view. Direct2D does not draw a live shadow at
+all; the Windows bridge records one and draws nothing.
+
+So the context (`src/backend/context2d.js`, both bridges) recognises the
+shapes a box shadow is made of — a `fill` of a path that is one `rect` or
+one `roundRect`, or two of them one inside the other filled `'evenodd'`,
+which is the frame an inset shadow is cast around, and a `fillRect` — and
+draws their shadow from a **tile**. The shadow of a rounded rect is the
+same all along its straight edges, so it is made once, for a copy of the
+shape shortened to three pixels of straight edge on each axis that has
+room, and drawn as up to nine pieces: the corners as they are, the
+straight pixel stretched between them. The tile is named by its corners,
+blur, hole and colour — not by where the shape is or what part of it a
+paint reaches — so every card with one shadow shares a tile, and a strip a
+scroll exposes draws a strip of it. ntk plans the tile and makes its
+pixels (`ntk/shadow-tiles`, the same code X11's shadows come from): the
+shape's coverage and a gaussian of σ `shadowBlur / 2`, made smaller for a
+wide blur and scaled up as it is drawn. The header's inset shadow is 4 ms
+where CoreGraphics took 130 to 380, and the tiled shadow is within six
+levels of 8-bit alpha of the exact one (`test/backend-shadow-tiles.test.js`,
+over the real bridge where it loads). What a tile cannot draw — a path of
+anything else, a transform that rotates, a composite other than
+`source-over` — is the bridge's, as before.
+
+Two things follow that are visible:
+
+- **A shadow a tile draws is the canvas spec's gaussian**, σ half the
+  blur, three σ wide — the one Chrome and X11 draw. CoreGraphics' own blur
+  is a little narrower, about 0.45 of the blur and cut off at the blur, and
+  it is still what a shape a tile does not draw gets.
+- **`<box boxShadow>` draws on macOS and Windows.** It was baked on an X
+  server and drew nothing without one. Without one it is the context's own
+  shadow now, which is to say a tile.
+
+`REACT_X11_NO_SHADOW_TILES=1`, or `ctx._shadowTiles = false` on one
+context, puts every shadow back on the bridge, for measuring the two
+against each other.
+
+A `roundRect` takes its radii as canvas has them: a number, a
+`{ x, y }` point for an elliptical corner, or a list of one to four of
+either, scaled down together where two corners on a side would meet. It
+took numbers alone, clamped each on its own, and drew a `{ x, y }` corner
+square. Circular corners go to the bridge as `ctxRoundRect`; elliptical
+ones as `ctxRoundRectXY` where it has one — and as op 9 in the one-call
+`ctxPath` stream — and as curves where it does not, so an older bridge
+draws them too.
+
 ## Animations and transforms: the API the model unlocks
 
 The existing declarative vocabulary is the seam: `transition:` and

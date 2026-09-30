@@ -394,6 +394,12 @@ own `color`. A blurred shadow is a real gaussian — RENDER's convolution over
 a coverage surface — cached by size, radius and blur, so a list of identical
 cards renders one and composites it many times.
 
+On macOS and Windows, which have no X server to bake one on, the shadow is
+the 2d context's own `shadowBlur`, and the context draws a rounded rect's
+shadow from a tile it makes once and stretches — see
+[macos.md](macos.md#a-shadow-from-a-tile). The rest of this section is the
+X11 route.
+
 The blur is **baked into the cached surface's pixels**, in two separable 1-D
 passes, rather than left as a filter on its picture. That is not an internal
 detail: XRender applies a picture's filter on every composite, so a shadow

@@ -103,14 +103,14 @@
   "dependencies": {
     "ical.js": "^2.2.1",
     "linebreak": "^1.1.0",
-    "ntk": "^8.14.3",
+    "ntk": "^8.16.1",
     "react-reconciler": "^0.34.0",
     "yoga-layout": "^3.2.1"
   },
   "optionalDependencies": {
-    "@windowkit/appkit": "^0.16.0",
+    "@windowkit/appkit": "^0.17.0",
     "@windowkit/wayland": "^3.1.1",
-    "@windowkit/win32": "^0.0.5",
+    "@windowkit/win32": "^0.0.6",
     "dbus-native": "^0.16.0",
     "x11-dri": "^0.9.0"
   },

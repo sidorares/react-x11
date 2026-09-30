@@ -25,6 +25,10 @@
 // resize — `_gen` is that generation.
 import { cssColorStraight } from 'ntk/color';
 
+import { normalizeRadii, planShadowTiles } from 'ntk/shadow-tiles';
+
+import { shadowTilesFor } from './shadowtiles.js';
+
 const BLACK = [0, 0, 0, 1];
 
 // A colour string is parsed once: a frame over a large tree sets the same
@@ -244,9 +248,56 @@ const P_RECT = 5;
 const P_ROUND = 6;
 const P_ARC = 7;
 const P_ELLIPSE = 8;
+/** A rounded rect whose corners are elliptical: x y w h, then each corner's
+ *  x and y radius, top left first. A bridge answering `ctxRoundRectXY`
+ *  reads it in `ctxPath` too; one that does not is sent the curves. */
+const P_ROUND_XY = 9;
 /** how many numbers each op carries, and what it costs a chunk's budget */
-const P_ARGS = [2, 2, 6, 4, 0, 4, 8, 6, 4];
-const P_POINTS = [1, 1, 3, 2, 0, 4, 8, 8, 4];
+const P_ARGS = [2, 2, 6, 4, 0, 4, 8, 6, 4, 12];
+const P_POINTS = [1, 1, 3, 2, 0, 4, 8, 8, 4, 8];
+
+/** A quarter ellipse as one cubic: how far along each tangent its handles
+ *  reach, as a fraction of the radius. */
+const KAPPA = 0.5522847498307936;
+
+/**
+ * An elliptical-cornered rounded rect as lines and curves, through `to` —
+ * a bridge with no `ctxRoundRectXY`. `c[a]…` is the op's twelve numbers.
+ */
+function roundRectCurves(to, c, a) {
+  const x = c[a];
+  const y = c[a + 1];
+  const r = x + c[a + 2];
+  const b = y + c[a + 3];
+  const [tlx, tly, trx, tRy, brx, bry, blx, bly] = [
+    c[a + 4],
+    c[a + 5],
+    c[a + 6],
+    c[a + 7],
+    c[a + 8],
+    c[a + 9],
+    c[a + 10],
+    c[a + 11],
+  ];
+  to.move(x + tlx, y);
+  to.line(r - trx, y);
+  if (trx > 0 && tRy > 0) {
+    to.curve(r - trx * (1 - KAPPA), y, r, y + tRy * (1 - KAPPA), r, y + tRy);
+  }
+  to.line(r, b - bry);
+  if (brx > 0 && bry > 0) {
+    to.curve(r, b - bry * (1 - KAPPA), r - brx * (1 - KAPPA), b, r - brx, b);
+  }
+  to.line(x + blx, b);
+  if (blx > 0 && bly > 0) {
+    to.curve(x + blx * (1 - KAPPA), b, x, b - bly * (1 - KAPPA), x, b - bly);
+  }
+  to.line(x, y + tly);
+  if (tlx > 0 && tly > 0) {
+    to.curve(x, y + tly * (1 - KAPPA), x + tlx * (1 - KAPPA), y, x + tlx, y);
+  }
+  to.close();
+}
 
 /**
  * A chunk closes at the first subpath boundary past either budget. Swept
@@ -264,6 +315,77 @@ const STROKE_CHUNK_SUBPATHS = 128;
  * two sets. Read once.
  */
 const NO_STROKE_CHUNKING = process.env.REACT_X11_NO_STROKE_CHUNKING === '1';
+
+const SQUARE = Object.freeze([
+  { x: 0, y: 0 },
+  { x: 0, y: 0 },
+  { x: 0, y: 0 },
+  { x: 0, y: 0 },
+]);
+
+/**
+ * The shape the recorded op at `i` draws, where it is one a shadow tile
+ * knows — a `rect`, or a `roundRect` with circular or elliptical corners —
+ * as `{ x, y, w, h, corners, end }`, `end` the index of the op after it;
+ * null for any other op.
+ */
+function shapeAt(c, i) {
+  const op = c[i];
+  const end = i + 1 + P_ARGS[op];
+  if (op === P_RECT) {
+    let [x, y, w, h] = [c[i + 1], c[i + 2], c[i + 3], c[i + 4]];
+    if (w < 0) ((x += w), (w = -w));
+    if (h < 0) ((y += h), (h = -h));
+    return { x, y, w, h, corners: SQUARE, end };
+  }
+  if (op === P_ROUND) {
+    const r = (v) => ({ x: v, y: v });
+    return {
+      x: c[i + 1],
+      y: c[i + 2],
+      w: c[i + 3],
+      h: c[i + 4],
+      corners: [r(c[i + 5]), r(c[i + 6]), r(c[i + 7]), r(c[i + 8])],
+      end,
+    };
+  }
+  if (op === P_ROUND_XY) {
+    const r = (j) => ({ x: c[i + j], y: c[i + j + 1] });
+    return {
+      x: c[i + 1],
+      y: c[i + 2],
+      w: c[i + 3],
+      h: c[i + 4],
+      corners: [r(5), r(7), r(9), r(11)],
+      end,
+    };
+  }
+  return null;
+}
+
+/** Whether shape `b` lies inside shape `a`'s box. */
+function contains(a, b) {
+  return (
+    b.x >= a.x && b.y >= a.y && b.x + b.w <= a.x + a.w && b.y + b.h <= a.y + a.h
+  );
+}
+
+/** Whether two `{ x, y, width, height }` rects share any area. */
+function meets(a, b) {
+  return (
+    a.x < b.x + b.width &&
+    b.x < a.x + a.width &&
+    a.y < b.y + b.height &&
+    b.y < a.y + a.height
+  );
+}
+
+/**
+ * The off switch for shadow tiles (src/backend/shadowtiles.js): every
+ * shadow drawn by the bridge, as before them. For measuring the tiles
+ * against the live blur, and as first aid. Read once.
+ */
+const NO_SHADOW_TILES = process.env.REACT_X11_NO_SHADOW_TILES === '1';
 
 /**
  * A solid ink for `drawGlyphs` — ntk's `createSolidPicture` answers an
@@ -340,6 +462,13 @@ export class BackendContext2D {
       'ctxPath' in native && typeof native.ctxPath === 'function';
     this._pathBuf = null;
     this._strokeChunking = !NO_STROKE_CHUNKING;
+    // Elliptical corners go over whole where the bridge takes them; the
+    // count of them in the recorded path is what tells `_emit` whether a
+    // whole path handed to `ctxPath` needs them spelled as curves first.
+    this._roundXY =
+      'ctxRoundRectXY' in native && typeof native.ctxRoundRectXY === 'function';
+    this._xyOps = 0;
+    this._shadowTiles = !NO_SHADOW_TILES;
   }
 
   /**
@@ -388,6 +517,7 @@ export class BackendContext2D {
       // the path went with the surface it was built on; nothing may
       // replay it onto the new one
       this._cmds.length = 0;
+      this._xyOps = 0;
       this._pathStale = false;
     }
     return surface;
@@ -745,6 +875,11 @@ export class BackendContext2D {
     const c = this._cmds;
     const n = this._native;
     if (this._bulkPaths) {
+      if (this._xyOps > 0 && !this._roundXY) {
+        // a bridge that does not read op 9 would stop at it
+        n.ctxPath(surface, this._spelledPath(from, to));
+        return;
+      }
       // one call, through a buffer kept between paths — the record is the
       // same stream the bridge parses, arguments and all
       const count = to - from;
@@ -803,12 +938,36 @@ export class BackendContext2D {
         );
       else if (op === P_ELLIPSE)
         n.ctxEllipse(surface, c[a], c[a + 1], c[a + 2], c[a + 3]);
+      else if (op === P_ROUND_XY) this._emitRoundXY(surface, c, a);
       i += 1 + P_ARGS[op];
     }
   }
 
+  /** The record `[from, to)` as a stream for a bridge that does not know
+   *  op 9: each elliptical rounded rect spelled as the lines and curves
+   *  it is, everything else as it was. */
+  _spelledPath(from, to) {
+    const c = this._cmds;
+    const out = [];
+    const spell = {
+      move: (x, y) => out.push(P_MOVE, x, y),
+      line: (x, y) => out.push(P_LINE, x, y),
+      curve: (ax, ay, bx, by, x, y) => out.push(P_CURVE, ax, ay, bx, by, x, y),
+      close: () => out.push(P_CLOSE),
+    };
+    for (let i = from; i < to;) {
+      const op = c[i];
+      const end = i + 1 + P_ARGS[op];
+      if (op === P_ROUND_XY) roundRectCurves(spell, c, i + 1);
+      else for (let j = i; j < end; j++) out.push(c[j]);
+      i = end;
+    }
+    return new Float64Array(out);
+  }
+
   beginPath() {
     this._cmds.length = 0;
+    this._xyOps = 0;
     if (this._bulkPaths) {
       this._s();
       // uploaded, empty or not, when something paints it
@@ -849,24 +1008,93 @@ export class BackendContext2D {
     if (surface !== null) this._native.ctxRect(surface, x, y, w, h);
   }
 
+  /**
+   * Canvas's `roundRect`: `radii` a number, a `{ x, y }` point for an
+   * elliptical corner, or a list of one to four of either, scaled down
+   * together where two corners on a side would overlap (HTML, "roundRect").
+   * Circular corners go to the bridge as they always did; elliptical ones
+   * as `ctxRoundRectXY` where the bridge has it, and as curves where not.
+   */
   roundRect(x, y, w, h, radii) {
-    let r = radii ?? 0;
-    if (typeof r === 'number') r = [r, r, r, r];
-    else if (r.length === 1) r = [r[0], r[0], r[0], r[0]];
-    else if (r.length === 2) r = [r[0], r[1], r[0], r[1]];
-    else if (r.length === 3) r = [r[0], r[1], r[2], r[1]];
-    const cap = Math.min(Math.abs(w) / 2, Math.abs(h) / 2);
-    const clamp = (v) => Math.max(0, Math.min(Number(v) || 0, cap));
+    if (![x, y, w, h].every(Number.isFinite)) return;
+    // an ellipse with no extent on one axis is no curve at all: the corner
+    // is square, as the spec's arc of nothing leaves it
+    let corners = normalizeRadii(Math.abs(w), Math.abs(h), radii).map((r) =>
+      r.x > 0 && r.y > 0 ? r : { x: 0, y: 0 },
+    );
+    // a negative extent is the same box drawn from its other side: the
+    // corners swap across the axis it runs back along
+    if (w < 0) {
+      x += w;
+      w = -w;
+      corners = [corners[1], corners[0], corners[3], corners[2]];
+    }
+    if (h < 0) {
+      y += h;
+      h = -h;
+      corners = [corners[3], corners[2], corners[1], corners[0]];
+    }
+    const [tl, tr, br, bl] = corners;
     const surface = this._pathFor();
-    const [r0, r1, r2, r3] = [
-      clamp(r[0]),
-      clamp(r[1]),
-      clamp(r[2]),
-      clamp(r[3]),
-    ];
-    this._cmds.push(P_ROUND, x, y, w, h, r0, r1, r2, r3);
-    if (surface !== null)
-      this._native.ctxRoundRect(surface, x, y, w, h, r0, r1, r2, r3);
+    if (tl.x === tl.y && tr.x === tr.y && br.x === br.y && bl.x === bl.y) {
+      this._cmds.push(P_ROUND, x, y, w, h, tl.x, tr.x, br.x, bl.x);
+      if (surface !== null)
+        this._native.ctxRoundRect(surface, x, y, w, h, tl.x, tr.x, br.x, bl.x);
+      return;
+    }
+    const at = this._cmds.length + 1;
+    this._cmds.push(
+      P_ROUND_XY,
+      x,
+      y,
+      w,
+      h,
+      tl.x,
+      tl.y,
+      tr.x,
+      tr.y,
+      br.x,
+      br.y,
+      bl.x,
+      bl.y,
+    );
+    this._xyOps++;
+    if (surface !== null) this._emitRoundXY(surface, this._cmds, at);
+  }
+
+  /** One elliptical-cornered rounded rect, from the record at `a`, onto a
+   *  bridge's path: whole where it takes one, as curves where not. */
+  _emitRoundXY(surface, c, a) {
+    const n = this._native;
+    if (this._roundXY) {
+      n.ctxRoundRectXY(
+        surface,
+        c[a],
+        c[a + 1],
+        c[a + 2],
+        c[a + 3],
+        c[a + 4],
+        c[a + 5],
+        c[a + 6],
+        c[a + 7],
+        c[a + 8],
+        c[a + 9],
+        c[a + 10],
+        c[a + 11],
+      );
+      return;
+    }
+    roundRectCurves(
+      {
+        move: (px, py) => n.ctxMoveTo(surface, px, py),
+        line: (px, py) => n.ctxLineTo(surface, px, py),
+        curve: (ax, ay, bx, by, px, py) =>
+          n.ctxCurveTo(surface, ax, ay, bx, by, px, py),
+        close: () => n.ctxClosePath(surface),
+      },
+      c,
+      a,
+    );
   }
 
   arc(x, y, radius, start, end, anticlockwise = false) {
@@ -1020,6 +1248,13 @@ export class BackendContext2D {
     const hasPath = pathOrRule != null && typeof pathOrRule === 'object';
     const rule = hasPath ? maybeRule : pathOrRule;
     if (hasPath && !this._replayPath(pathOrRule)) return;
+    if (this._castsShadow() && this._tiledShadow(rule === 'evenodd')) {
+      this._unshadowed(() => this._fillPath(rule));
+    } else this._fillPath(rule);
+    this._dirty();
+  }
+
+  _fillPath(rule) {
     this._path();
     const style = this._state.fillStyle;
     if (style instanceof LinearGradient) {
@@ -1036,7 +1271,111 @@ export class BackendContext2D {
       this._applyFill();
       this._native.ctxFill(this._s(), rule === 'evenodd');
     }
-    this._dirty();
+  }
+
+  // --- shadows from tiles (src/backend/shadowtiles.js) -----------------------
+
+  /** Whether what is filled now casts a blurred shadow a tile could draw:
+   *  one there, in a colour, composited the ordinary way. */
+  _castsShadow() {
+    if (!this._shadowTiles) return false;
+    const st = this._state;
+    return (
+      st.shadowBlur > 0 &&
+      st.gco === 'source-over' &&
+      parseColor(st.shadowColor)[3] > 0
+    );
+  }
+
+  /**
+   * The current path's shadow, from a tile, where the path is a shape a
+   * tile draws: one `rect` or `roundRect`, or — filled `evenodd` — two of
+   * them one inside the other, the frame an inset box shadow is cast
+   * around. False for anything else, and the bridge draws it.
+   */
+  _tiledShadow(evenodd) {
+    const c = this._cmds;
+    const first = shapeAt(c, 0);
+    if (!first) return false;
+    if (first.end === c.length) return this._drawTiledShadow(first, null);
+    if (!evenodd) return false;
+    const second = shapeAt(c, first.end);
+    if (!second || second.end !== c.length) return false;
+    if (contains(first, second)) return this._drawTiledShadow(first, second);
+    if (contains(second, first)) return this._drawTiledShadow(second, first);
+    return false;
+  }
+
+  /**
+   * Draw the shadow of `outer` — less `inner`, where there is one — from a
+   * tile: in device pixels, moved by the shadow's offset, which, like its
+   * blur, the transform does not scale (HTML, "shadows"). A transform
+   * that rotates, skews or mirrors is not one a tile can follow.
+   */
+  _drawTiledShadow(outer, inner) {
+    const st = this._state;
+    const [a, b, c, d, e, f] = st.ctm;
+    if (b !== 0 || c !== 0 || !(a > 0) || !(d > 0)) return false;
+    const device = (r) => {
+      const x0 = Math.round(a * r.x + e + st.shadowOffsetX);
+      const y0 = Math.round(d * r.y + f + st.shadowOffsetY);
+      return {
+        x0,
+        y0,
+        x1: Math.round(a * (r.x + r.w) + e + st.shadowOffsetX),
+        y1: Math.round(d * (r.y + r.h) + f + st.shadowOffsetY),
+        corners: r.corners.map((k) => ({ x: k.x * a, y: k.y * d })),
+      };
+    };
+    const o = device(outer);
+    if (![o.x0, o.y0, o.x1, o.y1].every(Number.isFinite)) return false;
+    // a shape with nothing in it casts nothing
+    if (!(o.x1 > o.x0 && o.y1 > o.y0)) return true;
+    let hole = inner && device(inner);
+    if (hole && !(hole.x1 > hole.x0 && hole.y1 > hole.y0)) hole = null;
+    const plan = planShadowTiles(o, hole, st.shadowBlur);
+    if (!plan) return false;
+    const clip = st.clip === NON_RECT ? null : st.clip;
+    if (clip && !meets(plan.bounds, clip)) return true;
+    const tile = shadowTilesFor(this._native).get(
+      plan,
+      parseColor(st.shadowColor),
+    );
+    if (tile == null) return false;
+    const s = this._s();
+    const n = this._native;
+    n.ctxSave(s);
+    n.ctxSetShadow(s, 0, 0, 0, 0, 0, 0, 0);
+    for (const [sx, sy, sw, sh, dx, dy, dw, dh] of plan.pieces) {
+      if (clip && !meets({ x: dx, y: dy, width: dw, height: dh }, clip))
+        continue;
+      n.ctxDrawSurface(
+        s,
+        tile,
+        sx,
+        sy,
+        sw,
+        sh,
+        (dx - e) / a,
+        (dy - f) / d,
+        dw / a,
+        dh / d,
+      );
+    }
+    n.ctxRestore(s);
+    // the shape is filled next, from the record: nothing above may have
+    // left the bridge's own copy of the path as it was
+    this._pathStale = true;
+    return true;
+  }
+
+  /** `fn`'s drawing with no shadow: the tile has drawn it already. */
+  _unshadowed(fn) {
+    const s = this._s();
+    this._native.ctxSave(s);
+    this._native.ctxSetShadow(s, 0, 0, 0, 0, 0, 0, 0);
+    fn();
+    this._native.ctxRestore(s);
   }
 
   stroke(path) {
@@ -1129,6 +1468,16 @@ export class BackendContext2D {
 
   fillRect(x, y, w, h) {
     if (!(w > 0) || !(h > 0)) return;
+    if (
+      this._castsShadow() &&
+      this._drawTiledShadow({ x, y, w, h, corners: SQUARE }, null)
+    ) {
+      this._unshadowed(() => this._fillRectNow(x, y, w, h));
+    } else this._fillRectNow(x, y, w, h);
+    this._dirty();
+  }
+
+  _fillRectNow(x, y, w, h) {
     const style = this._state.fillStyle;
     if (style instanceof LinearGradient) {
       const { coords, flat } = style._normalized();
@@ -1148,7 +1497,6 @@ export class BackendContext2D {
       this._applyFill();
       this._native.ctxFillRect(this._s(), x, y, w, h);
     }
-    this._dirty();
   }
 
   fillRects(rects) {
