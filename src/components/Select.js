@@ -4,6 +4,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useAppOrNull } from '../appcontext.js';
+import { flattenStyle } from '../styles.js';
 import { capBand, capTrim, rowRadius, useTheme } from './theme.js';
 import { Icon } from './Icon.js';
 import {
@@ -282,6 +283,14 @@ function Option({
  * the active option with wrapping; Home/End jump to the ends; Enter/Space
  * pick the active option (or open the menu when closed); Escape closes.
  * The active option is scrolled into view.
+ *
+ * `labelStyle` and `chevronStyle` are style slots over the caption and the
+ * chevron, each merged over the part's own default, as `<Slider>`'s are over
+ * its parts — so a select that has to wear someone else's look, a toolbar's
+ * or a web page's, is the widget restyled, with `style` on the trigger. The
+ * caption's `fontSize` is read back: the chevron is as tall as the capitals
+ * beside it. Any slot also chooses the drawn trigger over the platform's
+ * popup bezel, whose pixels no style reaches.
  */
 export function Select({
   value,
@@ -291,11 +300,18 @@ export function Select({
   placeholder = 'Select…',
   native,
   style,
+  labelStyle,
+  chevronStyle,
   ...boxProps
 }) {
   const theme = useTheme();
   const app = useAppOrNull();
-  const nativeControls = useNativeControls(native);
+  const styled = Boolean(labelStyle || chevronStyle);
+  const nativeControls = useNativeControls(styled ? false : native);
+  // The size the caption is set in, where its slot names one: the chevron is
+  // measured against those capitals, and an `<Icon>`'s size does not inherit.
+  const ownSize = flattenStyle(labelStyle).fontSize;
+  const captionSize = typeof ownSize === 'number' ? ownSize : theme.fontSize;
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState(null);
   const [focused, setFocused] = useState(false);
@@ -572,6 +588,7 @@ export function Select({
           ONE_LINE,
           nativeControls && nativeTitleStyle('regular'),
           { color: current ? theme.text : theme.textMuted },
+          labelStyle,
         ],
       },
       current ? current.label : placeholder,
@@ -593,8 +610,11 @@ export function Select({
         })
       : h(Icon, {
           name: 'chevronDown',
-          size: capBand(theme.fontSize),
+          size: capBand(captionSize),
           color: theme.textMuted,
+          // `display: 'none'` leaves it out, for a trigger whose arrow is
+          // drawn by something else
+          style: chevronStyle,
         }),
     open &&
       anchor &&

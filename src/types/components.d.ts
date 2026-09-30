@@ -511,6 +511,16 @@ export interface SelectProps<T = unknown>
   onChange?: (ev: WidgetChangeEvent<T>) => void;
   placeholder?: string;
   style?: StyleProp;
+  /**
+   * The caption's style — the value, or the placeholder — over the palette's
+   * `text` (`textMuted` for the placeholder). Its `fontSize`, as a number, is
+   * the one the chevron is sized against. Any slot chooses the drawn trigger
+   * over the platform's popup bezel.
+   */
+  labelStyle?: StyleProp;
+  /** The chevron's style, over `textMuted` at the caption's cap height.
+   *  `display: 'none'` leaves it out. */
+  chevronStyle?: StyleProp;
 }
 export function Select<T = unknown>(props: SelectProps<T>): ReactNode;
 
