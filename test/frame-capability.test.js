@@ -137,6 +137,59 @@ describe('<Frame>: input forwarded to a composited pane', () => {
     ]);
     await root.unmount();
   });
+
+  // The pane cannot hear the pointer leave: it has no window for a leave to
+  // arrive at. Told of motion and never of its end, it kept hovered whatever
+  // the pointer last crossed in it — a link in a page, with the pointer on
+  // the host's toolbar. The same message is what ends its hover when the
+  // host is no longer the active window, on a backend that keeps hover to
+  // that one (`EventManager.hoverLive`).
+  it('the pointer leaving the pane, or the host losing the keyboard, reaches it as a leave', async () => {
+    const app = createMockApp();
+    app.hoverNeedsActiveWindow = true;
+    app.createPaneHost = () => ({ setRect() {}, present() {}, destroy() {} });
+    const sent = [];
+    const transport = () => ({
+      send: (msg) => sent.push(msg),
+      onMessage: (cb) => {
+        setImmediate(() => cb({ type: 'ready', windowId: 1 }));
+        return () => {};
+      },
+      onExit: () => () => {},
+      pid: -1,
+    });
+    const root = await createRoot({ app });
+    root.render(
+      h(
+        'window',
+        { width: 200, height: 120 },
+        h('box', { style: { height: 40, flexShrink: 0 } }),
+        h(Frame, { src: PANE, transport, style: { flexGrow: 1 } }),
+      ),
+    );
+    await settle();
+    const wnd = app.windows[0];
+    wnd.flushFrame?.();
+    const pointer = () =>
+      sent
+        .filter((m) => m.type === 'pane-event' && /^mouse/.test(m.name))
+        .map((m) => m.name);
+
+    moveMouse(wnd, 50, 80);
+    moveMouse(wnd, 50, 20); // onto the box above the pane
+    assert.deepEqual(pointer(), ['mousemove', 'mouseout']);
+
+    sent.length = 0;
+    moveMouse(wnd, 50, 80);
+    wnd.emit('blur', {});
+    moveMouse(wnd, 60, 80);
+    assert.deepEqual(
+      pointer(),
+      ['mousemove', 'mouseout'],
+      'and no motion after it, until the window is the active one again',
+    );
+    await root.unmount();
+  });
 });
 
 describe('<Frame>: the cursor of a composited pane', () => {

@@ -739,6 +739,14 @@ dispatcher never sees platform structs:
   the smooth-scroll platform; the wheel pipeline already handles pixel
   deltas), enter/exit via a tracking area, per-window routing by
   `windowNumber`.
+- Hover is the active window's. The tracking area is `ActiveAlways`, so
+  motion over a background window arrives, and the event manager drops it
+  there (`app.hoverNeedsActiveWindow`, [events.md](events.md#when-the-response-is-painted)):
+  the platform's convention, which the window server already kept for the
+  cursor — one set by an application that is not the active one is ignored
+  — so a link in a background window lit up under an arrow. A press still
+  acts on the first click (`acceptsFirstMouse`), and the wheel still
+  scrolls.
 - Modifiers: `modifierFlags` → `shiftKey/ctrlKey/altKey/metaKey`
   (⌘ = meta, ⌥ = alt — the DOM's own macOS convention, which the event
   API borrowed already).
