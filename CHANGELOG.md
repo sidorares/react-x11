@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.26.3](https://github.com/sidorares/react-x11/compare/v2.26.2...v2.26.3) (2026-09-30)
+
+
+### Bug Fixes
+
+* **cocoa:** -apple-system and BlinkMacSystemFont are the system font ([#803](https://github.com/sidorares/react-x11/issues/803)) ([8d067ca](https://github.com/sidorares/react-x11/commit/8d067ca9a708da69d6fba793b9572829f0413949))
+
 ## [2.26.2](https://github.com/sidorares/react-x11/compare/v2.26.1...v2.26.2) (2026-09-30)
 
 
