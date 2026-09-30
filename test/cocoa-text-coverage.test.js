@@ -26,6 +26,8 @@ function fakeNative({ coverage = true } = {}) {
     asked,
     matchFont: ({ families, size }) => ({ family: families[0], size }),
     fontApplyVariations: (handle) => handle,
+    // what an empty paragraph's one line is measured from
+    fontMetrics: () => ({ ascent: 12, descent: 4, leading: 0 }),
     createLayout({ spans }) {
       const text = spans.map((span) => span.text).join('');
       return {
