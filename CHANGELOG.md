@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.26.0](https://github.com/sidorares/react-x11/compare/v2.25.0...v2.26.0) (2026-09-30)
+
+
+### Features
+
+* **select:** labelStyle and chevronStyle, so a select in another look is the widget restyled ([#796](https://github.com/sidorares/react-x11/issues/796)) ([9261dd2](https://github.com/sidorares/react-x11/commit/9261dd23f10af2059e31d5fb606b2c830985eaa6))
+
 ## [2.25.0](https://github.com/sidorares/react-x11/compare/v2.24.1...v2.25.0) (2026-09-30)
 
 
