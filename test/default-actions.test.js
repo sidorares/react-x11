@@ -460,7 +460,13 @@ test('…and leaving it alone puts the element back in the chain', async () => {
   });
   spinWheel(wnd, 50, 40);
   await tick();
-  assert.deepStrictEqual(pane.log, ['wheel:48@50,40'], 'it was offered first');
+  // …and, the window having scrolled it under a pointer that stayed, it
+  // hears the point again (hover follows content, `refreshHover`)
+  assert.deepStrictEqual(
+    pane.log,
+    ['wheel:48@50,40', 'move:50,40'],
+    'it was offered first',
+  );
   assert.strictEqual(pane.zoom, 1, 'and declined the gesture');
   assert.strictEqual(windowNode.scrollY, 48, 'so the walk ran as before');
 });

@@ -431,6 +431,10 @@ export class EventManager {
     this._wheelOwed = { x: 0, y: 0 };
     // the window's DragSession while a press has armed it (src/dnd.js)
     this._dragArmed = null;
+    // where the pointer last was over this window — the motion or the wheel
+    // that said so — for asking again what is under it once what is under
+    // it has moved (`refreshHover`). Null while the pointer is elsewhere.
+    this._pointer = null;
     // on a *top-level* window's manager: the chords bound anywhere in its
     // tree, newest last (`registerAccelerator`). Null until one is bound,
     // which is the common case and costs one null check per key.
@@ -792,6 +796,7 @@ export class EventManager {
    * render it started for the notch before.
    */
   _onWheel(native) {
+    this._pointer = native;
     // The first wheel is what says this window wants smooth scrolling. It was
     // created on core events — an XI2 selection costs four times as many
     // bytes per *pointer move*, which a window that is never scrolled would
@@ -1004,6 +1009,7 @@ export class EventManager {
   }
 
   _onMouseMove(native) {
+    this._pointer = native;
     if (inspectHandler) {
       inspectHandler('move', this._hit(native), native);
       return;
@@ -1090,6 +1096,7 @@ export class EventManager {
     // ancestor was told the pointer had gone and then that it was back, and
     // `onMouseOut` that it had left a window it was still in.
     if (this._leftIntoSurface(native)) return;
+    this._pointer = null;
     runWithPriority(ContinuousEventPriority, () => {
       this._updateHover([], native);
       // the pointer is somewhere else entirely: whatever it was heading for
@@ -1184,6 +1191,41 @@ export class EventManager {
       if (!path[i].destroyed) path[i].setStyleState(':active', true);
     }
     this.pressPath = path;
+  }
+
+  /**
+   * Hover follows content. The pointer stayed where it was and what is
+   * under it moved — a scroll, or a layout that put something else there —
+   * so the question a motion asks is asked again at the point, as a browser
+   * asks it at the frame after a scroll: `:hover`, enter and leave change
+   * as a motion would change them, and the node under the pointer hears
+   * `defaultMouseMove` there, since an element that paints its own hover
+   * (a document, a graph) has content that moved under the point even where
+   * the node did not. The application's `onMouseMove` is not called: the
+   * pointer did not move. Nothing is asked while a press or a capture holds
+   * the pointer, where hover is frozen for the gesture.
+   *
+   * Called by the window after a frame that laid out (nodes/window/flush.js),
+   * which is every frame a scroll moves content in.
+   */
+  refreshHover() {
+    const at = this._pointer;
+    if (!at || inspectHandler || this.node.destroyed) return;
+    if (this._captured() || this.downNode || this._dragArmed) return;
+    runWithPriority(ContinuousEventPriority, () => {
+      const target = this._hit(at);
+      const path = this._path(target);
+      const old = this.hoverPath;
+      if (
+        path.length !== old.length ||
+        path.some((node, i) => node !== old[i])
+      ) {
+        this._updateHover(path, at);
+      }
+      if (typeof target.defaultMouseMove === 'function') {
+        target.defaultMouseMove(this._makeEvent('mouseMove', at, target));
+      }
+    });
   }
 
   /** enter/leave do not propagate: each node on the diff gets its own call. */
