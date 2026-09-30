@@ -607,6 +607,7 @@ export class Node {
     // nothing else ever asks for a frame
     this.root?._animating.delete(this);
     this.root?._opaqueNodes?.delete(this);
+    this.root?._viewportFixedNodes?.delete(this);
     // a surface that goes away takes its selection with it, and the app-wide
     // claim on being the one showing one goes with it too
     this._textSelection?.destroy();
@@ -625,11 +626,15 @@ export class Node {
       this.root?._layoutHosts?.delete(this);
       root?._layoutHosts?.add(this);
     }
-    // an element answering `opaqueRect()` is one the window asks per pass
+    // an element answering `opaqueRect()` is one the window asks per pass,
+    // and one answering `viewportFixedRects()` one it asks per scroll blit
     const opaque = this.opaqueRect !== Node.prototype.opaqueRect;
+    const fixed = this.viewportFixedRects !== Node.prototype.viewportFixedRects;
     if (opaque) this.root?._opaqueNodes?.delete(this);
+    if (fixed) this.root?._viewportFixedNodes?.delete(this);
     this.root = root;
     if (opaque) root?._opaqueNodes?.add(this);
+    if (fixed) root?._viewportFixedNodes?.add(this);
     // styled before it had a window, so this is where a placed node is
     // first registered (WindowNode._placeNodes)
     if (this.style && isPlaced(this.style)) root?._placedNodes?.add(this);
