@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.26.1](https://github.com/sidorares/react-x11/compare/v2.26.0...v2.26.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **cocoa:** an empty paragraph is one line, so an empty field's caret is as tall as its text ([#798](https://github.com/sidorares/react-x11/issues/798)) ([1234dca](https://github.com/sidorares/react-x11/commit/1234dcae305065a34354c7225031bfea9fa4aa83))
+
 ## [2.26.0](https://github.com/sidorares/react-x11/compare/v2.25.0...v2.26.0) (2026-09-30)
 
 
