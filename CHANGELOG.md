@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.26.2](https://github.com/sidorares/react-x11/compare/v2.26.1...v2.26.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* **cocoa:** a window that is not the active one does not hover, and a composited pane hears the pointer leave ([#800](https://github.com/sidorares/react-x11/issues/800)) ([0f28ace](https://github.com/sidorares/react-x11/commit/0f28acec67826ae5f2d0cceda8b7bc7517209922))
+
 ## [2.26.1](https://github.com/sidorares/react-x11/compare/v2.26.0...v2.26.1) (2026-09-30)
 
 
