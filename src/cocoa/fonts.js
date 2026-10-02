@@ -735,9 +735,25 @@ function spacedFeatures(features, spacing) {
 const KEPT_TYPESETTER_UNITS = 1 << 20;
 
 export class CocoaFontManager {
-  /** @param native the @windowkit/appkit module; the tests hand in a fake */
-  constructor(native = loadNative()) {
+  /**
+   * @param native the @windowkit/appkit module; the tests hand in a fake
+   * @param options.scale the app's backing scale. A size this engine is
+   *   handed is in device pixels, and CoreText reads some of a face's data
+   *   by point size — San Francisco's optical size and tracking, Apple Color
+   *   Emoji's `trak` — so a font made at the device size is the face as it
+   *   is set at twice the size on a 2x display: a 13px label 8% narrower
+   *   than AppKit sets it, a 19px emoji 1em wide where it is 23pt at 19pt.
+   *   The bridge makes a font at `size / scale` points under a matrix of
+   *   `scale` instead (windowkit/appkit#106), and answers in device pixels
+   *   as before. A bridge older than that ignores the scale and sets the
+   *   text as it always did.
+   */
+  constructor(native = loadNative(), { scale = 1 } = {}) {
     this._native = native;
+    // the trailing argument cgFontWithSize and fontByPostScriptName take,
+    // and nothing at 1x, so a 1x app asks the bridge what it always asked
+    this._scale = scale > 0 && Number.isFinite(scale) ? scale : 1;
+    this._scaleArgs = this._scale === 1 ? [] : [this._scale];
     this._fonts = new Map(); // family|weight|italic|size -> handle
     // handle -> features key -> the handle with those features set
     this._featured = new WeakMap();
@@ -895,8 +911,15 @@ export class CocoaFontManager {
     const sizedKey = `${key}|${size}|${variations ? JSON.stringify(variations) : ''}`;
     let handle = this._sized.get(sizedKey);
     if (handle) return handle;
-    if (entry.ps) handle = this._native.fontByPostScriptName(entry.ps, size);
-    else if (entry.cg) handle = this._native.cgFontWithSize(entry.cg, size);
+    if (entry.ps) {
+      handle = this._native.fontByPostScriptName(
+        entry.ps,
+        size,
+        ...this._scaleArgs,
+      );
+    } else if (entry.cg) {
+      handle = this._native.cgFontWithSize(entry.cg, size, ...this._scaleArgs);
+    }
     if (!handle) return null;
     handle = this._withVariations(handle, variations);
     this._sized.set(sizedKey, handle);
@@ -1020,7 +1043,7 @@ export class CocoaFontManager {
             best = face;
           }
         }
-        handle = this._native.cgFontWithSize(best.cg, size);
+        handle = this._native.cgFontWithSize(best.cg, size, ...this._scaleArgs);
         break;
       }
       handle ??= this._native.matchFont({
@@ -1028,6 +1051,7 @@ export class CocoaFontManager {
         size,
         weight,
         italic,
+        ...(this._scale === 1 ? null : { scale: this._scale }),
       });
       this._fonts.set(key, handle);
     }
@@ -1115,7 +1139,7 @@ export class CocoaFontManager {
   _registeredFace(reg) {
     if (!reg.face) {
       reg.face = new CocoaFace(this, 'registered', (size) =>
-        this._native.cgFontWithSize(reg.cg, size),
+        this._native.cgFontWithSize(reg.cg, size, ...this._scaleArgs),
       );
       reg.face.key = `registered:${reg.face.postscriptName}`;
     }
