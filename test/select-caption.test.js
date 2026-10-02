@@ -189,3 +189,55 @@ test('a menu the screen clamps elides its rows rather than wrapping them', async
     `label ${text.abs.height}px tall in a ${row.abs.height}px row`,
   );
 });
+
+// A caption that changes is measured again; the spacer beside it was not.
+// The trigger is the caption, a spacer that grows and the chevron, in a row
+// as wide as the control, and the pass that measures floors laid that row
+// out at its own width: the spacer grew into what the first caption left
+// over and was read back as needing it. A value picked later, or the
+// trigger narrowed in place, then had only what the spacer had not claimed,
+// and melbcss.com's theme select read "Retro…" across 545px.
+
+test('a longer value picked later is shown whole', async () => {
+  const roomy = (value) =>
+    h(
+      'box',
+      { style: { width: 300, padding: 10 } },
+      h(Select, { 'data-testname': 'later', value, options: OPTIONS }),
+    );
+  const mounted = await renderX11(roomy('TCP'), {
+    width: 400,
+    height: 200,
+    fonts: FONTS,
+  });
+  await mounted.rerender(roomy(LONG));
+
+  const { text, layout } = captionOf(screen.getByTestName('later'));
+  assert.equal(
+    layout.truncated,
+    false,
+    `"${LONG}" elided in ${text.abs.width}px`,
+  );
+});
+
+test('and a trigger narrowed in place gives the spacer up first', async () => {
+  const sized = (width) =>
+    h(
+      'box',
+      { style: { width, padding: 10 } },
+      h(Select, { 'data-testname': 'narrowed', value: LONG, options: OPTIONS }),
+    );
+  const mounted = await renderX11(sized(380), {
+    width: 400,
+    height: 200,
+    fonts: FONTS,
+  });
+  await mounted.rerender(sized(200));
+
+  const { text, layout } = captionOf(screen.getByTestName('narrowed'));
+  assert.equal(
+    layout.truncated,
+    false,
+    `"${LONG}" elided in ${text.abs.width}px`,
+  );
+});
