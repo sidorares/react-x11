@@ -1896,7 +1896,7 @@ whose layer shows a **source** rather than a raster: its sprite's
 `contents` is the sink, and `src/cocoa/video.js` puts every pushed frame
 into a video surface — an IOSurface the render server scans out as it is,
 NV12 for a YCbCr sink, BGRA for a BGRA one (`createVideoSurface`,
-`@windowkit/appkit` 0.21) — and repoints the layer inside the `push`. The
+windowkit/appkit#103) — and repoints the layer inside the `push`. The
 window paints nothing for it: on the real bridge, threaded, sixty pushes
 of a 320x180 NV12 sink cost the window one frame, the one that lifted it.
 The surfaces are a ring of up to four, written only when

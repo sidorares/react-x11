@@ -615,10 +615,10 @@ export class CocoaApp {
    * A `<video>`'s frame into `surface` — its drawn presentation, a
    * `CocoaSurface` at the frame's size — in the bridge's code: a copy for
    * BGRA, and for YCbCr a conversion that keeps the colours Core Animation
-   * shows the same frame in on a layer (`writeVideoSurface`, @windowkit/appkit
-   * 0.21), so a video moving between the two does not change shade. False
-   * over a bridge without the verb, and the frame is converted in JavaScript
-   * instead (src/nodes/video.js).
+   * shows the same frame in on a layer (`writeVideoSurface`), so a video
+   * moving between the two does not change shade. False over a bridge
+   * without the verb, and the frame is converted in JavaScript instead
+   * (src/nodes/video.js).
    */
   writeVideoFrame(surface, sink, frame) {
     const native = this._native;
