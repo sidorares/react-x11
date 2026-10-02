@@ -805,9 +805,9 @@ export interface FileUrl {
 }
 
 /**
- * What `src` accepts: a file path or file URL (PNG/JPEG, decoded in JS),
- * encoded PNG/JPEG bytes, raw RGBA pixels, an ntk `Image`/`Surface`, or a
- * symbol by name.
+ * What `src` accepts: a file path or file URL, encoded bytes (PNG, JPEG or
+ * WebP; GIF, BMP, TIFF, HEIC and AVIF too under Bun), raw RGBA pixels, an
+ * ntk `Image`/`Surface`, or a symbol by name.
  */
 export type ImageSource =
   | string
@@ -862,9 +862,13 @@ export interface ImageDrawableSource {
 
 export interface ImageProps extends DrawnProps<DrawnNode> {
   /**
-   * Client-side pixels: a file path or file URL (PNG/JPEG, decoded in JS),
-   * encoded PNG/JPEG bytes (no temp file), raw RGBA
-   * (`{ width, height, data }`), or an ntk `Image`/`Surface` used as-is.
+   * Client-side pixels: a file path or file URL, encoded bytes (no temp
+   * file), raw RGBA (`{ width, height, data }`), or an ntk
+   * `Image`/`Surface` used as-is. Files and bytes are PNG, JPEG or WebP —
+   * and under Bun, which decodes them off the JavaScript thread, GIF and BMP
+   * too, with TIFF, HEIC and AVIF on macOS and Windows. A file, any format
+   * under Bun, and a WebP elsewhere arrive a moment after the first frame:
+   * the element takes no room until then, unless styled a size.
    *
    * One source per element: `src`, `picture` and `drawable` are mutually
    * exclusive, and passing two throws.

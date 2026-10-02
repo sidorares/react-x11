@@ -1820,19 +1820,69 @@ to the width on offer. For the server-side sources the "natural size" is the
 
 ```jsx
 <image src="./logo.png" />                     // file path or file URL
-<image src={pngBuffer} />                      // encoded PNG/JPEG bytes
+<image src={bytes} />                          // encoded PNG, JPEG, WebP, …
 <image src={{ width, height, data }} />        // raw straight RGBA
 <image src={ntkImage} />                       // an ntk Image (or Surface)
 ```
 
 A file path (or `new URL('./logo.png', import.meta.url)`) is read and
 decoded asynchronously; the element measures 0×0 until the decode lands,
-then reflows. The three in-memory forms are synchronous — pixels that
-arrived from a socket, a decoder, or a `getImageData` readback go on screen
-without touching the filesystem. Raw `data` is `width × height × 4` bytes of
-straight (non-premultiplied) RGBA — exactly what `getImageData` hands back —
-and the object is treated as immutable content: hand over a new object when
-the pixels change, or the renderer cannot tell.
+then reflows. Style it a `width` and `height` and nothing moves when it
+does. The in-memory forms skip the filesystem — pixels that arrived from a
+socket, a decoder, or a `getImageData` readback go straight on screen — and
+raw RGBA and an ntk `Image` are synchronous. Encoded bytes are synchronous
+where the decoder is (PNG and JPEG under Node) and land a moment later, the
+way a file does, where it is not: any format under Bun, and WebP elsewhere.
+Raw `data` is `width × height × 4` bytes of straight (non-premultiplied)
+RGBA — exactly what `getImageData` hands back — and the object is treated as
+immutable content: hand over a new object when the pixels change, or the
+renderer cannot tell. That goes for encoded bytes too, which under Bun are
+read on another thread after the commit.
+
+#### Formats, and what decodes them
+
+The format comes from the bytes, never from a file name. Which decoder
+reads them depends on the runtime:
+
+| format           | under Bun                                          | under Node                                 |
+| ---------------- | -------------------------------------------------- | ------------------------------------------ |
+| PNG, JPEG        | `Bun.Image`, off the JavaScript thread             | pngjs, jpeg-js — synchronous               |
+| WebP             | `Bun.Image`, off the JavaScript thread             | image-in-browser, loaded on the first WebP |
+| GIF, BMP         | `Bun.Image`, off the JavaScript thread             | not decoded — the error says to convert    |
+| TIFF, HEIC, AVIF | `Bun.Image` through ImageIO (macOS), WIC (Windows) | not decoded; nor under Bun on Linux        |
+
+**Under Bun, Bun decodes everything**, PNG and JPEG included, which the
+JavaScript decoders could read: libjpeg-turbo, spng and libwebp are built
+into the runtime and run on a worker thread. A 1080p JPEG takes ~110ms of the
+JavaScript thread inside jpeg-js and ~7ms under Bun, which is the difference
+between a stall the user feels and none. What it costs is that bytes under
+Bun land a frame or so late, like a file. Where that matters — a test that
+measures the element on its first frame — decode the bytes yourself and pass
+the result, which is used as-is on every runtime:
+
+```jsx
+import { decodeImage } from 'ntk/image'; // PNG and JPEG, synchronous
+
+const logo = <image src={decodeImage(bytes)} />;
+```
+
+The WebP decoder under Node is pure JavaScript, imported the first time a
+WebP arrives so an app that shows none never loads it: the first WebP pays
+~140ms to load the decoder, and each one about what jpeg-js costs a JPEG of
+the same size.
+
+What differs between the two, so it is not found the hard way:
+
+- **An animation shows its first frame** — an animated WebP on either
+  runtime, a GIF under Bun. Bun's libwebp cannot decode an animated WebP at
+  all (Bun 1.4), so under Bun that one goes to the JavaScript decoder too.
+- **A JPEG's EXIF orientation is applied under Bun and not under Node.**
+  Browsers apply it, and so does Bun; jpeg-js does not, so under Node a
+  phone photo taken in portrait shows on its side. Rotate it before
+  handing it over, or run under Bun.
+- **A format with no decoder says so**: GIF under Node, or HEIC under Bun on
+  Linux, is logged with what to convert it to, and the element shows
+  nothing, the same as a missing file.
 
 Decoded pixels are uploaded to the server once and composited from there on
 every repaint (ntk's `Image` caches its upload per connection), so the cost
