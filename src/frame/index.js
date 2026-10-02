@@ -529,7 +529,9 @@ function PaneHostView({
     }
     let host;
     try {
-      host = app.createPaneHost(wnd);
+      // `send` is for the windows the pane makes besides its own, which a
+      // backend whose pane process cannot show one shows here (Cocoa's)
+      host = app.createPaneHost(wnd, { send: (msg) => s.trySend?.(msg) });
     } catch (err) {
       embedErrorRef.current?.(err);
       return undefined;
@@ -539,17 +541,44 @@ function PaneHostView({
     // The pane's size is this box's laid-out size, told to the pane whenever
     // it changes — the same absolutize hook a <foreign> child window uses
     // (src/foreignnodes.js), because onViewport fires only for scrollers.
-    let sentSize = null;
+    //
+    // And where the box is on the screen, in device pixels (`screen`): the
+    // pane has no window of its own to ask, and a popup it anchors to one of
+    // its nodes is placed against it (`windowOrigin`, src/anchor.js) — a
+    // dropdown in a pane opened from the screen's corner without it. It
+    // moves when the box does and when the window does, so it is sent on
+    // layout, on a scroll that shifts the box, and on every anchor change
+    // of the window, which a move of the window is.
+    let sent = null;
     const syncSize = () => {
       host.setRect(node.abs);
       const sc = node.scale ?? 1;
       const width = Math.max(1, Math.round(node.abs.width / sc));
       const height = Math.max(1, Math.round(node.abs.height / sc));
-      if (sentSize && sentSize.width === width && sentSize.height === height) {
+      const origin = node.root?.window?._screenOrigin;
+      const screen = origin
+        ? {
+            x: Math.round(origin.x + node.abs.x),
+            y: Math.round(origin.y + node.abs.y),
+          }
+        : null;
+      if (
+        sent &&
+        sent.width === width &&
+        sent.height === height &&
+        sent.screen?.x === screen?.x &&
+        sent.screen?.y === screen?.y
+      ) {
         return;
       }
-      sentSize = { width, height };
-      s.trySend?.({ type: 'pane-rect', width, height, scale: sc });
+      sent = { width, height, screen };
+      s.trySend?.({
+        type: 'pane-rect',
+        width,
+        height,
+        scale: sc,
+        ...(screen && { screen }),
+      });
     };
     const origAbsolutize = node.absolutize.bind(node);
     node.absolutize = (ox, oy) => {
@@ -560,13 +589,31 @@ function PaneHostView({
     if (origShift) {
       node._shiftAbs = (dx, dy) => {
         origShift(dx, dy);
-        host.setRect(node.abs);
+        syncSize();
       };
     }
+    const offAnchor = node.root?.onAnchorChange?.(syncSize);
     if (node.abs?.width) syncSize();
 
+    // The window's focus, which the pane has no window to hear: a menu it
+    // keeps open on the strength of the window having it closes when the
+    // user goes to another application (`useDismissOnWindowBlur`).
+    const offFocus = node.root?.onWindowFocusChange?.((focused) =>
+      s.trySend?.({
+        type: 'pane-event',
+        name: focused ? 'focus' : 'blur',
+        ev: { buttons: 0, time: Date.now() },
+      }),
+    );
+
     const off = s.transport.onMessage((msg) => {
-      if (msg?.type === 'pane-present') {
+      if (msg?.type === 'pane-window') {
+        host.paneWindow?.(msg);
+      } else if (msg?.type === 'pane-present' && msg.window != null) {
+        host.presentWindow?.(msg);
+      } else if (msg?.type === 'pane-cursor' && msg.window != null) {
+        host.windowCursor?.(msg);
+      } else if (msg?.type === 'pane-present') {
         host.setRect(node.abs);
         host.present(msg.id);
       } else if (msg?.type === 'pane-cursor') {
@@ -581,6 +628,8 @@ function PaneHostView({
     });
     return () => {
       off();
+      offAnchor?.();
+      offFocus?.();
       node.defaultCursor = undefined;
       node.root?.events?.refreshCursor();
       node.absolutize = origAbsolutize;

@@ -34,7 +34,7 @@ import { CocoaCalendars } from './calendar.js';
 import { CocoaNotifications } from './notifications.js';
 import { CocoaPaneHost } from './panehost.js';
 import { CocoaPermissions } from './permissions.js';
-import { CocoaPaneWindow } from './panewindow.js';
+import { CocoaPaneSubwindow, CocoaPaneWindow } from './panewindow.js';
 import { CocoaColorSampler } from './screencolor.js';
 import { CocoaFilePanels } from './filepanels.js';
 import { CocoaFontManager } from './fonts.js';
@@ -331,6 +331,11 @@ export class CocoaApp {
     // composites (REACT_X11_FRAME is what the Frame host sets on the fork).
     this._paneMode = options.pane ?? process.env.REACT_X11_FRAME === '1';
     this._paneSend = null;
+    // the pane's own window, the one the host lays out and forwards to
+    this._paneWindow = null;
+    // What the pane's other windows said before the host was listening
+    // (`_postWindow`), until its first pane-rect.
+    this._paneOutbox = [];
 
     // The X stub: just enough for the modules that carry an X escape hatch
     // to no-op the way they do against the headless mock.
@@ -447,7 +452,18 @@ export class CocoaApp {
     // shared IOSurfaces and the HOST composites them (src/cocoa/
     // panewindow.js). Chosen by the same prop the X11 pane uses.
     if (this._paneMode && attributes.embeddable) {
-      return new CocoaPaneWindow(this, attributes);
+      const wnd = new CocoaPaneWindow(this, attributes);
+      if (!this._paneWindow || this._paneWindow.destroyed) {
+        this._paneWindow = wnd;
+      }
+      return wnd;
+    }
+    // Any other window a pane makes — a menu, a tooltip, a dialog — is
+    // drawn here and shown by the host, which has the NSApplication this
+    // process does not (#824). An NSWindow made here exists and is never on
+    // glass.
+    if (this._paneMode && !attributes.parent) {
+      return new CocoaPaneSubwindow(this, attributes);
     }
     if (attributes.parent) {
       // A parented "window" here is a GL child surface — GlAreaNode's
@@ -487,10 +503,12 @@ export class CocoaApp {
   /**
    * The Frame host seam (src/frame/index.js): a pane's composited region
    * in this window. Its presence is what routes <Frame> to the shared-
-   * memory pane path instead of the X foreign-window embed.
+   * memory pane path instead of the X foreign-window embed. `send` is the
+   * pane's channel, for the windows the pane makes besides its own: a pane
+   * process runs no AppKit, so they are made here (src/cocoa/panehost.js).
    */
-  createPaneHost(wnd) {
-    return new CocoaPaneHost(this, wnd);
+  createPaneHost(wnd, { send } = {}) {
+    return new CocoaPaneHost(this, wnd, { send });
   }
 
   /**
@@ -780,16 +798,66 @@ export class CocoaApp {
       }
     };
     channel.onMessage((msg) => {
-      const wnd = [...this._windows.values()][0];
-      if (!wnd) return;
+      const pane = this._paneWindow ?? [...this._windows.values()][0];
+      if (!pane) return;
       if (msg?.type === 'pane-rect') {
-        wnd.setPaneSize(msg.width, msg.height, msg.scale);
+        pane.setPaneSize(msg.width, msg.height, msg.scale, msg.screen);
+        this._flushPaneOutbox();
         this._afterInput();
       } else if (msg?.type === 'pane-event') {
-        wnd.emit(msg.name, msg.ev);
+        // input on one of the windows the host shows for this pane names
+        // it; the pane's own is the one that names none
+        const wnd = msg.window != null ? this._windows.get(msg.window) : pane;
+        if (!wnd || wnd.destroyed) return;
+        if (msg.name === 'resize') wnd._hostGeometry?.(msg.ev);
+        // a close request answers with `preventDefault`, which did not
+        // survive the channel
+        else if (msg.name === 'close')
+          wnd.emit('close', { ...msg.ev, preventDefault() {} });
+        else wnd.emit(msg.name, msg.ev);
         this._afterInput();
       }
     });
+  }
+
+  /**
+   * A message about one of the pane's other windows (`CocoaPaneSubwindow`),
+   * held until the host's first pane-rect. The host hears a pane's messages
+   * from the moment it has a `<Frame>`, and knows what to do with these
+   * only once the pane is laid out in it — a menu or a dialog open in the
+   * pane's first commit was made, and announced to nobody. That pane-rect
+   * is also where the pane learns where it is on the screen, so a popup
+   * anchored before it is placed again before anyone shows it.
+   */
+  _postWindow(msg) {
+    if (this._paneOutbox) this._paneOutbox.push(msg);
+    else this._paneSend?.(msg);
+  }
+
+  /**
+   * The host is listening, and the pane knows where it is — `setPaneSize`
+   * has just moved what is anchored to it. Everything held goes out in
+   * order, but a window is announced where it is now: a held move or resize
+   * is where it was before, and sent in order it came after a present the
+   * host showed at the old place.
+   */
+  _flushPaneOutbox() {
+    const held = this._paneOutbox;
+    if (!held) return;
+    this._paneOutbox = null;
+    for (const msg of held) {
+      if (msg.type === 'pane-window') {
+        if (msg.op === 'move' || msg.op === 'resize') continue;
+        const wnd = msg.op === 'create' && this._windows.get(msg.window);
+        if (wnd) {
+          msg.x = wnd.x;
+          msg.y = wnd.y;
+          msg.width = wnd.width;
+          msg.height = wnd.height;
+        }
+      }
+      this._paneSend(msg);
+    }
   }
 
   _unregisterWindow(wnd) {

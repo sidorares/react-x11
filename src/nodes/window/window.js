@@ -550,12 +550,22 @@ export class WindowNode extends Scrollable(Node) {
    * relative to the *frame*, not the root. A popup anchored with them lands
    * near the corner of the screen instead of under its trigger. The server
    * will translate for us, and its answer is right whatever the WM did.
+   *
+   * A backend with no server to ask keeps the origin on its window object
+   * itself, current as of the event that moved it — Cocoa's
+   * `_nativeResized`, a frame pane's `setPaneSize`. There is no question to
+   * ask there, and what is left is what the answer would have done: tell
+   * whatever is anchored to this window that it moved. Without it a popup
+   * stayed where the window had been, and a frame pane told its new place
+   * on the screen dropped its next menu from the old one.
    */
   _refreshScreenOrigin() {
     const wnd = this.window;
+    if (!wnd) return;
     const X = this.app?.X;
     const root = X?.display?.screen?.[0]?.root;
-    if (!wnd || root == null || typeof X.TranslateCoordinates !== 'function') {
+    if (root == null || typeof X.TranslateCoordinates !== 'function') {
+      this._notifyAnchorChange();
       return;
     }
     X.TranslateCoordinates(wnd.id, root, 0, 0, (err, res) => {
