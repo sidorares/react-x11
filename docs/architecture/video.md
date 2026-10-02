@@ -408,8 +408,8 @@ macOS 15.8.1, M1 Pro:
 | `420v` IOSurface, 2 planes, video range        | **green, as filled**             | 0 / 4096 px               |
 | `420f` IOSurface, 2 planes, full range         | **green, as filled**             | —                         |
 | `2vuy` IOSurface, 1 packed plane               | **green, as filled**             | 0 / 4096 px               |
-| `y420` IOSurface, 3 planes, video range        | black                            | —                         |
-| `f420` IOSurface, 3 planes, full range         | black                            | —                         |
+| `y420` IOSurface, 3 planes, video range        | nothing: the tile is transparent | —                         |
+| `f420` IOSurface, 3 planes, full range         | nothing: the tile is transparent | —                         |
 | `AVSampleBufferDisplayLayer`, 30 H.264 frames  | red, as encoded                  | —                         |
 | `AVPlayerLayer`, a `.mov` written by the probe | magenta, as encoded              | —                         |
 | `CGImage` — control                            | orange, as drawn                 | 4096 / 4096 px            |
@@ -421,7 +421,8 @@ Three conclusions, and the first two overturn what was written here before:
   (§13 says what to test through instead). The "free" path is free.
 - **Two planes or packed, not three.** Every bi-planar and packed layout
   tried renders; the three-plane planar ones — what ffmpeg calls
-  `yuv420p`, the default output of nearly every decoder — render black.
+  `yuv420p`, the default output of nearly every decoder — draw nothing:
+  the layer is transparent and the window shows through.
   So the sink's native format on macOS is **NV12**, and an I420 frame is
   interleaved into one on the way in: a loop the bridge's write verb does
   over 1.5 bytes per pixel, in the same pass as the copy it has to make
