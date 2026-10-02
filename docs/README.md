@@ -225,13 +225,16 @@ that have not been built, and say so at the top.
   presentable `Surface` plus `presentedSurface()` policy that would remove
   both. Not built.
 - [architecture/video.md](architecture/video.md) — the design record for
-  video: why no X11 extension decodes anything and the one that did is
-  dead, what a decoded frame costs through core `PutImage` and what Xv
-  would change, the VideoToolbox and Core Animation ladder on macOS
-  measured end to end, the YUV-surface trap that decides the Cocoa design
-  on both playback and capture, what a webcam actually costs, and why a
-  `<video>` element is one element with two very different insides. Not
-  built.
+  video, reviewed against the four backends: why no X11 extension decodes
+  anything and the one that did is dead, what a decoded frame costs through
+  core `PutImage` and what Xv would change, the VideoToolbox and Core
+  Animation ladder on macOS measured end to end, the YUV surface that is
+  blank through `render(in:)` and drawn on screen (probed, and it reverses
+  the first version's Cocoa design), what a frame sink costs through a
+  plain layer, the Media Foundation plan for Windows with the probes it
+  owes, a `<video>` element with two sources — `frames` everywhere, `src`
+  where the platform has a player — on the sprite seam, and how `<Html>`
+  and `<MediaPlayer>` consume it. Not built.
 - [architecture/animation.md](architecture/animation.md) — what the style
   vocabulary cannot say today (a fade, a move that does not reflow, a
   timeline that ends), who should interpolate it, and what offloading a

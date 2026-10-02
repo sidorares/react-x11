@@ -794,9 +794,12 @@ one-second grace — is `promotion.js`'s and transfers either way.
   untouched — the constant-cost flip that design wants.
 - **Video**: Media Foundation decodes into NV12 textures, and a YUV
   swapchain on its own visual lets the display's overlay planes scan it
-  out without a composition pass, where the GPU has them. Its own design,
-  later ([architecture/video.md](architecture/video.md) is the record on
-  the other backends).
+  out without a composition pass, where the GPU has them. Its own design:
+  [architecture/video.md](architecture/video.md) §4 is the plan for this
+  backend — `IMFMediaEngine` in frame-server mode first, drawn in paint
+  order, the windowless swapchain onto a visual once promotion can decide
+  what is drawn over it — and §4.3 the probes it owes before any of it is
+  written.
 - The **composition swapchain** API of Windows 11 (present at a target
   time, per-buffer availability, statistics that include the displayed
   time) belongs to these three, not to the 2D surface.
