@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.36.0](https://github.com/sidorares/react-x11/compare/v2.35.0...v2.36.0) (2026-10-02)
+
+
+### Features
+
+* **cocoa:** a sprite listed before another of its element's that the frame turns down, and that the other overlaps, is turned down with it in that frame, so an element may offer parts its later ones overlap on the word that those are lifted too, where it had to keep every such part for itself ([#852](https://github.com/sidorares/react-x11/issues/852)) ([e88e2fb](https://github.com/sidorares/react-x11/commit/e88e2fb93544e071c0db07973d5bccc7bfa2fd72))
+
+
+### Bug Fixes
+
+* fillText places its text where textAlign and textBaseline say on macOS and Windows, centred on its x, ended at it or hung from the top of its em box, where the native context drew every string from the left end of its alphabetic baseline whatever the two said ([#853](https://github.com/sidorares/react-x11/issues/853)) ([a7ad0d3](https://github.com/sidorares/react-x11/commit/a7ad0d3bedb91af60deff98ac4c43af665fb243d))
+* **types:** DesktopSettings declares animations, the reduced-motion half core answers on every backend and its own loops and ProgressBar read, where a TypeScript app could not read it without a cast ([#851](https://github.com/sidorares/react-x11/issues/851)) ([a051925](https://github.com/sidorares/react-x11/commit/a0519253093c63263a8d0e3aad500b89f81db378))
+
+
+### Performance Improvements
+
+* **animation:** a loop stops while everything it can draw is out of sight, scrolled out of its pane, clipped away by a box above it or outside the window, and runs again from the top when it comes back, where twenty indeterminate bars scrolled out of a list kept 75 frames and 75 layout passes a second going on macOS ([#847](https://github.com/sidorares/react-x11/issues/847)) ([988f7fe](https://github.com/sidorares/react-x11/commit/988f7fefe9e1e929460618a6d25b580967038b8f))
+* **cocoa:** a loop on a row of a list runs in the render server, its layer cut to the list's box and the scrollbar's thumb lifted above it, and a loop the clock runs is offered again once the scene would take it, where it is in its cycle, where every row under the bar's track or half out of the list, and every loop turned down once, ran on the clock at the display's rate ([#848](https://github.com/sidorares/react-x11/issues/848)) ([5c45634](https://github.com/sidorares/react-x11/commit/5c456346041181d0c855e0dc8dfd80100c7bacd5))
+* **cocoa:** an indeterminate ProgressBar slides in the render server, a loop on an inset of a box out of the flow that no pointer lands on running as its layer's position, cut to the rounded track it slides in, where every bar on screen cost a layout pass and a frame at the display's rate, 16% of a core on an M1 Pro at 75 Hz ([#849](https://github.com/sidorares/react-x11/issues/849)) ([9c568a0](https://github.com/sidorares/react-x11/commit/9c568a06b4d0dcd97c711cd850c6d7c171a74716))
+
 ## [2.35.0](https://github.com/sidorares/react-x11/compare/v2.34.0...v2.35.0) (2026-10-02)
 
 
