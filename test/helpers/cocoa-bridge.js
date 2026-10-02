@@ -163,6 +163,15 @@ export function fakeCocoaBridge({ screens } = {}) {
     // space (windowkit/appkit's colorSpace verb), which is what lets the
     // surface presenter promote by default
     colorSpace: () => 'sRGB',
+    // a transform may be a whole matrix (windowkit/appkit#97), which is what
+    // the surface presenter's sprites ask for before lifting any
+    transformForms: () => [
+      'translate',
+      'rotate',
+      'scale',
+      'matrix',
+      'matrix3d',
+    ],
     txBegin() {},
     txCommit() {},
 
@@ -328,12 +337,20 @@ export function pointerOver(app, node, { press = false, dx = 0, dy = 0 } = {}) {
 
 export async function mountCocoa(
   children,
-  { width = 200, height = 120, promote, presenter, ...attrs } = {},
+  {
+    width = 200,
+    height = 120,
+    promote,
+    presenter,
+    native: bridge,
+    ...attrs
+  } = {},
 ) {
   const cocoa = {};
   if (promote !== undefined) cocoa.promote = promote;
   if (presenter !== undefined) cocoa.presenter = presenter;
-  const { native, app } = fakeCocoaApp(cocoa);
+  // a bridge of the test's own, for one that lacks a verb
+  const { native, app } = fakeCocoaApp(cocoa, bridge ? { native: bridge } : {});
   const root = await createRoot({ app });
   mounted.push(root);
   const windowOf = (kids) => h('window', { width, height, ...attrs }, kids);
