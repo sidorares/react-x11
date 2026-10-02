@@ -142,6 +142,19 @@
     "dupQueries": 0,
     "churn": 0
   },
+  "focus: 6 Tabs down a form in a scroll pane": {
+    "requests": 178,
+    "bytesOut": 12772,
+    "bytesIn": 1064,
+    "replies": 17,
+    "composites": 19,
+    "compositePixels": 209968,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
+    "stalls": 1,
+    "dupQueries": 0,
+    "churn": 0
+  },
   "svg: 100 unchanged icons, full repaint": {
     "requests": 105,
     "bytesOut": 3676,

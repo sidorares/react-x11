@@ -16,7 +16,7 @@ import {
   XK_END,
   XK_SPACE,
 } from '../keysyms.js';
-import { DAMAGE_SLOP, layoutDiff } from './damage.js';
+import { DAMAGE_SLOP, NO_DAMAGE, layoutDiff } from './damage.js';
 import { describeSize, laidBox, offsetInParent } from './layout.js';
 import { insetRect, intersectRects, rectsOverlap } from './rects.js';
 import {
@@ -340,11 +340,23 @@ export const Scrollable = (Base) =>
       const askedY = this.scrollY;
       this.scrollY = clampScroll(this.scrollY, this._maxScroll('y'));
       this.scrollX = clampScroll(this.scrollX, this._maxScroll('x'));
-      // Of those three moves the clamp's is the one no call claimed when it
-      // was asked for — the diff below claims it
+      // Of those three moves the clamp's is the one nobody asked for, and
+      // where no blit is armed the diff below claims it
       const clamped = this.scrollX !== askedX || this.scrollY !== askedY;
       this._reportViewport();
       this._reportScrollTo(from);
+      // …and whichever of them moved the offsets claims the viewport the
+      // content moved in, once the pass is over. A `scrollIntoView` asks for
+      // its pass claiming nothing (issue #813), so this is the only claim
+      // its move gets, and the blit it armed reads it as the scroll's own,
+      // as it reads the one `scrollTo` makes. Not through the diff, where a
+      // claim reads as content laid out anew, which is not a pure scroll
+      // and declines that blit. A clamp under an armed blit owes it too:
+      // the walk below gives that frame's moves to the blit's ledger, and
+      // without a scrollTo nothing else has claimed the viewport.
+      if (this.scrollX !== from.x || this.scrollY !== from.y) {
+        this.root?._reflowed.add(this);
+      }
       // `scrollX` is how far the content has moved **from its start**, which
       // is the right-hand edge in RTL — so scrolling shifts the children the
       // other way. Keeping it a distance rather than a coordinate is what
@@ -588,43 +600,7 @@ export const Scrollable = (Base) =>
       // A pane no pass has placed arms nothing: its first pass is a layout
       // change rather than a pure scroll.
       if (root && this._childOrigin != null) {
-        // Arming is the one moment the evidence still exists: the viewport
-        // claim recorded below coalesces earlier claims into itself
-        // (addDamageRect keeps the list disjoint), after which a change
-        // inside the viewport is indistinguishable from the scroll's own
-        // claim — the blind spot the claim-time cancel in
-        // WindowNode.invalidate cannot cover (react-x11#295). The scroll
-        // has not claimed yet, so damage already overlapping this viewport
-        // is foreign by construction: poison the frame instead of arming,
-        // and the full-viewport repaint below stays in force.
-        const arming = this._pendingBlitFrom == null;
-        // The ledger this frame's changes inside the viewport are written
-        // to (issue #398). Opened with the blit and read by
-        // _applyScrollBlits, which clears it beside the origin.
-        if (arming) this._blitLedger = [];
-        if (arming && Array.isArray(root._damage)) {
-          const zone = insetRect(this.abs, -(DAMAGE_SLOP * 2 + 1));
-          for (const rect of root._damage) {
-            // Already coalesced, so these rects are as coarse as the frame
-            // has made them — which the ledger reads conservatively: a blob
-            // that swallowed the viewport says so and poisons, exactly as
-            // this gate used to for every claim it saw.
-            if (rectsOverlap(rect, zone) && !this._recordBlitClaim(rect)) {
-              this._pendingBlitFrom = BLIT_POISONED;
-              break;
-            }
-          }
-        }
-        // An element that also shifted its own drawing this frame
-        // (`scrollContents`, issue #303) is two shifts of the same pixels,
-        // and a frame can only have one.
-        if (this._pendingBlitContents) this._pendingBlitFrom = BLIT_POISONED;
-        // The offsets whose pixels are on screen, captured before the first
-        // change of the frame: the frame's blit fast path (issue #138) shifts
-        // from *these* to wherever layout settles, however many scrollTo
-        // calls land in between.
-        this._pendingBlitFrom ??= { x: this.scrollX, y: this.scrollY };
-        (root._pendingScrolls ??= new Set()).add(this);
+        this._armScrollBlit(root);
         // ... and the claim about to be recorded is the scroll itself, not a
         // reason to un-blit it
         root._scrollClaim = this;
@@ -642,6 +618,52 @@ export const Scrollable = (Base) =>
       // exposed strip and blits the rest — see WindowNode.)
       this.root?.invalidate(true, this, 'scroll');
       if (root) root._scrollClaim = null;
+    }
+
+    /**
+     * Arm the frame's scroll blit (issue #138) for a move of this pane's
+     * offsets: a `scrollTo` about to make one, or a `scrollIntoView` whose
+     * pass may (`scrollIntoView`). Before the move, and before the claim
+     * that comes with it.
+     *
+     * Arming is the one moment the evidence still exists: the viewport
+     * claim coalesces earlier claims into itself (addDamageRect keeps the
+     * list disjoint), after which a change inside the viewport is
+     * indistinguishable from the scroll's own claim — the blind spot the
+     * claim-time cancel in WindowNode.invalidate cannot cover
+     * (react-x11#295). The scroll has not claimed yet, so damage already
+     * overlapping this viewport is foreign by construction: poison the
+     * frame instead of arming, and the full-viewport repaint stays in force.
+     */
+    _armScrollBlit(root) {
+      const arming = this._pendingBlitFrom == null;
+      // The ledger this frame's changes inside the viewport are written
+      // to (issue #398). Opened with the blit and read by
+      // _applyScrollBlits, which clears it beside the origin.
+      if (arming) this._blitLedger = [];
+      if (arming && Array.isArray(root._damage)) {
+        const zone = insetRect(this.abs, -(DAMAGE_SLOP * 2 + 1));
+        for (const rect of root._damage) {
+          // Already coalesced, so these rects are as coarse as the frame
+          // has made them — which the ledger reads conservatively: a blob
+          // that swallowed the viewport says so and poisons, exactly as
+          // this gate used to for every claim it saw.
+          if (rectsOverlap(rect, zone) && !this._recordBlitClaim(rect)) {
+            this._pendingBlitFrom = BLIT_POISONED;
+            break;
+          }
+        }
+      }
+      // An element that also shifted its own drawing this frame
+      // (`scrollContents`, issue #303) is two shifts of the same pixels,
+      // and a frame can only have one.
+      if (this._pendingBlitContents) this._pendingBlitFrom = BLIT_POISONED;
+      // The offsets whose pixels are on screen, captured before the first
+      // change of the frame: the frame's blit fast path (issue #138) shifts
+      // from *these* to wherever layout settles, however many scrollTo
+      // calls land in between.
+      this._pendingBlitFrom ??= { x: this.scrollX, y: this.scrollY };
+      (root._pendingScrolls ??= new Set()).add(this);
     }
 
     /**
@@ -864,13 +886,29 @@ export const Scrollable = (Base) =>
      * that has no geometry yet. `absolutize` resolves it against freshly
      * computed yoga positions, and `onScroll` reports the move once that
      * pass is over (`_reportScrollTo`).
+     *
+     * Asking claims nothing (issue #813). Most of the time the node is in
+     * view already — every Tab between the fields of a form in a pane — and
+     * a claim made now, before anyone knows, repainted the pane's whole
+     * viewport for a frame that moved nothing. So the pass is asked for
+     * with no damage, and a request that finds its node in view costs what
+     * the focus change costs outside a pane. One that does move the pane
+     * moves it the way a scroll does: the blit is armed here, as `scrollTo`
+     * arms it, and the pass claims the viewport once the offsets have
+     * changed (`_absolutizeChildren`), which `_applyScrollBlits` narrows to
+     * the strip the move uncovered.
      */
     scrollIntoView(node) {
       if (!node || !this.isScroller()) return;
       this._scrollIntoViewTarget = node;
-      // whatever the resolved scroll moves is inside this clipped viewport,
-      // so the viewport's own before/after rects bound the frame
-      this._invalidateLayout('scroll');
+      const root = this.root;
+      if (!root) return;
+      // a pane no pass has placed arms nothing, as for `scrollTo`
+      if (this._childOrigin != null) this._armScrollBlit(root);
+      // `'scroll'`: the walk goes everywhere, which is what reaches this
+      // pane however clean the boxes above it are, and the content floors
+      // owe nothing
+      root.invalidate(true, NO_DAMAGE, 'scroll', this);
     }
 
     _resolveScrollIntoView() {
