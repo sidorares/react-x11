@@ -159,6 +159,18 @@ export interface Context2D {
    * asks this first.
    */
   readonly scalesText?: boolean;
+  /**
+   * `true` where a `Surface` drawn under a `globalAlpha` below 1 costs about
+   * what it costs drawn at 1 — the macOS context, over a bridge that scales
+   * the surface's pixels by the alpha rather than drawing it through
+   * CoreGraphics' own alpha, which costs some fifteen times as much. Where
+   * it is true, fading a group drawn on a surface of its own — CSS
+   * `opacity` — is cheaper than fading each thing drawn in it, as well as
+   * right where they overlap. Absent where that is not known: Windows, and
+   * X11, whose server composites a surface under an alpha in the request
+   * that composites it.
+   */
+  readonly fadesSurfacesCheaply?: boolean;
   measureText(text: string): { width: number; [key: string]: unknown };
   /**
    * Composite an offscreen `Surface` (`react-x11/ntk`) — whole at a point,

@@ -1562,7 +1562,23 @@ export class BackendContext2D {
       dw = sw;
       dh = sh;
     }
-    if (!this._blit(src, sx, sy, sw, sh, dx, dy, dw, dh)) {
+    if (this._blit(src, sx, sy, sw, sh, dx, dy, dw, dh)) {
+      // a row memcpy
+    } else if (this._faded()) {
+      this._native.ctxDrawSurfaceFaded(
+        this._s(),
+        src,
+        sx,
+        sy,
+        sw,
+        sh,
+        dx,
+        dy,
+        dw,
+        dh,
+        this._state.globalAlpha,
+      );
+    } else {
       this._native.ctxDrawSurface(
         this._s(),
         src,
@@ -1577,6 +1593,41 @@ export class BackendContext2D {
       );
     }
     this._dirty();
+  }
+
+  /**
+   * Whether a surface is drawn under this `globalAlpha` from its pixels
+   * scaled by it (@windowkit/appkit's `ctxDrawSurfaceFaded`): where the
+   * alpha is below 1, no shadow would ink, and the bridge has the verb.
+   * CoreGraphics draws an image under an alpha below 1 at some fifteen times
+   * what the same draw costs at 1 — a 556x300 surface 1.24ms against 0.09 —
+   * so a group faded on a surface (`NodePaint._paintGroup`) cost more than
+   * fading each thing in it; scaled first, the same colours within a unit
+   * take 0.25ms (#810). A shadow is drawn from the image and the alpha
+   * together, so a draw that casts one is left to the draw that always did.
+   */
+  _faded() {
+    const st = this._state;
+    if (!(st.globalAlpha < 1)) return false;
+    if (typeof this._native.ctxDrawSurfaceFaded !== 'function') return false;
+    return !(
+      parseColor(st.shadowColor)[3] > 0 &&
+      (st.shadowBlur > 0 || st.shadowOffsetX !== 0 || st.shadowOffsetY !== 0)
+    );
+  }
+
+  /**
+   * `true` where a surface drawn under a `globalAlpha` below 1 costs about
+   * what it costs drawn at 1 — the macOS context, over a bridge with
+   * `ctxDrawSurfaceFaded` — so that a group faded on a surface of its own,
+   * as CSS `opacity` has it, is the cheaper way to fade what overlaps, and
+   * not only the right one. Absent where that is not known: on Windows,
+   * where Direct2D draws the bitmap with the opacity and nobody has
+   * measured it, and on X11, whose server composites a surface under an
+   * alpha in the request that composites it at all.
+   */
+  get fadesSurfacesCheaply() {
+    return typeof this._native.ctxDrawSurfaceFaded === 'function' || undefined;
   }
 
   /**

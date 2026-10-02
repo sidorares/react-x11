@@ -1514,6 +1514,41 @@ vocabulary is smaller, which is what the feature detection is for — in
 CI, and, where the real bridge loads, that the blit and the draw are
 pixel-identical.
 
+### Compositing a surface under an alpha
+
+CoreGraphics draws an image under an alpha below 1 at some fifteen times
+what the same draw costs at 1, and composites a transparency layer the
+same way. Neither the flip nor the interpolation is the cost, and nor is
+the colour space, which is sRGB at both ends. So a group faded on a
+surface of its own — `<box opacity>` (`NodePaint._paintGroup`), CSS
+`opacity` in `@react-x11/components`' `<Html>` — cost more than drawing
+each thing in it faded, which is the wrong answer wherever they overlap
+(#810). A standalone benchmark of the bridge's own surfaces, a 556×300
+card on an M1 Pro:
+
+| drawn as                                  |   ms |
+| ----------------------------------------- | ---: |
+| the card, each thing at alpha .6          | 0.63 |
+| its surface at alpha 1                    | 0.09 |
+| its surface at alpha .6, the CGImage draw | 1.24 |
+| a transparency layer at alpha .6          | 1.30 |
+| its pixels scaled by .6, then drawn at 1  | 0.25 |
+
+The bridge's `ctxDrawSurfaceFaded` (@windowkit/appkit) is the last row:
+`ctxDrawSurface` with the alpha passed again, since CoreGraphics keeps no
+getter for the one `ctxSetGlobalAlpha` set, which scales the source rect's
+premultiplied pixels into a bitmap of their own and draws that at 1. The
+colours are the same within a unit a channel. The context sends a draw
+there when its `globalAlpha` is below 1, the bridge has the verb and no
+shadow would ink — a shadow is drawn from the image and the alpha
+together — and says so as `fadesSurfacesCheaply`, beside `scalesText`, for
+an element choosing between fading a group and fading each thing. The
+bridge itself draws what is not that shape — a rect off the pixel grid, an
+IOSurface source, a surface onto itself — through the CGImage under the
+alpha, as before, and so does a bridge without the verb.
+`test/cocoa-composite.test.js` pins the decisions over a fake bridge, and,
+where the real bridge has the verb, that its colours are the draw's.
+
 ### A shadow from a tile
 
 CoreGraphics blurs a shadow on every fill that has one set, and what it
