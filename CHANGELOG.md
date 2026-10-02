@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.29.0](https://github.com/sidorares/react-x11/compare/v2.28.0...v2.29.0) (2026-10-02)
+
+
+### Features
+
+* **cocoa:** an element hands the surface presenter parts of its drawing, sprites, each lifted onto a layer of its own under promotion's rules and animated by the render server, where an animation inside a drawn element was JavaScript frames ([#821](https://github.com/sidorares/react-x11/issues/821)) ([db06ffd](https://github.com/sidorares/react-x11/commit/db06ffd057986c9e53486f168a36a7db433f42d7)), closes [#819](https://github.com/sidorares/react-x11/issues/819)
+
+
+### Bug Fixes
+
+* **deps:** @windowkit/appkit 0.19.0, so that sprites lift, with a transform as a matrix and a negative delay, and a window is colour-managed on a wide-gamut display, where its bitmap was more saturated than its CSS colours and a promoted node changed colour on its layer ([#823](https://github.com/sidorares/react-x11/issues/823)) ([231e7aa](https://github.com/sidorares/react-x11/commit/231e7aa75386b69f2005e952d9556252c393caa9)), closes [#820](https://github.com/sidorares/react-x11/issues/820)
+
 ## [2.28.0](https://github.com/sidorares/react-x11/compare/v2.27.0...v2.28.0) (2026-10-02)
 
 
