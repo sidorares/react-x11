@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.33.0](https://github.com/sidorares/react-x11/compare/v2.32.0...v2.33.0) (2026-10-02)
+
+
+### Features
+
+* &lt;video src&gt; plays a file or URL with AVFoundation on macOS, on the player's own layer lifted into the picture or copied into it while something is drawn over it, with HTML's props, events and ref ([#837](https://github.com/sidorares/react-x11/issues/837)) ([c152080](https://github.com/sidorares/react-x11/commit/c152080a77a2b12982fc366f57576397ea2300db))
+* &lt;video&gt;, frames an application decodes into a VideoFrames sink, drawn on every backend and lifted onto a layer of its own on macOS where every push reaches the screen with no frame of the window's, and objectFit for &lt;video&gt; and &lt;image&gt; ([#836](https://github.com/sidorares/react-x11/issues/836)) ([1c19ada](https://github.com/sidorares/react-x11/commit/1c19ada22078f8b3ca217e7d10268f225ca51d3b))
+* **cocoa:** a sprite's clip may have round corners, clipRadius, which the box its layer is cut in takes, so a part that reaches a rounded card's corners is lifted, where a clip could only be a rectangle and its element kept such a part on its own clock ([#838](https://github.com/sidorares/react-x11/issues/838)) ([b835bf2](https://github.com/sidorares/react-x11/commit/b835bf287f919b869d5f8cde2bd0b05367586e0d))
+
+
+### Bug Fixes
+
+* **cocoa:** text on a Retina display is set at its point size, so a 13px system-font label is as wide as AppKit sets it and an emoji is wider than 1em, where a font made at its device pixel size was the face as CoreText sets it at twice the size ([#840](https://github.com/sidorares/react-x11/issues/840)) ([fc4d4f0](https://github.com/sidorares/react-x11/commit/fc4d4f09cbc3118c5b588fcfd298a6cdbb49a0fc))
+
 ## [2.32.0](https://github.com/sidorares/react-x11/compare/v2.31.0...v2.32.0) (2026-10-02)
 
 
