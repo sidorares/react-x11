@@ -292,14 +292,12 @@ export class WindowFlush {
       placed = true;
     }
     // A loop this arrangement put out of sight stops, and one it brought
-    // back runs again: after the pass and the placements, so it is judged
-    // where things landed, and before the presenter's word, so a loop
-    // handed to it is taken back in the frame that hid it. Nothing moves
-    // anything but these two, so a frame without either has nothing new to
-    // judge.
-    if ((layoutRan || placed) && this._loopNodes.size) {
-      this._recheckLoopSight();
-    }
+    // back runs again; one the clock runs is offered to the presenter
+    // again (`_recheckLoops`). After the pass and the placements, so it is
+    // judged where things landed, and before the presenter's word, so a
+    // loop handed to it, or taken back, is in this frame. Nothing moves
+    // anything but these two passes, so sight is judged only after one.
+    if (this._loopNodes.size) this._recheckLoops(layoutRan || placed);
     // A presenter compositing part of the tree on layers of its own — the
     // surface presenter's promoted nodes (src/cocoa/promotion.js) — gets
     // its word in here: after layout, so it sees where everything landed,

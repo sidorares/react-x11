@@ -950,6 +950,9 @@ export const Scrollable = (Base) =>
      * its own route, since it paints through `_paintRegion` and never
      * through `Node.paint`. */
     _paintScrollbars(ctx) {
+      // on layers of their own, over the layers of the rows they are drawn
+      // over (src/cocoa/promotion.js `_syncThumbs`)
+      if (this._thumbsLifted) return;
       for (const bar of this._scrollbars()) {
         paintScrollbarThumb(ctx, bar, this.props.scrollbarColor);
       }

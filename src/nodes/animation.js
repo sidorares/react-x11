@@ -23,6 +23,12 @@ import { inThemeWalk } from './cascade.js';
 import { insetRect, intersectRects, outerPixels } from './rects.js';
 import { shallowEqual } from './util.js';
 
+/** How often a loop the clock runs is offered to a presenter again, at
+ *  most (`_recheckLoops`): a check is a walk up the node's ancestors and
+ *  along what is painted after it, and the loop is a frame every refresh
+ *  for as long as it waits. */
+const REOFFER_MS = 250;
+
 /** The loopable properties that reach past the node's box without moving
  *  anything: a ring that grows draws further out than the node did. */
 const REACH_PROPS = new Set(['outlineWidth', 'outlineOffset']);
@@ -304,14 +310,51 @@ export class NodeAnimation {
   }
 
   /** The presenter could not run `entry` after all — the node turned into a
-   *  raster between the swap and the frame. The frame clock takes it from
-   *  the top; the property's declared start is where the pixels still are. */
+   *  raster between the swap and the frame, or its layer went. A transition
+   *  starts again from the top, since the property's declared start is
+   *  where its pixels still are. A loop goes on where it is in its cycle:
+   *  the render server ran it from `start` (`LayerAnimations.apply`), or it
+   *  never left the clock, so a spinner given back does not jump. */
   _offloadDeclined(prop, entry) {
     if (this._anim?.get(prop) !== entry || this.destroyed) return;
     entry.offloaded = false;
-    entry.start = now();
+    entry.headStart = undefined;
+    if (entry.loop) entry.value = animationValueAt(entry, now() - entry.start);
+    else entry.start = now();
     this.style = { ...this._targetStyle, ...this._animatedValues() };
     this.root?._startAnimating(this);
+  }
+
+  /**
+   * Loops the frame clock runs that the presenter would take now: turned
+   * down by a frame, or given back, by a scene that has changed since — an
+   * ancestor done fading, a sibling gone, a thumb scrolled away. Nothing
+   * about a loop would ever ask again, so the window asks (`_recheckLoops`),
+   * and only where the presenter says a frame would take it
+   * (`wouldAnimateNode`), so a loop it would turn down again costs no swap.
+   * Handed over where it is in its cycle (`headStart`).
+   */
+  _offerLoopsAgain() {
+    const wnd = this.root?.window;
+    let asked = false;
+    let moved = false;
+    for (const [prop, a] of this._anim ?? []) {
+      if (!a.loop || a.offloaded) continue;
+      if (!asked) {
+        if (!wnd.wouldAnimateNode(this)) return;
+        asked = true;
+      }
+      a.headStart = now() - a.start;
+      if (this._offload(prop, a)) {
+        a.offloaded = true;
+        moved = true;
+      } else {
+        a.headStart = undefined;
+      }
+    }
+    if (!moved) return;
+    this.style = { ...this._targetStyle, ...this._animatedValues() };
+    this._scheduleAnimationFrames();
   }
 
   /** Keep the frame clock running only for what the clock itself animates;
@@ -388,13 +431,19 @@ export class NodeAnimation {
         // re-rendered — which is the frame after every state change in the
         // app.
         if (current?.loop && sameAnimation(current, spec)) {
-          // A loop the clock started before the window had a presenter —
-          // one declared at mount runs from `_setRoot`, before `realize` —
-          // moves over the first time a presenter can take it. Its phase is
-          // the render server's from here, which is what a restart costs.
-          if (!current.offloaded && this._offload(spec.prop, current)) {
-            current.offloaded = true;
-            changed = true;
+          // A loop the clock runs moves over the first time a presenter
+          // takes it: one declared at mount runs from `_setRoot`, before
+          // `realize`, and one a frame turned down runs until the next swap
+          // offers it again (or `_offerLoopsAgain` does). It goes where it
+          // has got to in its cycle (`headStart`), so nothing jumps.
+          if (!current.offloaded) {
+            current.headStart = now() - current.start;
+            if (this._offload(spec.prop, current)) {
+              current.offloaded = true;
+              changed = true;
+            } else {
+              current.headStart = undefined;
+            }
           }
           continue;
         }
@@ -460,7 +509,7 @@ export class NodeAnimation {
    * away by the boxes that clip it, or lies outside the window — a spinner
    * in a row scrolled out of its list, a bar in a panel scrolled away.
    * Judged against the arrangement the last layout pass left, and again
-   * after every pass that moved anything (`_recheckLoopSight`).
+   * after every pass that moved anything (`_recheckLoops`).
    *
    * Never from where a frame of the loop has the node *now*: a block that
    * slides across a track is off it at the start of every crossing, and a
@@ -654,18 +703,38 @@ export class WindowAnimation {
   }
 
   /**
-   * A pass moved things: a loop it put out of sight stops, and one it
-   * brought back runs again (`_loopsOutOfSight`) — from the top, as every
-   * stop here resumes, since nobody saw where it had got to. Only the loops
-   * whose answer changed are asked again, so a pass that moved nothing of
-   * theirs costs a walk up from each.
+   * After the frame's layout and placements, before the presenter's word.
+   *
+   * Where a pass moved things (`moved`), a loop it put out of sight stops,
+   * and one it brought back runs again (`_loopsOutOfSight`) — from the top,
+   * as every stop here resumes, since nobody saw where it had got to. Only
+   * the loops whose answer changed are asked again, so a pass that moved
+   * nothing of theirs costs a walk up from each.
+   *
+   * And where a presenter can run a loop in the render server, a loop in
+   * sight that the clock runs is offered to it again (`_offerLoopsAgain`),
+   * each at most every `REOFFER_MS`: what turned it down can go without a
+   * layout pass — an ancestor's fade arriving is a paint — and the loop is
+   * a frame every refresh until it is taken.
    */
-  _recheckLoopSight() {
+  _recheckLoops(moved) {
+    const offer = typeof this.window?.wouldAnimateNode === 'function';
+    if (!moved && !offer) return;
+    const t = offer ? now() : 0;
     for (const node of [...this._loopNodes]) {
-      const out = node._loopsOutOfSight();
-      if (out === (node._outOfSight === true)) continue;
-      node._outOfSight = out;
-      node._updateLoops();
+      if (moved) {
+        const out = node._loopsOutOfSight();
+        if (out !== (node._outOfSight === true)) {
+          node._outOfSight = out;
+          node._updateLoops();
+          continue;
+        }
+      }
+      if (!offer || node._outOfSight === true || node.destroyed) continue;
+      if (!(t - (node._offeredAt ?? -Infinity) >= REOFFER_MS)) continue;
+      if (!node.root?._animating.has(node)) continue; // the clock runs none
+      node._offeredAt = t;
+      node._offerLoopsAgain();
     }
   }
 

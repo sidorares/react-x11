@@ -1757,21 +1757,49 @@ sibling at any level (a later subtree counts where it puts ink, so a
 layout-only container laid over the node is no overlap, and a later
 subtree that is itself promoted is on a layer above and does not count),
 no ancestor's border ring or focus ring (both are painted after the
-children), no scrollbar — and only when every clipping ancestor holds the
-whole of it, because the layer would not be clipped, and no ancestor
-fades, because the layer would not fade with it: a box inside a faded box
-stays in the group's pixels, on the clock, where a layer on the root was
-drawn at full strength until #817. All of it is answered from
+children), and no ancestor that fades, because the layer would not fade
+with it: a box inside a faded box stays in the
+group's pixels, on the clock, where a layer on the root was drawn at full
+strength until #817. A clipping ancestor with square corners cuts the
+layer to its box: the layer goes in a box of the clip's size that masks to
+it, the way an element's part is cut (below), so a row half scrolled out
+of its list is promoted, and one none of which shows is kept on a layer
+that shows nothing. One with round corners has to hold the whole of the
+node, since no box is cut to a curve. All of it is answered from
 `paintOrder()` and the cached paint reach, and the same test runs again
 every frame, later-painted nodes first, so a node that becomes
-overlapped, hidden, clipped, faded around or non-plain (a `:hover` that
-adds a shadow) returns to the bitmap in the frame that finds it, the
-animation handed back to the clock. Overlays, toasts, drag ghosts, spinners and floating
-cards pass by construction; a hover fade on a row in the middle of a list
-does not, and stays on the clock. Declining is always safe — the frame
+overlapped, hidden, clipped round, faded around or non-plain (a `:hover`
+that adds a shadow) returns to the bitmap in the frame that finds it, the
+animation handed back to the clock. Overlays, toasts, drag ghosts,
+spinners, floating cards and the rows of a list pass by construction.
+Declining is always safe — the frame
 clock runs the animation exactly as it does with promotion off — and a
 refusal is remembered until the next layout, so the same scene does not
 cost a frame's decline per retarget.
+
+**A scrollbar's thumb goes above the rows it is drawn over.** The bars
+are painted after a pane's children, over them, and the thumb is a bar's
+only ink — its track is not drawn. So a row under the thumb is no reason
+to refuse the row: the thumb goes on a layer of its own instead, a colour
+and a radius as core paints it, ordered after everything inside the pane
+and before whatever is painted after it, and the bitmap stops painting it
+(`Scrollable._paintScrollbars`). That is only where nothing painted after
+the pane reaches anywhere the thumb can go, nothing above the pane fades
+and every clip above it holds the track whole — `_clear` asked of the
+pane at its tracks — and the thumb is back in the bitmap in the frame no
+layer is under it any more. Without it every row of a list was under the
+track, and a list of pulsing rows was the clock's at the display's rate.
+
+**A loop the clock runs is offered again.** Nothing about a loop ever asks
+twice — a transition ends and the next one is offered afresh, but a loop
+turned down at its start would run on the clock, a frame every refresh,
+for as long as it runs. So after each frame's layout the window offers
+every loop the clock runs to the presenter again, at most every 250 ms and
+only where the scene would take it now (`wouldTake`): a fading ancestor
+arrived at 1, a sibling moved away. It comes over
+where it is in its cycle — the render server's animation starts that far
+in — and a loop given back carries on from where the render server had
+it, so a spinner that changes hands does not jump either way.
 
 **The frame.** `WindowNode.flush()` gives the presenter its word in after
 layout and before the damage is taken (`window.prepareFrame`, feature-

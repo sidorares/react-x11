@@ -502,11 +502,18 @@ test("a loop's delay is a wait on the render server's clock, or a head start", a
         backgroundColor: { to: '#00ff00', duration: 900, delay },
       },
     };
-    const m = await mountAnimated(loop);
-    await m.rerender(loop);
-    m.presenter.frame(m.windowNode);
-    const [[, options]] = m.bridge.argsOf('addAnimation');
-    return { delay: options.delay, timeOffset: options.timeOffset };
+    // held: the loop goes over where the clock has it, and on the wall
+    // clock that is however long the mount took
+    const clock = withFrameClock();
+    try {
+      const m = await mountAnimated(loop);
+      await m.rerender(loop);
+      m.presenter.frame(m.windowNode);
+      const [[, options]] = m.bridge.argsOf('addAnimation');
+      return { delay: options.delay, timeOffset: options.timeOffset };
+    } finally {
+      clock.restore();
+    }
   };
   assert.deepStrictEqual(await opts(300), {
     delay: 0.3,
