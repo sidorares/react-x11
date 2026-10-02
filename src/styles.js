@@ -6,6 +6,7 @@
 import { cssColorStraight } from 'ntk/color';
 
 import { parseBoxShadow, parseLinearGradient } from './decorations.js';
+import { OBJECT_FITS } from './nodes/fit.js';
 import {
   validateGridValue,
   GRID_CONTAINER_PROPS,
@@ -575,6 +576,9 @@ const STYLE_PROPS = new Set([
   ...TEXT_PAINT_PROPS,
   'color',
   'borderStyle',
+  // Where an `<image>`'s or a `<video>`'s picture goes in its box — CSS's
+  // `object-fit`. Paint: the box is laid out the same whichever it is.
+  'objectFit',
   'transition',
   // a loop rather than a change with an end — see `animationsOf`
   'animation',
@@ -938,6 +942,13 @@ function validateValue(key, value, where) {
     }
     return;
   }
+  if (key === 'objectFit') {
+    if (value == null || OBJECT_FITS.includes(value) || isToken(value)) return;
+    throw new Error(
+      `react-x11: invalid objectFit ${JSON.stringify(value)} in ${where} ` +
+        `(expected ${OBJECT_FITS.map((v) => `'${v}'`).join(', ')})`,
+    );
+  }
   if (key === 'opacity') {
     // unset, the way a conditional writes it: `opacity: dim ? 0.5 : undefined`
     if (value == null) return;
@@ -1189,6 +1200,8 @@ const NOT_ANIMATABLE = new Set([
   'cursor',
   'pointerEvents',
   'borderStyle',
+  // a keyword: there is no halfway between filling a box and covering it
+  'objectFit',
   'fontFamily',
   'fontWeight',
   'fontStyle',
@@ -2269,11 +2282,13 @@ export function paintPropsChanged(props, oldProps = {}) {
   for (const key of PAINT_PROPS) {
     if (props[key] !== oldProps[key]) return true;
   }
-  // `color` and `borderStyle` paint but are deliberately not in PAINT_PROPS:
-  // that set also decides what a state block is allowed to set, and widening
-  // it would change validation rather than just this comparison
+  // `color`, `borderStyle` and `objectFit` paint but are deliberately not in
+  // PAINT_PROPS: that set also decides what a state block is allowed to set,
+  // and widening it would change validation rather than just this comparison
   return (
-    props.color !== oldProps.color || props.borderStyle !== oldProps.borderStyle
+    props.color !== oldProps.color ||
+    props.borderStyle !== oldProps.borderStyle ||
+    props.objectFit !== oldProps.objectFit
   );
 }
 

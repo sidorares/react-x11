@@ -104,6 +104,11 @@ import {
   createSettings,
   useClipboard,
   useSupports,
+  createVideoFrames,
+  useVideoFrames,
+  NoMediaPlaybackError,
+  VIDEO_FORMATS,
+  VideoFrames,
   useDesktopSettings,
   useFileDialog,
   useGlobalMenu,
@@ -1427,13 +1432,72 @@ function _Supports() {
   const bezels: boolean = useSupports('nativeControls');
   const embedding: boolean = useSupports('embedding');
   const overlay: boolean = useSupports('glOverlay');
+  const playback: boolean = useSupports('mediaPlayback');
   // @ts-expect-error — not a feature useSupports knows
   useSupports('webgpu');
   // @ts-expect-error — a taskbar surface is a *desktop* capability, not a
   // property of the display: useDesktopCapability('launcher').features
   useSupports('thumbnailToolbar');
-  void [canBlend, shaders, bezels, embedding, overlay];
+  void [canBlend, shaders, bezels, embedding, overlay, playback];
   return null;
+}
+
+// <video>: a sink the application decodes into, everywhere; a file the
+// platform plays, where useSupports('mediaPlayback') says so
+function _Video() {
+  const app = useApp();
+  const frames = useVideoFrames({ width: 1280, height: 720, format: 'NV12' });
+  const formats: readonly ('NV12' | 'I420' | 'BGRA')[] =
+    frames.preferredFormats;
+  frames.push([new Uint8Array(1280 * 720), new Uint8Array(1280 * 360)], {
+    time: 0.04,
+  });
+  frames.push(new Uint8Array(1280 * 720 * 1.5), { strides: [1280, 1280] });
+  const bgra: VideoFrames = createVideoFrames(app, {
+    width: 320,
+    height: 180,
+    colorSpace: 'bt601',
+    range: 'full',
+  });
+  const version: number = bgra.version;
+  const time: number | null | undefined = frames.frame?.time;
+  // @ts-expect-error — YUY2 is not a format a sink takes
+  useVideoFrames({ width: 2, height: 2, format: 'YUY2' });
+  // @ts-expect-error — a sink's size is not optional
+  createVideoFrames(app, { format: 'BGRA' });
+  void [formats, version, time, VIDEO_FORMATS];
+  return (
+    <box>
+      <video
+        frames={frames}
+        poster="./poster.png"
+        style={{ width: '100%', aspectRatio: 16 / 9, objectFit: 'cover' }}
+        onLoadedMetadata={({ width, height, duration }) =>
+          void [width, height, duration]
+        }
+        aria-label="preview"
+      />
+      <video
+        src="file:///tmp/clip.mp4"
+        autoPlay
+        muted
+        loop
+        volume={0.5}
+        playbackRate={1.5}
+        paused={false}
+        onTimeUpdate={({ currentTime }) => void currentTime}
+        onEnded={() => {}}
+        onError={(err) => {
+          if (err instanceof NoMediaPlaybackError) void err.code;
+        }}
+      />
+      <image src="./logo.png" style={{ objectFit: 'contain' }} />
+      {/* @ts-expect-error — 'stretch' is CSS's background-size, not object-fit */}
+      <video frames={frames} style={{ objectFit: 'stretch' }} />
+      {/* @ts-expect-error — frames is a sink, not raw bytes */}
+      <video frames={new Uint8Array(4)} />
+    </box>
+  );
 }
 
 // the clipboard facade: groups, options, and the two read contracts

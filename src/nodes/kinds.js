@@ -13,6 +13,7 @@ export const DRAWN_KINDS = new Set([
   'box',
   'text',
   'image',
+  'video',
   'canvas',
   'textinput',
   'textarea',

@@ -27,6 +27,7 @@ import {
   watchCompositing,
 } from './compositing.js';
 import { canEmbed } from './embedding.js';
+import { canPlayMedia } from './mediaplayback.js';
 import { hasDirectGL, watchDirectGL } from './glbackend.js';
 import { canOverlay } from './gloverlay.js';
 
@@ -59,7 +60,7 @@ export function useApp() {
   return app;
 }
 
-// 'nativeControls', 'embedding' and 'glOverlay' are properties of the
+// 'nativeControls', 'embedding', 'glOverlay' and 'mediaPlayback' are properties of the
 // backend — and 'glOverlay' of the X server too, which `createRoot` asks
 // before the first render (src/gloverlay.js) — decided before anything
 // renders and never changing after, so their subscription has nothing to
@@ -81,6 +82,7 @@ const FEATURES = {
   },
   embedding: { watch: NEVER_CHANGES, read: canEmbed },
   glOverlay: { watch: NEVER_CHANGES, read: canOverlay },
+  mediaPlayback: { watch: NEVER_CHANGES, read: canPlayMedia },
   // Everything here is a property of the **display**: what the server, the
   // compositor and the drawing pipeline can do. A desktop's own surfaces --
   // a tray, a launcher icon and what hangs off it, a notification daemon --
@@ -183,6 +185,19 @@ const FEATURES = {
  *
  * A property of the backend and the display, settled before the first
  * render, and it never changes.
+ *
+ * `'mediaPlayback'` is true when this display plays a file or URL itself —
+ * a platform player, AVFoundation on macOS — which is what `<video src>`
+ * needs. It is false on X11 and Wayland for good, where no display-server
+ * player exists, and the question to ask before rendering a `<video src>`,
+ * which refuses with one `onError` and shows its poster where the answer is
+ * no. `<video frames>`, a sink the application decodes into, needs no
+ * capability: it works everywhere, at a cost that differs.
+ *
+ * ```jsx
+ * const playback = useSupports('mediaPlayback');
+ * {playback ? <video src={file} autoPlay /> : <video frames={decoded} />}
+ * ```
  */
 export function useSupports(feature) {
   const app = useApp();

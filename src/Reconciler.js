@@ -33,6 +33,7 @@ import {
 } from './nodes/scope.js';
 import { TextNode, TextChunkNode, setTextStripBelow } from './nodes/text.js';
 import { ImageNode } from './nodes/image.js';
+import { VideoNode } from './nodes/video.js';
 import { CanvasNode } from './nodes/canvas.js';
 import { TextInputNode } from './nodes/textinput.js';
 import { TextAreaNode } from './nodes/textarea.js';
@@ -102,6 +103,7 @@ export const HOST_TYPES = [
   'box',
   'text',
   'image',
+  'video',
   'canvas',
   'textinput',
   'textarea',
@@ -315,6 +317,9 @@ const HostConfig = {
         break;
       case 'image':
         node = new ImageNode(props, rootContainer);
+        break;
+      case 'video':
+        node = new VideoNode(props, rootContainer);
         break;
       case 'canvas':
         node = new CanvasNode(props, rootContainer);

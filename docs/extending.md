@@ -1765,6 +1765,37 @@ layer presenter and a scene that refuses never ask, and your `paint` draws
 everything as it always did, so the same element runs on every backend and
 the animation runs on your own clock there.
 
+#### A part that shows a source
+
+A part may show something the presenter does not paint at all: its
+`contents`, in place of `paint` and `version`. Today that is a
+`VideoFrames` sink ([elements.md](elements.md#video)) — a camera feed in a
+chart's corner, a preview inside a document — whose every `push` reaches the
+part's layer by itself, with no frame of the window's and no `paint`:
+
+```js
+sprites() {
+  const frames = this.props.frames;
+  if (!frames?.frame) return null; // nothing to show yet
+  const rect = this.previewRect(); // device pixels, on whole pixels
+  return [{ key: 'preview', rect, contents: frames }];
+}
+
+paint(ctx) {
+  super.paint(ctx);
+  if (!this.lifted.has('preview')) this.drawPreview(ctx); // the newest frame
+}
+```
+
+The layer is exactly `rect` — the picture scaled into it — so put its edges
+on whole pixels, or the hole you leave and the layer that fills it meet with
+a seam. Everything else is a part's: the rules above, a `clip` if you cut it,
+`spritesChanged()` when the part comes or goes. A presenter that cannot show
+the source — any bridge without video surfaces, and every backend but macOS —
+declines the part, and drawing the newest frame yourself is the same code
+that runs in every frame something is painted over it. `<video>` is built
+exactly this way (src/nodes/video.js).
+
 Three things to know about ids and time. An animation is attached **once per
 `id`**: one that changed is a new id, and one the render server finished is
 not started again while you still list it. Its `delay` counts from the frame

@@ -1889,6 +1889,32 @@ it: `scripts/bench/presenters-gate.json`'s `promoted` rules judge the
 promoted column on frames per tick, full frames and damage share, next to
 the surface column's own.
 
+### Video on a layer
+
+A `<video frames>` ([elements.md](elements.md#video)) is the first part
+whose layer shows a **source** rather than a raster: its sprite's
+`contents` is the sink, and `src/cocoa/video.js` puts every pushed frame
+into a video surface — an IOSurface the render server scans out as it is,
+NV12 for a YCbCr sink, BGRA for a BGRA one (`createVideoSurface`,
+windowkit/appkit#103) — and repoints the layer inside the `push`. The
+window paints nothing for it: on the real bridge, threaded, sixty pushes
+of a 320x180 NV12 sink cost the window one frame, the one that lifted it.
+The surfaces are a ring of up to four, written only when
+`videoSurfaceIsInUse` says the render server has let one go.
+
+Declined — a box painted over it, a fade, a rounded clip — the element
+draws the newest frame into a surface of its own through
+`writeVideoSurface`, which converts a YCbCr frame in the colours the layer
+shows it in. Both are the colours `AVPlayerLayer` shows the frame in: a
+surface with CoreVideo's tags alone is linearised with the exact 709 curve,
+where the player, VideoToolbox and Core Image use Apple's 1.961 gamma, so
+the bridge names each surface's colour space from its tags and converts
+through VideoToolbox. Read back through `snapshotWindow`, the same frame
+lifted, drawn and played differs by at most two levels a channel. A
+bridge without the verbs lifts nothing, and the frame is converted in
+JavaScript instead (`app.videoFormats()` then says `BGRA` first).
+docs/architecture/video.md is the design record.
+
 ## Running as an app bundle
 
 A react-x11 process is a `node` (or `bun`) process, and AppKit names, icons

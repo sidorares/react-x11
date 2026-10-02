@@ -280,6 +280,28 @@ const hotMany = (tick, n, cols = COLS, rows = ROWS) => {
   return hot;
 };
 
+/** The `video` scenario's sink and the frames pushed into it: four NV12
+ *  frames of a ramp that moves, made once, so a tick costs the push and
+ *  nothing else. */
+function videoSource(createVideoFrames) {
+  const w = 1280;
+  const h = 720;
+  const sink = createVideoFrames(null, { width: w, height: h, format: 'NV12' });
+  const frames = [0, 1, 2, 3].map((k) => {
+    const y = Buffer.alloc(w * h);
+    for (let row = 0; row < h; row++) {
+      for (let x = 0; x < w; x++) y[row * w + x] = 16 + ((x + k * 40) % 220);
+    }
+    const uv = Buffer.alloc(w * (h / 2));
+    for (let i = 0; i < uv.length; i += 2) {
+      uv[i] = 90 + k * 10;
+      uv[i + 1] = 170 - k * 10;
+    }
+    return [y, uv];
+  });
+  return { sink, frames };
+}
+
 const header = (text) =>
   e(
     'text',
@@ -1212,6 +1234,45 @@ const SCENARIOS = {
     },
   },
 
+  /** A video: a 1280x720 NV12 sink shown at 640x360, a frame pushed every
+   *  tick — a decoder at 60fps. Lifted (the promoted column, over a bridge
+   *  with video surfaces) a push writes a surface and repoints a layer and
+   *  the window paints nothing, so frames per tick is the gate, the frame
+   *  that lifted it aside. Drawn — the surface and layers columns, X11, a
+   *  bridge without video surfaces — every push is a frame bounded to the
+   *  picture, its frame converted in the bridge on Cocoa and in JavaScript
+   *  on X11: `flush` and `cpu` are that cost. */
+  video: {
+    tree: (tick, deps) =>
+      windowOf(
+        [
+          header('video — a 1280x720 NV12 sink, a frame every tick'),
+          e('video', {
+            key: 'video',
+            frames: deps.video.sink,
+            style: {
+              width: 640,
+              height: 360,
+              margin: 16,
+              backgroundColor: '#000000',
+            },
+          }),
+        ],
+        'bench video',
+      ),
+    setup(ctx) {
+      // whether this bridge can lift a video at all: the gate's rule for a
+      // lifted one is skipped over one that cannot (`needs`)
+      ctx.extra.videoSurfaces =
+        typeof ctx.native?.createVideoSurface === 'function';
+      ctx.deps.video.sink.push(ctx.deps.video.frames[0]);
+    },
+    drive(ctx) {
+      const { sink, frames } = ctx.deps.video;
+      sink.push(frames[ctx.tick % frames.length]);
+    },
+  },
+
   /** Nothing happens: the big tree on screen, no ticks. What the app costs
    *  at rest is the pump and nothing else — `cpu` and `pump` are the
    *  columns, and `frames` must be zero. */
@@ -1445,8 +1506,9 @@ async function runChild() {
     create: (props, app) => new BenchPaneNode(props, app),
   });
   const { Icon } = await import('../../src/components/Icon.js');
+  const { createVideoFrames } = await import('../../src/videoframes.js');
   const store = makeStore(COLS * ROWS);
-  const deps = { Icon, store };
+  const deps = { Icon, store, video: videoSource(createVideoFrames) };
   const StreamPaneNode = defineStreamPane(Node);
   registerElement('streampane', {
     create: (props, app) => new StreamPaneNode(props, app),
@@ -1646,6 +1708,7 @@ async function runChild() {
     stats,
     extra,
     store,
+    deps,
     stamp: () => inFlight.push(performance.now()),
     find: (pred) => [...walk(node)].find(pred) ?? null,
     findAll: (pred) => [...walk(node)].filter(pred),
@@ -1825,6 +1888,12 @@ function loadGate() {
 /** The verdicts one cell's numbers earn against its rules. */
 function judge(name, r, rules) {
   const out = [];
+  // a rule about what a bridge can do, on a bridge that cannot: the cell ran
+  // the other presentation, and there is nothing to judge (`video` over a
+  // bridge without video surfaces — the published one, until it has them)
+  if (rules.needs && !r.extra?.[rules.needs]) {
+    return [{ ok: true, what: `skipped: the bridge has no ${rules.needs}` }];
+  }
   const windowPx = W * H * r.scale * r.scale;
   const share = (r.damageKpxPerFrame * 1000) / windowPx;
   const x = r.extra ?? {};

@@ -113,6 +113,9 @@ content. `flex: 'auto'` grows and shrinks from the content's own size, and
   borders — a non-uniform border paints square
   ([styling.md](styling.md#per-side-borders))
 - `zIndex` — paint/hit order among siblings (stable sort)
+- `objectFit` — where an `<image>`'s or a `<video>`'s picture goes in its
+  content box, CSS's `object-fit`, centred: `'fill'` (`<image>`'s default),
+  `'contain'` (`<video>`'s), `'cover'`, `'none'`, `'scale-down'`
 - `outlineWidth`, `outlineColor`, `outlineOffset` — the focus ring, painted
   outside the border box and invisible to yoga, so it never moves what it
   surrounds. A focusable node draws one on `:focus-visible` without being
@@ -1816,6 +1819,16 @@ to the width on offer. For the server-side sources the "natural size" is the
 <image src={photo} style={{ height: 64 }} /> // width follows the aspect ratio
 ```
 
+`objectFit` decides where the picture goes inside that box when the two
+shapes differ: `'fill'` — the default — stretches it to the box, `'contain'`
+fits it inside with the background around it, `'cover'` fills the box and
+cuts what overflows, `'none'` leaves it its own size and `'scale-down'` is
+the smaller of `'none'` and `'contain'`, all centred.
+
+```jsx
+<image src={photo} style={{ width: 96, height: 96, objectFit: 'cover' }} />
+```
+
 ### `src` — pixels the client has
 
 ```jsx
@@ -2007,6 +2020,135 @@ once). Hand `src` the pixels instead.
 Both descriptors also accept the richer objects that already carry these
 fields — an ntk `Pixmap` is `{ id, width, height, depth }` and goes straight
 in as `drawable`.
+
+## `<video>` {#video}
+
+```jsx
+// frames the application decodes — every backend
+const frames = useVideoFrames({ width: 1280, height: 720, format: 'NV12' });
+useEffect(() => startDecoder(file, frames), [frames, file]);
+<video frames={frames} style={{ width: '100%', backgroundColor: '#000' }} />;
+```
+
+| prop                                                  |                                                                                                                                                  |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `frames`                                              | a `VideoFrames` sink the application pushes decoded frames into (`useVideoFrames`, `createVideoFrames`) — works on every backend                 |
+| `src`                                                 | a path or URL the platform plays itself, where `useSupports('mediaPlayback')` is true; elsewhere one `NoMediaPlaybackError` through `onError`    |
+| `poster`                                              | an `<image src>` value, shown until there is a frame and whenever there is none                                                                  |
+| `autoPlay`, `loop`, `muted`, `volume`, `playbackRate` | HTML's names and defaults — nothing plays until asked; for `src`                                                                                 |
+| `paused`                                              | controlled when present; for `src`                                                                                                               |
+| `onLoadedMetadata`                                    | `{ width, height, duration }` once the stream's size is known — for a sink, once it is mounted, with a `duration` of `Infinity`, a live source's |
+| `onPlay`, `onPause`, `onEnded`, `onTimeUpdate`        | for `src`                                                                                                                                        |
+| `onError`                                             | the source failed, or there is no player for `src`; without a handler, one console warning                                                       |
+
+`frames` and `src` are exclusive, and passing both throws. The element is a
+drawn node like `<image>` — in the layout, in the paint order, hit like
+anything else — so a video in a form sits under the form's popups and inside
+its scroll panes, which a child window or a `<glarea>` can do neither of.
+
+**Size.** HTML's: the stream's size in logical pixels — a 1280x720 stream is
+1280 wide at any scale, as an image is — then the poster's, then 300x150. A
+style that names one axis gets the other from the picture's ratio, larger
+than the stream as well as smaller. `objectFit` is `'contain'` unless the
+style says otherwise, and `backgroundColor` is what shows in the bars.
+
+### `VideoFrames`, the sink
+
+react-x11 decodes nothing; where the bytes come from is the application's
+business, and every source ends in `push`:
+
+```js
+import { spawn } from 'node:child_process';
+
+// ffmpeg decoding a file into NV12 frames on a pipe, paced to the clip's rate
+function startDecoder(file, frames) {
+  const ff = spawn('ffmpeg', [
+    '-re',
+    '-i',
+    file,
+    '-f',
+    'rawvideo',
+    '-pix_fmt',
+    frames.format.toLowerCase(),
+    '-s',
+    `${frames.width}x${frames.height}`,
+    '-',
+  ]);
+  const size = frames.width * frames.height * 1.5; // NV12
+  let pending = Buffer.alloc(0);
+  ff.stdout.on('data', (chunk) => {
+    pending = Buffer.concat([pending, chunk]);
+    while (pending.length >= size) {
+      frames.push(pending.subarray(0, size)); // one buffer, planes back to back
+      pending = pending.subarray(size);
+    }
+  });
+  return () => ff.kill();
+}
+```
+
+- **Formats.** `'NV12'` (Y, then Cb/Cr pairs — what a hardware decoder
+  emits), `'I420'` (Y, Cb, Cr — `yuv420p`, most software decoders' default)
+  and `'BGRA'` (the fourth byte ignored: a frame is opaque). `colorSpace`
+  (`'bt709'` by default, `'bt601'`, `'bt2020'`) and `range` (`'video'` by
+  default, `'full'`) say what a YCbCr frame's numbers mean.
+- **`preferredFormats`** is this display's order, cheapest first, for a
+  decoder that can choose: `NV12, I420, BGRA` on macOS, where a YCbCr frame
+  goes on a layer as it is, and `BGRA` wherever a 2D context draws it. Every
+  format works everywhere; the conversion is charged where it happens.
+- **The newest frame is the frame.** A push replaces the last one, shown or
+  not; nothing queues, and the decoder's own clock is the pacing. A push
+  hands its planes over until the next push — they are read then, not
+  copied at the call — so a decoder that writes every frame into one buffer
+  pushes it again after writing.
+- **`push(planes, { strides, time })`** takes a Buffer per plane or one
+  Buffer of them back to back, with each plane's bytes per row when a
+  decoder pads them; a plane too small for the frame is a `TypeError` naming
+  the plane and the bytes it needs. `close()` drops the frame and ignores
+  what comes after, so a decoder racing an unmount loses quietly.
+- **Nothing to free.** A sink owns nothing native: what shows it makes its
+  surfaces and lets them go when it stops showing it.
+
+### Lifted, drawn, and what each costs
+
+On **macOS** a video with a frame to show goes on a layer of its own above
+the window's bitmap, under the same rule that lifts an animation
+([macos.md](macos.md)): nothing painted over it, no fade, no rounded
+clipping ancestor that cannot hold it. There every `push` writes the frame
+into a surface the render server shows as it is and repoints the layer —
+0.07ms for a 1080p NV12 frame, 0.27ms for an I420 one interleaved on the
+way — with **no frame of the window's own**. The rest of the time — a
+tooltip over it, a dialog's dim, a card with rounded corners — it is
+**drawn**: a push claims the picture, and the next frame copies the newest
+frame into a surface of the element's own and composites it in paint
+order. The bridge converts a YCbCr frame into that surface in the colours
+the layer shows it in, so the picture does not change shade on the way
+between the two.
+
+On **X11, Wayland and Windows** it is always drawn, the frame converted to
+RGBA in JavaScript unless it is BGRA — which is why those displays prefer
+BGRA. On X11 the upload rides ntk's shared-memory path where the server has
+it. No transfer function is applied there, as nothing else on those
+displays is colour-managed either.
+
+`borderRadius` on an ancestor that clips the video costs the layer, not the
+picture: the video is drawn for as long as the rounded clip holds it.
+
+### `src` — the platform's player
+
+Where `useSupports('mediaPlayback')` is true, `src` is a file or URL the
+platform plays with its own decoder, audio, seeking and streaming. Where it
+is false — X11 and Wayland for good, and macOS until the player lands — the
+element reports one `NoMediaPlaybackError` (`code: 'ENOMEDIAPLAYBACK'`)
+through `onError`, on a microtask, and shows its poster: never a black box
+that looks like a video that has not started. Ask before rendering one:
+
+```jsx
+const playback = useSupports('mediaPlayback');
+{
+  playback ? <video src={file} autoPlay /> : <video frames={decoded} />;
+}
+```
 
 ## `<canvas>`
 

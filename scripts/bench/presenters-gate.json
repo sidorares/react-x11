@@ -12,7 +12,9 @@
     "the layer presenter's and the flush and the scroll the surface's. Frames",
     "per tick is the animation half (a palette step or a hover flip costs one",
     "frame, the fades between them none); damage share and full frames are the",
-    "bitmap half; scroll and tree must keep what the surface column keeps."
+    "bitmap half; scroll and tree must keep what the surface column keeps.",
+    "`video`: drawn, every push is a frame of the picture and no more;",
+    "promoted, over a bridge with video surfaces, a push is no frame at all."
   ],
   "rules": {
     "color": {
@@ -72,6 +74,11 @@
       "maxFullPct": 0,
       "minFrames": 30,
       "minInputs": 20
+    },
+    "video": {
+      "maxFullPct": 0,
+      "maxDamageShare": 0.45,
+      "minFrames": 30
     }
   },
   "promoted": {
@@ -105,6 +112,11 @@
       "maxFullPct": 0,
       "maxDamageShare": 0.005,
       "minFrames": 30
+    },
+    "video": {
+      "needs": "videoSurfaces",
+      "maxFullPct": 0,
+      "maxFramesPerTick": 0.05
     }
   }
 }

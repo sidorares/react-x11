@@ -75,6 +75,13 @@ export {
 export { useDesktopCalendarEvents } from './desktopcalendarhooks.js';
 export { parseUriList } from './transfer.js';
 export { useApp, useClipboard, useSupports } from './appcontext.js';
+export {
+  createVideoFrames,
+  VIDEO_FORMATS,
+  VideoFrames,
+} from './videoframes.js';
+export { useVideoFrames } from './videohooks.js';
+export { NoMediaPlaybackError } from './mediaplayback.js';
 export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';
 export { announce } from './a11y.js';
 // the standard Undo/Cut/Copy/Paste menu, for an element that edits or

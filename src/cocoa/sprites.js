@@ -17,7 +17,12 @@
 // A part's content is a raster the presenter paints by calling the part's
 // own `paint`, at opacity 1 and untransformed, and paints again when its
 // `version` changes; its opacity and its transform are the layer's, and so
-// are its animations, keyframes the bridge hands to Core Animation. A
+// are its animations, keyframes the bridge hands to Core Animation. Or it is
+// a **source**, the part's `contents` — a `<video>`'s frames — which the
+// presenter does not paint at all: the source shows itself on the layer
+// (src/cocoa/video.js), between frames and on its own clock, and the layer
+// is exactly the part's rect. A source this bridge cannot show is a part
+// declined, drawn by its element like any other. A
 // transform is CSS's matrix, which the bridge takes from
 // `@windowkit/appkit` 0.19 (`transformForms()`) along with the negative
 // delay a part joined half way through needs, so that is the bridge sprites
@@ -25,8 +30,10 @@
 // element.
 
 import { RASTER_PAD, RasterState } from './presenter.js';
+import { VideoLift, canLiftVideo } from './video.js';
 import { intersectRects } from '../nodes/rects.js';
 import { DEV } from '../nodes/util.js';
+import { isVideoFrames } from '../videoframes.js';
 
 // Past this many device pixels on a side a part is drawn by its element: a
 // layer's contents are a bitmap, and a page-sized one is a page-sized
@@ -105,10 +112,18 @@ function isAnimation(a) {
   return true;
 }
 
-/** Is `sprite` a part as `Node.sprites()` documents one? */
+/** Is `sprite` a part as `Node.sprites()` documents one? Either it paints
+ *  or it has a source to show, never both. */
 function isSprite(sprite) {
   if (sprite == null || typeof sprite.key !== 'string') return false;
-  if (!isRect(sprite.rect) || typeof sprite.paint !== 'function') return false;
+  if (!isRect(sprite.rect)) return false;
+  if (
+    sprite.contents != null
+      ? sprite.paint !== undefined
+      : typeof sprite.paint !== 'function'
+  ) {
+    return false;
+  }
   if (sprite.reach !== undefined && !isRect(sprite.reach)) return false;
   if (sprite.clip !== undefined && !isRect(sprite.clip)) return false;
   if (
@@ -210,8 +225,11 @@ function extentOf(sprite) {
 }
 
 /** The raster a part's content is painted into: its reach, out to whole
- *  pixels and padded for antialiasing, untransformed. */
+ *  pixels and padded for antialiasing, untransformed. A source's layer is
+ *  the part's rect, which the element has already put on whole pixels so
+ *  that the hole it leaves and the layer meet. */
 function rasterRectOf(sprite) {
+  if (sprite.contents != null) return sprite.rect;
   const reach = sprite.reach ?? sprite.rect;
   const x = Math.floor(reach.x) - RASTER_PAD;
   const y = Math.floor(reach.y) - RASTER_PAD;
@@ -242,6 +260,8 @@ export class SpriteLayers {
     this.supported = Boolean(
       this.native.transformForms?.()?.includes?.('matrix'),
     );
+    // and a video's frames on a layer need its video surfaces
+    this.videos = canLiftVideo(this.native);
     this.hosts = new Map(); // element -> Map(key -> state)
     this._warned = new WeakSet();
   }
@@ -310,8 +330,18 @@ export class SpriteLayers {
           continue;
         }
         if (now.has(sprite.key)) continue;
+        const contents = sprite.contents ?? null;
+        // a source this bridge cannot show: the element draws it
+        if (contents !== null && !this._canShow(contents)) continue;
         const raster = rasterRectOf(sprite);
-        if (raster.width > MAX_SIDE || raster.height > MAX_SIDE) continue;
+        // a raster's limit; a source's surface is its own size, whatever
+        // the layer is scaled to
+        if (
+          contents === null &&
+          (raster.width > MAX_SIDE || raster.height > MAX_SIDE)
+        ) {
+          continue;
+        }
         // what shows of everywhere it can be: inside its own clip, and the
         // clips of its element's ancestors, which cut its layer (`_clear`)
         const cut = {
@@ -325,13 +355,20 @@ export class SpriteLayers {
         const shown = cut.bounds;
         let state = was?.get(sprite.key);
         // a clip that comes or goes is a layer in a box or out of one: lifted
-        // again, rather than a running layer moved between parents
-        if (state && Boolean(state.clip) !== Boolean(cut.clip)) {
+        // again, rather than a running layer moved between parents — and so
+        // is a part that shows another source, or stops painting to show one
+        if (
+          state &&
+          (Boolean(state.clip) !== Boolean(cut.clip) ||
+            state.contents !== contents)
+        ) {
           this._drop(state, root);
           state = null;
         }
         const lifting = !state;
-        if (lifting) state = this._lift(host, sprite.key, cut.clip !== null);
+        if (lifting) {
+          state = this._lift(host, sprite.key, cut.clip !== null, contents);
+        }
         state.sprite = sprite;
         state.clip = cut.clip;
         state.radius = cut.radius;
@@ -381,7 +418,12 @@ export class SpriteLayers {
     }
   }
 
-  _lift(host, key, clipped) {
+  /** Can this bridge show `contents` on a layer by itself? */
+  _canShow(contents) {
+    return isVideoFrames(contents) && this.videos;
+  }
+
+  _lift(host, key, clipped, contents = null) {
     const layer = this.native.createLayer();
     // a part cut to a clip is in a box of the clip's size that masks to it,
     // and the box is what stands among the layers above the bitmap
@@ -414,6 +456,9 @@ export class SpriteLayers {
       sprite: null,
       extent: null,
       order: null,
+      // what shows itself on the layer, for a part with a source
+      contents,
+      lift: contents ? new VideoLift(this.native, contents, layer) : null,
     };
   }
 
@@ -421,6 +466,7 @@ export class SpriteLayers {
    *  forgotten, and the bitmap under where it could be repaints with the
    *  element drawing it again. */
   _drop(state, root) {
+    state.lift?.release();
     this.native.removeFromSuperlayer(state.box ?? state.layer);
     state.raster.release(this.native);
     for (const run of state.runs.values()) this._ends().delete(run.caId);
@@ -439,13 +485,14 @@ export class SpriteLayers {
     const phase = `${reach.x - Math.floor(reach.x)},${reach.y - Math.floor(reach.y)}`;
     // painted again for a new version, and for a raster of another size or
     // with the part at another fraction of a pixel; a move by whole pixels
-    // is the layer's alone
+    // is the layer's alone. A source paints nothing: it shows itself.
     if (
-      state.painted === UNPAINTED ||
-      sprite.version !== state.painted ||
-      state.rect?.width !== rect.width ||
-      state.rect?.height !== rect.height ||
-      state.phase !== phase
+      !state.lift &&
+      (state.painted === UNPAINTED ||
+        sprite.version !== state.painted ||
+        state.rect?.width !== rect.width ||
+        state.rect?.height !== rect.height ||
+        state.phase !== phase)
     ) {
       this._paint(state, sprite, rect);
       state.phase = phase;
@@ -616,6 +663,7 @@ export class SpriteLayers {
   destroy() {
     for (const lifted of this.hosts.values()) {
       for (const state of lifted.values()) {
+        state.lift?.release();
         this.native.removeFromSuperlayer(state.box ?? state.layer);
         state.raster.release(this.native);
         for (const run of state.runs.values()) this._ends().delete(run.caId);

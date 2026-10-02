@@ -23,6 +23,7 @@ import { TextNode } from '../src/nodes/text.js';
 import { TextInputNode } from '../src/nodes/textinput.js';
 import { TextAreaNode } from '../src/nodes/textarea.js';
 import { ImageNode } from '../src/nodes/image.js';
+import { VideoNode } from '../src/nodes/video.js';
 import { CanvasNode } from '../src/nodes/canvas.js';
 import { WindowNode } from '../src/nodes/window/window.js';
 import { PopupNode } from '../src/nodes/window/popup.js';
@@ -45,6 +46,7 @@ const BUILD = {
   textinput: (app, props) => new TextInputNode(props, app),
   textarea: (app, props) => new TextAreaNode(props, app),
   image: (app, props) => new ImageNode(props, app),
+  video: (app, props) => new VideoNode(props, app),
   canvas: (app, props) => new CanvasNode(props, app),
   svg: (app, props) => new SvgNode(props, app),
   glarea: (app, props) => new GlAreaNode(props, app),

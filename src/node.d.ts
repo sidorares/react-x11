@@ -24,6 +24,7 @@ import type {
   MouseEvent,
   WheelEvent,
 } from './types/events.js';
+import type { VideoFrames } from './types/video.js';
 
 /** A gradient, as `createLinearGradient` answers with. */
 export interface CanvasGradientLike {
@@ -296,8 +297,16 @@ export interface Sprite {
    * cannot take both. */
   clipRadius?: number;
   /** Draws the part where it is in the window, as `paint` would, but at
-   * opacity 1 and untransformed. */
-  paint(ctx: Context2D): void;
+   * opacity 1 and untransformed. A part with `contents` has none. */
+  paint?(ctx: Context2D): void;
+  /**
+   * A source that shows itself on the part's layer instead of a paint — a
+   * `VideoFrames` sink, whose every push reaches the layer with no frame of
+   * the window's own. `rect` is the picture, on whole pixels; a presenter
+   * that cannot show the source declines the part, and the element draws
+   * the current frame itself (docs/extending.md).
+   */
+  contents?: VideoFrames;
   /** Compared with `===` from frame to frame; a change paints the part
    * again. Left out, it is painted once. */
   version?: unknown;
