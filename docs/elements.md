@@ -1871,6 +1871,13 @@ WebP arrives so an app that shows none never loads it: the first WebP pays
 ~140ms to load the decoder, and each one about what jpeg-js costs a JPEG of
 the same size.
 
+An element that draws images of its own — a document's `<img>`, a CSS
+background — decodes through the same ladder, so that an image shows there
+exactly when it would show in an `<image>`: `decodeImageBytes` from
+`react-x11/ntk` takes the bytes and answers an `Image`, or a promise of one
+wherever the table above says the decode is not synchronous, and throws or
+rejects, saying what to convert to, where an `<image>` would show nothing.
+
 What differs between the two, so it is not found the hard way:
 
 - **An animation shows its first frame** — an animated WebP on either

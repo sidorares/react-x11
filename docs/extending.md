@@ -1986,14 +1986,14 @@ In TypeScript, augment `CustomPositions` the way `CustomLayouts` is.
 
 ## The subpath exports
 
-| subpath             |                                                                                                                                                 |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `react-x11/host`    | `registerElement`, `registerLayout`, `registerPosition` and their `unregister…`/`registered…` pairs, `hostTypes`, `knownElements`, `drawnKinds` |
-| `react-x11/node`    | `Node`, the built-in node classes, `Scrollable`, `intrinsicSize`                                                                                |
-| `react-x11/style`   | `createStyles`, `flattenStyle`, `isStyleProp`, `resolveTokens`, the rest of the vocabulary                                                      |
-| `react-x11/yoga`    | the layout engine — `Yoga`, `loadLayout`, `layoutLoaded`. Rarely needed; see below                                                              |
-| `react-x11/ntk`     | ntk itself, re-exported — `Path2D`, `Image`, `Pixmap`, the font sources, `createClient` — and `Surface`, on whichever backend the app is        |
-| `react-x11/keysyms` | the `XK_*` constants, `keysymOf`, `charOf`, `MOD`, `ctrlChordLetter`                                                                            |
+| subpath             |                                                                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `react-x11/host`    | `registerElement`, `registerLayout`, `registerPosition` and their `unregister…`/`registered…` pairs, `hostTypes`, `knownElements`, `drawnKinds`              |
+| `react-x11/node`    | `Node`, the built-in node classes, `Scrollable`, `intrinsicSize`                                                                                             |
+| `react-x11/style`   | `createStyles`, `flattenStyle`, `isStyleProp`, `resolveTokens`, the rest of the vocabulary                                                                   |
+| `react-x11/yoga`    | the layout engine — `Yoga`, `loadLayout`, `layoutLoaded`. Rarely needed; see below                                                                           |
+| `react-x11/ntk`     | ntk itself, re-exported — `Path2D`, `Image`, `Pixmap`, the font sources, `createClient` — `Surface`, on whichever backend the app is, and `decodeImageBytes` |
+| `react-x11/keysyms` | the `XK_*` constants, `keysymOf`, `charOf`, `MOD`, `ctrlChordLetter`                                                                                         |
 
 **Reach ntk through `react-x11/ntk`, not a second dependency.** Two copies
 of ntk in one process means two font caches and two glyph atlases, and a
@@ -2001,7 +2001,11 @@ node built against one cannot be painted by the other — a failure that
 looks like a drawing bug rather than a dependency bug. It is also where a
 drawing-adjacent name gets its backend-neutral answer: `Surface` from here
 is a pixmap on X11 and a CG bitmap on the Cocoa backend, where `Surface`
-from `ntk` is the pixmap only.
+from `ntk` is the pixmap only. And it is where an element that draws images
+of its own decodes them: `decodeImageBytes` is the ladder `<image>` reads
+bytes with — WebP everywhere, and under Bun every format Bun reads, off the
+JavaScript thread — where ntk's `decodeImage` is PNG and JPEG, synchronously
+([formats](elements.md#formats-and-what-decodes-them)).
 
 **An element does not need the layout engine, and that is deliberate.**
 `measureContent` is handed its constraints in words (`'exactly'`,

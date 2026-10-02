@@ -139,6 +139,20 @@ test(
   },
 );
 
+test(
+  "react-x11/ntk's decodeImageBytes is this ladder, for an element that draws images of its own",
+  { skip: realBun },
+  async () => {
+    const ntk = await import('../src/ntk.js');
+    assert.strictEqual(ntk.decodeImageBytes, decodeImageBytes);
+    // ntk's own decodeImage stays ntk's: synchronous, PNG and JPEG
+    assert.notStrictEqual(ntk.decodeImage, decodeImageBytes);
+    const image = await ntk.decodeImageBytes(losslessWebP(TWO_BY_TWO));
+    assert.ok(image instanceof ntk.Image, 'an ntk Image, drawable as one');
+    assert.deepStrictEqual(Array.from(image.data), Array.from(TWO_BY_TWO.data));
+  },
+);
+
 test('an animated WebP shows its first frame', { skip: realBun }, async () => {
   const image = await decodeImageBytes(animatedWebP(RED, BLUE));
   assert.deepStrictEqual([image.width, image.height], [4, 4]);
