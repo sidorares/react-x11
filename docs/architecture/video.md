@@ -115,17 +115,23 @@ constraint it runs into on X11 is the one
   through: a pixel buffer keeps a use count on its surface, and
   `IOSurfaceIsInUse` would answer true for one nothing shows.
   `videoSurfacePlanes` was not needed: the copy is 0.07ms at 1080p.
-- **A colour finding the record did not have.** Core Animation shows a
-  surface tagged BT.709 throughout with the exact 709 curve; VideoToolbox's
-  pixel transfer, Core Image, and Core Animation itself for any other
-  tagging use a pure 1.961 gamma — a video-range Y′=50 is sRGB 55 on a layer
-  and 44 converted. The drawn presentation converts 709 itself (vImage's
-  matrix and the curve as a lookup, 0.5ms at 1080p) and everything else
-  through VideoToolbox (about 1ms), and lifted and drawn agree to within two
-  levels on screen (the bridge's `test/video-surface.js`).
+- **A colour finding the record did not have.** With CoreVideo's tags
+  alone, Core Animation shows a surface tagged BT.709 throughout with the
+  exact 709 curve — while `AVPlayerLayer`, VideoToolbox's pixel transfer,
+  Core Image, and Core Animation itself for any other tagging use Apple's
+  1.961 gamma: a video-range Y′=47 was sRGB 51 on such a layer and 40 under
+  `AVPlayerLayer` playing the same clip. So §3.4's "colour attachments are
+  read" was half the story: the bridge names each video surface's colour
+  space as the one CoreVideo makes of its tags, which puts a lifted frame on
+  the player's curve exactly, and every drawn frame goes through
+  VideoToolbox, about 1ms at 1080p. A frame lifted, drawn, and played by
+  `AVPlayerLayer` agree to within two levels on screen (the bridge's
+  `test/video-surface.js` and `test/player.js`).
 
-Not built yet: the player (§12 track 3), the Windows and Wayland rungs, and
-the bench scenario and gate rule of §9.
+Also: the presenter bench's `video` scenario and its gate rule (§9) — a
+lifted sink holds to no window frame per push, a rule read as skipped over a
+bridge without video surfaces. Not built yet: the player (§12 track 3) and
+the Windows and Wayland rungs.
 
 ## 1. The asymmetry, stated once
 
@@ -793,7 +799,7 @@ Three rules, each of which is a cost somewhere:
 
   | backend | lifted                                                         | drawn                                                                                                           | `preferredFormats`     |
   | ------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------- |
-  | Cocoa   | NV12 as is; I420 interleaved on the write (bridge); BGRA as is | BGRA; NV12/I420 converted in the bridge: 709 by vImage, 0.5ms at 1080p; the rest by VideoToolbox, about 1ms     | `NV12`, `I420`, `BGRA` |
+  | Cocoa   | NV12 as is; I420 interleaved on the write (bridge); BGRA as is | BGRA; NV12/I420 converted in the bridge by VideoToolbox, colour-matched to sRGB, about 1ms at 1080p             | `NV12`, `I420`, `BGRA` |
   | X11     | —                                                              | BGRA into an ntk `Surface` (SHM where the server has it); NV12/I420 converted in JS, which is not free at 1080p | `BGRA`                 |
   | win32   | later: an NV12 swapchain on a visual (§4.2)                    | BGRA into a texture; NV12/I420 through the video processor, or in JS until then                                 | `BGRA`, then `NV12`    |
   | Wayland | —                                                              | NV12, I420 and BGRA as textures; YUV sampled in the shader, no conversion anywhere                              | `NV12`, `I420`, `BGRA` |

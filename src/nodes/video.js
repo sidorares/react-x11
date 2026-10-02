@@ -392,8 +392,8 @@ export class VideoNode extends Node {
 
   _upload(surface, sink, frame) {
     // natively where the backend converts in its own code (the Cocoa
-    // bridge's writeVideoSurface: a memcpy for BGRA, vImage or VideoToolbox
-    // for YCbCr, colour-matched to what a layer shows)
+    // bridge's writeVideoSurface: a copy for BGRA, VideoToolbox for YCbCr,
+    // colour-matched to what a layer shows)
     if (this.app?.writeVideoFrame?.(surface, sink, frame)) return;
     const w = sink.width;
     const h = sink.height;

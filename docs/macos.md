@@ -1905,11 +1905,12 @@ The surfaces are a ring of up to four, written only when
 Declined — a box painted over it, a fade, a rounded clip — the element
 draws the newest frame into a surface of its own through
 `writeVideoSurface`, which converts a YCbCr frame in the colours the layer
-shows it in: Core Animation linearises a surface tagged BT.709 throughout
-with the exact 709 curve, where VideoToolbox and Core Image use a 1.961
-gamma, so the bridge converts a 709 frame itself (vImage and a lookup) and
-leaves the rest to VideoToolbox. Read back through `snapshotWindow`, the
-same frame lifted and drawn differ by at most two levels a channel. A
+shows it in. Both are the colours `AVPlayerLayer` shows the frame in: a
+surface with CoreVideo's tags alone is linearised with the exact 709 curve,
+where the player, VideoToolbox and Core Image use Apple's 1.961 gamma, so
+the bridge names each surface's colour space from its tags and converts
+through VideoToolbox. Read back through `snapshotWindow`, the same frame
+lifted, drawn and played differs by at most two levels a channel. A
 bridge without the verbs lifts nothing, and the frame is converted in
 JavaScript instead (`app.videoFormats()` then says `BGRA` first).
 docs/architecture/video.md is the design record.
