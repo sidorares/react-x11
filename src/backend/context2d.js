@@ -194,6 +194,19 @@ class LinearGradient {
 
 const clamp01 = (v) => Math.min(1, Math.max(0, Number(v) || 0));
 
+// What `textAlign`, `textBaseline` and `direction` take. A value outside
+// them is ignored and the last one stays, as canvas has it.
+const TEXT_ALIGNS = new Set(['start', 'end', 'left', 'right', 'center']);
+const TEXT_BASELINES = new Set([
+  'top',
+  'hanging',
+  'middle',
+  'alphabetic',
+  'ideographic',
+  'bottom',
+]);
+const DIRECTIONS = new Set(['ltr', 'rtl', 'inherit']);
+
 /**
  * The Render ops text draws with, numbered as XRender numbers them so a
  * caller's `ctx.Render?.PictOp?.Over ?? 3` reads the same on both
@@ -428,6 +441,9 @@ export class BackendContext2D {
       dash: [],
       dashOffset: 0,
       font: '10px sans-serif',
+      textAlign: 'start',
+      textBaseline: 'alphabetic',
+      direction: 'inherit',
       shadowBlur: 0,
       shadowOffsetX: 0,
       shadowOffsetY: 0,
@@ -652,6 +668,37 @@ export class BackendContext2D {
 
   set font(value) {
     this._state.font = String(value);
+  }
+
+  /** Where `fillText`'s x is on the text: its start, end, left, right or
+   *  centre. */
+  get textAlign() {
+    return this._state.textAlign;
+  }
+
+  set textAlign(value) {
+    if (TEXT_ALIGNS.has(value)) this._state.textAlign = value;
+  }
+
+  /** Where `fillText`'s y is on the text: its alphabetic baseline, or the
+   *  top, middle or bottom of its em box, or its hanging or ideographic
+   *  baseline. */
+  get textBaseline() {
+    return this._state.textBaseline;
+  }
+
+  set textBaseline(value) {
+    if (TEXT_BASELINES.has(value)) this._state.textBaseline = value;
+  }
+
+  /** Which way `start` and `end` face. `inherit`, with no element to take
+   *  it from, is the text's own: right to left where it starts so. */
+  get direction() {
+    return this._state.direction;
+  }
+
+  set direction(value) {
+    if (DIRECTIONS.has(value)) this._state.direction = value;
   }
 
   get shadowBlur() {
@@ -1932,9 +1979,53 @@ export class BackendContext2D {
   fillText(text, x, y) {
     const layout = this._fontLayout(text);
     if (!layout) return;
-    // canvas fillText's y is the baseline; layouts draw from their top
-    const baseline = layout.lines[0]?.baseline ?? 0;
-    this._drawLayout(layout, x, y - baseline);
+    // canvas fillText's y is on the baseline `textBaseline` names, and x on
+    // the side `textAlign` does; a layout draws from its top left
+    const line = layout.lines[0];
+    const baseline = line?.baseline ?? 0;
+    this._drawLayout(
+      layout,
+      x + this._alignOffset(layout, line),
+      y - baseline + this._baselineOffset(line),
+    );
+  }
+
+  /** How far left of x the text starts: ntk's `_alignOffset`, so a label
+   *  centred on X11 is centred here too. */
+  _alignOffset(layout, line) {
+    let align = this._state.textAlign;
+    if (align === 'start' || align === 'end') {
+      const direction = this._state.direction;
+      const rtl =
+        direction === 'rtl' ||
+        (direction === 'inherit' &&
+          !!line?.runs?.find((r) => r.start === 0)?.rtl);
+      align = (align === 'start') !== rtl ? 'left' : 'right';
+    }
+    const width = layout.width ?? 0;
+    if (align === 'center') return -width / 2;
+    if (align === 'right') return -width;
+    return 0;
+  }
+
+  /** How far below y the alphabetic baseline is: ntk's `_baselineOffset`,
+   *  from the face's ascent and descent. */
+  _baselineOffset(line) {
+    const ascent = line?.ascent ?? 0;
+    const descent = line?.descent ?? 0;
+    switch (this._state.textBaseline) {
+      case 'top':
+        return ascent;
+      case 'hanging':
+        return ascent * 0.8;
+      case 'middle':
+        return (ascent - descent) / 2;
+      case 'bottom':
+      case 'ideographic':
+        return -descent;
+      default:
+        return 0;
+    }
   }
 
   _fontLayout(text, color) {
