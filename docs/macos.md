@@ -1785,6 +1785,25 @@ of the bridge. `test/cocoa-promotion.test.js` pins the contract over the
 fake bridge; `test/animation-example.test.js` walks the example through
 it.
 
+**An element's parts** (#819). A registered element whose content is its
+own `paint` has no plain box to promote, so it offers the parts of its
+drawing it would like lifted — `sprites()`, asked every frame like
+`opaqueRect()` ([extending.md](extending.md#parts-of-your-drawing-on-layers-of-their-own)).
+Each lifted part is a layer of its own on the window root, in the same
+paint order as the promoted nodes (`src/cocoa/sprites.js`): its content a
+raster painted once by the part's own `paint`, its opacity and its
+transform — a matrix, which the bridge takes from `@windowkit/appkit` 0.19 —
+properties of the layer, and its animations keyframes the render server
+runs. The rules are the ones above, asked of the element at everywhere the
+part can be over its animations, with the element's own fade added to its
+ancestors': the element vouches for its inside, and leaves a hole where a
+lifted part is from the frame `spritesLifted` tells it so. A part given back
+is the element's to draw again in that same frame, with the bitmap under it
+claimed. A registered element offering a card with an opacity loop, a turn
+sampled into 61 matrices, or a static half-faded quarter turn painted no
+window frame and no paint of the element in two seconds on this machine,
+with the render server's values moving under it.
+
 **One thing it found, and the bridge it needs.** A promoted node is the
 same node drawn two ways in turn, and the two had to agree to the pixel
 or every hover would flash. They did not: a layer's `backgroundColor` went

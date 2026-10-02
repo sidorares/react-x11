@@ -230,6 +230,75 @@ export interface PaintCachePlan {
   tint?: string;
 }
 
+/**
+ * CSS's `matrix(a, b, c, d, e, f)`: a point (x, y) goes to
+ * (a·x + c·y + e, b·x + d·y + f), with `e` and `f` in device pixels.
+ */
+export type SpriteMatrix = [number, number, number, number, number, number];
+
+/** A cubic-bezier's control points `[x1, y1, x2, y2]`, `x1` and `x2` in
+ *  0..1, or one of Core Animation's curve names. */
+export type SpriteTiming = [number, number, number, number] | string;
+
+/**
+ * An animation the render server runs on a sprite: keyframes for one
+ * property, played as CSS plays an animation's iterations.
+ */
+export interface SpriteAnimation {
+  /** The element's own name for this run, which `spriteAnimationEnded`
+   * reports. An animation is attached once per id: to change one, give it
+   * a new id. */
+  id: string;
+  property: 'opacity' | 'transform';
+  /** At least two: opacities, or matrices for a transform — sampled densely
+   * where the element interpolates in a way the render server would not. */
+  values: number[] | SpriteMatrix[];
+  /** One per value, 0 to 1, never decreasing; evenly spaced when left out. */
+  keyTimes?: number[];
+  /** One curve per segment, so one fewer than `values`; linear when left
+   * out. */
+  timings?: SpriteTiming[];
+  /** Milliseconds, one iteration. */
+  duration: number;
+  /** Milliseconds from the frame that asks: ahead, or — negative — already
+   * that far in. Read when the animation is attached and not after. */
+  delay?: number;
+  /** Iterations, `Infinity` for a loop; one when left out. */
+  repeat?: number;
+  /** Each iteration turns round at its end, as `alternate` does. */
+  autoreverse?: boolean;
+  /** The last value stays on screen after the end. */
+  hold?: boolean;
+}
+
+/**
+ * A part of an element's drawing a presenter may put on a layer of its own
+ * — what `sprites()` answers with (docs/extending.md "Parts of your drawing
+ * on layers of their own").
+ */
+export interface Sprite {
+  /** The same across frames for the same part. */
+  key: string;
+  /** Its box, untransformed: device pixels, window coordinates, like
+   * `abs`. */
+  rect: Rect;
+  /** What it draws, untransformed, when that is more than `rect`. */
+  reach?: Rect;
+  /** Draws the part where it is in the window, as `paint` would, but at
+   * opacity 1 and untransformed. */
+  paint(ctx: Context2D): void;
+  /** Compared with `===` from frame to frame; a change paints the part
+   * again. Left out, it is painted once. */
+  version?: unknown;
+  /** What the layer shows when no animation runs on it; 1 when left out. */
+  opacity?: number;
+  /** …and the transform, about `origin`; the identity when left out. */
+  transform?: SpriteMatrix;
+  /** Device pixels, window coordinates; `rect`'s centre when left out. */
+  origin?: { x: number; y: number };
+  animations?: SpriteAnimation[];
+}
+
 /** How an axis is bounded when layout asks an element for its size.
  * `'exactly'` — the style decided this axis; `'at-most'` — that many pixels
  * are on offer; `'unconstrained'` — nothing bounds it. */
@@ -570,6 +639,28 @@ export declare class Node {
    * read-only.
    */
   paintDamage(): Rect | null;
+  /**
+   * The parts of this element's drawing a presenter may put on layers of
+   * their own, and animate there in the render server — or null, the
+   * default. Asked every frame, after layout and before the damage is
+   * taken, by the macOS surface presenter's layer promotion and by nothing
+   * else: on X11, on Wayland and wherever a frame's scene refuses a part,
+   * the element draws everything, as it would without this.
+   */
+  sprites(): Sprite[] | null;
+  /**
+   * The keys of this element's sprites that are on layers of their own now.
+   * Called in the frame that changes the set, before it paints; `paint`
+   * leaves a lifted part out from then on, and draws again one the set no
+   * longer holds.
+   */
+  spritesLifted(keys: ReadonlySet<string>): void;
+  /** The render server is done with animation `id` on sprite `key`: it ran
+   * out (`finished`), or it was taken off with its layer. */
+  spriteAnimationEnded(key: string, id: string, finished: boolean): void;
+  /** Ask for the frame in which `sprites()` is asked again, when the parts
+   * changed and nothing the element draws did. A no-op where nothing asks. */
+  spritesChanged(): void;
   /**
    * "The pixels in `rect` moved by (dx, dy); the rest of it is new" — for an
    * element with a viewport of its own, whose pan is a scroll in every way

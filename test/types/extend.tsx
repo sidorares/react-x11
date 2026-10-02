@@ -27,6 +27,7 @@ import type {
   Context2D,
   MeasureConstraints,
   PaintCachePlan,
+  Sprite,
   TextStyle,
 } from '../../src/node.js';
 import type { Rect } from '../../src/types/nodes.js';
@@ -136,6 +137,54 @@ class SurfacePaneNode extends Node {
   paintCached(ctx: Context2D, box: Rect, ink?: string): void {
     ctx.fillStyle = ink ?? '#fff';
     ctx.fillRect(0, 0, box.width, box.height);
+  }
+
+  // a cursor that blinks in the render server where a presenter lifts it
+  lifted: ReadonlySet<string> = new Set();
+
+  sprites(): Sprite[] | null {
+    const box = this.contentBox();
+    const rect = { x: box.x, y: box.y, width: 2, height: 16 };
+    return [
+      {
+        key: 'cursor',
+        rect,
+        version: 1,
+        paint: (ctx) => ctx.fillRect(rect.x, rect.y, rect.width, rect.height),
+        transform: [1, 0, 0, 1, 0, 0],
+        animations: [
+          {
+            id: 'blink',
+            property: 'opacity',
+            values: [1, 0, 1],
+            keyTimes: [0, 0.5, 1],
+            timings: ['linear', [0.42, 0, 0.58, 1]],
+            duration: 1000,
+            repeat: Infinity,
+          },
+          {
+            id: 'nudge',
+            property: 'transform',
+            values: [
+              [1, 0, 0, 1, 0, 0],
+              [1, 0, 0, 1, 4, 0],
+            ],
+            duration: 200,
+            delay: -50,
+          },
+          // @ts-expect-error — a colour is not a property a sprite animates
+          { id: 'tint', property: 'color', values: [0, 1], duration: 1 },
+        ],
+      },
+    ];
+  }
+
+  spritesLifted(keys: ReadonlySet<string>): void {
+    this.lifted = keys;
+  }
+
+  spriteAnimationEnded(key: string, id: string, finished: boolean): void {
+    if (finished && key === 'cursor' && id === 'nudge') this.spritesChanged();
   }
 }
 

@@ -196,6 +196,9 @@ export class WindowNode extends Scrollable(Node) {
     // the nodes answering `viewportFixedRects()`, whose rects a scroll pane
     // they are in repairs when it blits (`_viewportFixedPins`)
     this._viewportFixedNodes = new Set();
+    // the nodes answering `sprites()`, which a presenter that lifts parts of
+    // an element onto layers asks every frame (src/cocoa/sprites.js)
+    this._spriteNodes = new Set();
     // Nodes that want the `attention` event (ntk#37) — an
     // `unstable_onAttention` prop,
     // an `:attention` block, or both. Built before the EventManager so the

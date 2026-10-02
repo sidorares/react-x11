@@ -525,7 +525,12 @@ gate's argument is recorded there, measured. `opacity` is in the table on
 both presenters since #817, on a plain box: its layer is its group, since
 Core Animation fades a layer and its sublayers as one, and promotion keeps
 a box inside a faded one off a layer of its own, which would be outside
-the group. The `Raster` column of §4.2 is not taken by either yet.
+the group. The `Raster` column of §4.2 is not taken by either yet. An
+element that draws its own scene hands over parts of it instead (#819,
+`Node.sprites()`): each a layer under promotion's rules, its `opacity` and
+`transform` animated as keyframes the element computed — a CSS transform
+sampled into matrices, so that the element's interpolation, not Core
+Animation's, is what the render server plays.
 
 ### 4.4 Bridge additions (`@windowkit/appkit`)
 

@@ -1669,6 +1669,107 @@ name, as above.
 cached copy is composited, so an ancestor animating opacity is a cache hit
 rather than a reason to opt out.
 
+### Parts of your drawing on layers of their own
+
+An element that draws a scene has animations inside it — a document's CSS
+animation on one element, a cursor's blink, an edge's dash, a tooltip's
+fade — and each is a frame of JavaScript: restyle, claim, repaint. On macOS
+the render server can run such an animation itself, with no frame at all, if
+what moves is on a layer of its own. Layer promotion does that for a plain
+`<box>` ([macos.md](macos.md#layer-promotion-the-animated-few-on-their-own-layers-above-the-surface-presenter));
+an element whose content is its own `paint` answers **sprites**: the parts
+of its drawing it would like lifted, each with what the layer shows and what
+runs on it.
+
+```js
+sprites() {
+  const card = this.cardRect(); // device pixels, window coordinates
+  return [
+    {
+      key: 'card',
+      rect: card,
+      version: this.cardVersion,
+      paint: (ctx) => this.drawCard(ctx, card), // where it is, unfaded
+      opacity: 1, // what it rests at
+      animations: [
+        {
+          id: `fade-${this.fadeRun}`,
+          property: 'opacity',
+          values: [0, 1],
+          timings: [[0.25, 0.1, 0.25, 1]],
+          duration: 300, // ms
+          delay: this.fadeStart - performance.now(), // ms; negative is begun
+        },
+      ],
+    },
+  ];
+}
+
+spritesLifted(keys) {
+  this.lifted = keys; // paint() leaves these out now
+}
+
+spriteAnimationEnded(key, id, finished) {
+  this.fadeDone = true;
+  this.spritesChanged(); // the frame that asks again
+}
+```
+
+| method                                    |                                                                             |
+| ----------------------------------------- | --------------------------------------------------------------------------- |
+| `sprites()`                               | the parts on offer, or `null`; asked every frame, after layout              |
+| `spritesLifted(keys)`                     | which of them are on layers now — before the frame paints                   |
+| `spriteAnimationEnded(key, id, finished)` | the render server is done with one: it ran out, or its layer went           |
+| `spritesChanged()`                        | ask for that frame when the parts changed and nothing the element draws did |
+
+A part is its `key`, its `rect` (and a `reach`, if it draws past it), a
+`paint` that draws it **where it is in the window, at opacity 1 and
+untransformed** — the layer carries both — and a `version` whose change
+paints it again. Its `opacity` and its `transform`, CSS's `matrix(a, b, c,
+d, e, f)` as an array with `e` and `f` in device pixels, about an `origin`
+that defaults to the rect's centre, are what the layer shows at rest. Its
+`animations` are keyframes for one of those two properties each: `values`,
+`keyTimes`, a `timings` curve per segment, a `duration`, a `repeat`
+(`Infinity` loops), `autoreverse`, and `hold` to stay on the last value. A
+CSS animation goes over as it plays: an opacity's keyframes with their
+curves, and a transform **sampled** into matrices from the element's own
+interpolation, which is what makes a full turn turn and a mixed function
+list interpolate as CSS says — Core Animation's own interpolation would do
+neither.
+
+The rules the presenter decides by, every frame, are promotion's, asked of
+the element at **everywhere the part can be** — its reach through every
+transform it is animated through:
+
+- **Nothing painted after the element reaches into it** — no later sibling,
+  no ancestor's border, ring or scrollbar — and every clipping ancestor
+  holds all of it, because a layer is above the window's whole bitmap and
+  clipped by nothing.
+- **Neither the element nor any ancestor fades**: their group on the bitmap
+  would leave the layer out of it.
+- **Your inside is yours.** Offer only a part that nothing you draw after it
+  overlaps. The presenter cannot see inside your `paint`.
+
+A lifted part is a hole in your drawing from the frame `spritesLifted` says
+so, and a part the set no longer holds is yours to draw again in that same
+frame — the bitmap under it is claimed as it comes back. Declining is always
+safe, and it is what happens everywhere but on macOS: X11, Wayland, the
+layer presenter and a scene that refuses never ask, and your `paint` draws
+everything as it always did, so the same element runs on every backend and
+the animation runs on your own clock there.
+
+Three things to know about ids and time. An animation is attached **once per
+`id`**: one that changed is a new id, and one the render server finished is
+not started again while you still list it. Its `delay` counts from the frame
+that asks, so it is a fresh number every frame and read only on the first.
+And a part is painted once unless its `version` changes — a move by whole
+pixels moves the layer, but a move to another fraction of a pixel, or a new
+size, paints it again.
+
+Sprites need `@windowkit/appkit` 0.19 or later, which takes a transform as
+a matrix and a negative delay as one begun in the past: on an older bridge
+nothing is asked, and the element draws everything.
+
 ### Elements that own a real X window
 
 `drawn: false` is for a node backed by its own child X window rather than

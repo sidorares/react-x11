@@ -260,6 +260,10 @@ export class CocoaWindow {
         this._promotion.noteInvalidate(damage, layoutChanged);
       this.prepareFrame = (root, layoutRan) =>
         this._promotion.frame(root, layoutRan);
+      // An element's parts on layers of their own (src/cocoa/sprites.js)
+      // are asked for in that frame, so an element whose parts changed with
+      // nothing else to paint asks for one.
+      this.spritesChanged = () => this._reactX11Node?._scheduleFrame();
     }
     app._registerWindow(this);
   }

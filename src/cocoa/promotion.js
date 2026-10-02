@@ -45,6 +45,7 @@ import {
   propBoxProps,
   stylePaintsPlain,
 } from './presenter.js';
+import { SpriteLayers } from './sprites.js';
 
 const ORIGIN = Object.freeze({ x: 0, y: 0 });
 
@@ -60,6 +61,17 @@ const IDLE_GRACE_MS = 1000;
 // Past this many bare-rect claims on one raster the passes cost more than
 // the repaint they save (the layer presenter's rule, per raster).
 const MAX_DIRTY_RECTS = 16;
+
+/** Paint order, for entries carrying a `_paintKey`: a key the walk would
+ *  not reach sorts last. */
+function byPaintKey(a, b) {
+  if (!a.key || !b.key) return (a.key ? 1 : 0) - (b.key ? 1 : 0);
+  const n = Math.min(a.key.length, b.key.length);
+  for (let i = 0; i < n; i++) {
+    if (a.key[i] !== b.key[i]) return a.key[i] - b.key[i];
+  }
+  return a.key.length - b.key.length;
+}
 
 const rectsOverlap = (a, b) =>
   a.x < b.x + b.width &&
@@ -243,6 +255,9 @@ export class CocoaPromotion {
       layerOf: (node) => this.promoted.get(node)?.visual.layer ?? null,
       onIdle: (node) => this._idle(node),
     });
+    // the parts of elements' drawing they offer (`Node.sprites()`), each on
+    // a layer of its own under the same rules (src/cocoa/sprites.js)
+    this.sprites = new SpriteLayers(this);
     this._claiming = false;
   }
 
@@ -390,8 +405,19 @@ export class CocoaPromotion {
    */
   frame(root, layoutRan) {
     if (layoutRan) this.layoutGen++;
-    if (this.promoted.size === 0 && this.candidates.size === 0) return;
+    // what elements offer, asked before anything is decided: an answer is
+    // about the element's own drawing, not about the layers
+    const offers = this.sprites.ask(root);
+    if (
+      this.promoted.size === 0 &&
+      this.candidates.size === 0 &&
+      offers.size === 0 &&
+      this.sprites.hosts.size === 0
+    ) {
+      return;
+    }
     const native = this.native;
+    let lifted = null;
     native.txBegin({ disableActions: true });
     try {
       // Later-painted first: a node painted after this one that is coming
@@ -416,13 +442,26 @@ export class CocoaPromotion {
           }
         }
       }
+      // Then the parts, against the layers this frame keeps: a node
+      // promoted over a part is a layer above it, not ink on it.
+      lifted = this.sprites.decide(root, offers);
+      // One order for every layer above the bitmap, nodes and parts alike.
       const order = this._inPaintOrder([...this.promoted.keys()]);
+      for (const state of this.sprites.entries()) {
+        order.push({ state, key: state.order });
+      }
+      order.sort(byPaintKey);
       for (let i = 0; i < order.length; i++) {
-        this._sync(order[i].node, i, root, layoutRan);
+        const { node, state } = order[i];
+        if (node) this._sync(node, i, root, layoutRan);
+        else this.sprites.sync(state, i);
       }
     } finally {
       native.txCommit();
     }
+    // An element told which of its parts are on layers now may claim,
+    // restyle or ask for frames; the frame has not taken its damage yet.
+    if (lifted?.size) this.sprites.notify(lifted);
   }
 
   _mayStay(node, key) {
@@ -528,15 +567,20 @@ export class CocoaPromotion {
 
   _inPaintOrder(nodes) {
     const keyed = nodes.map((node) => ({ node, key: this._paintKey(node) }));
-    keyed.sort((a, b) => {
-      if (!a.key || !b.key) return (a.key ? 1 : 0) - (b.key ? 1 : 0);
-      const n = Math.min(a.key.length, b.key.length);
-      for (let i = 0; i < n; i++) {
-        if (a.key[i] !== b.key[i]) return a.key[i] - b.key[i];
-      }
-      return a.key.length - b.key.length;
-    });
+    keyed.sort(byPaintKey);
     return keyed;
+  }
+
+  /**
+   * Where an element offering parts stands in the paint order, or null when
+   * none of them may go on a layer: hidden, inside a `<glarea>`, or itself
+   * faded — its group on the bitmap would leave a part's layer out of it. A
+   * faded ancestor is `_clear`'s to find, as it is for a node.
+   */
+  _spritePlace(host) {
+    if (host.destroyed || host.hidden) return null;
+    if (insideGlArea(host) || fadesAsGroup(host)) return null;
+    return this._paintKey(host);
   }
 
   /**
@@ -548,11 +592,11 @@ export class CocoaPromotion {
    * it, and the parent must not fade: its group is drawn on the bitmap or on
    * its own layer, and either way a layer of the node's would be outside it.
    */
-  _clear(node) {
+  _clear(node, bounds = node._subtreeBounds()) {
     // the exact reach, not `paintBounds()`: that one carries the damage
     // model's pixel of slop, and a section laid out flush under a card
-    // would read as reaching into it
-    const bounds = node._subtreeBounds();
+    // would read as reaching into it. An element's part is asked about at
+    // everywhere it can draw (src/cocoa/sprites.js).
     for (let n = node; !n.isWindow; n = n.parent) {
       const parent = n.parent;
       if (!parent) return false;
@@ -733,6 +777,7 @@ export class CocoaPromotion {
 
   /** Everything off the root layer and freed: the window is going. */
   destroy() {
+    this.sprites.destroy();
     for (const timer of this.idle.values()) clearTimeout(timer);
     this.idle.clear();
     this.releasing.clear();

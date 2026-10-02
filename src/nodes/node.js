@@ -45,6 +45,7 @@ import { NodePosition } from './position.js';
 import { NodeQueries } from './queries.js';
 import { NodeScrollBlit } from './scrollblit.js';
 import { NodeSelectable } from './selectable.js';
+import { NodeSprites } from './sprites.js';
 import { NodeStyling } from './styling.js';
 import { DEV } from './util.js';
 
@@ -608,6 +609,7 @@ export class Node {
     this.root?._animating.delete(this);
     this.root?._opaqueNodes?.delete(this);
     this.root?._viewportFixedNodes?.delete(this);
+    this.root?._spriteNodes?.delete(this);
     // a surface that goes away takes its selection with it, and the app-wide
     // claim on being the one showing one goes with it too
     this._textSelection?.destroy();
@@ -627,14 +629,18 @@ export class Node {
       root?._layoutHosts?.add(this);
     }
     // an element answering `opaqueRect()` is one the window asks per pass,
-    // and one answering `viewportFixedRects()` one it asks per scroll blit
+    // one answering `viewportFixedRects()` one it asks per scroll blit, and
+    // one answering `sprites()` one its presenter asks per frame
     const opaque = this.opaqueRect !== Node.prototype.opaqueRect;
     const fixed = this.viewportFixedRects !== Node.prototype.viewportFixedRects;
+    const sprites = this.sprites !== Node.prototype.sprites;
     if (opaque) this.root?._opaqueNodes?.delete(this);
     if (fixed) this.root?._viewportFixedNodes?.delete(this);
+    if (sprites) this.root?._spriteNodes?.delete(this);
     this.root = root;
     if (opaque) root?._opaqueNodes?.add(this);
     if (fixed) root?._viewportFixedNodes?.add(this);
+    if (sprites) root?._spriteNodes?.add(this);
     // styled before it had a window, so this is where a placed node is
     // first registered (WindowNode._placeNodes)
     if (this.style && isPlaced(this.style)) root?._placedNodes?.add(this);
@@ -1034,4 +1040,5 @@ installMethods(
   NodePaint,
   NodeBoxPaint,
   NodeSelectable,
+  NodeSprites,
 );
