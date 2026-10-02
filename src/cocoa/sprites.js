@@ -48,7 +48,7 @@
 import { RASTER_PAD, RasterState } from './presenter.js';
 import { CocoaPlayer, PlayerLift } from './player.js';
 import { VideoLift, canLiftVideo } from './video.js';
-import { intersectRects, rectContains } from '../nodes/rects.js';
+import { intersectRects, rectContains, rectsOverlap } from '../nodes/rects.js';
 import { DEV } from '../nodes/util.js';
 import { isVideoFrames } from '../videoframes.js';
 
@@ -497,6 +497,7 @@ export class SpriteLayers {
         state.extent = shown;
         now.set(sprite.key, state);
       }
+      if (place) this._underDrawn(host, list, now, was, root);
       if (was) {
         for (const [key, state] of was) {
           if (!now.has(key)) this._drop(state, root);
@@ -510,6 +511,44 @@ export class SpriteLayers {
       }
     }
     return changed;
+  }
+
+  /**
+   * An element lists its parts in the order it paints them, and its layers
+   * stand in that order above the bitmap. A part this frame turned down is
+   * the element's to draw, in the bitmap, under every layer, so a part
+   * listed before it — painted under it — may not stay on a layer over it
+   * where the two meet: the later part's pixels would be under the earlier
+   * one's. An element may then offer a part that a later one of its own
+   * overlaps, on the word that the later one is lifted too, and this keeps
+   * that word. Walked from the end of the list, so a part given back here
+   * is under the ones before it in turn. One inside another's layer goes
+   * with that layer, and is not asked.
+   */
+  _underDrawn(host, list, now, was, root) {
+    const drawn = []; // where later parts are in the bitmap
+    const giveBack = (state) => {
+      for (const kid of state.kids) giveBack(kid);
+      now.delete(state.key);
+      // one lifted in an earlier frame goes with the rest of those
+      if (was?.get(state.key) !== state) this._drop(state, root);
+    };
+    for (let index = list.length - 1; index >= 0; index--) {
+      const sprite = list[index];
+      if (!isSprite(sprite) || sprite.parent !== undefined) continue;
+      const state = now.get(sprite.key);
+      if (state?.sprite === sprite) {
+        if (!state.extent) continue; // it shows nothing to be over
+        if (!drawn.some((rect) => rectsOverlap(rect, state.extent))) continue;
+        giveBack(state);
+        drawn.push(state.extent);
+        continue;
+      }
+      // the element draws it, where its own clip lets it show
+      const extent = extentOf(sprite);
+      const shows = sprite.clip ? intersectRects(extent, sprite.clip) : extent;
+      if (shows) drawn.push(shows);
+    }
   }
 
   /** Every lifted part above the bitmap, with its place in the paint

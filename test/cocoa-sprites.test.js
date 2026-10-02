@@ -365,6 +365,64 @@ test("a later sibling over the part keeps it the element's, until it moves away"
   assert.ok(stateOf(m, node, 'a'), 'lifted once nothing is over it');
 });
 
+test("a part under a later one of its element's that is drawn in the bitmap stays the element's: its layer would be over the later part", async (t) => {
+  // `c` overlaps `a` and is listed after it, so the element paints it over
+  // `a`. A box painted after the element covers `c` and not `a`: `c` stays
+  // in the bitmap, under every layer, and `a` on a layer would be over it.
+  const C = { x: 100, y: 50, width: 60, height: 20 };
+  const over = (left) =>
+    h('box', {
+      key: 'over',
+      style: at(left, 25, 15, 10, { backgroundColor: '#00ff00' }),
+    });
+  const { m, node } = await shown(
+    t,
+    [stage(), over(65)],
+    [part('a', A, { animations: [fade] }), part('c', C)],
+  );
+  assert.ok(stateOf(m, node, 'c') === undefined, 'the box is over c');
+  assert.ok(stateOf(m, node, 'a') === undefined, 'and c is over a');
+  assert.deepEqual(node.paints.at(-1), ['a', 'c'], 'the element draws both');
+  assert.equal(
+    m.native.of('createLayer').filter(Boolean).length,
+    m.native.of('removeFromSuperlayer').length,
+    'and no layer is left standing',
+  );
+
+  // the box moves off c: both go on layers, in the order they were listed
+  await m.render([stage(), over(150)]);
+  m.frame();
+  const a = stateOf(m, node, 'a');
+  const c = stateOf(m, node, 'c');
+  assert.ok(a && c, 'both lifted');
+  assert.ok(a.layer.props.zPosition < c.layer.props.zPosition, 'c over a');
+
+  // …and back over c: a comes off its layer with it, in that frame
+  await m.render([stage(), over(65)]);
+  m.frame();
+  assert.ok(stateOf(m, node, 'a') === undefined);
+  assert.ok(stateOf(m, node, 'c') === undefined);
+  assert.equal(a.layer.parent, null, "a's layer is off the root");
+  assert.deepEqual(node.paints.at(-1), ['a', 'c']);
+});
+
+test("a part a later one of its element's in the bitmap does not reach keeps its layer", async (t) => {
+  // `b` is far from `a`: under the box it is the element's, and `a` is not
+  // under it anywhere
+  const over = h('box', {
+    key: 'over',
+    style: at(125, 25, 10, 10, { backgroundColor: '#00ff00' }),
+  });
+  const { m, node } = await shown(
+    t,
+    [stage(), over],
+    [part('a', A), part('b', B)],
+  );
+  assert.ok(stateOf(m, node, 'b') === undefined, 'the box is over b');
+  assert.ok(stateOf(m, node, 'a'), 'a is lifted');
+  assert.deepEqual(node.paints.at(-1), ['b']);
+});
+
 test('a part that comes to be overlapped leaves its layer in the frame that finds it, and the element draws it again in that frame', async (t) => {
   const { m, node } = await shown(
     t,
