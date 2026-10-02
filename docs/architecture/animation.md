@@ -521,7 +521,11 @@ on an offloadable property gets a CALayer of its own above the window's
 bitmap for as long as it animates, where nothing is painted over it, and
 the same `LayerAnimations` books run it in the render server. The bitmap
 keeps the frame for everything else. What this moved in the measure-first
-gate's argument is recorded there, measured.
+gate's argument is recorded there, measured. `opacity` is in the table on
+both presenters since #817, on a plain box: its layer is its group, since
+Core Animation fades a layer and its sublayers as one, and promotion keeps
+a box inside a faded one off a layer of its own, which would be outside
+the group. The `Raster` column of §4.2 is not taken by either yet.
 
 ### 4.4 Bridge additions (`@windowkit/appkit`)
 

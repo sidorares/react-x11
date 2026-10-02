@@ -400,6 +400,25 @@ test('a length retargets additively: the new delta joins the one still running',
   assert.ok(!m.node._anim?.size);
 });
 
+test("a fade is the layer's opacity, additive as a length is", async () => {
+  const fading = { opacity: 1, transition: { opacity: 120 } };
+  const m = await mountAnimated(fading);
+  await m.rerender({ ...fading, opacity: 0.25 });
+  assert.ok(m.node._anim.get('opacity')?.offloaded, 'the presenter took it');
+  assert.strictEqual(m.windowNode._animating.size, 0, 'no frame clock for it');
+  m.presenter.frame(m.windowNode);
+  const sent = m.bridge
+    .argsOf('setLayerProps')
+    .flatMap(([p]) => (p.opacity !== undefined ? [p.opacity] : []));
+  assert.strictEqual(sent.at(-1), 0.25, 'the model');
+  assert.deepStrictEqual(
+    m.bridge
+      .argsOf('addAnimation')
+      .map(([kp, o]) => [kp, o.from, o.to, o.additive]),
+    [['opacity', 0.75, 0, true]],
+  );
+});
+
 test('a colour retargets from where the pixels are, replacing the one before it', async () => {
   const m = await mountAnimated(fade);
   await m.rerender({ ...fade, backgroundColor: '#0000ff' });

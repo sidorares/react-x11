@@ -258,6 +258,74 @@ test('a loop keeps its layer for as long as it runs, and gives it back when it s
   assert.equal(m.node._animating.size, 0);
 });
 
+test("a fade is promoted: the render server animates the layer's opacity, the box and its children faded as one, and no frames", async () => {
+  const card = at(10, 10, 60, 30, {
+    backgroundColor: '#0000ff',
+    opacity: 1,
+    transition: { opacity: 120 },
+  });
+  const half = box(at(0, 0, 30, 30, { backgroundColor: '#ff0000' }));
+  const m = await mountCocoa(box(card, half));
+  const node = m.node.children[0];
+  await m.render(box({ ...card, opacity: 0.25 }, half));
+  assert.ok(node._anim.get('opacity')?.offloaded, 'taken at the swap');
+  const before = m.frames.count;
+  m.frame();
+  assert.equal(m.frames.count, before + 1, 'the one frame that sends it');
+  assert.equal(node._promoted, true);
+  const layer = layerOf(m, node);
+  assert.equal(layer.props.opacity, 0.25, 'the model');
+  const anims = m.native.of('addAnimation');
+  assert.equal(anims.length, 1);
+  const [animLayer, keyPath, opts] = anims[0];
+  assert.equal(animLayer, layer);
+  assert.equal(keyPath, 'opacity');
+  assert.deepEqual(
+    [opts.from, opts.to, opts.additive],
+    [0.75, 0, true],
+    'a delta over the model, as a length is',
+  );
+  // the child is a sublayer of the faded layer, which Core Animation draws
+  // with it and fades as one: the group the bitmap drew
+  const content = m.promotion.promoted.get(node).content;
+  assert.equal(content.layer.parent, layer);
+  m.frame();
+  assert.equal(m.frames.count, before + 1, 'and nothing after it');
+  assert.equal(m.node._animating.size, 0);
+});
+
+test('an opacity loop runs in the render server from the first frame; a faded box with a loop is promoted at its opacity', async () => {
+  const breathe = at(10, 10, 40, 20, {
+    backgroundColor: '#ff0000',
+    animation: {
+      opacity: { from: 0.2, to: 1, duration: 900, alternate: true },
+    },
+  });
+  const m = await mountCocoa(box(breathe));
+  const node = m.node.children[0];
+  assert.ok(node._anim.get('opacity')?.offloaded);
+  assert.equal(node._promoted, true);
+  assert.equal(m.node._animating.size, 0, 'no frames for it');
+  const [, keyPath, opts] = m.native.of('addAnimation')[0];
+  assert.equal(keyPath, 'opacity');
+  assert.deepEqual(
+    [opts.from, opts.to, opts.repeat, opts.autoreverse],
+    [0.2, 1, Infinity, true],
+  );
+  assert.equal(
+    layerOf(m, node).props.opacity,
+    0.2,
+    "the model: a loop's from is the property at rest",
+  );
+  await cleanupCocoa();
+
+  const still = await mountCocoa(box({ ...pulse, opacity: 0.5 }));
+  const faded = still.node.children[0];
+  assert.equal(faded._promoted, true);
+  assert.equal(layerOf(still, faded).props.opacity, 0.5);
+  assert.equal(still.node._animating.size, 0);
+});
+
 test('a later sibling reaching into the node keeps it on the clock, until the layout changes', async () => {
   const clock = withFrameClock();
   try {
@@ -379,6 +447,59 @@ test('a clipping ancestor has to hold the whole of it', async () => {
   }
 });
 
+test('a box inside a faded one stays in its group, on the clock: a layer on the root would be drawn at full strength', async () => {
+  const faded = at(0, 0, 150, 100, { opacity: 0.5 });
+  const m = await mountCocoa(box(faded, box(pulse)));
+  const node = m.node.children[0].children[0];
+  assert.equal(node._promoted, false);
+  assert.equal(m.native.of('createLayer').length, 0);
+  const entry = node._anim.get('backgroundColor');
+  assert.ok(entry && !entry.offloaded, 'the clock runs it');
+  assert.ok(m.node._animating.has(node));
+});
+
+test('a promoted box whose ancestor starts to fade comes off its layer in that frame, into the group', async () => {
+  const fading = { opacity: 1, transition: { opacity: 120 } };
+  // the ancestor on the bitmap, and already on a layer of its own — where a
+  // backdrop keeps its raster the same size with the box in it or without
+  const panels = {
+    'on the bitmap': [at(0, 0, 150, 100, fading)],
+    'on a layer': [
+      at(0, 0, 150, 100, {
+        ...fading,
+        backgroundColor: '#ffffff',
+        animation: {
+          backgroundColor: { to: '#eeeeee', duration: 900, alternate: true },
+        },
+      }),
+      kbox('backdrop', at(0, 0, 150, 100, { backgroundColor: '#f0f0f0' })),
+    ],
+  };
+  const rect = { x: px(10), y: px(10), width: px(40), height: px(20) };
+  for (const [where, [panel, ...under]] of Object.entries(panels)) {
+    const scene = (style) => box(style, ...under, kbox('box', pulse));
+    const m = await mountCocoa(scene(panel));
+    const panelNode = m.node.children[0];
+    const node = panelNode.children.at(-1);
+    assert.equal(node._promoted, true, where);
+    const layer = layerOf(m, node);
+    await m.render(scene({ ...panel, opacity: 0.4 }));
+    m.frame();
+    assert.equal(node._promoted, false, `${where}: off its layer`);
+    assert.equal(layer.parent, null);
+    assert.ok(m.node._animating.has(node), `${where}: its loop on the clock`);
+    // the fade is on a layer of its own, and the box is in its raster
+    assert.equal(panelNode._promoted, true, where);
+    const content = m.promotion.promoted.get(panelNode).content;
+    assert.equal(
+      fillsOf(m.native, rect, content.raster.surface),
+      1,
+      `${where}: painted into the group`,
+    );
+    await cleanupCocoa();
+  }
+});
+
 test('what the layer cannot express takes the node back to the bitmap, the loop to the clock', async () => {
   const m = await mountCocoa(box(pulse));
   const node = m.node.children[0];
@@ -493,6 +614,69 @@ test("a promoted node inside a promoted node: a hole in the parent's raster, and
     height: chipNode.abs.height,
   };
   assert.equal(fillsOf(m.native, chipRect), 1, 'painted once, at the mount');
+});
+
+test('a box promoted inside a promoted one is taken out of its raster, and given back is painted into it again', async () => {
+  const card = at(10, 10, 120, 60, {
+    backgroundColor: '#ffffff',
+    animation: {
+      backgroundColor: { to: '#eeeeee', duration: 900, alternate: true },
+    },
+  });
+  // a panel under the chip: the raster's reach is the same with the chip
+  // or without it, so nothing about its size asks for a repaint
+  const panel = at(0, 0, 120, 60, { backgroundColor: '#f0f0f0' });
+  const chip = at(10, 10, 30, 20, {
+    backgroundColor: '#ff0000',
+    transition: { backgroundColor: 120 },
+  });
+  const scene = (c) => box(card, kbox('p', panel), kbox('c', c));
+  const m = await mountCocoa(scene(chip));
+  const cardNode = m.node.children[0];
+  const chipNode = cardNode.children[1];
+  assert.equal(cardNode._promoted, true);
+  const raster = () =>
+    m.promotion.promoted.get(cardNode).content.raster.surface;
+  const chipRect = {
+    x: chipNode.abs.x,
+    y: chipNode.abs.y,
+    width: chipNode.abs.width,
+    height: chipNode.abs.height,
+  };
+  const passesOverChip = () =>
+    m.native
+      .of('ctxClearRect')
+      .filter(
+        ([s, x, y, w, hh]) =>
+          s.id === raster().id &&
+          x <= chipRect.x &&
+          y <= chipRect.y &&
+          x + w >= chipRect.x + chipRect.width &&
+          y + hh >= chipRect.y + chipRect.height,
+      ).length;
+  assert.equal(
+    fillsOf(m.native, chipRect, raster()),
+    1,
+    "in the card's raster",
+  );
+
+  // promoted: the raster repaints where it was, without it
+  const passes = passesOverChip();
+  await m.render(scene({ ...chip, backgroundColor: '#0000ff' }));
+  m.frame();
+  assert.equal(chipNode._promoted, true);
+  assert.equal(passesOverChip(), passes + 1, 'a pass over where it was');
+  assert.equal(fillsOf(m.native, chipRect, raster()), 1, 'not drawn in it');
+
+  // given back: in the raster again — the bitmap has a hole there, and
+  // the raster is all that would show it
+  const [, , opts] = m.native.of('addAnimation').at(-1);
+  m.native.emit({ type: 'animation-end', id: opts.id, finished: true });
+  m.promotion.releaseIdle();
+  await tick();
+  m.frame();
+  assert.equal(chipNode._promoted, false);
+  assert.equal(fillsOf(m.native, chipRect, raster()), 2, 'painted back in');
 });
 
 test('unmounting a promoted node takes its layer off the root', async () => {

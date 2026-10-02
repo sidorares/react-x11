@@ -1698,17 +1698,26 @@ sublayer painted by the node's own `_paintChildren` walk (a `Visual` and a
 `RasterState` from the layer presenter, used standalone), repainted for the
 claims that reach into it and for a change in where the children sit —
 the hover card in `examples/animation.jsx` promotes with its two captions.
-A promoted node inside a promoted node leaves a hole in its parent's
-raster and sits on a layer of its own above it; every promoted layer is
-flat on the window root, ordered by paint order. Hit testing never moves:
-the node tree stays the source of truth for input on every presenter, so
-promotion changes pixels and nothing else.
+Its `opacity` is the layer's as well, and the layer is then the group CSS
+asks for: Core Animation draws a layer under an opacity below 1 with its
+sublayers and fades them as one (`allowsGroupOpacity`, YES by default on
+macOS), which is what `NodePaint._paintGroup` draws on the bitmap — read
+back as 1 off a promoted layer's presentation layer, and a half-faded card
+over a red child snapshotted with no blue in the red. A promoted node
+inside a promoted node leaves a hole in its parent's raster and sits on a
+layer of its own above it, and coming off its layer it is painted into
+that raster again in the same frame (#817: what gives it back — the grace
+running out, a fade above it — claims its own layer or nothing, so no
+claim would have); every promoted layer is flat on the window root,
+ordered by paint order. Hit testing never moves: the node tree stays the
+source of truth for input on every presenter, so promotion changes pixels
+and nothing else.
 
 **The policy** is not inferred from the scene, and there is no style prop
 to get wrong: a node is promoted because it has a transition or a loop on
 a property a layer can express — a plain `<box>`'s `backgroundColor`,
-`borderColor`, `borderWidth`, `borderRadius` — for as long as it has one
-and a second after, and returns to the bitmap then. The second is
+`borderColor`, `borderWidth`, `borderRadius`, `opacity` — for as long as
+it has one and a second after, and returns to the bitmap then. The second is
 `IDLE_GRACE_MS`: a hover card fades in and, a moment later, out; a palette
 step ends one transition and starts the next; a toast pulses again.
 Demoting on the last frame of each cost a layer and a repaint of the hole
@@ -1728,12 +1737,15 @@ layout-only container laid over the node is no overlap, and a later
 subtree that is itself promoted is on a layer above and does not count),
 no ancestor's border ring or focus ring (both are painted after the
 children), no scrollbar — and only when every clipping ancestor holds the
-whole of it, because the layer would not be clipped. All of it is
-answered from `paintOrder()` and the cached paint reach, and the same test
-runs again every frame, later-painted nodes first, so a node that becomes
-overlapped, hidden, clipped or non-plain (a `:hover` that adds a shadow)
-returns to the bitmap in the frame that finds it, the animation handed
-back to the clock. Overlays, toasts, drag ghosts, spinners and floating
+whole of it, because the layer would not be clipped, and no ancestor
+fades, because the layer would not fade with it: a box inside a faded box
+stays in the group's pixels, on the clock, where a layer on the root was
+drawn at full strength until #817. All of it is answered from
+`paintOrder()` and the cached paint reach, and the same test runs again
+every frame, later-painted nodes first, so a node that becomes
+overlapped, hidden, clipped, faded around or non-plain (a `:hover` that
+adds a shadow) returns to the bitmap in the frame that finds it, the
+animation handed back to the clock. Overlays, toasts, drag ghosts, spinners and floating
 cards pass by construction; a hover fade on a row in the middle of a list
 does not, and stays on the clock. Declining is always safe — the frame
 clock runs the animation exactly as it does with promotion off — and a
@@ -1763,7 +1775,9 @@ come back, and the render server draws every frame between — through a
 busy JS thread, at the display's rate — while the bitmap keeps the frame
 for everything else, the scroll blit included. What it costs is a CALayer
 and, for a node with children, a bitmap the size of their reach, for as
-long as the node animates and the second after.
+long as the node animates and the second after. A fade is one of them: a
+200×120 card with an `opacity` loop over a child painted 120 frames in two
+seconds on the clock, and paints none on its layer.
 `createRoot({ cocoa: { promote: false } })` or `REACT_X11_COCOA_PROMOTE=0`
 keeps every animation on the frame clock, which is what the presenter
 bench's `surface` column measures; `true` / `=1` turns it on regardless
