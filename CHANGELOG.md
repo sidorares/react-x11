@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.28.0](https://github.com/sidorares/react-x11/compare/v2.27.0...v2.28.0) (2026-10-02)
+
+
+### Features
+
+* **cocoa:** an opacity transition or loop runs in the render server, on a promoted box that fades as one group, where every fade was JS frames; a box inside a faded one stays in the group, and one given back inside a promoted box is painted into its raster again ([#818](https://github.com/sidorares/react-x11/issues/818)) ([323f655](https://github.com/sidorares/react-x11/commit/323f6556d52bf6b578431b6de185c938fc467842)), closes [#817](https://github.com/sidorares/react-x11/issues/817)
+
+
+### Bug Fixes
+
+* **damage:** focus moving inside a scroll pane repaints the focus rings, not the viewport, and a focus that scrolls the pane takes the blit ([#815](https://github.com/sidorares/react-x11/issues/815)) ([8abdbf3](https://github.com/sidorares/react-x11/commit/8abdbf3a6acf58195f1c94ec3cf2d658d284d3ff)), closes [#813](https://github.com/sidorares/react-x11/issues/813)
+
 ## [2.27.0](https://github.com/sidorares/react-x11/compare/v2.26.3...v2.27.0) (2026-10-02)
 
 
