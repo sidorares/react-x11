@@ -286,8 +286,19 @@ export class WindowFlush {
     }
     // An animated placement asked for this frame and nothing laid out: its
     // pass runs on its own, against the arrangement the last one left
+    let placed = false;
     if (!layoutRan && this._placementsDue && this._placeNodes()) {
       this.needsPaint = true;
+      placed = true;
+    }
+    // A loop this arrangement put out of sight stops, and one it brought
+    // back runs again: after the pass and the placements, so it is judged
+    // where things landed, and before the presenter's word, so a loop
+    // handed to it is taken back in the frame that hid it. Nothing moves
+    // anything but these two, so a frame without either has nothing new to
+    // judge.
+    if ((layoutRan || placed) && this._loopNodes.size) {
+      this._recheckLoopSight();
     }
     // A presenter compositing part of the tree on layers of its own — the
     // surface presenter's promoted nodes (src/cocoa/promotion.js) — gets

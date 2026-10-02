@@ -27,9 +27,9 @@ const CROSSING_MS = 1100;
  * [styling.md](../../docs/styling.md#loops)), not a timer here: it runs on
  * the window's own frame clock, claims the block as its damage every frame
  * instead of invalidating the window, and stops itself when the window is
- * unmapped, minimized or buried. A `setInterval` calling `setState` would
- * do none of those three, and would re-render this component sixty times a
- * second to move a rectangle.
+ * unmapped, minimized or buried, or the bar is scrolled out of sight. A
+ * `setInterval` calling `setState` would do none of those, and would
+ * re-render this component sixty times a second to move a rectangle.
  *
  * The travel is in **percentages of the track**, so nothing here measures
  * anything: the bar is right at whatever width its container gives it and
