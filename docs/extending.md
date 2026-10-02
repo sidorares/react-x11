@@ -1757,6 +1757,18 @@ transform it is animated through:
 - **Your inside is yours.** Offer only a part that nothing you draw after it
   overlaps. The presenter cannot see inside your `paint`.
 
+A part can be inside another of yours — a spinner in a card that fades —
+by naming it as its `parent`, earlier in the list. Its layer goes in the
+parent's layer, so it fades, turns and is cut with it, and it is asked
+about nothing more than staying inside the parent's raster everywhere it
+can be: the parent was asked about all of that. Its `rect`, `origin` and
+`clip` are where it is in the window with its parent untransformed. The
+parent's `paint` is handed the keys of the parts lifted inside it, and
+leaves them out; the presenter paints it again whenever they change, in
+the frame they do. A part whose parent is not lifted, or that reaches out
+of it, is yours to draw — in the parent's raster, where the parent is
+lifted.
+
 A lifted part is a hole in your drawing from the frame `spritesLifted` says
 so, and a part the set no longer holds is yours to draw again in that same
 frame — the bitmap under it is claimed as it comes back. Declining is always

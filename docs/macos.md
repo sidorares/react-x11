@@ -1823,7 +1823,12 @@ is the element's to draw again in that same frame, with the bitmap under it
 claimed. A registered element offering a card with an opacity loop, a turn
 sampled into 61 matrices, or a static half-faded quarter turn painted no
 window frame and no paint of the element in two seconds on this machine,
-with the render server's values moving under it.
+with the render server's values moving under it. A part may name another
+as its `parent`: its layer is then a sublayer of the parent's, placed from
+the corner of the parent's raster, which the presenter paints again
+without it — handing the parent's `paint` the keys lifted inside it —
+whenever that set changes. It is asked about nothing at the window's
+level, since the parent was, and only kept to the parent's raster.
 
 **One thing it found, and the bridge it needs.** A promoted node is the
 same node drawn two ways in turn, and the two had to agree to the pixel

@@ -297,8 +297,16 @@ export interface Sprite {
    * cannot take both. */
   clipRadius?: number;
   /** Draws the part where it is in the window, as `paint` would, but at
-   * opacity 1 and untransformed. A part with `contents` has none. */
-  paint?(ctx: Context2D): void;
+   * opacity 1 and untransformed — and without the parts lifted inside it
+   * (`parent`), whose keys the presenter hands it as `children`. A part
+   * with `contents` has none. */
+  paint?(ctx: Context2D, children?: ReadonlySet<string>): void;
+  /** The key of another of the element's parts this one is inside, earlier
+   * in the list: its layer goes in that part's layer, fading, turning and
+   * cut with it, and is lifted only with it, and only where everywhere it
+   * can be is inside that part's raster. Its `rect`, `origin` and `clip`
+   * are the window's, with its parent untransformed. */
+  parent?: string;
   /**
    * A source that shows itself on the part's layer instead of a paint — a
    * `VideoFrames` sink, whose every push reaches the layer with no frame of

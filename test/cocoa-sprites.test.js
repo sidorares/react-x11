@@ -590,6 +590,102 @@ test('a clip that comes or goes lifts the part again, in a box or out of one; on
   assert.deepEqual(node.liftedCalls.at(-1), [], 'drawn by its element');
 });
 
+test("a part inside another of its element's goes in the parent's layer, placed from the corner of its raster, and the parent's paint is handed it and painted again whenever the parts inside it change", async (t) => {
+  // a card that fades, 200×160 device pixels at (20, 20), its raster at
+  // (18, 18) with the pad; a spinner in it, 40×40 at (60, 60), that slides
+  const card = { x: 20, y: 20, width: 200, height: 160 };
+  const spin = { x: 60, y: 60, width: 40, height: 40 };
+  const handed = [];
+  const parent = part('card', card, {
+    animations: [fade],
+    paint(ctx, kids) {
+      // the presenter's call: the element's own, drawing it, hands none
+      if (kids) handed.push([...kids]);
+      ctx.fillStyle = '#ff0000';
+      ctx.fillRect(card.x, card.y, card.width, card.height);
+    },
+  });
+  const child = (more = {}) =>
+    part('spin', spin, { parent: 'card', animations: [slide(20)], ...more });
+  const { m, node } = await shown(t, stage(), [parent, child()]);
+  const outer = stateOf(m, node, 'card');
+  const inner = stateOf(m, node, 'spin');
+  assert.ok(outer && inner, 'both lifted');
+  assert.deepEqual(node.liftedCalls.at(-1), ['card', 'spin']);
+  assert.equal(outer.layer.parent, rootLayer(m));
+  assert.equal(inner.layer.parent, outer.layer, "in the card's layer");
+  // its centre, (80, 80), from the raster's corner, in points
+  assert.deepEqual(inner.layer.props.position, [31, 31]);
+  assert.deepEqual(handed, [['spin']], 'the card painted without it');
+  // the spinner goes: the card is painted again with it, in that frame
+  reoffer(node, [parent]);
+  m.frame();
+  assert.ok(stateOf(m, node, 'spin') === undefined, 'given back');
+  assert.equal(inner.layer.parent, null, 'its layer went');
+  assert.equal(stateOf(m, node, 'card'), outer, 'the card stays');
+  assert.deepEqual(handed.at(-1), [], 'painted with it again');
+  // lifted again, then the card goes and takes it along
+  reoffer(node, [parent, child()]);
+  m.frame();
+  assert.deepEqual(handed.at(-1), ['spin']);
+  reoffer(node, [child()]);
+  m.frame();
+  assert.equal(m.promotion.sprites.hosts.size, 0, 'neither, with no card');
+  assert.deepEqual(node.liftedCalls.at(-1), []);
+  await cleanupCocoa();
+});
+
+test('a part inside another is lifted only with its parent, after it in the list, and only where it stays inside the parent’s raster', async (t) => {
+  const card = { x: 20, y: 20, width: 200, height: 160 };
+  const spin = { x: 60, y: 60, width: 40, height: 40 };
+  const parent = part('card', card, { animations: [fade] });
+  const child = (dx) =>
+    part('spin', spin, { parent: 'card', animations: [slide(dx)] });
+  {
+    // before its parent in the list: no parent to go in yet
+    const { m, node } = await shown(t, stage(), [child(20), parent]);
+    assert.ok(stateOf(m, node, 'card'), 'the card');
+    assert.ok(stateOf(m, node, 'spin') === undefined, 'not the spinner');
+    await cleanupCocoa();
+  }
+  {
+    // sliding out past the card's raster, where the card was not asked
+    // about: drawn by its element, in the card
+    const { m, node } = await shown(t, stage(), [parent, child(400)]);
+    assert.ok(stateOf(m, node, 'card'), 'the card');
+    assert.ok(stateOf(m, node, 'spin') === undefined, 'not the spinner');
+    await cleanupCocoa();
+  }
+  {
+    // cut to a clip of its own: its box in the card's layer, from the
+    // raster's corner, and the spinner in its box from the clip's
+    const { m, node } = await shown(t, stage(), [
+      parent,
+      part('spin', spin, {
+        parent: 'card',
+        animations: [slide(20)],
+        clip: { x: 40, y: 40, width: 80, height: 80 },
+      }),
+    ]);
+    const inner = stateOf(m, node, 'spin');
+    assert.equal(inner.box.parent, stateOf(m, node, 'card').layer);
+    assert.deepEqual(inner.box.props.frame, [11, 11, 40, 40]);
+    assert.deepEqual(inner.layer.props.position, [20, 20]);
+    await cleanupCocoa();
+  }
+  {
+    // a parent over which something is drawn is its element's, and so is
+    // the part inside it
+    const over = box(at(30, 30, 20, 20, { backgroundColor: '#00ff00' }));
+    const { m } = await shown(
+      t,
+      [stage(), h('box', { key: 'over', style: over.props.style })],
+      [parent, child(20)],
+    );
+    assert.equal(m.promotion.sprites.hosts.size, 0, 'neither');
+  }
+});
+
 test('a part the element stops offering, and an element that goes, take their layers with them', async (t) => {
   const spare = h('box', { key: 'spare', style: at(150, 100, 10, 10) });
   const parts = [part('a', A), part('b', B)];
