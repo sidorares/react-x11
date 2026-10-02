@@ -1377,6 +1377,12 @@ the layer presenter runs it on the node's own layer, and the surface
 presenter promotes the node to a layer of its own above the window for as
 long as it animates, where nothing is painted over it
 ([macos.md](macos.md#layer-promotion-the-animated-few-on-their-own-layers-above-the-surface-presenter)).
+So is a loop on an inset of a box out of the flow that says no pointer
+lands on it — `position: 'absolute'` and `pointerEvents: 'none'`, as the
+block of `<ProgressBar indeterminate>` does — since it moves that box and
+nothing else: it becomes the layer's position. Without `pointerEvents:
+'none'` it stays on the clock, because input is hit where the layout put
+the box.
 Anything else runs as above. `examples/animation.jsx` has both shapes side
 by side, with a frame counter in the terminal that shows the difference.
 

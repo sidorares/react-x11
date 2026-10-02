@@ -18,10 +18,12 @@
 //   promotion (#483): the three tiles, the chip and the hovered card get a
 //   layer of their own above the window's bitmap for as long as they
 //   animate, and the bitmap keeps the frame for everything else. The layer
-//   presenter has a layer for every box to begin with. Either way, untick
-//   "position · text ink · ProgressBar" and the counter reads 0 while the
-//   three tiles keep pulsing; press the button and they pulse straight
-//   through the block.
+//   presenter has a layer for every box to begin with. The ProgressBar's
+//   slide goes there too, as its block's position, since nothing presses
+//   the block; the dots, which a pointer can land on, stay on the clock.
+//   Either way, untick "position · text ink · ProgressBar" and the counter
+//   reads 0 while the three tiles keep pulsing; press the button and they
+//   pulse straight through the block.
 //
 //   REACT_X11_COCOA_PROMOTE=0 npm run examples:animation           # macOS,
 //                                              # every animation on the clock
@@ -309,7 +311,8 @@ function Loops() {
             </text>
           </box>
           <text style={s.hint}>
-            Layout, and ink in a bitmap: the frame clock on every backend.
+            Layout, and ink in a bitmap: the frame clock on every backend. On
+            macOS the bar's slide is its block's position, in the render server.
           </text>
         </box>
       </box>

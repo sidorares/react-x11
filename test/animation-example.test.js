@@ -161,10 +161,15 @@ describe('examples/animation', () => {
       await act();
       const promoted = () =>
         [...promotion.promoted.keys()]
-          .map((n) => n.props['data-testname'] ?? n.kind)
+          .map(
+            (n) =>
+              n.props['data-testname'] ??
+              (n.parent?.props.role === 'progressbar' ? 'bar' : n.kind),
+          )
           .sort();
-      // declared at mount, the three loops moved over on the first frame
-      assert.deepEqual(promoted(), ['breathe', 'pulse', 'round']);
+      // declared at mount, the three loops and the bar's slide moved over
+      // on the first frame
+      assert.deepEqual(promoted(), ['bar', 'breathe', 'pulse', 'round']);
       assert.deepEqual(
         onTheClock(windowNode),
         ['color', 'start'],
@@ -178,12 +183,13 @@ describe('examples/animation', () => {
         ['backgroundColor', Infinity, true],
         ['borderWidth', Infinity, true],
         ['cornerRadius', Infinity, true],
+        ['position.x', Infinity, false],
       ]);
-      // every promoted layer is a sublayer of the window root, and the
-      // three tiles kept their paint order
+      // every promoted layer is a sublayer of the window root, or of the box
+      // that cuts it to its clip — the bar's block, to the rounded track
       const rootLayer = windowNode.window._layer;
-      for (const { visual } of promotion.promoted.values()) {
-        assert.equal(visual.layer.parent, rootLayer);
+      for (const { visual, box } of promotion.promoted.values()) {
+        assert.equal((box ?? visual.layer).parent, rootLayer);
       }
 
       // the hover card answers on a layer of its own — text and all
@@ -251,6 +257,7 @@ describe('examples/animation', () => {
         ['backgroundColor', Infinity, true],
         ['borderWidth', Infinity, true],
         ['cornerRadius', Infinity, true],
+        ['position.x', Infinity, false],
       ]);
       assert.deepEqual(
         onTheClock(windowNode),

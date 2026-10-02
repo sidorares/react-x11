@@ -45,6 +45,7 @@ import {
   RASTER_PAD,
   RasterState,
   Visual,
+  movesNode,
   propBoxProps,
   stylePaintsPlain,
 } from './presenter.js';
@@ -254,13 +255,34 @@ function scrollbarTrack(bar, scale) {
 
 /**
  * The clip a node's layer is cut to: the one `_clear` narrowed its reach to
- * through the square clipping ancestors around it, where that leaves any of
- * the node out — and null where every one of them holds it whole, which
- * keeps a node clear of its pane's edges on the window root as before.
+ * through the clipping ancestors around it, where that leaves any of the
+ * node out — and null where every one of them holds it whole, which keeps a
+ * node clear of its pane's edges on the window root as before. A rounded
+ * clip comes with its radius, and with the square clips that cut it again
+ * (`outer`), as an element's part's does.
  */
-function clipOf(node, cut) {
+function clipOf(cut, reach) {
   if (!cut.clip) return null;
-  return containsRect(cut.clip, node._subtreeBounds()) ? null : cut.clip;
+  const radius = cut.radius > 0 ? cut.radius : 0;
+  const held = radius > 0 ? insetRect(cut.clip, radius) : cut.clip;
+  if (!cut.outer && containsRect(held, reach)) return null;
+  return { rect: cut.clip, radius, outer: cut.outer ?? null };
+}
+
+/**
+ * Where a node's layer can be. Where the layout put it and what it holds
+ * reach — or, for a node a loop moves (an inset on a node out of the flow,
+ * which the render server runs as the layer's position, presenter.js
+ * `INSET_KEY_PATHS`), anywhere in the nearest box that clips it, the reach
+ * every frame of the loop stays inside (nodes/animation.js `_loopReach`).
+ * Null where nothing short of the window holds it, which no layer is
+ * cleared for.
+ */
+function reachOf(node) {
+  if (!node._loops?.some((loop) => movesNode(loop.prop))) {
+    return node._subtreeBounds();
+  }
+  return node._loopReach?.()?.rect ?? null;
 }
 
 /**
@@ -483,14 +505,11 @@ export class CocoaPromotion {
         for (let i = candidates.length - 1; i >= 0; i--) {
           const { node, key } = candidates[i];
           if (this.promoted.has(node) || !this.animations.has(node)) continue;
-          const cut = { thumbs: new Set() };
-          if (
-            key &&
-            promotableNode(node) &&
-            this._clear(node, undefined, cut)
-          ) {
+          const cut = { thumbs: new Set(), round: true };
+          const reach = key && promotableNode(node) ? reachOf(node) : null;
+          if (reach && this._clear(node, reach, cut)) {
             for (const pane of cut.thumbs) wanted.add(pane);
-            this._promote(node, root, clipOf(node, cut));
+            this._promote(node, root, clipOf(cut, reach));
           } else {
             this.denied.set(node, this.layoutGen);
             this.animations.drop(node, true);
@@ -533,10 +552,11 @@ export class CocoaPromotion {
   _mayStay(node, key) {
     if (!key || !promotableNode(node)) return false;
     if (this.releasing.has(node)) return false; // its grace ran out
-    const cut = { thumbs: new Set() };
-    if (!this._clear(node, undefined, cut)) return false;
+    const cut = { thumbs: new Set(), round: true };
+    const reach = reachOf(node);
+    if (!reach || !this._clear(node, reach, cut)) return false;
     for (const pane of cut.thumbs) this._thumbsWanted?.add(pane);
-    this.promoted.get(node).clip = clipOf(node, cut);
+    this.promoted.get(node).clip = clipOf(cut, reach);
     return true;
   }
 
@@ -553,7 +573,11 @@ export class CocoaPromotion {
     if (this.window.destroyed || node.destroyed) return false;
     if (this.promoted.has(node)) return true;
     if (!promotableNode(node) || !this._paintKey(node)) return false;
-    if (!this._clear(node, undefined, { thumbs: new Set() })) return false;
+    const reach = reachOf(node);
+    if (!reach) return false;
+    if (!this._clear(node, reach, { thumbs: new Set(), round: true })) {
+      return false;
+    }
     // asked of the scene as it is now, so a refusal from an earlier one —
     // kept for the layout it was made in, and a fade that arrives lays
     // nothing out — no longer stands
@@ -566,11 +590,14 @@ export class CocoaPromotion {
       visual: new Visual(this, node),
       content: null,
       dirty: { all: true, rects: [] },
-      // the clip a square clipping ancestor cuts it to, or null (`clipOf`),
-      // and the box that masks to it
+      // the clip a clipping ancestor cuts it to, or null (`clipOf`), the box
+      // that masks to it, and the box of the square clips around a rounded
+      // one
       clip,
       box: null,
       boxProps: {},
+      outerBox: null,
+      outerProps: {},
     };
     this.promoted.set(node, p);
     this._place(p);
@@ -596,7 +623,7 @@ export class CocoaPromotion {
     this.animations.drop(node, reclaim && !node.destroyed);
     this._dropContent(p);
     p.visual.destroy();
-    if (p.box) this.native.removeFromSuperlayer(p.box);
+    if (p.box) this.native.removeFromSuperlayer(p.outerBox ?? p.box);
     if (!node.destroyed && node.abs) {
       this._repaintHolder(node);
       this._claim(root, node.paintBounds());
@@ -611,17 +638,46 @@ export class CocoaPromotion {
    * sends everything again (`Visual.attach`).
    */
   _place(p) {
-    if (p.clip && !p.box) {
-      p.box = this.native.createLayer();
-      p.boxProps = {};
-      this.native.addSublayer(this.rootVisual.layer, p.box);
-      p.visual.attach({ layer: p.box });
-    } else if (!p.clip && p.box) {
+    const want = p.clip ? (p.clip.outer ? 2 : 1) : 0;
+    const have = p.outerBox ? 2 : p.box ? 1 : 0;
+    if (want === have) {
+      if (!want) p.visual.attach(this.rootVisual);
+      return;
+    }
+    if (p.box) {
       p.visual.attach(this.rootVisual);
-      this.native.removeFromSuperlayer(p.box);
+      this.native.removeFromSuperlayer(p.outerBox ?? p.box);
       p.box = null;
-    } else if (!p.box) {
-      p.visual.attach(this.rootVisual);
+      p.outerBox = null;
+    }
+    if (!want) return;
+    p.box = this.native.createLayer();
+    p.boxProps = {};
+    if (want === 2) {
+      p.outerBox = this.native.createLayer();
+      p.outerProps = {};
+      this.native.addSublayer(this.rootVisual.layer, p.outerBox);
+      this.native.addSublayer(p.outerBox, p.box);
+    } else {
+      this.native.addSublayer(this.rootVisual.layer, p.box);
+    }
+    p.visual.attach({ layer: p.box });
+  }
+
+  /** A box's properties, sent where they changed. */
+  _setBox(layer, p, field, next) {
+    const was = p[field];
+    for (const key of Object.keys(next)) {
+      const a = was[key];
+      const b = next[key];
+      const same = Array.isArray(b)
+        ? Array.isArray(a) && b.every((v, i) => v === a[i])
+        : a === b;
+      if (!same) {
+        this.native.setLayerProps(layer, next);
+        p[field] = next;
+        return;
+      }
     }
   }
 
@@ -753,6 +809,30 @@ export class CocoaPromotion {
           return true;
         }
       }
+      // A node's layer may be cut to one rounded clip, the innermost that
+      // does not hold it — a block sliding along a bar's rounded track. Its
+      // padding box, with the corners its border leaves, and every square
+      // clip above it cuts it again as above (`outer`).
+      let roundCut = false;
+      if (
+        cut?.round &&
+        !cut.clip &&
+        !parent.isWindow &&
+        parent.clipsChildren?.() &&
+        typeof parent.style?.borderRadius === 'number' &&
+        parent.style.borderRadius > 0 &&
+        !containsRect(insetRect(parent.abs, parent.style.borderRadius), bounds)
+      ) {
+        const border = borderReach(parent);
+        cut.clip = insetRect(parent.abs, border);
+        cut.radius = Math.max(0, parent.style.borderRadius - border);
+        roundCut = true;
+        bounds = intersectRects(bounds, cut.clip);
+        if (!bounds) {
+          cut.bounds = null;
+          return true;
+        }
+      }
       const order = parent.paintOrder();
       for (let j = order.indexOf(n) + 1; j < order.length; j++) {
         if (this._reaches(order[j], bounds)) return false;
@@ -772,7 +852,7 @@ export class CocoaPromotion {
           if (!containsRect(insetRect(parent.abs, inside), bounds))
             return false;
         }
-        if (parent.clipsChildren?.()) {
+        if (parent.clipsChildren?.() && !roundCut) {
           const radius = parent.style?.borderRadius;
           const clip =
             typeof radius === 'number' && radius > 0
@@ -916,29 +996,42 @@ export class CocoaPromotion {
     let origin = ORIGIN;
     let z = order;
     if (p.box) {
-      // the box stands at the node's place among the layers, and the
-      // node's layer is placed from the box's corner inside it
+      // the box stands at the node's place among the layers — or inside
+      // the box of the square clips around it, which does — and the node's
+      // layer is placed from the box's corner inside it
       const s = this.scale;
-      const clip = p.clip;
-      const frame = [clip.x / s, clip.y / s, clip.width / s, clip.height / s];
-      const was = p.boxProps;
-      if (
-        was.zPosition !== order ||
-        !was.frame ||
-        frame.some((v, i) => v !== was.frame[i])
-      ) {
-        this.native.setLayerProps(p.box, {
-          frame,
+      const { rect: clip, radius, outer } = p.clip;
+      let base = ORIGIN;
+      let boxZ = order;
+      if (p.outerBox) {
+        this._setBox(p.outerBox, p, 'outerProps', {
+          frame: [outer.x / s, outer.y / s, outer.width / s, outer.height / s],
           masksToBounds: true,
           zPosition: order,
         });
-        p.boxProps = { frame, zPosition: order };
+        base = outer;
+        boxZ = 0;
       }
+      this._setBox(p.box, p, 'boxProps', {
+        frame: [
+          (clip.x - base.x) / s,
+          (clip.y - base.y) / s,
+          clip.width / s,
+          clip.height / s,
+        ],
+        masksToBounds: true,
+        // a circle's arc, as wide as the box allows, where the clip is
+        // rounded
+        cornerRadius: Math.min(radius, clip.width / 2, clip.height / 2) / s,
+        zPosition: boxZ,
+      });
       origin = clip;
       z = 0;
     }
     p.visual.set(propBoxProps(node, this.app, this.scale, origin, z));
-    // after the model value went out, inside the same transaction
+    // after the model value went out, inside the same transaction: what
+    // moves the node, as the layout has its parent now, then what waits
+    this.animations.follow(node, p.visual.layer);
     this.animations.apply(node, p.visual.layer);
     this._syncContent(node, p, root, layoutRan);
   }
@@ -1068,7 +1161,7 @@ export class CocoaPromotion {
       this.animations.drop(node, false);
       this._dropContent(p);
       p.visual.destroy();
-      if (p.box) this.native.removeFromSuperlayer(p.box);
+      if (p.box) this.native.removeFromSuperlayer(p.outerBox ?? p.box);
     }
     this.promoted.clear();
     this.candidates.clear();
