@@ -13,6 +13,7 @@ import React from 'react';
 
 import { CocoaApp } from '../src/cocoa/app.js';
 import { withFrameClock } from '../src/testing/index.js';
+import { interpolate } from '../src/styles.js';
 import {
   cleanupCocoa,
   fakeCocoaBridge,
@@ -428,22 +429,209 @@ test("an ancestor's border ring is painted after the node: promoted only clear o
   }
 });
 
-test('a clipping ancestor has to hold the whole of it', async () => {
-  const clip = at(10, 10, 100, 60, { overflow: 'hidden' });
-  for (const [left, promoted] of [
-    [80, false],
-    [20, true],
+test('a clipping ancestor with square corners cuts the layer to its box; one with round corners has to hold the whole of it', async () => {
+  for (const [radius, left, promoted, clip] of [
+    // held whole: on the window root, as it always was
+    [0, 20, true, null],
+    // half out: in a box of the clip's size, which masks to it
+    [0, 80, true, [10, 10, 100, 60]],
+    // all out: the same box, showing none of it, as an element's part that
+    // shows nothing stays on its layer — the render server runs what
+    // nobody sees rather than the clock
+    [0, 120, true, [10, 10, 100, 60]],
+    // a curve no box is cut to
+    [8, 80, false, null],
   ]) {
+    const frame = at(10, 10, 100, 60, {
+      overflow: 'hidden',
+      borderRadius: radius,
+    });
     const chip = at(left, 10, 40, 20, {
       backgroundColor: '#ff0000',
       transition: { backgroundColor: 120 },
     });
-    const m = await mountCocoa(box(clip, box(chip)));
+    const m = await mountCocoa(box(frame, box(chip)));
     const node = m.node.children[0].children[0];
-    await m.render(box(clip, box({ ...chip, backgroundColor: '#0000ff' })));
+    await m.render(box(frame, box({ ...chip, backgroundColor: '#0000ff' })));
     m.frame();
-    assert.equal(node._promoted, promoted, `left ${left}`);
+    const label = `radius ${radius}, left ${left}`;
+    assert.equal(node._promoted, promoted, label);
+    if (promoted) {
+      const layer = layerOf(m, node);
+      if (clip) {
+        const cut = layer.parent;
+        assert.equal(cut.parent, rootLayer(m), `${label}: the box is above`);
+        assert.deepEqual(
+          cut.props.frame,
+          clip,
+          `${label}: the clip, in points`,
+        );
+        assert.equal(cut.props.masksToBounds, true);
+        assert.deepEqual(
+          layer.props.frame,
+          [left, 10, 40, 20],
+          `${label}: placed from the clip's corner`,
+        );
+        assert.equal(layer.props.zPosition, 0, 'the box has its place');
+      } else {
+        assert.equal(layer.parent, rootLayer(m), label);
+      }
+    }
     await cleanupCocoa();
+  }
+});
+
+test('a row under a scrollbar runs in the render server, the thumb drawn over it on a layer of its own above it and out of the bitmap, and back in the bitmap once no layer is under it', async () => {
+  const row = {
+    height: 20,
+    marginTop: 50,
+    flexShrink: 0,
+    backgroundColor: '#ff0000',
+    animation: {
+      backgroundColor: { to: '#00ff00', duration: 900, alternate: true },
+    },
+  };
+  let pane = null;
+  const m = await mountCocoa(
+    h(
+      'box',
+      {
+        ref: (x) => (pane = x),
+        style: { width: 200, height: 100, overflow: 'scroll' },
+        scrollbarColor: '#0000ff80',
+      },
+      box(row),
+      box({ height: 1000, flexShrink: 0 }),
+    ),
+  );
+  const node = pane.children[0];
+  const thumbOf = () => pane._scrollbars()[0];
+  assert.ok(
+    node.abs.x + node.abs.width > thumbOf().x &&
+      node.abs.y > thumbOf().y + thumbOf().height,
+    'across the track, below the thumb',
+  );
+  assert.equal(node._promoted, true);
+  assert.equal(m.promotion.thumbs.size, 0, 'nothing under the thumb');
+  assert.ok(!pane._thumbsLifted);
+
+  pane.scrollTo(40);
+  m.frame();
+  assert.equal(node._promoted, true, 'the thumb over it takes nothing back');
+  const layers = m.promotion.thumbs.get(pane);
+  assert.ok(layers, 'the thumb is on a layer');
+  assert.equal(pane._thumbsLifted, true, 'and out of the bitmap');
+  const thumb = layers.get('y').layer;
+  const bar = thumbOf();
+  assert.equal(thumb.parent, rootLayer(m));
+  assert.deepEqual(thumb.props.frame, [
+    bar.x / 2,
+    bar.y / 2,
+    bar.width / 2,
+    bar.height / 2,
+  ]);
+  assert.deepEqual(thumb.props.backgroundColor, [0, 0, 1, 128 / 255]);
+  assert.equal(thumb.props.cornerRadius, 3);
+  assert.ok(
+    thumb.props.zPosition > layerOf(m, node).props.zPosition,
+    "above the row, as it is painted after the pane's children",
+  );
+  assert.equal(m.node._animating.size, 0, 'and no frames');
+
+  pane.scrollTo(0);
+  m.frame();
+  assert.equal(m.promotion.thumbs.size, 0, 'no layer under it');
+  assert.equal(thumb.parent, null);
+  assert.ok(!pane._thumbsLifted, 'painted in the bitmap again');
+  assert.equal(node._promoted, true);
+});
+
+test('a loop given back carries on where the render server had it, and is handed over again where the clock had got to', async () => {
+  const clock = withFrameClock();
+  try {
+    const over = (left) => at(left, 15, 40, 20, { backgroundColor: '#0000ff' });
+    const m = await mountCocoa([kbox('a', pulse), kbox('b', over(120))]);
+    const node = m.node.children[0];
+    assert.equal(node._promoted, true);
+    const entry = node._anim.get('backgroundColor');
+    assert.equal(entry.start, 0);
+
+    clock.advance(300);
+    await m.render([kbox('a', pulse), kbox('b', over(30))]);
+    m.frame();
+    assert.equal(node._promoted, false, 'a sibling came over it');
+    assert.ok(m.node._animating.has(node), 'the clock has the loop');
+    assert.equal(entry.start, 0, 'still the loop it was');
+    assert.equal(
+      node.style.backgroundColor,
+      interpolate('#ff0000', '#00ff00', 1 / 3),
+      'painted a third of the way, where the render server had it',
+    );
+
+    clock.advance(300);
+    await m.render([kbox('a', pulse), kbox('b', over(120))]);
+    m.frame();
+    assert.equal(node._promoted, true, 'handed over again');
+    assert.equal(m.node._animating.size, 0);
+    const [, , opts] = m.native.of('addAnimation').at(-1);
+    assert.equal(opts.timeOffset, 0.6, 'where the clock had got to');
+    assert.equal(opts.delay, undefined);
+  } finally {
+    clock.restore();
+  }
+});
+
+test('a loop out of sight by its first frame leaves no layer behind', async () => {
+  const row = {
+    height: 20,
+    marginTop: 300,
+    flexShrink: 0,
+    width: 100,
+    backgroundColor: '#ff0000',
+    animation: {
+      backgroundColor: { to: '#00ff00', duration: 900, alternate: true },
+    },
+  };
+  const m = await mountCocoa(
+    box(
+      { width: 200, height: 100, overflow: 'scroll' },
+      box(row),
+      box({ height: 400, flexShrink: 0 }),
+    ),
+  );
+  const node = m.node.children[0].children[0];
+  m.frame();
+  // offered when the window came up, and stopped by the frame that laid it
+  // out below the pane before the presenter decided on it
+  assert.equal(node._outOfSight, true);
+  assert.equal(node._promoted, false, 'nothing to run, so no layer');
+  assert.equal(m.promotion.promoted.size, 0);
+  assert.equal(m.native.of('createLayer').length, 0);
+});
+
+test('a loop its faded ancestor kept on the clock is handed over once the ancestor is opaque, though nothing was laid out', async () => {
+  const clock = withFrameClock();
+  try {
+    const card = (opacity) => at(0, 0, 150, 100, { opacity });
+    const m = await mountCocoa(box(card(0.5), box(pulse)));
+    const node = m.node.children[0].children[0];
+    assert.equal(node._promoted, false, 'in its group, on the clock');
+    clock.advance(400);
+    m.frame();
+    assert.equal(node._promoted, false, 'and asked again, in vain');
+
+    await m.render(box(card(1), box(pulse)));
+    m.frame();
+    assert.equal(node._promoted, false, 'asked at most every 250ms');
+    clock.advance(300);
+    m.frame();
+    assert.equal(node._promoted, true);
+    assert.equal(m.node._animating.size, 0, 'no frames');
+    const [, keyPath, opts] = m.native.of('addAnimation').at(-1);
+    assert.equal(keyPath, 'backgroundColor');
+    assert.equal(opts.timeOffset, 0.7, 'where the clock had got to');
+  } finally {
+    clock.restore();
   }
 });
 

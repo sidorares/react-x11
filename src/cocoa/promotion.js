@@ -23,16 +23,19 @@
 // part: a promoted layer sits above ALL the 2D content, so a node is
 // promoted only when nothing painted after it in the walk reaches into its
 // bounds — no later sibling at any level, no ancestor's border ring or
-// focus ring, no scrollbar — and only when every clipping ancestor holds
-// the whole of it, because the layer would not be clipped, and no ancestor
-// fades, because the layer would not be faded with it. Declining is
-// always safe: the frame clock runs the animation exactly as it does
-// without this file. And the same test runs again every frame, so a node
-// that becomes overlapped, hidden, clipped, faded or non-plain returns to
-// the bitmap in the frame that finds it, the animation handed back to the
-// clock. Overlays, toasts, drag ghosts, spinners and floating cards pass by
-// construction; a hover fade on a row in the middle of a list does not,
-// and stays on the clock. docs/macos.md §"Layer promotion" is the account.
+// focus ring — and only when every clipping ancestor with round corners
+// holds the whole of it, because the layer is not cut to a curve; one with
+// square corners cuts the layer to its box, a row half out of its list as
+// much as a spinner inside a card. A scrollbar's thumb drawn over it goes
+// on a layer of its own above it instead (`_syncThumbs`). And no ancestor
+// may fade, because the layer would not be faded with it. Declining is always
+// safe: the frame clock runs the animation exactly as it does without this
+// file. The same test runs again every frame, so a node that becomes
+// overlapped, hidden, clipped, faded or non-plain returns to the bitmap in
+// the frame that finds it, the animation handed back to the clock — and a
+// loop the clock runs is offered again once the scene would take it
+// (`wouldTake`), where it is in its cycle. docs/macos.md §"Layer
+// promotion" is the account.
 import { BoxNode } from '../nodes/box.js';
 import { addDamageRect, damageToPaint } from '../nodes/damage.js';
 import { intersectRects } from '../nodes/rects.js';
@@ -48,6 +51,15 @@ import {
 import { SpriteLayers } from './sprites.js';
 
 const ORIGIN = Object.freeze({ x: 0, y: 0 });
+
+// A pane's thumbs come after everything inside it in the paint order — the
+// bars are painted over the pane's children — and before whatever is
+// painted after the pane: its key with this past any child's index.
+const AFTER_CHILDREN = 1e9;
+
+// What core paints a thumb in when the pane names no colour
+// (`paintScrollbarThumb`).
+const THUMB_COLOUR = 'rgba(0, 0, 0, 0.25)';
 
 // How long a node that has stopped animating keeps its layer. A hover card
 // fades in and, a moment later, out; a palette step ends one transition and
@@ -207,9 +219,23 @@ function promotableNode(node) {
   return !paintsOutline(node);
 }
 
-/** The strip a scrollbar's track occupies, with the pad the thumb's
- * antialiasing needs. Mirrors the layer presenter's bar strip. */
-function scrollbarStrip(bar, scale) {
+/** Where a scrollbar puts ink: its thumb, with the pad the thumb's
+ * antialiasing needs. The track is not drawn, so a layer beside the thumb
+ * covers nothing of the bar's; one the thumb is drawn over has the thumb
+ * lifted above it (`_thumbsLiftable`). */
+function scrollbarInk(bar, scale) {
+  const pad = Math.ceil(2 * scale);
+  return {
+    x: bar.x - pad,
+    y: bar.y - pad,
+    width: bar.width + 2 * pad,
+    height: bar.height + 2 * pad,
+  };
+}
+
+/** …and everywhere the thumb can go, which a lifted thumb's layer may come
+ *  to stand over as the pane scrolls. */
+function scrollbarTrack(bar, scale) {
   const pad = Math.ceil(2 * scale);
   return bar.axis === 'x'
     ? {
@@ -224,6 +250,17 @@ function scrollbarStrip(bar, scale) {
         width: bar.width + 2 * pad,
         height: bar.trackLength + 2 * pad,
       };
+}
+
+/**
+ * The clip a node's layer is cut to: the one `_clear` narrowed its reach to
+ * through the square clipping ancestors around it, where that leaves any of
+ * the node out — and null where every one of them holds it whole, which
+ * keeps a node clear of its pane's edges on the window root as before.
+ */
+function clipOf(node, cut) {
+  if (!cut.clip) return null;
+  return containsRect(cut.clip, node._subtreeBounds()) ? null : cut.clip;
 }
 
 /**
@@ -263,6 +300,11 @@ export class CocoaPromotion {
     // the parts of elements' drawing they offer (`Node.sprites()`), each on
     // a layer of its own under the same rules (src/cocoa/sprites.js)
     this.sprites = new SpriteLayers(this);
+    // the scroll panes whose thumbs are on layers of their own, above the
+    // layers they are drawn over (`_syncThumbs`), and the ones this frame's
+    // layers are under
+    this.thumbs = new Map(); // pane -> Map(axis -> { layer, props })
+    this._thumbsWanted = null;
     this._claiming = false;
   }
 
@@ -417,12 +459,14 @@ export class CocoaPromotion {
       this.promoted.size === 0 &&
       this.candidates.size === 0 &&
       offers.size === 0 &&
-      this.sprites.hosts.size === 0
+      this.sprites.hosts.size === 0 &&
+      this.thumbs.size === 0
     ) {
       return;
     }
     const native = this.native;
     let lifted = null;
+    const wanted = (this._thumbsWanted = new Set());
     native.txBegin({ disableActions: true });
     try {
       // Later-painted first: a node painted after this one that is coming
@@ -439,8 +483,14 @@ export class CocoaPromotion {
         for (let i = candidates.length - 1; i >= 0; i--) {
           const { node, key } = candidates[i];
           if (this.promoted.has(node) || !this.animations.has(node)) continue;
-          if (key && promotableNode(node) && this._clear(node)) {
-            this._promote(node, root);
+          const cut = { thumbs: new Set() };
+          if (
+            key &&
+            promotableNode(node) &&
+            this._clear(node, undefined, cut)
+          ) {
+            for (const pane of cut.thumbs) wanted.add(pane);
+            this._promote(node, root, clipOf(node, cut));
           } else {
             this.denied.set(node, this.layoutGen);
             this.animations.drop(node, true);
@@ -450,18 +500,29 @@ export class CocoaPromotion {
       // Then the parts, against the layers this frame keeps: a node
       // promoted over a part is a layer above it, not ink on it.
       lifted = this.sprites.decide(root, offers);
-      // One order for every layer above the bitmap, nodes and parts alike.
+      // A thumb no layer is under any more goes back into the bitmap.
+      for (const pane of [...this.thumbs.keys()]) {
+        if (!wanted.has(pane)) this._dropThumbs(pane, root);
+      }
+      // One order for every layer above the bitmap, nodes, parts and
+      // thumbs alike.
       const order = this._inPaintOrder([...this.promoted.keys()]);
       for (const state of this.sprites.entries()) {
         order.push({ state, key: state.order });
       }
+      for (const pane of wanted) {
+        const key = this._paintKey(pane);
+        if (key) order.push({ pane, key: [...key, AFTER_CHILDREN] });
+      }
       order.sort(byPaintKey);
       for (let i = 0; i < order.length; i++) {
-        const { node, state } = order[i];
+        const { node, state, pane } = order[i];
         if (node) this._sync(node, i, root, layoutRan);
+        else if (pane) this._syncThumbs(pane, i, root);
         else this.sprites.sync(state, i);
       }
     } finally {
+      this._thumbsWanted = null;
       native.txCommit();
     }
     // An element told which of its parts are on layers now may claim,
@@ -472,17 +533,47 @@ export class CocoaPromotion {
   _mayStay(node, key) {
     if (!key || !promotableNode(node)) return false;
     if (this.releasing.has(node)) return false; // its grace ran out
-    return this._clear(node);
+    const cut = { thumbs: new Set() };
+    if (!this._clear(node, undefined, cut)) return false;
+    for (const pane of cut.thumbs) this._thumbsWanted?.add(pane);
+    this.promoted.get(node).clip = clipOf(node, cut);
+    return true;
   }
 
-  _promote(node, root) {
-    const visual = new Visual(this, node);
-    visual.attach(this.rootVisual);
-    this.promoted.set(node, {
-      visual,
+  /**
+   * Would a frame put `node` on a layer now? Asked of a loop the clock runs
+   * because a frame turned it down or gave it back (nodes/animation.js
+   * `_offerLoopsAgain`): the scene that refused it may have moved on — a
+   * fading ancestor arrived, a sibling went, a scroll took the thumb away —
+   * and nothing about the loop itself would ever ask again. The frame
+   * decides as it always does; this is what keeps a loop that would only
+   * be turned down again from being offered every frame.
+   */
+  wouldTake(node) {
+    if (this.window.destroyed || node.destroyed) return false;
+    if (this.promoted.has(node)) return true;
+    if (!promotableNode(node) || !this._paintKey(node)) return false;
+    if (!this._clear(node, undefined, { thumbs: new Set() })) return false;
+    // asked of the scene as it is now, so a refusal from an earlier one —
+    // kept for the layout it was made in, and a fade that arrives lays
+    // nothing out — no longer stands
+    this.denied.delete(node);
+    return true;
+  }
+
+  _promote(node, root, clip = null) {
+    const p = {
+      visual: new Visual(this, node),
       content: null,
       dirty: { all: true, rects: [] },
-    });
+      // the clip a square clipping ancestor cuts it to, or null (`clipOf`),
+      // and the box that masks to it
+      clip,
+      box: null,
+      boxProps: {},
+    };
+    this.promoted.set(node, p);
+    this._place(p);
     node._promoted = true;
     // the bitmap under it repaints without it, from this frame on — and so
     // does the raster of a promoted node it is in, which the claim that
@@ -505,9 +596,32 @@ export class CocoaPromotion {
     this.animations.drop(node, reclaim && !node.destroyed);
     this._dropContent(p);
     p.visual.destroy();
+    if (p.box) this.native.removeFromSuperlayer(p.box);
     if (!node.destroyed && node.abs) {
       this._repaintHolder(node);
       this._claim(root, node.paintBounds());
+    }
+  }
+
+  /**
+   * The node's layer on the window root, or in a box of its clip's size
+   * that masks to it, where a clipping ancestor with square corners cuts it
+   * (`clipOf`) — a row half scrolled out of its list, as an element's part
+   * is cut (src/cocoa/sprites.js). A layer moved into or out of the box
+   * sends everything again (`Visual.attach`).
+   */
+  _place(p) {
+    if (p.clip && !p.box) {
+      p.box = this.native.createLayer();
+      p.boxProps = {};
+      this.native.addSublayer(this.rootVisual.layer, p.box);
+      p.visual.attach({ layer: p.box });
+    } else if (!p.clip && p.box) {
+      p.visual.attach(this.rootVisual);
+      this.native.removeFromSuperlayer(p.box);
+      p.box = null;
+    } else if (!p.box) {
+      p.visual.attach(this.rootVisual);
     }
   }
 
@@ -597,8 +711,9 @@ export class CocoaPromotion {
    * it, and the parent must not fade: its group is drawn on the bitmap or on
    * its own layer, and either way a layer of the node's would be outside it.
    *
-   * With `cut`, the reach is an element's part (src/cocoa/sprites.js),
-   * whose layer can be cut to a rectangle: a clipping ancestor with square
+   * With `cut`, the layer can be cut to a rectangle — a node's
+   * (`clipOf`), or an element's part's (src/cocoa/sprites.js): a clipping
+   * ancestor with square
    * corners narrows `cut.clip` to its padding box — its border is drawn
    * over what it holds anyway — instead of having to hold the part whole,
    * and every test from there up is asked of what shows through the clip.
@@ -668,9 +783,12 @@ export class CocoaPromotion {
       }
       if (typeof parent._scrollbars === 'function') {
         for (const bar of parent._scrollbars()) {
-          if (rectsOverlap(scrollbarStrip(bar, this.scale), bounds)) {
-            return false;
-          }
+          if (!rectsOverlap(scrollbarInk(bar, this.scale), bounds)) continue;
+          // a thumb drawn over a node's layer goes on a layer of its own
+          // above it, where it can (`_thumbsLiftable`); an element's part
+          // keeps clear of it
+          if (!cut?.thumbs || !this._thumbsLiftable(parent)) return false;
+          cut.thumbs.add(parent);
         }
       }
     }
@@ -697,11 +815,129 @@ export class CocoaPromotion {
     return false;
   }
 
+  // --- a pane's thumbs above the rows they are drawn over ----------------------
+
+  /**
+   * Can `pane`'s thumbs go on a layer above everything inside it? The bars
+   * are painted after the pane's children, so a layer of theirs stands over
+   * the layers of the rows in the pane as the thumb stands over the rows —
+   * where nothing painted after the pane reaches anywhere the thumb can go,
+   * nothing above it fades, and every clip above it holds the track whole:
+   * `_clear` asked of the pane at its tracks. A pane that fades has its
+   * bars in its group.
+   */
+  _thumbsLiftable(pane) {
+    if (fadesAsGroup(pane)) return false;
+    for (const bar of pane._scrollbars()) {
+      if (!this._clear(pane, scrollbarTrack(bar, this.scale))) return false;
+    }
+    return true;
+  }
+
+  /** `pane`'s thumbs on layers of their own at `z` among the layers above
+   *  the bitmap, which stops painting them (`Scrollable._paintScrollbars`):
+   *  a colour and a radius, as core paints one, where the thumb is now. */
+  _syncThumbs(pane, z, root) {
+    let layers = this.thumbs.get(pane);
+    if (!layers) {
+      layers = new Map();
+      this.thumbs.set(pane, layers);
+      pane._thumbsLifted = true;
+      // the bitmap under it, repainted without it
+      for (const bar of pane._scrollbars()) {
+        this._claim(root, scrollbarInk(bar, this.scale));
+      }
+    }
+    const s = this.scale;
+    const backgroundColor = this.app._parseColor(
+      String(pane.props.scrollbarColor || THUMB_COLOUR),
+    ) ?? [0, 0, 0, 0.25];
+    const seen = new Set();
+    for (const bar of pane._scrollbars()) {
+      seen.add(bar.axis);
+      let entry = layers.get(bar.axis);
+      if (!entry) {
+        entry = { layer: this.native.createLayer(), props: {} };
+        this.native.addSublayer(this.rootVisual.layer, entry.layer);
+        layers.set(bar.axis, entry);
+      }
+      const next = {
+        frame: [bar.x / s, bar.y / s, bar.width / s, bar.height / s],
+        backgroundColor,
+        cornerRadius: 3,
+        zPosition: z,
+      };
+      const out = {};
+      let any = false;
+      for (const key of Object.keys(next)) {
+        const was = entry.props[key];
+        const value = next[key];
+        const same = Array.isArray(value)
+          ? Array.isArray(was) && value.every((v, i) => v === was[i])
+          : was === value;
+        if (!same) {
+          out[key] = value;
+          any = true;
+        }
+      }
+      if (any) {
+        this.native.setLayerProps(entry.layer, out);
+        entry.props = next;
+      }
+    }
+    for (const [axis, entry] of layers) {
+      if (seen.has(axis)) continue;
+      this.native.removeFromSuperlayer(entry.layer);
+      layers.delete(axis);
+    }
+  }
+
+  /** `pane`'s thumbs back into the bitmap, which paints them again where
+   *  they are now. */
+  _dropThumbs(pane, root) {
+    const layers = this.thumbs.get(pane);
+    if (!layers) return;
+    this.thumbs.delete(pane);
+    for (const entry of layers.values()) {
+      this.native.removeFromSuperlayer(entry.layer);
+    }
+    pane._thumbsLifted = false;
+    if (pane.destroyed) return;
+    for (const bar of pane._scrollbars()) {
+      this._claim(root, scrollbarInk(bar, this.scale));
+    }
+  }
+
   // --- what the layer shows ----------------------------------------------------
 
   _sync(node, order, root, layoutRan) {
     const p = this.promoted.get(node);
-    p.visual.set(propBoxProps(node, this.app, this.scale, ORIGIN, order));
+    this._place(p);
+    let origin = ORIGIN;
+    let z = order;
+    if (p.box) {
+      // the box stands at the node's place among the layers, and the
+      // node's layer is placed from the box's corner inside it
+      const s = this.scale;
+      const clip = p.clip;
+      const frame = [clip.x / s, clip.y / s, clip.width / s, clip.height / s];
+      const was = p.boxProps;
+      if (
+        was.zPosition !== order ||
+        !was.frame ||
+        frame.some((v, i) => v !== was.frame[i])
+      ) {
+        this.native.setLayerProps(p.box, {
+          frame,
+          masksToBounds: true,
+          zPosition: order,
+        });
+        p.boxProps = { frame, zPosition: order };
+      }
+      origin = clip;
+      z = 0;
+    }
+    p.visual.set(propBoxProps(node, this.app, this.scale, origin, z));
     // after the model value went out, inside the same transaction
     this.animations.apply(node, p.visual.layer);
     this._syncContent(node, p, root, layoutRan);
@@ -817,6 +1053,13 @@ export class CocoaPromotion {
   /** Everything off the root layer and freed: the window is going. */
   destroy() {
     this.sprites.destroy();
+    for (const [pane, layers] of this.thumbs) {
+      for (const entry of layers.values()) {
+        this.native.removeFromSuperlayer(entry.layer);
+      }
+      pane._thumbsLifted = false;
+    }
+    this.thumbs.clear();
     for (const timer of this.idle.values()) clearTimeout(timer);
     this.idle.clear();
     this.releasing.clear();
@@ -825,6 +1068,7 @@ export class CocoaPromotion {
       this.animations.drop(node, false);
       this._dropContent(p);
       p.visual.destroy();
+      if (p.box) this.native.removeFromSuperlayer(p.box);
     }
     this.promoted.clear();
     this.candidates.clear();

@@ -256,6 +256,10 @@ export class CocoaWindow {
         this._promotion.animate(node, prop, entry);
       this.cancelNodeAnimation = (node, prop) =>
         this._promotion.cancel(node, prop);
+      // …and whether a loop the clock runs, turned down or given back by
+      // an earlier frame, would be taken now (nodes/animation.js
+      // `_offerLoopsAgain`)
+      this.wouldAnimateNode = (node) => this._promotion.wouldTake(node);
       this.noteInvalidate = (damage, layoutChanged) =>
         this._promotion.noteInvalidate(damage, layoutChanged);
       this.prepareFrame = (root, layoutRan) =>

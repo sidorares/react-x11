@@ -559,7 +559,12 @@ export class LayerAnimations {
   /** Stop what runs for `prop` on `node`: a loop the window lost sight of,
    *  a declaration that changed, a transition the clock takes back. */
   cancel(node, prop) {
-    this.pending.get(node)?.delete(prop);
+    const pending = this.pending.get(node);
+    // …and nothing left waiting is no entry at all: an empty map still
+    // answers `has`, and a node with nothing to run went onto a layer it
+    // never gave back — a loop that went out of sight between its offer
+    // and its frame did
+    if (pending?.delete(prop) && pending.size === 0) this.pending.delete(node);
     this._removeLive(node, prop);
   }
 
@@ -606,9 +611,13 @@ export class LayerAnimations {
         opts.repeat = Infinity;
         opts.autoreverse = entry.alternate;
         // CA's two halves of one CSS delay: a begin time the layer waits
-        // for showing `from`, or a time offset that starts it that far in
-        if (entry.delay > 0) opts.delay = entry.delay / 1000;
-        else if (entry.delay < 0) opts.timeOffset = -entry.delay / 1000;
+        // for showing `from`, or a time offset that starts it that far in.
+        // A loop the clock has been running comes over where it has got to
+        // (`headStart`, nodes/animation.js `_offerLoopsAgain`), which is
+        // the same delay that much shorter.
+        const wait = (entry.delay ?? 0) - (entry.headStart ?? 0);
+        if (wait > 0) opts.delay = wait / 1000;
+        else if (wait < 0) opts.timeOffset = -wait / 1000;
       } else if (map.colour) {
         // From where the pixels are — which is what "an interrupted
         // transition reverses from where it got to" means here. A colour
