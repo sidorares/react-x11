@@ -17,7 +17,7 @@ import React from 'react';
 import { CocoaApp } from '../src/cocoa/app.js';
 import { setCompositingForTests } from '../src/compositing.js';
 import { Frame } from '../src/frame/index.js';
-import { createRoot } from '../src/index.js';
+import { Select, createRoot } from '../src/index.js';
 import { setScaleForTests } from '../src/scale.js';
 import { setScreensForTests } from '../src/screens.js';
 import { loopbackFrameFactory } from './helpers/frame-loopback.js';
@@ -103,6 +103,18 @@ function fakeBridge() {
     },
     setLayerContentsIOSurface(layer, id) {
       calls.push(['flip', layer, id]);
+    },
+    // A pop-up menu (bridge 0.20): what was asked for, and its callback, for
+    // the test to answer as a person would; a cancel answers null.
+    menus: [],
+    popUpMenu(handle, spec, cb) {
+      const menu = { menu: ++seq, handle, spec, cb, cancelled: false };
+      base.menus.push(menu);
+      return menu;
+    },
+    cancelPopUpMenu(menu) {
+      menu.cancelled = true;
+      queueMicrotask(() => menu.cb(null));
     },
   };
   return new Proxy(base, {
@@ -523,4 +535,112 @@ test("a dialog a pane opens is a managed window the host makes, centred over the
   m.host._route({ type: 'window-close-request', windowNumber: dialog.id });
   await settle(m.host, m.pane);
   assert.deepStrictEqual(m.closes, [true]);
+});
+
+// --- the platform's menu (bridge 0.20) ---------------------------------------
+
+test("a select's platform menu is the bridge's, dropped from the trigger in points after the press is answered", async () => {
+  const native = fakeBridge();
+  const app = appOver(native);
+  const root = await createRoot({ app });
+  roots.push(root);
+  const changes = [];
+  root.render(
+    h(
+      'window',
+      { width: 300, height: 200, x: 100, y: 50 },
+      h(
+        'box',
+        { style: { padding: 30, alignItems: 'flex-start' } },
+        h(Select, {
+          options: ['alpha', 'beta', 'gamma'],
+          value: 'beta',
+          native: false,
+          nativeMenu: true,
+          style: { width: 120 },
+          onChange: (ev) => changes.push(ev.value),
+        }),
+      ),
+    ),
+  );
+  await settle(app);
+  const wnd = [...app._windows.values()][0];
+  const trigger = find(wnd._reactX11Node, (n) => n.props?.role === 'combobox');
+  const t = trigger.abs;
+  const s = app.scale;
+  click(app, wnd, (t.x + 20) / s, (t.y + t.height / 2) / s);
+  assert.equal(
+    native.menus.length,
+    0,
+    'not inside the press: a microtask after it',
+  );
+  await settle(app);
+  assert.equal(native.menus.length, 1, "the bridge's menu");
+  const [menu] = native.menus;
+  assert.ok(menu.handle === wnd._h, "from the trigger's window");
+  assert.deepStrictEqual(
+    menu.spec.frame,
+    [t.x / s, t.y / s, t.width / s, t.height / s],
+    'its frame in points',
+  );
+  assert.strictEqual(menu.spec.selected, 2);
+  assert.strictEqual(
+    native.of('createWindow2').length,
+    1,
+    'and no window of ours for it',
+  );
+  menu.cb(3);
+  await settle(app);
+  assert.deepStrictEqual(changes, ['gamma']);
+  assert.strictEqual(trigger.props['aria-expanded'], false);
+});
+
+test("a pane's platform menu is dropped by the host, over the pane's place in its window, and the pick goes back", async () => {
+  const m = await mount({ nativeMenu: true });
+  const t = m.trigger().abs;
+  const s = m.host.scale;
+  click(
+    m.host,
+    m.hostWnd,
+    (m.frameBox.abs.x + t.x + 20) / s,
+    (m.frameBox.abs.y + t.y + t.height / 2) / s,
+  );
+  await until(
+    [m.host, m.pane],
+    () => m.hostNative.menus.length === 1,
+    "the host's menu",
+  );
+  assert.strictEqual(m.paneNative.menus.length, 0, 'none in the pane');
+  const [menu] = m.hostNative.menus;
+  assert.ok(menu.handle === m.hostWnd._h, "in the host's window");
+  assert.deepStrictEqual(
+    menu.spec.frame,
+    [
+      (m.frameBox.abs.x + t.x) / s,
+      (m.frameBox.abs.y + t.y) / s,
+      t.width / s,
+      t.height / s,
+    ],
+    "the trigger's box, where the pane is laid out in the host",
+  );
+  assert.strictEqual(m.hosted('popup'), null, 'and no drawn menu');
+  menu.cb(2);
+  await until([m.host, m.pane], () => m.picks.length > 0, 'the pick');
+  assert.deepStrictEqual(m.picks, ['beta']);
+
+  // opened again, and the pane goes: its menu goes with it
+  click(
+    m.host,
+    m.hostWnd,
+    (m.frameBox.abs.x + t.x + 20) / s,
+    (m.frameBox.abs.y + t.y + t.height / 2) / s,
+  );
+  await until(
+    [m.host, m.pane],
+    () => m.hostNative.menus.length === 2,
+    'the menu again',
+  );
+  m.unmountFrame();
+  await settle(m.host, m.pane);
+  assert.ok(m.hostNative.menus[1].cancelled, 'cancelled with the pane');
 });

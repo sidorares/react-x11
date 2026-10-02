@@ -1275,6 +1275,13 @@ weight, a 5pt highlight radius — read off `NSMenu.size` (`NATIVE_MENU` in
 read as another toolkit's beside the menus the system's own controls open.
 The menu bar itself keeps the drawn metrics: a bar is not an NSMenu.
 
+**A `<Select>`'s list is the NSMenu itself** where the bridge has
+`popUpMenu` (@windowkit/appkit 0.20): `CocoaApp.popUpMenu` drops it from the
+trigger through an `NSPopUpButtonCell` nobody draws, as a browser drops a
+`<select>`'s, and a pane asks its host to (`pane-menu`). The drawn list
+stays for a drawn select that does not ask for it (`nativeMenu`) and for an
+older bridge.
+
 The Linux global menu was built for exactly this moment: the item
 vocabulary is data (dbusmenu's), `MenuBar` draws the same array it
 exports, and the pure `snapshot`/`diffSnapshots`/`IdAllocator` machinery

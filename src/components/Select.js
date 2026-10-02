@@ -143,6 +143,33 @@ const TRIGGER_PAD_LEFT = 10;
 // (`nodes/scrollbars.js`, SCROLLBAR_WIDTH), so a menu that scrolls reserves the room
 const SCROLLBAR_WIDTH = 6;
 
+// The family a caption's style names, for the platform's menu: the first of
+// a CSS list, unquoted, and nothing for a generic one, which is the menu
+// font's own to answer.
+const GENERIC_FAMILIES = new Set([
+  'sans-serif',
+  'serif',
+  'monospace',
+  'cursive',
+  'fantasy',
+  'system-ui',
+  'ui-sans-serif',
+  'ui-serif',
+  'ui-monospace',
+  '-apple-system',
+  'blinkmacsystemfont',
+]);
+function menuFamily(family) {
+  if (typeof family !== 'string') return undefined;
+  const first = family
+    .split(',')[0]
+    .trim()
+    .replace(/^["']|["']$/g, '');
+  return first && !GENERIC_FAMILIES.has(first.toLowerCase())
+    ? first
+    : undefined;
+}
+
 function normalizeOption(option) {
   return typeof option === 'object' && option !== null
     ? option
@@ -291,6 +318,17 @@ function Option({
  * caption's `fontSize` is read back: the chevron is as tall as the capitals
  * beside it. Any slot also chooses the drawn trigger over the platform's
  * popup bezel, whose pixels no style reaches.
+ *
+ * `nativeMenu` is the menu's half of `native`: where the backend drops a
+ * control's menu as the platform's own (`app.nativePopUpMenus`, macOS), the
+ * list is that menu — the chosen row over the trigger, the platform's
+ * tracking, type-select and VoiceOver — rather than a `<popup>` drawn to
+ * look like it. It follows the trigger by default, so a select under the
+ * native bezel gets the native menu and a drawn one keeps the drawn menu;
+ * `true` asks for the platform's menu under a drawn trigger too, which is
+ * what a browser does with a `<select>` a page styled, and `false` keeps the
+ * drawn one. A drawn trigger's menu is set at the caption's size, in the
+ * family its style names when the system has it.
  */
 export function Select({
   value,
@@ -299,6 +337,7 @@ export function Select({
   name,
   placeholder = 'Select…',
   native,
+  nativeMenu,
   style,
   labelStyle,
   chevronStyle,
@@ -308,11 +347,20 @@ export function Select({
   const app = useAppOrNull();
   const styled = Boolean(labelStyle || chevronStyle);
   const nativeControls = useNativeControls(styled ? false : native);
+  // the platform's own menu, where there is one and this select wants it
+  const platformMenu =
+    (nativeMenu ?? nativeControls) && Boolean(app?.nativePopUpMenus);
   // The size the caption is set in, where its slot names one: the chevron is
   // measured against those capitals, and an `<Icon>`'s size does not inherit.
   const ownSize = flattenStyle(labelStyle).fontSize;
   const captionSize = typeof ownSize === 'number' ? ownSize : theme.fontSize;
   const [open, setOpen] = useState(false);
+  // The platform's menu, while it is down: its cancel function, and whether
+  // it is open, for the trigger's open look and `aria-expanded`.
+  const platformRef = useRef(null);
+  const [platformOpen, setPlatformOpen] = useState(false);
+  // a menu is down, whichever one: the trigger's open look follows it
+  const expanded = open || platformOpen;
   const [anchor, setAnchor] = useState(null);
   const [focused, setFocused] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -387,8 +435,48 @@ export function Select({
     };
   };
 
-  const close = () => setOpen(false);
+  const close = () => {
+    setOpen(false);
+    platformRef.current?.();
+  };
+  // The platform's menu, dropped from the trigger: the same options, the
+  // current one placed over it. Its answer is a pick like a row's.
+  const openPlatformMenu = () => {
+    const node = triggerRef.current;
+    const wnd = node?.root?.window;
+    if (!node || !wnd || platformRef.current) return;
+    const chosen = normalized.findIndex((o) => o.value === value);
+    const family = menuFamily(flattenStyle(labelStyle).fontFamily);
+    setPlatformOpen(true);
+    platformRef.current = app.popUpMenu(
+      wnd,
+      {
+        items: normalized.map((o, i) => ({
+          id: i + 1,
+          title: String(o.label),
+        })),
+        frame: [node.abs.x, node.abs.y, node.abs.width, node.abs.height],
+        ...(chosen >= 0 && { selected: chosen + 1 }),
+        // under the bezel the menu is the bezel's, at the menu font's size
+        ...(!nativeControls && { fontSize: captionSize }),
+        ...(!nativeControls && family && { fontFamily: family }),
+        // the theme's, as the bezel's appearance is
+        appearance: theme.scheme === 'dark' ? 'dark' : 'light',
+        rtl: node.direction === 'rtl',
+      },
+      (id) => {
+        platformRef.current = null;
+        setPlatformOpen(false);
+        const option = id != null ? normalized[id - 1] : null;
+        if (option && option.value !== value) emit(option.value);
+      },
+    );
+  };
   const openMenu = () => {
+    if (platformMenu) {
+      openPlatformMenu();
+      return;
+    }
     const node = triggerRef.current;
     if (!node) return;
     const rect = measureAnchor(menuAnchorOptions());
@@ -398,7 +486,9 @@ export function Select({
     setActiveIndex(selected >= 0 ? selected : 0);
     setOpen(true);
   };
-  const toggle = () => (open ? close() : openMenu());
+  const toggle = () => (expanded ? close() : openMenu());
+  // a menu still down when the select goes is taken with it
+  useEffect(() => () => platformRef.current?.(), []);
 
   // keeps the menu under the trigger for as long as it is open: a scrolled
   // ancestor, the trigger's own layout moving it (a neighbouring field
@@ -491,7 +581,7 @@ export function Select({
     {
       theme,
       role: 'combobox',
-      'aria-expanded': open,
+      'aria-expanded': expanded,
       'aria-haspopup': 'listbox',
       ref: triggerRef,
       focusable: true,
@@ -546,7 +636,8 @@ export function Select({
               paddingRight: 10,
               borderWidth: theme.borderWidth,
               borderRadius: theme.radius,
-              borderColor: focused || open ? theme.borderFocus : theme.border,
+              borderColor:
+                focused || expanded ? theme.borderFocus : theme.border,
               backgroundColor: theme.surface,
             },
         // Hover and press belong to the trigger while it is *shut*: they say
@@ -560,7 +651,7 @@ export function Select({
         // not overwrite. The only way for open to win is to not be competing.
         // (In native mode the wash overlay below answers the press instead.)
         !nativeControls &&
-          !open && {
+          !expanded && {
             ':hover': { backgroundColor: theme.surfaceHover },
             ':active': { backgroundColor: theme.surfaceActive },
           },
@@ -576,7 +667,7 @@ export function Select({
     nativeControls &&
       h(Bezel, {
         kind: 'popup',
-        pressed: open,
+        pressed: expanded,
         enabled: true,
         style: ABS_FILL,
       }),
@@ -605,7 +696,7 @@ export function Select({
           style: [
             ABS_FILL,
             { borderRadius: 6 },
-            !open && { ':active': { backgroundColor: pressWash(theme) } },
+            !expanded && { ':active': { backgroundColor: pressWash(theme) } },
           ],
         })
       : h(Icon, {
