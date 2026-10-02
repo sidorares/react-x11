@@ -24,11 +24,12 @@
 // promoted only when nothing painted after it in the walk reaches into its
 // bounds — no later sibling at any level, no ancestor's border ring or
 // focus ring, no scrollbar — and only when every clipping ancestor holds
-// the whole of it, because the layer would not be clipped. Declining is
+// the whole of it, because the layer would not be clipped, and no ancestor
+// fades, because the layer would not be faded with it. Declining is
 // always safe: the frame clock runs the animation exactly as it does
 // without this file. And the same test runs again every frame, so a node
-// that becomes overlapped, hidden, clipped or non-plain returns to the
-// bitmap in the frame that finds it, the animation handed back to the
+// that becomes overlapped, hidden, clipped, faded or non-plain returns to
+// the bitmap in the frame that finds it, the animation handed back to the
 // clock. Overlays, toasts, drag ghosts, spinners and floating cards pass by
 // construction; a hover fade on a row in the middle of a list does not,
 // and stays on the clock. docs/macos.md §"Layer promotion" is the account.
@@ -157,12 +158,14 @@ function insideGlArea(node) {
 const faded = (style) => style?.opacity !== undefined && !(style.opacity >= 1);
 
 /**
- * A box whose `opacity` is below 1, now or on its way there, is a group the
- * bitmap composites (`NodePaint._paintGroup`) — the box and everything in it
- * drawn once and faded as one. On a layer of its own the box and its content
- * would be separate layers under the one opacity, fading one over the other,
- * and an opacity the frame clock is still animating would never reach the
- * layer at all.
+ * A box whose `opacity` is below 1, now or on its way there, is a group:
+ * the box and everything in it drawn once and faded as one. The bitmap
+ * composites one (`NodePaint._paintGroup`), and so does Core Animation — a
+ * layer under an opacity below 1 is drawn with its sublayers and faded as
+ * one (`allowsGroupOpacity`, YES by default on macOS), and a promoted box's
+ * children are a sublayer of its layer. So a faded box may be promoted;
+ * what may not is a box inside one, whose layer would be flat on the window
+ * root, outside the group and at full strength (`_clear`).
  */
 function fadesAsGroup(node) {
   return (
@@ -182,7 +185,6 @@ function fadesAsGroup(node) {
 function promotableNode(node) {
   if (node.destroyed || !plainBox(node)) return false;
   if (insideGlArea(node)) return false;
-  if (fadesAsGroup(node)) return false;
   if (!stylePaintsPlain(node, node._targetStyle ?? node.style)) return false;
   if (node.isScroller?.()) return false;
   return !paintsOutline(node);
@@ -438,7 +440,9 @@ export class CocoaPromotion {
       dirty: { all: true, rects: [] },
     });
     node._promoted = true;
-    // the bitmap under it repaints without it, from this frame on
+    // the bitmap under it repaints without it, from this frame on — and so
+    // does the raster of a promoted node it is in, which the claim that
+    // handed us its animation reached (`noteInvalidate`)
     this._claim(root, node.paintBounds());
   }
 
@@ -457,7 +461,32 @@ export class CocoaPromotion {
     this.animations.drop(node, reclaim && !node.destroyed);
     this._dropContent(p);
     p.visual.destroy();
-    if (!node.destroyed && node.abs) this._claim(root, node.paintBounds());
+    if (!node.destroyed && node.abs) {
+      this._repaintHolder(node);
+      this._claim(root, node.paintBounds());
+    }
+  }
+
+  /**
+   * A node coming off its layer inside a promoted node: the bitmap holds a
+   * hole there, and the node's pixels belong in that node's raster — so the
+   * raster repaints where the node reaches, taking it back, in this frame.
+   * Nothing else would ask: `_claim` keeps our claims off our own books, a
+   * raster's layout key is compared only in a frame that ran layout, and
+   * what gives a node back claims its own layer (the grace ran out) or
+   * nothing (an ancestor began to fade, a sibling came over it). Going onto
+   * a layer needs no such call — the claim that handed us the animation
+   * reached the raster. The nearest promoted node alone, since a raster
+   * leaves out the whole subtree of a promoted child.
+   */
+  _repaintHolder(node) {
+    for (let n = node.parent; n && !n.isWindow; n = n.parent) {
+      const holder = this.promoted.get(n);
+      if (holder) {
+        this._dirtyRect(holder, node.paintBounds());
+        return;
+      }
+    }
   }
 
   _dropContent(p) {
@@ -511,11 +540,13 @@ export class CocoaPromotion {
   }
 
   /**
-   * Is nothing painted over this node, and is all of it visible? Walked up
-   * the chain: at every level, what the parent paints after the child on
-   * the way to this node — later siblings, then the parent's own border and
-   * ring, then its bars — must keep out of the node's reach, and the
-   * parent's clip, if it has one, must hold the whole of it.
+   * Is nothing painted over this node, is all of it visible, and is it in
+   * no faded group? Walked up the chain: at every level, what the parent
+   * paints after the child on the way to this node — later siblings, then
+   * the parent's own border and ring, then its bars — must keep out of the
+   * node's reach, the parent's clip, if it has one, must hold the whole of
+   * it, and the parent must not fade: its group is drawn on the bitmap or on
+   * its own layer, and either way a layer of the node's would be outside it.
    */
   _clear(node) {
     // the exact reach, not `paintBounds()`: that one carries the damage
@@ -530,6 +561,7 @@ export class CocoaPromotion {
         if (this._reaches(order[j], bounds)) return false;
       }
       if (!parent.isWindow) {
+        if (fadesAsGroup(parent)) return false;
         const border = borderReach(parent);
         if (
           border > 0 &&

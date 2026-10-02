@@ -318,7 +318,7 @@ test('on the Cocoa surface presenter the group composites a surface at the alpha
   );
 });
 
-test('a faded box is not lifted onto a layer of its own, where it would fade in pieces', async () => {
+test('a faded box is lifted onto a layer of its own whole, and a box inside one is not, where it would escape the fade', async () => {
   const pulse = (more) =>
     h('box', {
       style: {
@@ -334,18 +334,31 @@ test('a faded box is not lifted onto a layer of its own, where it would fade in 
         ...more,
       },
     });
-  const plain = await mountCocoa(pulse({}), { width: 60, height: 60 });
-  plain.frame();
-  assert.equal(plain.node.children[0]._promoted, true, 'the control case');
-
+  // Core Animation draws a layer under an opacity with its sublayers and
+  // fades them as one (`allowsGroupOpacity`): the layer is the group
   const faded = await mountCocoa(pulse({ opacity: 0.5 }), {
     width: 60,
     height: 60,
   });
   faded.frame();
-  assert.equal(faded.node.children[0]._promoted, false);
+  const node = faded.node.children[0];
+  assert.equal(node._promoted, true);
+  assert.equal(
+    faded.promotion.promoted.get(node).visual.layer.props.opacity,
+    0.5,
+  );
+  await cleanupCocoa();
+
+  // …and a promoted layer is flat on the window root, so one for a box
+  // inside a faded box would be drawn outside its group, at full strength
+  const inside = await mountCocoa(
+    h('box', { style: { width: 60, height: 60, opacity: 0.5 } }, pulse({})),
+    { width: 60, height: 60 },
+  );
+  inside.frame();
+  assert.equal(inside.node.children[0].children[0]._promoted, false);
   assert.ok(
-    faded.native.of('ctxSetGlobalAlpha').some(([, a]) => a === 0.5),
+    inside.native.of('ctxSetGlobalAlpha').some(([, a]) => a === 0.5),
     'drawn through its group on the bitmap',
   );
 });

@@ -356,6 +356,9 @@ const ANIMATED_KEY_PATHS = Object.freeze({
   borderColor: { keyPath: 'borderColor', colour: true },
   borderWidth: { keyPath: 'borderWidth', scaled: true },
   borderRadius: { keyPath: 'cornerRadius', scaled: true },
+  // the subtree's, as CSS has it: a layer under an opacity is drawn with
+  // its sublayers and faded as one (`layerOpacity`)
+  opacity: { keyPath: 'opacity' },
 });
 
 // the ids the bridge reports an animation's end under: unique per process,
@@ -487,9 +490,11 @@ export function propBoxProps(node, app, scale, parentOrigin, order) {
 }
 
 /**
- * `opacity` as a layer's own. On the layer presenter a node's children are
- * its sublayers, so this fades the subtree with it; the bitmap paths draw
- * the group themselves and never promote a faded box.
+ * `opacity` as a layer's own. A node's children are its layer's sublayers —
+ * each its own on the layer presenter, one raster on a promoted box — and
+ * Core Animation draws a layer under an opacity below 1 with its sublayers
+ * and fades them as one (`allowsGroupOpacity`, YES by default on macOS): the
+ * group `NodePaint._paintGroup` draws on the bitmap.
  */
 export function layerOpacity(style) {
   const value = style?.opacity;
