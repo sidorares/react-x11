@@ -14,6 +14,11 @@
 // via emit. Geometry and input arrive as channel messages (the host owns
 // layout and hit-testing — this is CPU offloading, not isolation), and what
 // goes out is pane-present, and pane-cursor for the cursor the host shows.
+//
+// Every other window the pane's tree makes — a menu, a dropdown's sheet, a
+// tooltip, a dialog — is a `CocoaPaneSubwindow`: the same ring and the same
+// presents, naming the window, and an NSWindow the host makes for it
+// (src/cocoa/panehost.js), because nothing in a pane process runs AppKit.
 import { BackendContext2D } from '../backend/context2d.js';
 
 let nextPaneId = 1;
@@ -31,13 +36,15 @@ export class CocoaPaneWindow {
     this.id = this.windowId;
     this.windowNumber = this.windowId;
     this.scale = app.scale ?? 2;
-    this.width = Math.max(
-      1,
-      Math.round((attributes.width ?? 400) * this.scale),
-    );
+    // Device pixels, as every window's attributes are (`windowAttributes`
+    // multiplies the props through once): the size the pane is born at,
+    // until the host's first pane-rect says what it is. Multiplied again
+    // here, a pane was born twice its size, and a dialog it opened in its
+    // first commit was centred over a window that was never there.
+    this.width = Math.max(1, Math.round(attributes.width ?? 400 * this.scale));
     this.height = Math.max(
       1,
-      Math.round((attributes.height ?? 300) * this.scale),
+      Math.round(attributes.height ?? 300 * this.scale),
     );
     this._listeners = new Map();
     this._surface = null;
@@ -52,27 +59,51 @@ export class CocoaPaneWindow {
     this._seq = 0;
     this._presentedAt = -Infinity;
     this._reactX11Node = null;
+    // Where the pane's corner is on the screen, in device pixels, as the
+    // host last said (`setPaneSize`): what a popup the pane anchors to one
+    // of its nodes is placed against (`windowOrigin`, src/anchor.js). The
+    // pane has no window of its own to ask, so until the host says, a menu
+    // dropped from the screen's corner.
+    this.x = 0;
+    this.y = 0;
+    this._screenOrigin = { x: 0, y: 0 };
+    // what the app's window map keys this window by, and the id the host
+    // names it by in a pane-event (`CocoaApp.attachPaneChannel`)
+    this._key = this.windowId;
     app._registerWindow(this);
   }
 
   // --- the channel-facing half --------------------------------------------
 
-  /** The host's layout answer: logical size plus the display scale. */
-  setPaneSize(width, height, scale) {
+  /**
+   * The host's layout answer: logical size plus the display scale, and
+   * where the pane is on the screen — `screen`, device pixels, absent from
+   * a host that does not say. A move alone is a `resize` that `moved`, the
+   * event a window's own move is, so what is anchored here follows it.
+   */
+  setPaneSize(width, height, scale, screen) {
     if (this.destroyed) return;
     if (scale) this.scale = scale;
     const w = Math.max(1, Math.round(width * this.scale));
     const h = Math.max(1, Math.round(height * this.scale));
-    if (w === this.width && h === this.height) return;
+    const moved =
+      screen != null && (screen.x !== this.x || screen.y !== this.y);
+    const resized = w !== this.width || h !== this.height;
+    if (!moved && !resized) return;
+    if (moved) {
+      this.x = screen.x;
+      this.y = screen.y;
+      this._screenOrigin = { x: screen.x, y: screen.y };
+    }
     this.width = w;
     this.height = h;
     this.emit('resize', {
       width: w,
       height: h,
-      x: 0,
-      y: 0,
-      moved: false,
-      resized: true,
+      x: this.x,
+      y: this.y,
+      moved,
+      resized,
     });
   }
 
@@ -103,7 +134,13 @@ export class CocoaPaneWindow {
    */
   setCursor(name) {
     if (this.destroyed) return;
-    this.app._paneSend?.({ type: 'pane-cursor', cursor: name ?? null });
+    this._post({ type: 'pane-cursor', cursor: name ?? null });
+  }
+
+  /** A message about this window, to the host. The pane's own names none:
+   * the host knows it as the pane (`CocoaPaneSubwindow` names itself). */
+  _post(msg) {
+    this.app._paneSend?.(msg);
   }
 
   requestAnimationFrame(cb) {
@@ -264,7 +301,7 @@ export class CocoaPaneWindow {
     const shown = this._ring[this._drawIndex];
     this._native.surfaceUnlock(shown.handle);
     this._flushDamage = null;
-    this.app._paneSend?.({
+    this._post({
       type: 'pane-present',
       seq: ++this._seq,
       id: shown.iosurfaceId,
@@ -302,5 +339,158 @@ export class CocoaPaneWindow {
     this.destroyed = true;
     this.app._unregisterWindow(this);
     this._releaseRing();
+  }
+}
+
+/**
+ * Any other window a pane's tree makes: a `<popup>` — a menu, a dropdown's
+ * sheet, a tooltip, the edit menu — or a managed one, a dialog (#824).
+ *
+ * A pane process runs no AppKit (`CocoaApp.start`): no NSApplication, no
+ * event pump. An NSWindow made here exists and is never shown, so a
+ * `<Select>` in a pane took the press, opened, and showed nothing. This
+ * window paints into a shared ring exactly as the pane does, and the host
+ * makes the NSWindow and shows the ring in it (`CocoaPaneHost`,
+ * src/cocoa/panehost.js) — the split the pane already has: the pane draws,
+ * the host owns glass and input.
+ *
+ * Its place is the pane's to decide and the host's to take as given: `x`
+ * and `y` are the screen position the pane's own anchoring worked out,
+ * against the origin the host sends with every pane-rect. What goes out is
+ * the window's life as `pane-window` messages and its frames as
+ * `pane-present`s naming it; what comes back is the input on the host's
+ * window, as `pane-event`s naming it, and for a managed window the moves
+ * and the resizes the user made and the close button.
+ */
+export class CocoaPaneSubwindow extends CocoaPaneWindow {
+  constructor(app, attributes = {}) {
+    super(app, attributes);
+    this.attributes = attributes;
+    this._popup = attributes.overrideRedirect === true;
+    this.mapped = false;
+    // device pixels, as every window's attributes are — unlike the pane's
+    // own, whose size is the host's to say
+    const size = this.snapSize(attributes.width ?? 1, attributes.height ?? 1);
+    this.width = size.width;
+    this.height = size.height;
+    this.x = Math.round(attributes.x ?? 0);
+    this.y = Math.round(attributes.y ?? 0);
+    this._screenOrigin = { x: this.x, y: this.y };
+    this._send({
+      op: 'create',
+      x: this.x,
+      y: this.y,
+      width: this.width,
+      height: this.height,
+      popup: this._popup,
+      // an ARGB visual is a transparent window here, as in `CocoaWindow`
+      transparent:
+        attributes.visual !== undefined || Boolean(attributes.transparent),
+      grabKeyboard: attributes.grabKeyboard === true,
+      dragPreview: Boolean(attributes.dragPreview),
+      title: attributes.title ?? '',
+      decorations: attributes.decorations,
+      resizable: attributes.resizable,
+      sizeHints: attributes.sizeHints,
+    });
+  }
+
+  /** Named, and held until the host is listening (`CocoaApp._postWindow`). */
+  _post(msg) {
+    this.app._postWindow({ ...msg, window: this.windowId });
+  }
+
+  _send(msg) {
+    if (this.destroyed) return;
+    this._post({ type: 'pane-window', ...msg });
+  }
+
+  /** `CocoaWindow`'s rule, so the size this window records is the size the
+   * host's NSWindow will take: whole points, rounded up. */
+  snapSize(width, height) {
+    const s = this.scale;
+    const up = (v) =>
+      Math.max(1, Math.ceil(Math.max(1, Math.round(v)) / s) * s);
+    return { width: up(width), height: up(height) };
+  }
+
+  map() {
+    this.mapped = true;
+    this._send({ op: 'map' });
+  }
+
+  unmap() {
+    this.mapped = false;
+    this._send({ op: 'unmap' });
+  }
+
+  move(x, y) {
+    this.x = Math.round(x);
+    this.y = Math.round(y);
+    this._screenOrigin = { x: this.x, y: this.y };
+    this._send({ op: 'move', x: this.x, y: this.y });
+  }
+
+  resize(width, height) {
+    const size = this.snapSize(width, height);
+    this.width = size.width;
+    this.height = size.height;
+    this._send({ op: 'resize', width: this.width, height: this.height });
+  }
+
+  setTitle(title) {
+    this._send({ op: 'title', title: String(title ?? '') });
+  }
+
+  setSizeHints(hints = {}) {
+    this._send({ op: 'size-hints', hints: { ...hints } });
+  }
+
+  /** The grab is the host's: a press anywhere in its windows comes here,
+   * outside this window, which is the dismissal (`CocoaApp._grabTarget`). */
+  grabPointer(options, cb) {
+    this._send({ op: 'grab' });
+    cb?.(null, 0);
+  }
+
+  ungrabPointer() {
+    this._send({ op: 'ungrab' });
+  }
+
+  /**
+   * Where the host's window went for a reason of its own — the user moved a
+   * dialog, or resized it — which a `resize` here says as a window's own
+   * move or resize does. A size comes only from the user (`resized`): the
+   * pane's own resizes come back as the host's echo, and one taken as news
+   * would read as the user taking an `'auto'` window over.
+   */
+  _hostGeometry(ev) {
+    if (this.destroyed) return;
+    const moved = ev.x !== this.x || ev.y !== this.y;
+    const resized =
+      Boolean(ev.resized) &&
+      (ev.width !== this.width || ev.height !== this.height);
+    if (!moved && !resized) return;
+    this.x = ev.x;
+    this.y = ev.y;
+    this._screenOrigin = { x: ev.x, y: ev.y };
+    if (resized) {
+      this.width = ev.width;
+      this.height = ev.height;
+    }
+    this.emit('resize', {
+      width: this.width,
+      height: this.height,
+      x: this.x,
+      y: this.y,
+      moved,
+      resized,
+    });
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this._send({ op: 'destroy' });
+    super.destroy();
   }
 }

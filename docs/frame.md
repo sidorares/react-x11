@@ -25,7 +25,10 @@ you are on when reading a trace:
 - **Cocoa** — there is no server to share, so the pane paints into
   `IOSurface`s created shared and presents by message; the host points one
   sublayer of its window at whichever surface the pane last presented. The
-  pane has no `NSWindow` at all.
+  pane has no `NSWindow` at all, and runs no AppKit. Every other window it
+  makes — a menu, a dropdown's sheet, a tooltip, a dialog — it paints the
+  same way, and the host shows in an `NSWindow` of its own (see "Sizing,
+  stacking, input").
 - **Windows** — the same shape as Cocoa with a **DirectComposition surface
   handle** in the IOSurface's place: the pane makes the handle, draws into it
   through a composition swapchain, and duplicates it into the host, which
@@ -251,6 +254,39 @@ tree names its cursor as a window's would, the pane sends it
 default cursor, so a `cursor` in the frame's `style` still wins. On X11 the
 pane's own window carries its cursor, as any window does.
 
+**A pane's other windows.** On X11 a `<popup>` in a pane is a real window on
+the pane's own connection. A Cocoa pane process runs no AppKit, so a window
+made there exists and is never shown — a `<Select>` in a pane took the press
+and opened nothing (#824). So the pane paints each window it makes besides
+its own into a shared ring, as it paints itself (`CocoaPaneSubwindow`,
+`src/cocoa/panewindow.js`), and the host makes the `NSWindow` and shows the
+ring in it (`src/cocoa/panehost.js`):
+
+- **Where it goes is the pane's to say.** Every `pane-rect` carries
+  `screen`, where the frame's box is on the screen in device pixels, sent
+  again when the box or the window moves. A popup the pane anchors to one of
+  its nodes is placed against it exactly as a window's popup is
+  (`windowOrigin`, src/anchor.js), and the host puts the window where the
+  pane says.
+- **The window's life goes up, its input comes down.** `pane-window`
+  messages make, map, move, resize, grab with and destroy it, and its
+  `pane-present`s and `pane-cursor`s name it. Input on the host's window for
+  it goes back as `pane-event`s naming it. A grab is the host's, so a press
+  anywhere in the host's windows reaches the menu outside its bounds, which
+  is the dismissal. A managed window — a `<Dialog>` — also sends back the
+  user's moves and resizes and its close button.
+- **The window's focus goes down too.** The host's window gaining or losing
+  it is sent to the pane as `focus`/`blur`, so a menu that closes when its
+  window loses focus (`useDismissOnWindowBlur`) closes when the user goes to
+  another application.
+- **Nothing waits on the host until it is listening.** These messages are
+  held until the host's first `pane-rect`: it hears a pane from the moment
+  it has a `<Frame>`, and knows what to do with them only once the pane is
+  laid out in it. A window is then announced where it is, after that rect
+  has placed what is anchored to the pane again.
+- **The pane's windows go with it.** A pane that exits or unmounts takes
+  every window the host shows for it, and their grab.
+
 `backgroundColor` in the frame's `style` is what shows before the pane's
 first frame and after one dies — the same server-painted rectangle
 `<foreign>` documents.
@@ -287,6 +323,14 @@ Named so they are not rediscovered:
   pane process attaches a separate DevTools, not a merged one.
 - **No intrinsic size**: the host decides the rect; a `measure` protocol
   could exist and does not yet.
+- **A window a pane opens in its first commit is placed against a guess.**
+  The host has not laid the pane out yet, so the pane does not know where
+  it is. A popup anchored to a node is placed again when the first
+  `pane-rect` comes, before anyone sees it; a `<Dialog>` open from the start
+  is centred where the pane guessed it was, as it is not anchored.
+- **Windows** panes do not read `screen` yet: a popup a Windows pane
+  anchors is placed against the screen's corner, the second half of what
+  #824 fixed on Cocoa. Not run there.
 - The `<window embeddable>` underneath (created unmapped, waiting for an
   embedder — see [embedding.md](embedding.md)) speaks plain reparenting
   today, not the `_XEMBED` messages; focus works through the forwarding
