@@ -28,11 +28,20 @@
 // delay a part joined half way through needs, so that is the bridge sprites
 // ask for: on an older one nothing is asked and every part is drawn by its
 // element.
+//
+// A part may be inside another of its element's (`parent`): a spinner in a
+// card that fades. Its layer is lifted inside the parent's, so it fades,
+// turns and is cut with it, and the parent's raster leaves it out — the
+// presenter hands the parent's `paint` the keys of its children lifted with
+// it, and paints it again whenever they change, in the frame they do. The
+// parent was asked about everywhere it can be, so a child is asked about
+// nothing more where it stays inside the parent's raster, and is its
+// element's to draw where it does not, or where its parent is not lifted.
 
 import { RASTER_PAD, RasterState } from './presenter.js';
 import { CocoaPlayer, PlayerLift } from './player.js';
 import { VideoLift, canLiftVideo } from './video.js';
-import { intersectRects } from '../nodes/rects.js';
+import { intersectRects, rectContains } from '../nodes/rects.js';
 import { DEV } from '../nodes/util.js';
 import { isVideoFrames } from '../videoframes.js';
 
@@ -46,6 +55,11 @@ const MAX_SIDE = 8192;
 const AFTER_CHILDREN = Number.MAX_SAFE_INTEGER;
 
 const IDENTITY = Object.freeze([1, 0, 0, 1, 0, 0]);
+
+const ORIGIN = Object.freeze({ x: 0, y: 0 });
+
+// what a part with no part lifted inside it is handed
+const NO_KIDS = Object.freeze(new Set());
 
 // what a part's raster holds before its first paint
 const UNPAINTED = Symbol('unpainted');
@@ -127,6 +141,9 @@ function isSprite(sprite) {
   }
   if (sprite.reach !== undefined && !isRect(sprite.reach)) return false;
   if (sprite.clip !== undefined && !isRect(sprite.clip)) return false;
+  if (sprite.parent !== undefined && typeof sprite.parent !== 'string') {
+    return false;
+  }
   if (
     sprite.clipRadius !== undefined &&
     !(finite(sprite.clipRadius) && sprite.clipRadius >= 0)
@@ -331,6 +348,15 @@ export class SpriteLayers {
           continue;
         }
         if (now.has(sprite.key)) continue;
+        // inside another of the element's parts: lifted with it or not at
+        // all, its parent earlier in the list, and neither of them a source
+        let parent = null;
+        if (sprite.parent !== undefined) {
+          parent = now.get(sprite.parent) ?? null;
+          if (!parent || parent.contents !== null || sprite.contents != null) {
+            continue;
+          }
+        }
         const contents = sprite.contents ?? null;
         // a source this bridge cannot show: the element draws it
         if (contents !== null && !this._canShow(contents)) continue;
@@ -352,32 +378,52 @@ export class SpriteLayers {
         };
         const extent = extentOf(sprite);
         const bounds = cut.clip ? intersectRects(extent, cut.clip) : extent;
-        if (!bounds || !this.promotion._clear(host, bounds, cut)) continue;
+        if (!bounds) continue;
+        if (parent) {
+          // the parent was asked about everywhere it can be, and its layer
+          // carries this one: nothing more to ask where it stays inside the
+          // parent's raster, and its element draws it where it does not
+          if (!rectContains(rasterRectOf(parent.sprite), bounds)) continue;
+          cut.bounds = bounds;
+        } else if (!this.promotion._clear(host, bounds, cut)) {
+          continue;
+        }
         const shown = cut.bounds;
         let state = was?.get(sprite.key);
         // a clip that comes or goes is a layer in a box or out of one: lifted
         // again, rather than a running layer moved between parents — and so
-        // is a part that shows another source, or stops painting to show one
+        // is a part that shows another source, or stops painting to show
+        // one, and one in another layer than it was
         if (
           state &&
           (Boolean(state.clip) !== Boolean(cut.clip) ||
-            state.contents !== contents)
+            state.contents !== contents ||
+            state.parent !== parent)
         ) {
           this._drop(state, root);
           state = null;
         }
         const lifting = !state;
         if (lifting) {
-          state = this._lift(host, sprite.key, cut.clip !== null, contents);
+          state = this._lift(
+            host,
+            sprite.key,
+            cut.clip !== null,
+            contents,
+            parent,
+          );
         }
         state.sprite = sprite;
         state.clip = cut.clip;
         state.radius = cut.radius;
-        state.order = [...place, AFTER_CHILDREN, index];
+        state.order = parent ? null : [...place, AFTER_CHILDREN, index];
+        state.kids = [];
+        parent?.kids.push(state);
         // the bitmap under where it shows repaints without it, from this
         // frame on; where it went since, it is the element's own claims
-        // that move the hole
-        if (lifting) this.promotion._claim(root, shown);
+        // that move the hole. A child is under its parent's layer, whose
+        // raster leaves it out instead (`sync`).
+        if (lifting && !parent) this.promotion._claim(root, shown);
         state.extent = shown;
         now.set(sprite.key, state);
       }
@@ -396,11 +442,12 @@ export class SpriteLayers {
     return changed;
   }
 
-  /** Every lifted part, with its place in the paint order. */
+  /** Every lifted part above the bitmap, with its place in the paint
+   *  order: not one inside another's layer, which goes with it (`sync`). */
   entries() {
     const out = [];
     for (const lifted of this.hosts.values()) {
-      for (const state of lifted.values()) out.push(state);
+      for (const state of lifted.values()) if (!state.parent) out.push(state);
     }
     return out;
   }
@@ -426,23 +473,29 @@ export class SpriteLayers {
     return isVideoFrames(contents) && this.videos;
   }
 
-  _lift(host, key, clipped, contents = null) {
+  _lift(host, key, clipped, contents = null, parent = null) {
     const layer = this.native.createLayer();
     // a part cut to a clip is in a box of the clip's size that masks to it,
-    // and the box is what stands among the layers above the bitmap
+    // and the box is what stands among the layers above the bitmap — or
+    // among its parent's children, for a part inside another's layer
+    const above = parent ? parent.layer : this.promotion.rootVisual.layer;
     let box = null;
     if (clipped) {
       box = this.native.createLayer();
-      this.native.addSublayer(this.promotion.rootVisual.layer, box);
+      this.native.addSublayer(above, box);
       this.native.addSublayer(box, layer);
     } else {
-      this.native.addSublayer(this.promotion.rootVisual.layer, layer);
+      this.native.addSublayer(above, layer);
     }
     return {
       host,
       key,
       layer,
       box,
+      // the part whose layer this one is in, and the parts in this one's
+      parent,
+      kids: [],
+      paintedKids: '',
       boxProps: {},
       clip: null, // device pixels, window coordinates
       radius: 0, // the clip's corners, device pixels
@@ -479,7 +532,9 @@ export class SpriteLayers {
     state.raster.release(this.native);
     for (const run of state.runs.values()) this._ends().delete(run.caId);
     state.runs.clear();
-    if (!state.host.destroyed && state.extent) {
+    // a child's is under its parent's layer, which paints it again or goes
+    // with it
+    if (!state.host.destroyed && state.extent && !state.parent) {
       this.promotion._claim(root, state.extent);
     }
   }
@@ -491,28 +546,41 @@ export class SpriteLayers {
     const rect = rasterRectOf(sprite);
     const reach = sprite.reach ?? sprite.rect;
     const phase = `${reach.x - Math.floor(reach.x)},${reach.y - Math.floor(reach.y)}`;
+    // the parts lifted inside it, which its raster leaves out
+    const kids = state.kids.map((kid) => kid.key).join('\n');
     // painted again for a new version, and for a raster of another size or
-    // with the part at another fraction of a pixel; a move by whole pixels
-    // is the layer's alone. A source paints nothing: it shows itself.
+    // with the part at another fraction of a pixel, or with other parts
+    // lifted inside it; a move by whole pixels is the layer's alone. A
+    // source paints nothing: it shows itself.
     if (
       !state.lift &&
       (state.painted === UNPAINTED ||
         sprite.version !== state.painted ||
         state.rect?.width !== rect.width ||
         state.rect?.height !== rect.height ||
-        state.phase !== phase)
+        state.phase !== phase ||
+        state.paintedKids !== kids)
     ) {
       this._paint(state, sprite, rect);
       state.phase = phase;
+      state.paintedKids = kids;
     }
     state.rect = rect;
     const origin = originOf(sprite);
     const m = sprite.transform ?? IDENTITY;
+    // where its layer's coordinates start: the window's corner, or the
+    // corner of its parent's raster, for a part inside another's layer
+    const base = state.parent?.rect ?? ORIGIN;
     // in its box, where it is cut to a clip: placed from the clip's corner,
     // and the box at the part's place among the layers
     const clip = state.clip;
     if (state.box) {
-      const frame = [clip.x / s, clip.y / s, clip.width / s, clip.height / s];
+      const frame = [
+        (clip.x - base.x) / s,
+        (clip.y - base.y) / s,
+        clip.width / s,
+        clip.height / s,
+      ];
       // its corners rounded where the clip's are: a circle's arc, as wide
       // as the box allows
       const cornerRadius =
@@ -532,8 +600,8 @@ export class SpriteLayers {
         state.boxProps = { frame, zPosition: z, cornerRadius };
       }
     }
-    const ox = state.box ? clip.x : 0;
-    const oy = state.box ? clip.y : 0;
+    const ox = state.box ? clip.x : base.x;
+    const oy = state.box ? clip.y : base.y;
     const next = {
       bounds: [0, 0, rect.width / s, rect.height / s],
       anchorPoint: [
@@ -570,6 +638,10 @@ export class SpriteLayers {
     state.lift?.layout?.(next.bounds);
     // after the model went out, in the same transaction
     this._syncAnimations(state, sprite);
+    // the parts inside it, in the element's order, over its raster
+    for (let i = 0; i < state.kids.length; i++) {
+      this.sync(state.kids[i], i + 1);
+    }
   }
 
   _paint(state, sprite, rect) {
@@ -586,7 +658,10 @@ export class SpriteLayers {
       ctx.translate(-rect.x, -rect.y);
       // a part paints whole: there is no pass to cull it by
       if (root) root._paintDamage = null;
-      sprite.paint(ctx);
+      sprite.paint(
+        ctx,
+        state.kids.length ? new Set(state.kids.map((kid) => kid.key)) : NO_KIDS,
+      );
     } catch (err) {
       this._warn(
         state.host,
