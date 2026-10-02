@@ -2038,7 +2038,7 @@ useEffect(() => startDecoder(file, frames), [frames, file]);
 | `autoPlay`, `loop`, `muted`, `volume`, `playbackRate` | HTML's names and defaults — nothing plays until asked; for `src`                                                                                 |
 | `paused`                                              | controlled when present; for `src`                                                                                                               |
 | `onLoadedMetadata`                                    | `{ width, height, duration }` once the stream's size is known — for a sink, once it is mounted, with a `duration` of `Infinity`, a live source's |
-| `onPlay`, `onPause`, `onEnded`, `onTimeUpdate`        | for `src`                                                                                                                                        |
+| `onPlay`, `onPause`, `onEnded`, `onTimeUpdate`        | for `src`; the `ref` has `play()`, `pause()`, `seek(seconds)`, `currentTime`, `duration` and `paused`                                            |
 | `onError`                                             | the source failed, or there is no player for `src`; without a handler, one console warning                                                       |
 
 `frames` and `src` are exclusive, and passing both throws. The element is a
@@ -2137,11 +2137,48 @@ picture: the video is drawn for as long as the rounded clip holds it.
 ### `src` — the platform's player
 
 Where `useSupports('mediaPlayback')` is true, `src` is a file or URL the
-platform plays with its own decoder, audio, seeking and streaming. Where it
-is false — X11 and Wayland for good, and macOS until the player lands — the
-element reports one `NoMediaPlaybackError` (`code: 'ENOMEDIAPLAYBACK'`)
-through `onError`, on a microtask, and shows its poster: never a black box
-that looks like a video that has not started. Ask before rendering one:
+platform plays with its own decoder, audio, seeking and streaming — on macOS
+AVFoundation, over a bridge with its player verbs (`createPlayer`).
+A path, a `file://` URL and an `http(s)` one, HLS included, all play.
+
+```jsx
+const ref = useRef(null);
+<video
+  ref={ref}
+  src="/Users/me/clip.mp4"
+  autoPlay
+  muted
+  onLoadedMetadata={({ duration }) => setDuration(duration)}
+  onTimeUpdate={({ currentTime }) => setAt(currentTime)}
+  onEnded={() => setDone(true)}
+  style={{ width: 640 }}
+/>;
+// a transport bar of your own
+<button onPress={() => ref.current.seek(30)} />;
+```
+
+It is laid out at 300x150 — or the poster's size — until the item is ready,
+and at the clip's size from `onLoadedMetadata` on. `paused` is controlled
+when present; `autoPlay`, `loop`, `muted`, `volume` and `playbackRate` are
+HTML's, and a change to any of them goes to the same player. The `ref` is
+HTMLMediaElement's imperative half: `play()` (from the start if the item has
+ended), `pause()`, `seek(seconds)` — exact, not to the nearest keyframe —
+and `currentTime`, `duration` and `paused`. `onPlay` and `onPause` fire when
+it starts and stops, `onTimeUpdate` four times a second while it plays and
+after a seek, `onEnded` at the end of an item that does not loop, and
+`onError` when the item fails.
+
+Lifted, the picture is the player's own layer and costs the window nothing
+while it plays; painted over, the frame showing is copied into the element's
+surface at the clip's own frame rate for as long as it plays, in the same
+colours. There is no `controls` attribute: the transport is your React,
+over or beside the video.
+
+Where `useSupports('mediaPlayback')` is false — X11 and Wayland for good,
+and macOS over an older bridge — the element reports one
+`NoMediaPlaybackError` (`code: 'ENOMEDIAPLAYBACK'`) through `onError`, on a
+microtask, and shows its poster: never a black box that looks like a video
+that has not started. Ask before rendering one:
 
 ```jsx
 const playback = useSupports('mediaPlayback');

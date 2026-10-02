@@ -11,6 +11,7 @@ import type {
   NtkWindow,
   ScrollableNode,
   TextInputNode,
+  VideoNode,
 } from './nodes.js';
 import type { AnchorOptions, ScreenAnchorRect } from './components.js';
 import type { VideoFrames, VideoMetadataEvent } from './video.js';
@@ -919,7 +920,7 @@ export interface ImageProps extends DrawnProps<DrawnNode> {
  * order like an `<image>` whose pixels changed. `borderRadius` on an
  * ancestor that clips it costs the layer, not the picture.
  */
-export interface VideoProps extends DrawnProps<DrawnNode> {
+export interface VideoProps extends DrawnProps<VideoNode> {
   /** A sink the application pushes decoded frames into
    * (`useVideoFrames`). Works on every backend. */
   frames?: VideoFrames;
@@ -948,8 +949,8 @@ export interface VideoProps extends DrawnProps<DrawnNode> {
   onPlay?: () => void;
   onPause?: () => void;
   onEnded?: () => void;
-  /** A few times a second while playing, as HTML's is. */
-  onTimeUpdate?: (ev: { currentTime: number }) => void;
+  /** A few times a second while playing, as HTML's is, and after a seek. */
+  onTimeUpdate?: (ev: { currentTime: number; node: VideoNode }) => void;
   /** The source failed, or this backend has no player for `src`
    * (`NoMediaPlaybackError`). Without a handler the failure is a console
    * warning. */

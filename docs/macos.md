@@ -1913,6 +1913,18 @@ through VideoToolbox. Read back through `snapshotWindow`, the same frame
 lifted, drawn and played differs by at most two levels a channel. A
 bridge without the verbs lifts nothing, and the frame is converted in
 JavaScript instead (`app.videoFormats()` then says `BGRA` first).
+
+A `<video src>` is the second source: an `AVPlayer` over the file or URL
+(`createPlayer`, `src/cocoa/player.js`) is the
+part's `contents`, and lifted, its own `AVPlayerLayer` goes inside the part's
+layer and fills it — AVFoundation puts every frame on the screen, and on the
+real bridge a playing 30fps clip cost the window no frames at all. Declined,
+the element asks `playerCopyFrame` for the frame showing every display frame
+while it plays, which answers only when there is a new one, so a covered
+30fps clip is thirty frames a second of the window's, each bounded to the
+picture, in the colours the player's layer shows. Over a bridge without the
+verbs `createPlayer` is absent from the app, `useSupports('mediaPlayback')`
+is false, and `src` refuses as it does on X11.
 docs/architecture/video.md is the design record.
 
 ## Running as an app bundle

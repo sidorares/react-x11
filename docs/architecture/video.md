@@ -130,8 +130,14 @@ constraint it runs into on X11 is the one
 
 Also: the presenter bench's `video` scenario and its gate rule (§9) — a
 lifted sink holds to no window frame per push, a rule read as skipped over a
-bridge without video surfaces. Not built yet: the player (§12 track 3) and
-the Windows and Wayland rungs.
+bridge without video surfaces. And **`<video src>` on macOS** (§12 track 3):
+`@windowkit/appkit`'s `createPlayer`, `playerSet`, `playerSeek`,
+`playerCopyFrame` and `releasePlayer` with the `player-*` events, and
+`src/cocoa/player.js`, the player as a sprite part's `contents` — its
+`AVPlayerLayer` lifted into the part, its frame copied into the element's
+surface while it plays and something is over it. HTML's props, events and
+imperative half; `useSupports('mediaPlayback')` true where the bridge plays.
+Not built yet: the Windows and Wayland rungs.
 
 ## 1. The asymmetry, stated once
 
