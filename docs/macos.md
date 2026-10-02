@@ -1820,6 +1820,36 @@ bridge answers `'sRGB'`** — on 0.5.0 it stays off unless asked for — so
 nobody gets the flash for free, and the bridge upgrade is what turned it
 on.
 
+**And one a wide-gamut display found** (#820). The surface presenter shows
+the window through an IOSurface, and that IOSurface named no colour space.
+Core Animation shows such a surface as the display's own numbers, and
+colour-matches everything that does name one: a promoted layer's `CGImage`,
+its `backgroundColor`. So on a display whose profile is not sRGB — a
+MacBook's built-in panel, a monitor carrying its own EDID profile — the
+window was more saturated than its CSS colours, and a promoted node changed
+colour on its way onto its layer and again on its way back: `#3b82f6` read
+(59, 130, 246) in the bitmap and (78, 128, 238) on its layer on the
+built-in panel. `@windowkit/appkit` 0.19.0, the range this package asks
+for, names every IOSurface it makes sRGB, and `setLayerContentsIOSurface`
+names one that names nothing, which covers a `<glarea>`'s x11-dri frames
+too (windowkit/appkit#98, #99). On it the bitmap, a promoted layer, a
+`<Frame>` pane and a `<glarea>` read the same numbers on all three displays
+measured. Three consequences:
+
+- **Every window on such a display is colour-managed now**, as Safari and
+  Chrome manage a page, and looks less saturated than it did before 0.19.0:
+  correct, and visibly different.
+- **Opaque colours agree to the pixel; translucent ones do not quite.**
+  Core Animation blends a layer in the display's space, where the bitmap
+  blends in sRGB before it is matched, so `rgba(255, 0, 0, 0.5)` over white
+  reads (239, 134, 131) in the bitmap and (245, 153, 145) on a layer.
+  Neither the bridge nor core can name that space away, and it matters most
+  for a node given back while it rests at a partial opacity.
+- **`window.snapshot()` reads the display's numbers for the bitmap**, as it
+  already did for a layer, and the PNG carries the display's profile: red
+  is (234, 51, 35) on the built-in panel. A script that compares raw
+  snapshot numbers with CSS colours sees the shift.
+
 **Measured**, 2026-09-06, this machine (a 120Hz panel; the window on a
 60Hz monitor where it says 59fps), 4s per cell, `npm run bench:presenters
 -- --scenario=anim,animtree,hovertree,pananim,scroll,tree`; `surface` is
