@@ -28,6 +28,16 @@
 // without knowing which backend it was mounted on. This subpath is where a
 // drawing-adjacent name gets its backend-neutral answer; the X-only names
 // (`createClient`, `Pixmap`, `Picture`, `XEmbedSocket`) stay X-only.
+//
+// One name is not ntk's at all. `decodeImageBytes` (src/imagedecode.js) is
+// the decoder ladder behind `<image>`'s bytes and files — the runtime's own
+// decoder where there is one, WebP where ntk reads only PNG and JPEG — and
+// an element that draws images of its own (`<Html>`'s `<img>`, a CSS
+// background) decodes through it so that an image shows there exactly when
+// it would show in an `<image>`. It is a name of its own rather than ntk's
+// `decodeImage` answered differently, because that one is synchronous and a
+// caller may read the size off what it returns; this one answers a promise
+// wherever the decode is not.
 import * as ntk from 'ntk';
 
 import { adoptNtk } from './ntkroot.js';
@@ -35,6 +45,7 @@ import { adoptNtk } from './ntkroot.js';
 export * from 'ntk';
 export { default } from 'ntk';
 export { Surface } from './offscreen.js';
+export { decodeImageBytes } from './imagedecode.js';
 
 // what src/ntkroot.js would load, already loaded: handed over rather than
 // imported twice

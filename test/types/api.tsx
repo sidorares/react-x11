@@ -9,7 +9,8 @@
 import React, { useRef, useState } from 'react';
 import { startTrace } from 'react-x11/debug';
 import { XK_MULTI_KEY, isDeadKeysym, keysymFromName } from 'react-x11/keysyms';
-import { Surface } from 'react-x11/ntk';
+import { Surface, decodeImageBytes } from 'react-x11/ntk';
+import type { DecodedImage } from 'react-x11/ntk';
 import type { Context2D, GlAreaNode } from 'react-x11/node';
 import { onReload, performReactRefresh } from 'react-x11/refresh';
 import { registerRefresh, createTransformer } from 'react-x11/refresh/loader';
@@ -1360,6 +1361,14 @@ async function main() {
   new Surface(ownCompose.app, { width: 1, height: 1, format: 'rgb24' });
   // @ts-expect-error — a size is not optional
   new Surface(ownCompose.app, { width: 1 });
+
+  // the decoder <image> reads bytes with, for an element that draws its own
+  // images: an Image, or a promise of one where the decode is not synchronous
+  const decoded: DecodedImage = await decodeImageBytes(new Uint8Array(8));
+  const rgba: Uint8Array = decoded.data;
+  void [decoded.width, decoded.height, rgba];
+  // @ts-expect-error — bytes, not a path: a file goes to <image src>
+  decodeImageBytes('./logo.webp');
 
   // accelerators: the Latin keysym by default, and two ways to say otherwise
   const byLayout = await createRoot({ accelerators: 'layout' });

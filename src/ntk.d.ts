@@ -91,6 +91,32 @@ export interface Surface {
   [Symbol.dispose](): void;
 }
 export const Surface: new (app: unknown, options: SurfaceOptions) => Surface;
+/** What `decodeImageBytes` answers: an ntk `Image` of straight RGBA. */
+export interface DecodedImage {
+  readonly width: number;
+  readonly height: number;
+  /** `width × height × 4` bytes, straight (not premultiplied) RGBA. */
+  readonly data: Uint8Array;
+}
+
+/**
+ * Encoded image bytes → an ntk `Image`, through the decoder `<image>` uses:
+ * the runtime's own where there is one (`Bun.Image`, off the JavaScript
+ * thread, every format it reads), and JavaScript elsewhere — PNG and JPEG
+ * synchronously, WebP through a decoder imported the first time a WebP
+ * arrives. The format comes from the bytes.
+ *
+ * An `Image`, or a promise of one wherever the decode is not synchronous;
+ * it throws, or rejects, on bytes this runtime cannot decode, saying what to
+ * convert them to. The bytes are read after it returns where the answer is
+ * a promise, so they must not change until it settles. See
+ * [elements.md](../docs/elements.md#formats-and-what-decodes-them) for which
+ * runtime decodes what.
+ */
+export function decodeImageBytes(
+  bytes: Uint8Array,
+): DecodedImage | Promise<DecodedImage>;
+
 /** `code` values on a failed GL setup — see `<glarea onError>`. */
 export const GLXError: {
   NO_EXTENSION: 'GLX_NO_EXTENSION';
