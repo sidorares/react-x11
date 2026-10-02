@@ -1899,11 +1899,14 @@ function _System() {
   // panel (reduce motion only), a test, or nobody
   const feelSource: 'xsettings' | 'macos' | 'test' | null = feel.source;
   void feelSource;
+  // whether anything should move at all
+  const moving: boolean = feel.animations;
   void [
     feel.doubleClickMs,
     feel.doubleClickDistance,
     feel.dragThreshold,
     blinkFor,
+    moving,
   ];
 
   const { locale, direction, weekStartsOn, timeZone }: SystemLocale =
