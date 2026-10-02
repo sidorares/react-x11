@@ -3,7 +3,8 @@
 _Design record, 2026-09-08, **reviewed 2026-10-02** against master at 65e323a
 (react-x11 2.30.0, ntk ^8.17.8, `@windowkit/appkit` ^0.19.0,
 `@windowkit/win32` ^0.0.6, `@windowkit/wayland` ^3.1.1, node-x11 4.2.3 in
-the lockfile). **Nothing is implemented with this document.** §0.1 is what
+the lockfile). §0.2 is what has been built since — track 1 of §12 and the
+Cocoa half of track 2. §0.1 is what
 moved in the month between the two dates and what it changed here; §6 is
 the element, §7 the seam it rides, §8 the two consumers it is for, §12 what
 can be built now and in what order, and §13 the spikes every number came
@@ -90,6 +91,41 @@ constraint it runs into on X11 is the one
 | Xv is a lockfile refresh away                                                                                                               | the lockfile has node-x11 4.2.3 (`PutImage`, `ShmPutImage`, `QueryImageAttributes`, `StopVideo`, both notify selectors); ntk still has no Xv wrapper and the renderer calls none of it                                                                        | the Xv rung is gated on nothing upstream; it is still work                                               |
 | camera capture is a separate element, later                                                                                                 | unchanged — and the on-screen result makes both `AVCaptureVideoPreviewLayer` and a raw `2vuy` surface viable layer contents, where the first version doubted both                                                                                             | §3.5's conclusion softens; the element is still later                                                    |
 | the ecosystem has nothing to play a video with                                                                                              | `@react-x11/components` has `<MediaPlayer>` (mpv or VLC embedded over `<foreign>`, X11 only, transport over mpv's JSON IPC) and `<Html>` lays a `<video>` out as its poster, or a 300×150 box; neither plays a frame on macOS                                 | §8: what each becomes                                                                                    |
+
+### 0.2 Built, 2026-10-02
+
+- **Core** (§12 track 1): `VideoFrames` (`src/videoframes.js`,
+  `createVideoFrames`, `useVideoFrames`), `<video>` (`src/nodes/video.js`)
+  drawn on every backend through a `Surface` of its own, `objectFit` for
+  `<video>` and `<image>` (`src/nodes/fit.js`), `poster`, HTML's sizing,
+  `onLoadedMetadata`, the typed refusal of `src` (`NoMediaPlaybackError`)
+  and `useSupports('mediaPlayback')`, false everywhere until a player lands.
+  The JavaScript conversion (`frameToRGBA`) applies the matrix and the
+  range and no transfer function.
+- **The `contents` sprite kind** (§7) in `src/cocoa/sprites.js`, and the
+  lift in `src/cocoa/video.js`: a ring of up to four video surfaces, each
+  push written and the layer repointed in the push. Measured on the real
+  bridge, threaded: sixty pushes, one window frame — the lift's.
+- **`@windowkit/appkit` release A** (§9), with the shapes the work settled
+  on: `createVideoSurface(width, height, { format, colorSpace, range })`,
+  `writeVideoSurface(target, format, planes, { strides, … })` — whose target
+  may also be a 2D surface, which is the drawn presentation's whole native
+  half — `videoSurfaceIsInUse`, `releaseVideoSurface` and `videoFormats()`.
+  The surface holds the IOSurface alone, not the CVPixelBuffer it was made
+  through: a pixel buffer keeps a use count on its surface, and
+  `IOSurfaceIsInUse` would answer true for one nothing shows.
+  `videoSurfacePlanes` was not needed: the copy is 0.07ms at 1080p.
+- **A colour finding the record did not have.** Core Animation shows a
+  surface tagged BT.709 throughout with the exact 709 curve; VideoToolbox's
+  pixel transfer, Core Image, and Core Animation itself for any other
+  tagging use a pure 1.961 gamma — a video-range Y′=50 is sRGB 55 on a layer
+  and 44 converted. The drawn presentation converts 709 itself (vImage's
+  matrix and the curve as a lookup, 0.5ms at 1080p) and everything else
+  through VideoToolbox (about 1ms), and lifted and drawn agree to within two
+  levels on screen (the bridge's `test/video-surface.js`).
+
+Not built yet: the player (§12 track 3), the Windows and Wayland rungs, and
+the bench scenario and gate rule of §9.
 
 ## 1. The asymmetry, stated once
 
@@ -742,7 +778,7 @@ interface VideoFrames {
   close(): void;
 }
 
-useVideoFrames(options): VideoFrames // stable across renders; closed on unmount; new when size or format changes
+useVideoFrames(options): VideoFrames // stable across renders; new when size, format or colour changes; nothing to close
 ```
 
 Three rules, each of which is a cost somewhere:
@@ -757,7 +793,7 @@ Three rules, each of which is a cost somewhere:
 
   | backend | lifted                                                         | drawn                                                                                                           | `preferredFormats`     |
   | ------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------- |
-  | Cocoa   | NV12 as is; I420 interleaved on the write (bridge); BGRA as is | BGRA; NV12/I420 converted in the bridge (vImage), to be measured                                                | `NV12`, `I420`, `BGRA` |
+  | Cocoa   | NV12 as is; I420 interleaved on the write (bridge); BGRA as is | BGRA; NV12/I420 converted in the bridge: 709 by vImage, 0.5ms at 1080p; the rest by VideoToolbox, about 1ms     | `NV12`, `I420`, `BGRA` |
   | X11     | —                                                              | BGRA into an ntk `Surface` (SHM where the server has it); NV12/I420 converted in JS, which is not free at 1080p | `BGRA`                 |
   | win32   | later: an NV12 swapchain on a visual (§4.2)                    | BGRA into a texture; NV12/I420 through the video processor, or in JS until then                                 | `BGRA`, then `NV12`    |
   | Wayland | —                                                              | NV12, I420 and BGRA as textures; YUV sampled in the shader, no conversion anywhere                              | `NV12`, `I420`, `BGRA` |

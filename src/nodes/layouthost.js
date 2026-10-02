@@ -147,6 +147,7 @@ const NO_LAYOUT_KINDS = new Set([
   'text',
   'textchunk',
   'image',
+  'video',
   'svg',
   'canvas',
   'textinput',

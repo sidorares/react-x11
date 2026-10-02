@@ -123,6 +123,7 @@ export const ATSPI_ROLE = Object.freeze({
   INFO_BAR: 102,
   LEVEL_BAR: 103,
   BLOCK_QUOTE: 105,
+  VIDEO: 107,
   ARTICLE: 109,
   LANDMARK: 110,
   LOG: 111,
@@ -307,6 +308,9 @@ const KIND_ROLES = {
   box: ATSPI_ROLE.FILLER,
   text: ATSPI_ROLE.LABEL,
   image: ATSPI_ROLE.IMAGE,
+  // AT-SPI's own role for one, which Chromium and Firefox give `<video>` too;
+  // ARIA has none, so there is no web role name to write in its place
+  video: ATSPI_ROLE.VIDEO,
   canvas: ATSPI_ROLE.DRAWING_AREA,
   textinput: ATSPI_ROLE.ENTRY,
   textarea: ATSPI_ROLE.ENTRY,

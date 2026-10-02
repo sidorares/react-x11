@@ -73,6 +73,15 @@ export type JustifySelf = 'auto' | JustifyItems;
 export type Overflow = 'visible' | 'hidden' | 'scroll';
 export type BorderStyle = 'solid' | 'dashed';
 /**
+ * Where an `<image>`'s or a `<video>`'s picture goes in its content box —
+ * CSS's `object-fit`, centred. `'fill'` stretches it to the box (`<image>`'s
+ * default); `'contain'` fits it inside, with bars of the background
+ * (`<video>`'s); `'cover'` fills the box and cuts what overflows; `'none'`
+ * keeps its own size; `'scale-down'` is the smaller of `'none'` and
+ * `'contain'`.
+ */
+export type ObjectFit = 'fill' | 'contain' | 'cover' | 'none' | 'scale-down';
+/**
  * Whether the pointer can land on a node. `'none'`: not on it nor anything
  * inside it. `'box-none'` (React Native's): not on the node itself, but on
  * its children — a press on the node's own area goes through to what is
@@ -450,6 +459,8 @@ export type HitSlop =
 /** Every property a style may set, before the block forms. */
 export interface StyleProperties extends LayoutStyle, PaintStyle, TextStyle {
   borderStyle?: BorderStyle;
+  /** `<image>` and `<video>`: where the picture goes in the box. */
+  objectFit?: ObjectFit;
   cursor?: Cursor;
   pointerEvents?: PointerEvents;
   /**

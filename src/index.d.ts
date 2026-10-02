@@ -32,6 +32,7 @@ export * from './types/tray.js';
 export * from './types/permissions.js';
 export * from './types/notifications.js';
 export * from './types/desktopcalendar.js';
+export * from './types/video.js';
 
 /**
  * The XID of the X11 window a ref points at, or `null` if there is not one
@@ -220,9 +221,20 @@ export function useClipboard(): Clipboard;
  * above everything the X server draws: nothing can be drawn over one there.
  * Ask it before handing a surface its HUD. A property of the backend and the
  * display, settled before the first render.
+ *
+ * `'mediaPlayback'` is whether this display plays a file or URL itself — a
+ * platform player — which `<video src>` needs. False on X11 and Wayland for
+ * good; ask it before rendering a `<video src>`, which refuses with one
+ * `onError` and shows its poster where it is false. `<video frames>` needs
+ * no capability. A property of the backend, and it never changes.
  */
 export type SupportsFeature =
-  'transparency' | 'shaders' | 'nativeControls' | 'embedding' | 'glOverlay';
+  | 'transparency'
+  | 'shaders'
+  | 'nativeControls'
+  | 'embedding'
+  | 'glOverlay'
+  | 'mediaPlayback';
 
 /**
  * Can this **display** do something? `'transparency'` is true when the

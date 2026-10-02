@@ -24,6 +24,7 @@ const BUILT_IN = Object.freeze([
   'box',
   'text',
   'image',
+  'video',
   'canvas',
   'textinput',
   'textarea',

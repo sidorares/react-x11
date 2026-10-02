@@ -18,6 +18,7 @@ import {
 } from '../imagesource.js';
 import { loadImageFile } from '../imagedecode.js';
 import { symbolWeight, symbolsFor, warnOnce } from '../symbols.js';
+import { fitRect, objectFitOf } from './fit.js';
 import { intrinsicSize } from './layout.js';
 import { Node } from './node.js';
 import { DEV } from './util.js';
@@ -317,12 +318,42 @@ export class ImageNode extends Node {
     }
     if (!this.image) return;
     const content = this.contentBox();
-    ctx.drawImage(
-      this.image,
-      content.x,
-      content.y,
-      content.width,
-      content.height,
+    const fit = objectFitOf(this.style, 'fill');
+    if (fit === 'fill') {
+      ctx.drawImage(
+        this.image,
+        content.x,
+        content.y,
+        content.width,
+        content.height,
+      );
+      return;
+    }
+    // the source's size in device pixels, as `measureContent` takes it
+    const s = this.scale;
+    const rect = fitRect(
+      content,
+      (this.image.width ?? 0) * s,
+      (this.image.height ?? 0) * s,
+      fit,
     );
+    if (!(rect.width > 0 && rect.height > 0)) return;
+    const inside =
+      rect.x >= content.x &&
+      rect.y >= content.y &&
+      rect.x + rect.width <= content.x + content.width &&
+      rect.y + rect.height <= content.y + content.height;
+    if (!inside) {
+      // `cover`, and `none` larger than the box: cut to the content box
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(content.x, content.y, content.width, content.height);
+      ctx.clip();
+    }
+    try {
+      ctx.drawImage(this.image, rect.x, rect.y, rect.width, rect.height);
+    } finally {
+      if (!inside) ctx.restore();
+    }
   }
 }

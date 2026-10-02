@@ -599,6 +599,42 @@ export class CocoaApp {
   }
 
   /**
+   * The formats a `VideoFrames` sink is cheapest in here, first to last
+   * (`preferredFormats`, src/videoframes.js). Over a bridge with video
+   * surfaces a YCbCr frame goes onto a layer as it is and into a bitmap
+   * through the bridge's own conversion, so NV12 — what a hardware decoder
+   * emits — is first; without them every frame is converted in JavaScript on
+   * its way to a `putImageData`, and BGRA is the one that costs least.
+   */
+  videoFormats() {
+    if (typeof this._native.writeVideoSurface !== 'function') return ['BGRA'];
+    return ['NV12', 'I420', 'BGRA'];
+  }
+
+  /**
+   * A `<video>`'s frame into `surface` — its drawn presentation, a
+   * `CocoaSurface` at the frame's size — in the bridge's code: a copy for
+   * BGRA, and for YCbCr a conversion that keeps the colours Core Animation
+   * shows the same frame in on a layer (`writeVideoSurface`, @windowkit/appkit
+   * 0.21), so a video moving between the two does not change shade. False
+   * over a bridge without the verb, and the frame is converted in JavaScript
+   * instead (src/nodes/video.js).
+   */
+  writeVideoFrame(surface, sink, frame) {
+    const native = this._native;
+    const handle = surface?._surfaceHandle;
+    if (typeof native.writeVideoSurface !== 'function' || !handle) return false;
+    native.writeVideoSurface(handle, sink.format, frame.planes, {
+      strides: frame.strides,
+      width: sink.width,
+      height: sink.height,
+      colorSpace: sink.colorSpace,
+      range: sink.range,
+    });
+    return true;
+  }
+
+  /**
    * The release seam for an `Image`'s upload (`freeImage`, src/imagesource.js).
    * `ctx.drawImage(image)` here composites from a CG bitmap made for the
    * Image on its first draw, which ntk's `Image.destroy()` — written for X,

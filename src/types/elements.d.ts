@@ -13,6 +13,7 @@ import type {
   TextInputNode,
 } from './nodes.js';
 import type { AnchorOptions, ScreenAnchorRect } from './components.js';
+import type { VideoFrames, VideoMetadataEvent } from './video.js';
 import type {
   ChangeEvent,
   SelectionChangeEvent,
@@ -904,6 +905,57 @@ export interface ImageProps extends DrawnProps<DrawnNode> {
 // style size, the source's own size (stated, for the server-side sources)
 // is the natural one, kept to its aspect ratio.
 
+/**
+ * `<video>`: frames the application decodes (`frames`), or a file or URL the
+ * platform plays (`src`, where `useSupports('mediaPlayback')` is true),
+ * fitted into the box by `objectFit` — `'contain'` unless the style says
+ * otherwise, with `backgroundColor` in the bars. Laid out at the stream's
+ * size in logical pixels, kept to its ratio when the style names one axis;
+ * before that is known, the poster's, and then HTML's 300x150.
+ *
+ * On macOS the picture goes on a layer of its own while nothing is painted
+ * over it, and every `push` reaches the screen with no frame of the window's
+ * own; elsewhere, and whenever something overlaps it, it is drawn in paint
+ * order like an `<image>` whose pixels changed. `borderRadius` on an
+ * ancestor that clips it costs the layer, not the picture.
+ */
+export interface VideoProps extends DrawnProps<DrawnNode> {
+  /** A sink the application pushes decoded frames into
+   * (`useVideoFrames`). Works on every backend. */
+  frames?: VideoFrames;
+  /**
+   * A path or URL the platform plays itself. Where there is no player the
+   * element reports one `NoMediaPlaybackError` through `onError`, on a
+   * microtask, and shows its poster. Exclusive with `frames`: passing both
+   * throws.
+   */
+  src?: string;
+  /** Shown until there is a frame, and whenever there is none — an
+   * `<image src>` value. */
+  poster?: ImageSource;
+  /** HTML's names and defaults: nothing plays until asked. For `src`; a
+   * sink plays what it is pushed. */
+  autoPlay?: boolean;
+  loop?: boolean;
+  muted?: boolean;
+  /** 0 to 1. */
+  volume?: number;
+  playbackRate?: number;
+  /** Controlled when present; the element plays or pauses to match. */
+  paused?: boolean;
+  /** The stream's size is known — for a sink, once it is mounted. */
+  onLoadedMetadata?: (ev: VideoMetadataEvent) => void;
+  onPlay?: () => void;
+  onPause?: () => void;
+  onEnded?: () => void;
+  /** A few times a second while playing, as HTML's is. */
+  onTimeUpdate?: (ev: { currentTime: number }) => void;
+  /** The source failed, or this backend has no player for `src`
+   * (`NoMediaPlaybackError`). Without a handler the failure is a console
+   * warning. */
+  onError?: (err: Error) => void;
+}
+
 /** What `onDraw` is told about the node it is painting. */
 export interface DrawInfo {
   /**
@@ -1075,6 +1127,7 @@ export interface ReactX11Elements {
   textinput: TextInputProps;
   textarea: TextAreaProps;
   image: ImageProps;
+  video: VideoProps;
   canvas: CanvasProps;
   svg: SvgProps;
   glarea: GlAreaProps;

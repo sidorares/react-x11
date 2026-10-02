@@ -119,7 +119,28 @@ export function fakeCocoaBridge({ screens } = {}) {
       if (released.has(id)) {
         throw new Error('IOSurfaceLookup: no surface with that id');
       }
+      layer.ioSurface = id;
     },
+
+    // --- video surfaces (@windowkit/appkit's createVideoSurface and the
+    // rest): a handle that remembers what it was made as, and whether the
+    // render server is reading it, which a test sets ----------------------------
+    createVideoSurface(width, height, options = {}) {
+      const id = ++seq;
+      return {
+        handle: { video: id, width, height, ...options, inUse: false },
+        iosurfaceId: id,
+      };
+    },
+    writeVideoSurface() {},
+    videoSurfaceIsInUse: (handle) => Boolean(handle.inUse),
+    releaseVideoSurface(handle) {
+      released.add(handle.video);
+    },
+    videoFormats: () => ({
+      surfaces: ['NV12', 'BGRA'],
+      frames: ['NV12', 'I420', 'BGRA'],
+    }),
     scrollSurface: () => true,
 
     // --- native bezels (the shape of cocoa-bezel-cache.test.js's fake) ---------
