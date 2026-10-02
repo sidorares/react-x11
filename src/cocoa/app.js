@@ -245,7 +245,7 @@ export class CocoaApp {
     // the app's own bridge, so an app over a fake one (the tests) needs no
     // real bridge on the machine — the manager's default loads it only when
     // it is built standalone
-    this.fonts = new CocoaFontManager(native);
+    this.fonts = new CocoaFontManager(native, { scale: this.scale });
     // `<image src={{ symbol }}>`'s names are SF Symbols here (src/symbols.js)
     this.symbols = new CocoaSymbols(native);
 

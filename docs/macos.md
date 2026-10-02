@@ -628,6 +628,20 @@ implements it over CoreText, the optional `coverage()` (#673) included:
   in any case, so a stack written for the web that leads with them is set
   in SF rather than in the first fallback that happens to be installed.
   Only on this backend: they name the Mac's face and nothing on X11.
+- **Sizes reach CoreText as points.** A size the engine is handed is in
+  device pixels, and CoreText reads some of a face's data by point size:
+  San Francisco's optical size and tracking, and the tracking Apple Color
+  Emoji's `trak` table adds below 29pt. Made at the device size, a font on
+  a 2x display was the face as it is set at twice its size — a 13px label
+  8% narrower than AppKit sets it, a 19px emoji 1em wide where it is 23pt
+  at 19pt — while faces with no such data (Helvetica, Menlo, most web
+  fonts) measured the same, which is why it hid. So every font is made at
+  `size / app.scale` points under a matrix of `app.scale` (the bridge's
+  `scale`, windowkit/appkit#106), and CoreText answers in device pixels as
+  before. An emoji's advance is the one number that is not exactly twice
+  its 1x one: CoreText rounds a bitmap glyph's to a whole pixel of the font
+  it is set in, half a point at 2x (test/cocoa-text-scale.test.js). A
+  bridge older than the option ignores it.
 - **Shaping/wrapping/bidi/truncation**: `CTFramesetter` over an
   attributed string built from the same span list (spans map to
   attribute ranges — the nested-`<text>` model transfers directly).
