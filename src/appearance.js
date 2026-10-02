@@ -135,12 +135,22 @@ const SAME = (a, b) =>
  * and a re-render per announcement would be churn with nothing behind it.
  */
 function publish(values, source) {
+  // **A pin is a pin.** A rung can answer long after it was asked — the
+  // ladder a test started before releasing its pin, a watcher's next line, a
+  // portal signal — and its answer lands in whatever test is running by
+  // then. Taken, that turns the next test's pixels into this machine's
+  // desktop, which is the one thing the pin exists to prevent.
+  if (owner === 'test' && source !== 'test') return;
   const next = Object.freeze({ ...NOTHING, ...values, source });
   if (SAME(next, snapshot)) return;
   snapshot = next;
-  // What came *off* the disk does not go back onto it, and a pinned test
-  // value must never reach a developer's real cache file.
-  if (source !== 'cache' && source !== 'test') save(next);
+  // Only what a rung answered is remembered. What came *off* the disk does
+  // not go back onto it, a pinned test value must never reach a developer's
+  // real cache file — and nor must the defaults a released pin falls back
+  // to (`source: null`), which every `cleanup()` publishes: written, they
+  // replaced the developer's remembered desktop after every test, and their
+  // next app drew its first frame in the wrong colours.
+  if (source && source !== 'cache' && source !== 'test') save(next);
   for (const fn of [...watchers]) {
     try {
       fn(snapshot);
@@ -162,23 +172,28 @@ function publish(values, source) {
  * Pass `null` to release the pin and let the ladder run again.
  */
 export function setAppearanceForTests(values) {
+  if (values === null) {
+    // Releasing undoes a *pin*, and only a pin. A real rung's answer is not
+    // this function's to throw away: `cleanup()` releases after every test,
+    // and a suite that resolved the appearance for real would otherwise find
+    // it wiped by the harness that was meant to leave it alone — or, with
+    // the cache marked unread, replaced on the next read by what the disk
+    // says, which is a verified answer turned back into a remembered one.
+    if (owner !== 'test') return;
+    owner = null;
+    probe = null;
+    // Unpinned, the remembered answer is this machine's to read again —
+    // intact, because neither the pin nor this release is ever written
+    // (`publish`).
+    cacheChecked = false;
+    publish({}, null);
+    return;
+  }
   probe = null;
   // Never touch the developer's own remembered answer either, in either
   // direction: `publish` will not write a pinned value, and marking the cache
   // as already checked keeps `load()` from reading one back over it.
   cacheChecked = true;
-  if (values === null) {
-    cacheChecked = false;
-    // Releasing undoes a *pin*, and only a pin. A real rung's answer is not
-    // this function's to throw away: `cleanup()` releases after every test,
-    // and a suite that resolved the appearance for real would otherwise find
-    // it wiped by the harness that was meant to leave it alone.
-    if (owner === 'test') {
-      owner = null;
-      publish({}, null);
-    }
-    return;
-  }
   owner = 'test';
   publish(values, 'test');
 }
@@ -929,6 +944,11 @@ async function runWatcher() {
         answered = true;
         publish(values, 'macos');
         done(true);
+        // Refused, because a test pinned the store while this was starting
+        // (`publish`): nothing will hear this watcher again, and while it
+        // lives the rung starts no other — so the ladder that runs once the
+        // pin is released would find the Mac silent.
+        if (owner === 'test') proc.kill();
       }
     };
     proc.stdout.setEncoding?.('utf8');
@@ -1020,7 +1040,10 @@ async function runLadder(app) {
       answered = false;
     }
     if (answered) {
-      owner = name;
+      // A pin set while this rung was being asked keeps the store: the
+      // rung's answer was refused (`publish`), and owning it would hand the
+      // rung's live updates a store they must not write to.
+      if (owner !== 'test') owner = name;
       return snapshot;
     }
   }
