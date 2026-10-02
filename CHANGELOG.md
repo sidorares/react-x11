@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.32.0](https://github.com/sidorares/react-x11/compare/v2.31.0...v2.32.0) (2026-10-02)
+
+
+### Features
+
+* **ntk:** react-x11/ntk exports decodeImageBytes, the ladder &lt;image&gt; decodes bytes with, so an element that draws images of its own shows a WebP where an &lt;image&gt; does, where @react-x11/components' &lt;Html&gt; decoded through ntk's PNG and JPEG alone ([#834](https://github.com/sidorares/react-x11/issues/834)) ([47c4dc2](https://github.com/sidorares/react-x11/commit/47c4dc295feb53f135a05e960ebc0201262fad44))
+
 ## [2.31.0](https://github.com/sidorares/react-x11/compare/v2.30.0...v2.31.0) (2026-10-02)
 
 
