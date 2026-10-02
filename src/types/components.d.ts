@@ -521,6 +521,16 @@ export interface SelectProps<T = unknown>
   /** The chevron's style, over `textMuted` at the caption's cap height.
    *  `display: 'none'` leaves it out. */
   chevronStyle?: StyleProp;
+  /**
+   * The menu's half of `native`: where the backend drops a control's menu
+   * as the platform's own (macOS, with `@windowkit/appkit` 0.20 or later),
+   * the list is that menu rather than a drawn one. Follows the trigger by
+   * default — the native bezel's select gets the native menu, a drawn one
+   * the drawn menu. `true` asks for the platform's menu under a drawn
+   * trigger too, set at the caption's size; `false` keeps the drawn menu.
+   * Ignored where the backend has no such menu.
+   */
+  nativeMenu?: boolean;
 }
 export function Select<T = unknown>(props: SelectProps<T>): ReactNode;
 

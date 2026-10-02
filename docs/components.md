@@ -707,6 +707,7 @@ import { Select } from 'react-x11';
 | `style` + any box props | forwarded to the trigger box              |
 | `labelStyle`            | the caption's style, over `text`          |
 | `chevronStyle`          | the chevron's style, over `textMuted`     |
+| `native`, `nativeMenu`  | the platform's bezel, and its menu        |
 
 The two style slots restyle what is inside the trigger, and `style` restyles
 the trigger itself, so a select that has to wear somebody else's look — a
@@ -738,6 +739,20 @@ it out, for a trigger whose arrow is drawn by something else. A select with
 either slot is drawn, where `controls: 'auto'` would otherwise use the
 platform's popup bezel, whose pixels no style reaches. The menu is not
 restyled: it is the same surface a menu is.
+
+**The menu can be the platform's.** On macOS, with `@windowkit/appkit` 0.20
+or later, a select under the native bezel drops a real `NSMenu`: the chosen
+row placed over the trigger and checked, the menu at least the trigger's
+width, AppKit's tracking, type-select and VoiceOver. A drawn menu sized as
+one was the best a drawn widget could do; this is the menu itself.
+`nativeMenu` is that choice on its own: it follows the trigger by default,
+`true` asks for the platform's menu under a drawn trigger too — what a
+browser does with a `<select>` a page styled, and what `<Html>` does — set
+at the caption's size and in the family its style names when the system
+has it, and `false` keeps the drawn menu. Elsewhere, and on an older
+bridge, the menu is drawn whatever the prop says. The menu is the
+platform's to dismiss: Escape, a click outside, or the application losing
+focus, and the select hears a pick or nothing.
 
 Behavior: the menu opens on the **press** — Space and Enter toggle it too;
 Escape, focus loss, or picking closes it; the option list scrolls when taller

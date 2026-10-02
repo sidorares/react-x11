@@ -512,6 +512,82 @@ export class CocoaApp {
   }
 
   /**
+   * Whether this backend drops a control's menu as the platform's own — a
+   * bridge with `popUpMenu` (@windowkit/appkit 0.20) — rather than a drawn
+   * `<popup>` sized as one. What `<Select>` asks before it opens.
+   */
+  get nativePopUpMenus() {
+    return typeof this._native?.popUpMenu === 'function';
+  }
+
+  /**
+   * The platform's own menu, dropped from a control in one of this app's
+   * windows as an NSPopUpButton's drops: the item `spec.selected` placed
+   * over `spec.frame` and checked, the menu at least the frame's width.
+   * `spec` is the bridge's (`items`, `selected`, `fontSize`, `fontFamily`,
+   * `appearance`, `rtl`) with `frame` in the window's device pixels, which
+   * every rect on this side is. `onAnswer(id | null)` hears the item chosen,
+   * or null for a menu dismissed, once; the frame that answer causes goes
+   * out with it. Returns a function that cancels the menu.
+   *
+   * Opened on a microtask, after the input that asked for it has been
+   * answered and painted: in pump mode the menu's tracking holds this thread
+   * from the call to the choice, and the press that opened it should be on
+   * glass before it does. From a worker the call returns at once.
+   *
+   * A pane has no NSWindow to drop it from, so in a pane the host does,
+   * over the pane's place in its window (`CocoaPaneHost.popUpMenu`).
+   */
+  popUpMenu(wnd, spec, onAnswer) {
+    let answered = false;
+    const answer = (id) => {
+      if (answered) return;
+      answered = true;
+      onAnswer(id ?? null);
+      this._afterInput();
+    };
+    if (this._paneMode) return this._paneMenu(wnd, spec, answer);
+    let cancelled = false;
+    let handle = null;
+    queueMicrotask(() => {
+      if (cancelled || this._closed || !wnd || wnd.destroyed) {
+        answer(null);
+        return;
+      }
+      const s = wnd.scale ?? this.scale;
+      handle = this._native.popUpMenu(
+        wnd._h,
+        { ...spec, frame: spec.frame.map((v) => v / s) },
+        (id) => answer(id),
+      );
+    });
+    return () => {
+      if (answered) return;
+      cancelled = true;
+      if (handle) this._native.cancelPopUpMenu?.(handle);
+    };
+  }
+
+  /** A pane's menu, asked of the host: `pane-menu` with the frame in the
+   *  window it is in, `pane-menu-answer` back. */
+  _paneMenu(wnd, spec, answer) {
+    const menu = (this._paneMenuSeq = (this._paneMenuSeq ?? 0) + 1);
+    (this._paneMenus ??= new Map()).set(menu, answer);
+    this._paneSend?.({
+      type: 'pane-menu',
+      menu,
+      // the pane's own window is the one the host knows as the pane
+      ...(wnd && wnd !== this._paneWindow && { window: wnd.windowId }),
+      spec,
+    });
+    return () => {
+      if (this._paneMenus?.has(menu)) {
+        this._paneSend?.({ type: 'pane-menu-cancel', menu });
+      }
+    };
+  }
+
+  /**
    * The offscreen-surface seam `react-x11/ntk`'s `Surface` dispatches on:
    * ntk's `Surface` contract over a CG bitmap (src/cocoa/surface.js). Its
    * presence is what makes `new Surface(app, { width, height })` answer a
@@ -804,6 +880,10 @@ export class CocoaApp {
         pane.setPaneSize(msg.width, msg.height, msg.scale, msg.screen);
         this._flushPaneOutbox();
         this._afterInput();
+      } else if (msg?.type === 'pane-menu-answer') {
+        const answer = this._paneMenus?.get(msg.menu);
+        this._paneMenus?.delete(msg.menu);
+        answer?.(msg.id ?? null);
       } else if (msg?.type === 'pane-event') {
         // input on one of the windows the host shows for this pane names
         // it; the pane's own is the one that names none

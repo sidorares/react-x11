@@ -1,7 +1,8 @@
 // The pane the pane-window tests mount: a `<Select>`, whose menu is a
-// `<popup grab>` anchored to its trigger, and on demand a `<Dialog>`, a
-// managed window, and a `<popup anchor>` open from the first commit. What
-// the user picks and closes goes back through bridged callbacks.
+// `<popup grab>` anchored to its trigger or, with `nativeMenu`, the
+// platform's, and on demand a `<Dialog>`, a managed window, and a
+// `<popup anchor>` open from the first commit. What the user picks and
+// closes goes back through bridged callbacks.
 import React, { useRef, useState } from 'react';
 
 import { Dialog } from '../../src/components/Dialog.js';
@@ -9,7 +10,13 @@ import { Select } from '../../src/components/Select.js';
 
 const h = React.createElement;
 
-export default function PopupPane({ dialog, pinned, onPick, onCloseDialog }) {
+export default function PopupPane({
+  dialog,
+  pinned,
+  nativeMenu,
+  onPick,
+  onCloseDialog,
+}) {
   const [value, setValue] = useState('alpha');
   const mark = useRef(null);
   return h(
@@ -18,8 +25,10 @@ export default function PopupPane({ dialog, pinned, onPick, onCloseDialog }) {
     h(Select, {
       options: ['alpha', 'beta', 'gamma'],
       value,
-      // the drawn trigger and menu, whatever the bridge says about bezels
+      // the drawn trigger, whatever the bridge says about bezels, and the
+      // drawn menu unless the test asks for the platform's
       native: false,
+      nativeMenu,
       style: { width: 120 },
       onChange: (ev) => {
         setValue(ev.value);

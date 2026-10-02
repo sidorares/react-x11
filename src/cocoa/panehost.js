@@ -133,6 +133,36 @@ export class CocoaPaneHost extends PaneLayer {
     this._send = send ?? null;
     /** @type {Map<number, object>} the pane's windows, by its id for them */
     this._windows = new Map();
+    /** @type {Map<number, () => void>} the pane's open menus, by its id */
+    this._menus = new Map();
+  }
+
+  /**
+   * A `pane-menu` message: the pane's `<Select>` asked for the platform's
+   * menu, which a process with no AppKit cannot drop (`CocoaApp.popUpMenu`).
+   * Its frame is in the window it is in — the pane's own, laid out at this
+   * layer's rect in the host's window, or one the pane made, shown here —
+   * and the answer goes back as `pane-menu-answer`.
+   */
+  popUpMenu(msg) {
+    if (this.destroyed || !msg.spec) return;
+    const entry = msg.window != null ? this._windows.get(msg.window) : null;
+    const [x, y, width, height] = msg.spec.frame;
+    const at = entry ? { x: 0, y: 0 } : (this._rect ?? { x: 0, y: 0 });
+    const cancel = this.app.popUpMenu(
+      entry ? entry.wnd : this.wnd,
+      { ...msg.spec, frame: [x + at.x, y + at.y, width, height] },
+      (id) => {
+        this._menus.delete(msg.menu);
+        this._send?.({ type: 'pane-menu-answer', menu: msg.menu, id });
+      },
+    );
+    this._menus.set(msg.menu, cancel);
+  }
+
+  /** `pane-menu-cancel`: the pane's `<Select>` went, or closed it. */
+  cancelMenu(menu) {
+    this._menus.get(menu)?.();
   }
 
   /**
@@ -271,6 +301,8 @@ export class CocoaPaneHost extends PaneLayer {
    * that crashed with a menu open leaves no menu behind. */
   destroy() {
     if (this.destroyed) return;
+    for (const cancel of [...this._menus.values()]) cancel();
+    this._menus.clear();
     for (const entry of [...this._windows.values()]) this._drop(entry);
     super.destroy();
   }

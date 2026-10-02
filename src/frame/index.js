@@ -609,6 +609,10 @@ function PaneHostView({
     const off = s.transport.onMessage((msg) => {
       if (msg?.type === 'pane-window') {
         host.paneWindow?.(msg);
+      } else if (msg?.type === 'pane-menu') {
+        host.popUpMenu?.(msg);
+      } else if (msg?.type === 'pane-menu-cancel') {
+        host.cancelMenu?.(msg.menu);
       } else if (msg?.type === 'pane-present' && msg.window != null) {
         host.presentWindow?.(msg);
       } else if (msg?.type === 'pane-cursor' && msg.window != null) {
