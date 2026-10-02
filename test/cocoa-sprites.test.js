@@ -495,6 +495,67 @@ test("a part's own clip cuts its layer, and what is painted over it outside the 
   assert.ok(stateOf(m, node, 'a') === undefined, 'under the box');
 });
 
+test('a clip with round corners rounds the box the part is cut in, as wide as the box allows; a clipping ancestor with square corners that would cut it again keeps the part with its element', async (t) => {
+  // 120×80 device pixels at (20, 20): 60×40 points at (10, 10)
+  const cut = { x: 20, y: 20, width: 120, height: 80 };
+  {
+    const { m, node } = await shown(t, stage(), [
+      part('a', A, { clip: cut, clipRadius: 16 }),
+    ]);
+    const state = stateOf(m, node, 'a');
+    assert.ok(state, 'lifted');
+    assert.deepEqual(state.box.props.frame, [10, 10, 60, 40]);
+    assert.equal(state.box.props.masksToBounds, true);
+    assert.equal(state.box.props.cornerRadius, 8, 'in points');
+    // past half the box, half of it
+    reoffer(node, [part('a', A, { clip: cut, clipRadius: 400 })]);
+    m.frame();
+    assert.equal(stateOf(m, node, 'a'), state, 'the same layer');
+    assert.equal(state.box.props.cornerRadius, 20);
+    // square again
+    reoffer(node, [part('a', A, { clip: cut })]);
+    m.frame();
+    assert.equal(state.box.props.cornerRadius, 0);
+    await cleanupCocoa();
+  }
+  {
+    // a pane at (20, 10) device pixels, 200×120, that clips the stage: a
+    // rounded clip inside it is the box's alone, and one it would cut is
+    // no box's shape
+    const pane = (child) =>
+      box(at(10, 5, 100, 60, { overflow: 'hidden' }), child);
+    const inside = { x: 40, y: 30, width: 100, height: 60 };
+    const across = { x: 0, y: 0, width: 300, height: 200 };
+    const { m, node } = await shown(t, pane(stage()), [
+      part('a', A, { clip: inside, clipRadius: 12 }),
+    ]);
+    assert.deepEqual(stateOf(m, node, 'a')?.clip, inside, 'inside the pane');
+    reoffer(node, [part('a', A, { clip: across, clipRadius: 12 })]);
+    m.frame();
+    assert.ok(stateOf(m, node, 'a') === undefined, 'cut again by the pane');
+    reoffer(node, [part('a', A, { clip: across })]);
+    m.frame();
+    assert.deepEqual(
+      stateOf(m, node, 'a')?.clip,
+      { x: 20, y: 10, width: 200, height: 120 },
+      'square, cut to the pane',
+    );
+    await cleanupCocoa();
+  }
+  {
+    // a radius that is no length is no part
+    const warn = console.warn;
+    console.warn = () => {};
+    t.after(() => {
+      console.warn = warn;
+    });
+    const { m } = await shown(t, stage(), [
+      part('a', A, { clip: cut, clipRadius: -1 }),
+    ]);
+    assert.equal(m.promotion.sprites.hosts.size, 0);
+  }
+});
+
 test('a clip that comes or goes lifts the part again, in a box or out of one; one that moves moves the box; one that leaves nothing showing keeps the part with its element', async (t) => {
   const cut = { x: 0, y: 0, width: 100, height: 240 };
   const { m, node } = await shown(t, stage(), [part('a', A)]);

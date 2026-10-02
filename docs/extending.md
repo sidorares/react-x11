@@ -1723,7 +1723,8 @@ spriteAnimationEnded(key, id, finished) {
 | `spritesChanged()`                        | ask for that frame when the parts changed and nothing the element draws did |
 
 A part is its `key`, its `rect` (and a `reach`, if it draws past it, and a
-`clip`, if you cut it to one), a `paint` that draws it **where it is in the
+`clip`, if you cut it to one, with a `clipRadius` where the clip's corners
+are round), a `paint` that draws it **where it is in the
 window, at opacity 1 and untransformed** — the layer carries both — and a
 `version` whose change paints it again. Its `opacity` and its `transform`, CSS's `matrix(a, b, c,
 d, e, f)` as an array with `e` and `f` in device pixels, about an `origin`
@@ -1747,7 +1748,10 @@ transform it is animated through:
   corners: the layer goes in a box that masks it to them, so a carousel's
   slide under `overflow: hidden`, or a part scrolled half out of its pane,
   is cut there as the bitmap is. A rounded ancestor has to hold all of it,
-  since one box cannot take its corners.
+  since one box cannot take its corners. A `clip` of your own may have
+  round corners — a card with a radius, cutting what it holds — and the
+  box takes them; then an ancestor with square corners that would cut it
+  again keeps the part yours, for the same reason.
 - **Neither the element nor any ancestor fades**: their group on the bitmap
   would leave the layer out of it.
 - **Your inside is yours.** Offer only a part that nothing you draw after it

@@ -615,6 +615,10 @@ export class CocoaPromotion {
         !(parent.style?.borderRadius > 0)
       ) {
         const inner = insetRect(parent.abs, borderReach(parent));
+        // a clip with round corners cut again is no box's shape
+        if (cut.radius > 0 && cut.clip && !containsRect(inner, cut.clip)) {
+          return false;
+        }
         cut.clip = cut.clip ? intersectRects(cut.clip, inner) : inner;
         bounds = cut.clip && intersectRects(bounds, cut.clip);
         if (!bounds) return false;
