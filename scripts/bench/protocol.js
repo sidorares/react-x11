@@ -1200,6 +1200,75 @@ const SCENARIOS = [
     })(),
   ],
   [
+    // Tab down a form in a scroll pane (issue #813): a field, then three
+    // rows of text, twelve times. The first three Tabs land on fields
+    // already in view and the last three scroll the pane to the next one.
+    // Focus asks the pane to show its node, and that request used to claim
+    // the whole viewport before the pass knew whether anything would move —
+    // which, the pane filling the window, made all six full-window frames:
+    // the first three for two focus rings, the last three with no blit.
+    //
+    // Baselined with the fix live, like the scroll scenarios above: a
+    // change that went back to claiming the viewport for a request lands
+    // here (before the fix: 268 requests, 0.97 Mpx).
+    'focus: 6 Tabs down a form in a scroll pane',
+    (() => {
+      let ctl;
+      let fields;
+      const form = () =>
+        React.createElement(
+          'window',
+          { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+          React.createElement(
+            'box',
+            { style: { flexGrow: 1, overflow: 'scroll' } },
+            Array.from({ length: 12 }, (_, i) => [
+              React.createElement('box', {
+                key: `field${i}`,
+                focusable: true,
+                style: {
+                  height: 24,
+                  flexShrink: 0,
+                  margin: 4,
+                  backgroundColor: '#ffffff',
+                  borderWidth: 1,
+                  borderColor: '#8a96a8',
+                  borderRadius: 4,
+                },
+              }),
+              ...Array.from({ length: 3 }, (_, r) =>
+                React.createElement(
+                  'box',
+                  { key: `row${i}.${r}`, style: { flexShrink: 0, padding: 4 } },
+                  React.createElement(
+                    'text',
+                    { style: { fontSize: 11 } },
+                    `note ${i}.${r}: the quick brown fox`,
+                  ),
+                ),
+              ),
+            ]).flat(),
+          ),
+        );
+      return {
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, form());
+          const pane = ctl.root.children[0];
+          fields = pane.children.filter((n) => n.props.focusable);
+          ctl.root.events.focus(fields[0], 'key');
+          ctl.frame();
+        },
+        run: async (app) => {
+          for (let i = 1; i <= 6; i++) {
+            ctl.root.events.focus(fields[i], 'key');
+            ctl.frame();
+            await new Promise((resolve) => app.X.GetInputFocus(resolve));
+          }
+        },
+      };
+    })(),
+  ],
+  [
     // The frame the <svg> rasterization cache (issue #149) exists for: every
     // icon is inside the damage rect and not one of them changed. Damage
     // culling already skips unchanged subtrees *outside* the damage, so this

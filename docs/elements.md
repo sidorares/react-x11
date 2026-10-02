@@ -1247,7 +1247,12 @@ node fully visible — for one larger than the viewport, CSSOM View's
 `block: nearest`: left where it covers the viewport, and otherwise brought
 in by the edge that moves it least — and is safe to call from an effect right after that
 node mounts: the request is resolved on the next layout pass, when the
-node actually has geometry.
+node actually has geometry. Asking repaints nothing by itself. A request
+that finds the node in view already leaves the pane as it was, so focus
+moving between the fields of a form in a pane costs what it costs outside
+one: the two focus rings. One that does move the pane is a scroll like any
+other: where the backend can copy pixels, what stays on screen is copied
+and only the strip the move uncovers is repainted.
 
 `scrollTo` answers inside the call, from the extent the last layout pass
 measured: the offset moves and `onScroll` fires before it returns. When a
