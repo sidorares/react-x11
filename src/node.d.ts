@@ -284,6 +284,11 @@ export interface Sprite {
   rect: Rect;
   /** What it draws, untransformed, when that is more than `rect`. */
   reach?: Rect;
+  /** Where it shows, when the element clips it: device pixels, window
+   * coordinates. Its layer is cut to the rect, and so it is to the clip of
+   * every ancestor with square corners (a rounded one has to hold all of
+   * it). */
+  clip?: Rect;
   /** Draws the part where it is in the window, as `paint` would, but at
    * opacity 1 and untransformed. */
   paint(ctx: Context2D): void;

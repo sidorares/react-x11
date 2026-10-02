@@ -406,31 +406,127 @@ test('an element that fades, or one inside a fade, keeps its parts: a layer woul
   }
 });
 
-test('a clipping ancestor has to hold everywhere the part can be, its transform animation included', async (t) => {
-  const slide = (dx) => ({
-    id: 'slide',
-    property: 'transform',
-    values: [
-      [1, 0, 0, 1, 0, 0],
-      [1, 0, 0, 1, dx, 0],
-    ],
-    duration: 400,
-  });
-  // 100×60 logical: 200×120 device pixels, and the part reaches to x 120
-  const clip = (child) => box(at(0, 0, 100, 60, { overflow: 'hidden' }), child);
+const slide = (dx) => ({
+  id: 'slide',
+  property: 'transform',
+  values: [
+    [1, 0, 0, 1, 0, 0],
+    [1, 0, 0, 1, dx, 0],
+  ],
+  duration: 400,
+});
+
+test("a clipping ancestor with square corners cuts the part's layer to its padding box; a rounded one has to hold everywhere the part can be", async (t) => {
+  // 100×60 logical at (10, 5): 200×120 device pixels at (20, 10), and the
+  // part's slide takes it out past the right edge
+  const clip = (more, child) =>
+    box(at(10, 5, 100, 60, { overflow: 'hidden', ...more }), child);
   {
-    const { m, node } = await shown(t, clip(stage()), [
-      part('a', A, { animations: [slide(20)] }),
+    const { m, node } = await shown(t, clip({}, stage()), [
+      part('a', A, { animations: [slide(120)] }),
     ]);
-    assert.ok(stateOf(m, node, 'a'), 'inside the clip all the way');
+    const state = stateOf(m, node, 'a');
+    assert.ok(state, 'lifted, cut to the clip');
+    assert.deepEqual(state.clip, { x: 20, y: 10, width: 200, height: 120 });
+    assert.equal(state.layer.parent, state.box, 'in a box');
+    assert.equal(state.box.parent, rootLayer(m), 'the box among the layers');
+    assert.deepEqual(state.box.props.frame, [10, 5, 100, 60]);
+    assert.equal(state.box.props.masksToBounds, true);
+    assert.equal(typeof state.box.props.zPosition, 'number');
+    // placed from the clip's corner: its centre, (80, 60), less (20, 10)
+    assert.deepEqual(state.layer.props.position, [30, 25]);
+    assert.equal(state.layer.props.zPosition, 0);
+    // what shows of where it can be is what is claimed and asked about
+    assert.ok(
+      state.extent.x + state.extent.width <= 220,
+      JSON.stringify(state.extent),
+    );
     await cleanupCocoa();
   }
   {
-    const { m, node } = await shown(t, clip(stage()), [
+    // a border is drawn over what the box holds: the clip is inside it
+    const { m, node } = await shown(
+      t,
+      clip({ borderWidth: 2, borderColor: '#000000' }, stage()),
+      [part('a', A, { animations: [slide(120)] })],
+    );
+    assert.deepEqual(stateOf(m, node, 'a')?.clip, {
+      x: 24,
+      y: 14,
+      width: 192,
+      height: 112,
+    });
+    await cleanupCocoa();
+  }
+  {
+    const { m, node } = await shown(t, clip({ borderRadius: 8 }, stage()), [
+      part('a', A, { animations: [slide(20)] }),
+    ]);
+    const state = stateOf(m, node, 'a');
+    assert.ok(state, 'clear of the corners all the way');
+    assert.equal(state.box, null, 'and not cut');
+    await cleanupCocoa();
+  }
+  {
+    const { m, node } = await shown(t, clip({ borderRadius: 8 }, stage()), [
       part('a', A, { animations: [slide(120)] }),
     ]);
-    assert.ok(stateOf(m, node, 'a') === undefined, 'out past it at the end');
+    assert.ok(stateOf(m, node, 'a') === undefined, 'out past the rounded one');
   }
+});
+
+test("a part's own clip cuts its layer, and what is painted over it outside the clip keeps nothing from it", async (t) => {
+  // a box after the stage over the part's right half, x 100 to 140 device
+  const over = box(at(50, 20, 20, 20, { backgroundColor: '#00ff00' }));
+  const left = { x: 0, y: 0, width: 100, height: 240 };
+  const { m, node } = await shown(
+    t,
+    [stage(), h('box', { key: 'over', style: over.props.style })],
+    [part('a', A, { clip: left })],
+  );
+  const state = stateOf(m, node, 'a');
+  assert.ok(state, 'what shows of it is clear');
+  assert.deepEqual(state.clip, left);
+  assert.deepEqual(state.box.props.frame, [0, 0, 50, 120]);
+  assert.ok(state.extent.x + state.extent.width <= 100);
+  // cut wider, the box over it is in what shows: the element draws it
+  reoffer(node, [part('a', A, { clip: { ...left, width: 120 } })]);
+  m.frame();
+  assert.ok(stateOf(m, node, 'a') === undefined, 'under the box');
+});
+
+test('a clip that comes or goes lifts the part again, in a box or out of one; one that moves moves the box; one that leaves nothing showing keeps the part with its element', async (t) => {
+  const cut = { x: 0, y: 0, width: 100, height: 240 };
+  const { m, node } = await shown(t, stage(), [part('a', A)]);
+  const plain = stateOf(m, node, 'a');
+  assert.equal(plain.box, null);
+  assert.equal(plain.layer.parent, rootLayer(m));
+  reoffer(node, [part('a', A, { clip: cut })]);
+  m.frame();
+  const boxed = stateOf(m, node, 'a');
+  assert.notEqual(boxed, plain, 'lifted again');
+  assert.equal(plain.layer.parent, null, 'the old layer went');
+  assert.equal(boxed.box.parent, rootLayer(m));
+  assert.deepEqual(node.liftedCalls.at(-1), ['a'], 'still lifted all along');
+  // the clip moves: the box goes with it, the part stays where it was
+  reoffer(node, [part('a', A, { clip: { ...cut, x: 20 } })]);
+  m.frame();
+  assert.equal(stateOf(m, node, 'a'), boxed, 'the same layer');
+  assert.deepEqual(boxed.box.props.frame, [10, 0, 50, 120]);
+  assert.deepEqual(boxed.layer.props.position, [30, 30]);
+  // out of its box again
+  reoffer(node, [part('a', A)]);
+  m.frame();
+  const again = stateOf(m, node, 'a');
+  assert.equal(again.box, null);
+  assert.equal(boxed.box.parent, null, 'the box went with its layer');
+  // a clip clear of the part: nothing of it shows, and it is not lifted
+  reoffer(node, [
+    part('a', A, { clip: { x: 300, y: 0, width: 50, height: 50 } }),
+  ]);
+  m.frame();
+  assert.ok(stateOf(m, node, 'a') === undefined, 'nothing shows');
+  assert.deepEqual(node.liftedCalls.at(-1), [], 'drawn by its element');
 });
 
 test('a part the element stops offering, and an element that goes, take their layers with them', async (t) => {

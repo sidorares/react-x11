@@ -1722,10 +1722,10 @@ spriteAnimationEnded(key, id, finished) {
 | `spriteAnimationEnded(key, id, finished)` | the render server is done with one: it ran out, or its layer went           |
 | `spritesChanged()`                        | ask for that frame when the parts changed and nothing the element draws did |
 
-A part is its `key`, its `rect` (and a `reach`, if it draws past it), a
-`paint` that draws it **where it is in the window, at opacity 1 and
-untransformed** — the layer carries both — and a `version` whose change
-paints it again. Its `opacity` and its `transform`, CSS's `matrix(a, b, c,
+A part is its `key`, its `rect` (and a `reach`, if it draws past it, and a
+`clip`, if you cut it to one), a `paint` that draws it **where it is in the
+window, at opacity 1 and untransformed** — the layer carries both — and a
+`version` whose change paints it again. Its `opacity` and its `transform`, CSS's `matrix(a, b, c,
 d, e, f)` as an array with `e` and `f` in device pixels, about an `origin`
 that defaults to the rect's centre, are what the layer shows at rest. Its
 `animations` are keyframes for one of those two properties each: `values`,
@@ -1741,10 +1741,13 @@ The rules the presenter decides by, every frame, are promotion's, asked of
 the element at **everywhere the part can be** — its reach through every
 transform it is animated through:
 
-- **Nothing painted after the element reaches into it** — no later sibling,
-  no ancestor's border, ring or scrollbar — and every clipping ancestor
-  holds all of it, because a layer is above the window's whole bitmap and
-  clipped by nothing.
+- **Nothing painted after the element reaches into what shows of it** — no
+  later sibling, no ancestor's border, ring or scrollbar. What shows is
+  what is inside its `clip` and inside every clipping ancestor with square
+  corners: the layer goes in a box that masks it to them, so a carousel's
+  slide under `overflow: hidden`, or a part scrolled half out of its pane,
+  is cut there as the bitmap is. A rounded ancestor has to hold all of it,
+  since one box cannot take its corners.
 - **Neither the element nor any ancestor fades**: their group on the bitmap
   would leave the layer out of it.
 - **Your inside is yours.** Offer only a part that nothing you draw after it

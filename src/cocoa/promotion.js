@@ -591,8 +591,16 @@ export class CocoaPromotion {
    * node's reach, the parent's clip, if it has one, must hold the whole of
    * it, and the parent must not fade: its group is drawn on the bitmap or on
    * its own layer, and either way a layer of the node's would be outside it.
+   *
+   * With `cut`, the reach is an element's part (src/cocoa/sprites.js),
+   * whose layer can be cut to a rectangle: a clipping ancestor with square
+   * corners narrows `cut.clip` to its padding box — its border is drawn
+   * over what it holds anyway — instead of having to hold the part whole,
+   * and every test from there up is asked of what shows through the clip.
+   * `cut.bounds` comes back as that. A clip that leaves nothing showing is
+   * a refusal.
    */
-  _clear(node, bounds = node._subtreeBounds()) {
+  _clear(node, bounds = node._subtreeBounds(), cut = null) {
     // the exact reach, not `paintBounds()`: that one carries the damage
     // model's pixel of slop, and a section laid out flush under a card
     // would read as reaching into it. An element's part is asked about at
@@ -600,6 +608,17 @@ export class CocoaPromotion {
     for (let n = node; !n.isWindow; n = n.parent) {
       const parent = n.parent;
       if (!parent) return false;
+      if (
+        cut &&
+        !parent.isWindow &&
+        parent.clipsChildren?.() &&
+        !(parent.style?.borderRadius > 0)
+      ) {
+        const inner = insetRect(parent.abs, borderReach(parent));
+        cut.clip = cut.clip ? intersectRects(cut.clip, inner) : inner;
+        bounds = cut.clip && intersectRects(bounds, cut.clip);
+        if (!bounds) return false;
+      }
       const order = parent.paintOrder();
       for (let j = order.indexOf(n) + 1; j < order.length; j++) {
         if (this._reaches(order[j], bounds)) return false;
@@ -636,6 +655,7 @@ export class CocoaPromotion {
         }
       }
     }
+    if (cut) cut.bounds = bounds;
     return true;
   }
 
