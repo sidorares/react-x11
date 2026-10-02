@@ -10,7 +10,10 @@
 import React from 'react';
 import { createRoot } from '../Reconciler.js';
 import { setAnimationClock } from '../nodes/animation.js';
-import { setAppearanceForTests } from '../appearance.js';
+import {
+  pinnedAppearanceForTests,
+  setAppearanceForTests,
+} from '../appearance.js';
 
 // A test process must not register with the desktop's live AT-SPI registry —
 // a suite on a developer desktop would otherwise parade hundreds of phantom
@@ -140,9 +143,25 @@ export async function renderX11(element, options = {}) {
     wrap = element?.type !== 'window',
     title = 'react-x11 test',
     colorScheme = 'light',
+    appearance = null,
     a11y = false,
     ...rootOptions
   } = options;
+
+  // Checked before anything is created, so a mistake costs no server
+  const pin = appearancePin(colorScheme, appearance);
+  if (setBeforeMount) {
+    const values = setBeforeMount;
+    setBeforeMount = null;
+    throw new Error(
+      'react-x11/test: setAppearance() was called before renderX11(), which ' +
+        'pins the appearance as it mounts — the values it set would be ' +
+        'replaced without a word. Pass them to the render instead:\n\n' +
+        `  await renderX11(<App />, { appearance: ${JSON.stringify(values)} });\n\n` +
+        'setAppearance() is for changing them once the tree is mounted. ' +
+        'See docs/testing.md#the-desktops-appearance.',
+    );
+  }
 
   let server = null;
   let app = options.app ?? null;
@@ -161,14 +180,9 @@ export async function renderX11(element, options = {}) {
   // on a light desktop, red on a dark one, with nothing in the test saying
   // so. After the app exists, so it wins over `createMockApp`'s own pin.
   // `colorScheme: 'dark'` renders the other palette; `'system'` releases the
-  // pin, for a test that is *about* what the desktop reports.
-  setAppearanceForTests(
-    colorScheme === 'system'
-      ? null
-      : colorScheme === 'dark'
-        ? { colorScheme: 'dark' }
-        : {},
-  );
+  // pin, for a test that is *about* what the desktop reports; `appearance`
+  // pins the rest of what `useSystemAppearance()` reports.
+  setAppearanceForTests(pin);
 
   const root = await createRoot({ app, ...rootOptions });
 
@@ -374,6 +388,131 @@ export async function cleanup() {
   // change, every mounted root repaints on one, and a repaint scheduled onto
   // a connection that is about to close lands after it has.
   setAppearanceForTests(null);
+  setBeforeMount = null;
+}
+
+// --- the desktop's appearance ----------------------------------------------
+
+/**
+ * What a test may pin, and what each value may be — the fields
+ * `useSystemAppearance()` reports, less `source`, which reads `'test'` for as
+ * long as anything is pinned.
+ *
+ * Checked rather than passed through, because the store takes anything: a
+ * `reduceMotion: true` would pin nothing, render the component the way it
+ * always does, and pass a test that was meant to prove the opposite.
+ */
+const APPEARANCE = {
+  colorScheme: [
+    (v) => v === 'light' || v === 'dark' || v === 'no-preference',
+    "'light', 'dark' or 'no-preference'",
+  ],
+  accent: [colourOrNull, "a CSS colour such as '#ed5b00', or null"],
+  accentText: [colourOrNull, "a CSS colour such as '#ffffff', or null"],
+  selection: [colourOrNull, "a CSS colour such as '#c96003', or null"],
+  palette: [
+    (v) => v === null || (typeof v === 'object' && !Array.isArray(v)),
+    'an object of palette tokens, or null',
+  ],
+  contrast: [(v) => v === 'normal' || v === 'high', "'normal' or 'high'"],
+  reducedMotion: [(v) => typeof v === 'boolean', 'true or false'],
+};
+
+function colourOrNull(value) {
+  return value === null || (typeof value === 'string' && value !== '');
+}
+
+function checkAppearance(values, where) {
+  if (!values || typeof values !== 'object' || Array.isArray(values)) {
+    throw new TypeError(
+      `react-x11/test: ${where} takes an object of appearance values, such ` +
+        `as { reducedMotion: true } — got ${String(values)}.`,
+    );
+  }
+  for (const [key, value] of Object.entries(values)) {
+    if (key === 'source') {
+      throw new TypeError(
+        `react-x11/test: ${where} cannot set \`source\` — a pinned ` +
+          "appearance reports 'test', which is how a component can tell " +
+          'one from a desktop that answered.',
+      );
+    }
+    const rule = APPEARANCE[key];
+    if (!rule) {
+      throw new TypeError(
+        `react-x11/test: ${where} has no appearance value \`${key}\`. ` +
+          `The values are ${Object.keys(APPEARANCE).join(', ')} — the ` +
+          'fields useSystemAppearance() reports.',
+      );
+    }
+    if (!rule[0](value)) {
+      throw new TypeError(
+        `react-x11/test: ${where}: \`${key}\` is ${rule[1]}, not ` +
+          `${JSON.stringify(value) ?? String(value)}.`,
+      );
+    }
+  }
+  return values;
+}
+
+/** `renderX11`'s two appearance options → the pin, or null to release. */
+function appearancePin(colorScheme, appearance) {
+  if (colorScheme === 'system') {
+    if (appearance) {
+      throw new TypeError(
+        "react-x11/test: renderX11 was given colorScheme: 'system', which " +
+          'follows the real desktop, and `appearance`, which pins it. Pass ' +
+          'one: pin `colorScheme` inside `appearance`, or drop `appearance` ' +
+          'to follow the desktop.',
+      );
+    }
+    return null;
+  }
+  if (colorScheme !== 'light' && colorScheme !== 'dark') {
+    throw new TypeError(
+      "react-x11/test: renderX11's colorScheme is 'light' (the default), " +
+        `'dark' or 'system', not ${JSON.stringify(colorScheme)}.`,
+    );
+  }
+  return {
+    // Light is pinned as "the desktop said nothing", which resolves to the
+    // light palette and is what the mock app pins too
+    ...(colorScheme === 'dark' ? { colorScheme: 'dark' } : {}),
+    ...(appearance ? checkAppearance(appearance, 'renderX11 appearance') : {}),
+  };
+}
+
+/** Values set with nothing mounted, which the next `renderX11` would lose. */
+let setBeforeMount = null;
+
+/**
+ * Change the pinned appearance under a mounted tree, and flush what it
+ * changed — the re-render of everything reading `useSystemAppearance()`, the
+ * palette's repaint, and the frame — the way `userEvent` flushes an input.
+ *
+ * Merged over what is pinned: `setAppearance({ reducedMotion: true })` under
+ * a `colorScheme: 'dark'` render stays dark. Where nothing is pinned
+ * (`colorScheme: 'system'`), it pins these values over the defaults rather
+ * than over this machine's answer, so the result is the test's alone.
+ *
+ * ```js
+ * await renderX11(<Spinner />, { appearance: { reducedMotion: true } });
+ * await setAppearance({ reducedMotion: false });
+ * ```
+ *
+ * The appearance is the desktop's, so it is one for the process: every
+ * mounted root sees the change, as every window would. `cleanup()` releases
+ * it, and a pinned value is never written to the cache the next run of a
+ * real app reads.
+ */
+export async function setAppearance(values) {
+  checkAppearance(values, 'setAppearance()');
+  // `source` comes along and does not matter: the pin overwrites it
+  const next = { ...pinnedAppearanceForTests(), ...values };
+  if (mounted.size === 0) setBeforeMount = { ...setBeforeMount, ...values };
+  await act(() => {
+    setAppearanceForTests(next);
+  });
 }
 
 // --- the animation clock ---------------------------------------------------

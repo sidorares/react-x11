@@ -28,7 +28,7 @@ something that is not a widget, or a design decision that is not a palette.
 | `palette`       | the desktop's whole palette as tokens, on macOS — or **null**                                  |
 | `contrast`      | `'normal'` or `'high'`                                                                         |
 | `reducedMotion` | `true` when the user asked for less animation                                                  |
-| `source`        | which rung answered — `'portal'`, `'xsettings'`, `'macos'`, `'cache'`, or null                 |
+| `source`        | which rung answered — `'portal'`, `'xsettings'`, `'macos'`, `'windows'`, `'cache'`, or null    |
 
 Two of these are easy to get wrong.
 
@@ -273,6 +273,18 @@ await renderX11(<App />, { fonts: FONTS, colorScheme: 'system' }); // the real o
 
 `createMockApp()` pins the same way. `'system'` is for a test that is _about_
 what the desktop reports.
+
+The other values pin too, from the first render or under a mounted tree —
+which is how a component that follows `reducedMotion`, `contrast` or the
+accent is tested, change included. A pinned appearance reports
+`source: 'test'`.
+
+```js
+await renderX11(<App />, { appearance: { reducedMotion: true } });
+await setAppearance({ reducedMotion: false }); // re-renders, repaints
+```
+
+See [testing](testing.md#the-desktops-appearance) for the rules.
 
 ## Reduced motion
 

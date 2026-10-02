@@ -21,6 +21,7 @@ import {
   toRgb,
   toPNG,
   withFrameClock,
+  setAppearance,
   createMockApp,
   windowNodesOf,
   textOf,
@@ -31,6 +32,8 @@ import {
   ownerChainOf,
   sourceOf,
 } from '../../src/testing/index.js';
+import type { PinnedAppearance } from '../../src/testing/index.js';
+import { useSystemAppearance } from '../../src/index.js';
 import {
   XK_RETURN,
   XK_ESCAPE,
@@ -147,6 +150,18 @@ async function suite() {
   if (server) server.injectPointerMove(1, 1);
   void ntkWindow?.id;
 
+  // the desktop's appearance, pinned from the first render and changed live
+  await renderX11(<box />, {
+    colorScheme: 'dark',
+    appearance: { reducedMotion: true, contrast: 'high', accent: '#f7821b' },
+  });
+  await renderX11(<box />, { colorScheme: 'system' });
+  await setAppearance({ reducedMotion: false, accent: null, palette: null });
+  const pin: PinnedAppearance = { colorScheme: 'no-preference' };
+  await setAppearance(pin);
+  // what a component reads back under a pin
+  const _pinned: boolean = useSystemAppearance().source === 'test';
+
   await act(() => {});
   await waitFor(() => getByRole('button'));
   await rerender(<box />);
@@ -159,5 +174,11 @@ async function suite() {
 const _badBackend = renderX11(<box />, { backend: 'popup' });
 // @ts-expect-error — a keysym is a number, not a character
 const _badKey = fireEvent.key('a');
+// @ts-expect-error — a typo pins nothing, so it does not compile either
+const _badPin = setAppearance({ reduceMotion: true });
+// @ts-expect-error — `source` reads 'test' under a pin; it is not settable
+const _badSource = setAppearance({ source: 'portal' });
+// @ts-expect-error — contrast is 'normal' or 'high'
+const _badContrast = renderX11(<box />, { appearance: { contrast: 'more' } });
 
 export default suite;

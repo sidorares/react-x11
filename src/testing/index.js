@@ -30,6 +30,7 @@ import { setDefaultTarget } from './events.js';
 export {
   act,
   cleanup,
+  setAppearance,
   settle,
   waitFor,
   withFrameClock,

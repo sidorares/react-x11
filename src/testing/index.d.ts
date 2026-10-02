@@ -5,6 +5,7 @@
 
 import type { ReactNode } from 'react';
 import type { DrawnNode, NtkApp, NtkWindow } from '../types/nodes.js';
+import type { SystemAppearance } from '../types/appearance.js';
 import type { ModifierName } from '../keysyms.js';
 
 export * from '../keysyms.js';
@@ -28,6 +29,14 @@ export interface TestServer {
 
 /** ntk's 2d context. Pixel helpers take it; `renderX11` hands it back. */
 export type TestContext2D = unknown;
+
+/**
+ * The desktop's appearance as a test pins it: any of the values
+ * `useSystemAppearance()` reports, except `source`, which reads `'test'` for
+ * as long as anything is pinned. A key outside these throws, so a typo cannot
+ * pin nothing and pass.
+ */
+export type PinnedAppearance = Partial<Omit<SystemAppearance, 'source'>>;
 
 export interface RenderX11Options {
   /** Window size (default 640×480). */
@@ -59,6 +68,21 @@ export interface RenderX11Options {
   title?: string;
   /** Render into a connection you already have. */
   app?: NtkApp;
+  /**
+   * The desktop's colour scheme, **pinned** so a pixel assertion means the
+   * same on every machine. `'light'` (the default) and `'dark'` pick the
+   * built-in palette; `'system'` releases the pin, for a test that is about
+   * what the real desktop reports.
+   */
+  colorScheme?: 'light' | 'dark' | 'system';
+  /**
+   * The rest of the desktop's appearance, pinned from the first render:
+   * reduced motion, contrast, the accent. Merged over `colorScheme`, so
+   * `appearance.colorScheme` wins where both name one; it cannot be combined
+   * with `colorScheme: 'system'`. To change it while mounted, use
+   * `setAppearance()`.
+   */
+  appearance?: PinnedAppearance;
   /**
    * Install the assistive-technology spy before the mount and hand it back
    * as `at`: an in-process log of everything a screen reader would have
@@ -288,8 +312,29 @@ export function renderX11(
  */
 export function act(fn?: () => unknown): Promise<void>;
 
-/** Unmount everything, restore the animation clock, close every server. */
+/**
+ * Unmount everything, restore the animation clock, release the pinned
+ * appearance, close every server.
+ */
 export function cleanup(): Promise<void>;
+
+/**
+ * Change the pinned appearance under a mounted tree and flush what it moved:
+ * every component reading `useSystemAppearance()` re-renders, the palette
+ * repaints, and the frame lands — the way `userEvent` flushes an input.
+ *
+ * Merged over what is pinned, so `setAppearance({ reducedMotion: true })`
+ * under a `colorScheme: 'dark'` render stays dark. The appearance is the
+ * desktop's and so one per process: every mounted root sees the change.
+ * Calling it before `renderX11()` is an error at that render, which pins as
+ * it mounts — pass `appearance` to the render instead.
+ *
+ * ```ts
+ * await renderX11(<Spinner />, { appearance: { reducedMotion: true } });
+ * await setAppearance({ reducedMotion: false });
+ * ```
+ */
+export function setAppearance(values: PinnedAppearance): Promise<void>;
 
 /** Drain in-flight requests on a connection. */
 export function settle(app: NtkApp, roundTrips?: number): Promise<void>;

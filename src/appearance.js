@@ -198,6 +198,16 @@ export function setAppearanceForTests(values) {
   publish(values, 'test');
 }
 
+/**
+ * What is pinned right now, or null where nothing is. `react-x11/test`'s
+ * `setAppearance` merges over it, so changing one value keeps the rest of the
+ * pin — and asks the store rather than keeping a copy, which a direct
+ * `setAppearanceForTests` call would leave stale.
+ */
+export function pinnedAppearanceForTests() {
+  return owner === 'test' ? snapshot : null;
+}
+
 // --------------------------------------------------------------------------
 // The last known answer
 // --------------------------------------------------------------------------

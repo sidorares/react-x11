@@ -55,15 +55,17 @@ what they mean there.
 Mounts the tree and returns a handle **plus the queries bound to it**, so
 `const { getByText } = await renderX11(<App />)` reads the familiar way.
 
-| option            |                                                                        |
-| ----------------- | ---------------------------------------------------------------------- |
-| `width`, `height` | the window (default 640×480)                                           |
-| `screen`          | the display (defaults comfortably larger than the window — see below)  |
-| `backend`         | `'xserver'` (default) or `'mock'`                                      |
-| `fonts`           | `{ family: '/path/to.ttf' }` — **required for text pixels**            |
-| `wrap`            | wrap in a `<window>`; default true unless the element is one           |
-| `app`             | render into a connection you already have                              |
-| `scale`           | pin the display scale — `2` renders as a retina panel would; default 1 |
+| option            |                                                                                  |
+| ----------------- | -------------------------------------------------------------------------------- |
+| `width`, `height` | the window (default 640×480)                                                     |
+| `screen`          | the display (defaults comfortably larger than the window — see below)            |
+| `backend`         | `'xserver'` (default) or `'mock'`                                                |
+| `fonts`           | `{ family: '/path/to.ttf' }` — **required for text pixels**                      |
+| `wrap`            | wrap in a `<window>`; default true unless the element is one                     |
+| `app`             | render into a connection you already have                                        |
+| `scale`           | pin the display scale — `2` renders as a retina panel would; default 1           |
+| `colorScheme`     | `'light'` (default), `'dark'`, or `'system'` to follow the real desktop          |
+| `appearance`      | pin the rest of the desktop's appearance — [see below](#the-desktops-appearance) |
 
 | on the result         |                                                                       |
 | --------------------- | --------------------------------------------------------------------- |
@@ -346,6 +348,72 @@ clock.restore();
 Install it **before** the render. Every timestamp in the tree has to come
 from the same clock: mixing a real start time with a frozen `now` gives a
 transition that never progresses, which is a confusing way to spend an hour.
+
+## The desktop's appearance
+
+The built-in palette follows the desktop, so `renderX11` **pins** it: an
+unpinned suite renders in whatever colours the machine running it is in, and
+a pixel assertion passes on a light desktop and fails on a dark one with
+nothing in the test to say why. The pin is light unless the render says
+otherwise, and it covers everything `useSystemAppearance()` reports — so a
+component that follows reduced motion, contrast or the accent is tested the
+way one that follows the scheme is:
+
+```jsx
+await renderX11(<App />); // light
+await renderX11(<App />, { colorScheme: 'dark' });
+await renderX11(<Spinner />, { appearance: { reducedMotion: true } });
+await renderX11(<App />, { colorScheme: 'system' }); // the real desktop
+```
+
+`appearance` pins from the **first** render, which matters wherever the first
+render decides something: a loop that never starts is a different path from
+one that starts and is stopped. To change a value under a mounted tree — the
+case a component that follows the desktop has to get right — use
+`setAppearance`:
+
+```jsx
+import { renderX11, setAppearance, screen } from 'react-x11/test';
+
+await renderX11(<Spinner />, {
+  colorScheme: 'dark',
+  appearance: { reducedMotion: true },
+});
+screen.getByText('paused');
+await setAppearance({ reducedMotion: false });
+screen.getByText('spinning'); // re-rendered and repainted, and still dark
+```
+
+It merges over the pin, so naming one value keeps the rest, and it flushes the
+way `userEvent` does: the re-render, the palette's repaint and the frame are
+done when it resolves. The appearance is the desktop's, so there is one per
+process — every mounted root sees the change, as every window would.
+
+`reducedMotion` is the appearance's answer, and it is not the one core's own
+motion follows: `ProgressBar` and the style loops read
+`useDesktopSettings().animations`, a separate setting from a separate source
+([system.md](system.md)) that the two can disagree on. The in-process server
+has no settings daemon, so it stays at its default — on — whatever is pinned
+here.
+
+Three mistakes throw rather than pass quietly:
+
+- **A key outside `useSystemAppearance()`'s fields.** `reduceMotion: true`
+  would otherwise pin nothing and render the component the way it always
+  does. `source` is not settable either: under a pin it reads `'test'`.
+- **`colorScheme: 'system'` with `appearance`.** The first follows the real
+  desktop and the second pins it; name `colorScheme` inside `appearance`
+  instead.
+- **`setAppearance` before `renderX11`.** The render pins as it mounts and
+  would replace what was set, so it throws and says to pass `appearance`.
+
+`cleanup()` releases the pin, and only the pin: what a real desktop answered
+is not the harness's to throw away. A pinned value is never written to the
+cache a real app starts its first frame from ([appearance.md](appearance.md)),
+so a suite run on a developer's desktop leaves that desktop's remembered
+answer as it found it — and an answer the desktop sends while a pin is held,
+from a probe a `'system'` test started, is dropped rather than painted into
+the next test.
 
 ## The mock backend
 
