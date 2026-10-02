@@ -22,7 +22,12 @@ async function connect(t) {
   const server = xserver.createServer({ width: 400, height: 300 });
   const [serverEnd, clientEnd] = xserver.createStreamPair();
   server.addClientStream(serverEnd);
-  const app = await createClient({ stream: clientEnd });
+  // No shared glyph cache: the first text a connection draws elects it the
+  // display's glyph directory, which puts a listener on the connection for
+  // good — several round trips later, awaited by nothing. Counted against a
+  // root, it is a leak whenever a loaded runner lands it after the count
+  // was taken.
+  const app = await createClient({ stream: clientEnd, sharedGlyphs: false });
   t.after(() => app.close());
   return app;
 }
@@ -88,10 +93,6 @@ test('roots mounted one after another on one connection leave nothing on it', as
     await root.unmount();
     await tick();
   };
-  // two first, for what a connection takes on once and keeps — ntk's glyph
-  // directory claims the connection's glyph sets on first use
-  await cycle();
-  await cycle();
   const before = app.X.listenerCount('event');
   for (let i = 0; i < 10; i++) await cycle();
   assert.equal(app.X.listenerCount('event'), before);
