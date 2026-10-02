@@ -34,6 +34,11 @@ if (!fs.existsSync(bundle)) {
 // the state it actually ships in.
 const nodeBuffer = globalThis.Buffer;
 delete globalThis.Buffer;
+// And no SharedArrayBuffer: a page has one only when it is cross-origin
+// isolated, which GitHub Pages cannot make it, while node always has one. A
+// module that made one at load (ntk's font prewarm did) passed every gate
+// here and threw before the playground drew anything.
+delete globalThis.SharedArrayBuffer;
 
 const rx = await import(pathToFileURL(bundle));
 

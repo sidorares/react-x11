@@ -25,9 +25,11 @@ if (!fs.existsSync(bundle)) {
   process.exit(1);
 }
 
-// Same reason as check-bundle.mjs: the bundle ships its own Buffer and only
-// installs it when there is no global one, which is the browser's situation.
+// Same reasons as check-bundle.mjs: the bundle ships its own Buffer and only
+// installs it when there is no global one, which is the browser's situation,
+// and the page it runs in is not cross-origin isolated.
 delete globalThis.Buffer;
+delete globalThis.SharedArrayBuffer;
 const RX = await import(pathToFileURL(bundle));
 
 const fontDir = path.join(path.dirname(bundle), 'fonts');
