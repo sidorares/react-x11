@@ -111,6 +111,12 @@ function isSprite(sprite) {
   if (!isRect(sprite.rect) || typeof sprite.paint !== 'function') return false;
   if (sprite.reach !== undefined && !isRect(sprite.reach)) return false;
   if (sprite.clip !== undefined && !isRect(sprite.clip)) return false;
+  if (
+    sprite.clipRadius !== undefined &&
+    !(finite(sprite.clipRadius) && sprite.clipRadius >= 0)
+  ) {
+    return false;
+  }
   if (sprite.opacity !== undefined && !finite(sprite.opacity)) return false;
   if (sprite.transform !== undefined && !isMatrix(sprite.transform)) {
     return false;
@@ -308,7 +314,11 @@ export class SpriteLayers {
         if (raster.width > MAX_SIDE || raster.height > MAX_SIDE) continue;
         // what shows of everywhere it can be: inside its own clip, and the
         // clips of its element's ancestors, which cut its layer (`_clear`)
-        const cut = { clip: sprite.clip ?? null, bounds: null };
+        const cut = {
+          clip: sprite.clip ?? null,
+          radius: sprite.clip ? (sprite.clipRadius ?? 0) : 0,
+          bounds: null,
+        };
         const extent = extentOf(sprite);
         const bounds = cut.clip ? intersectRects(extent, cut.clip) : extent;
         if (!bounds || !this.promotion._clear(host, bounds, cut)) continue;
@@ -324,6 +334,7 @@ export class SpriteLayers {
         if (lifting) state = this._lift(host, sprite.key, cut.clip !== null);
         state.sprite = sprite;
         state.clip = cut.clip;
+        state.radius = cut.radius;
         state.order = [...place, AFTER_CHILDREN, index];
         // the bitmap under where it shows repaints without it, from this
         // frame on; where it went since, it is the element's own claims
@@ -389,6 +400,7 @@ export class SpriteLayers {
       box,
       boxProps: {},
       clip: null, // device pixels, window coordinates
+      radius: 0, // the clip's corners, device pixels
       raster: new RasterState(),
       painted: UNPAINTED,
       rect: null, // the raster's rect, device pixels, window coordinates
@@ -446,14 +458,23 @@ export class SpriteLayers {
     const clip = state.clip;
     if (state.box) {
       const frame = [clip.x / s, clip.y / s, clip.width / s, clip.height / s];
+      // its corners rounded where the clip's are: a circle's arc, as wide
+      // as the box allows
+      const cornerRadius =
+        Math.min(state.radius, clip.width / 2, clip.height / 2) / s;
       const was = state.boxProps;
-      if (!sameMatrix(was.frame, frame) || was.zPosition !== z) {
+      if (
+        !sameMatrix(was.frame, frame) ||
+        was.zPosition !== z ||
+        was.cornerRadius !== cornerRadius
+      ) {
         this.native.setLayerProps(state.box, {
           frame,
           masksToBounds: true,
+          cornerRadius,
           zPosition: z,
         });
-        state.boxProps = { frame, zPosition: z };
+        state.boxProps = { frame, zPosition: z, cornerRadius };
       }
     }
     const ox = state.box ? clip.x : 0;

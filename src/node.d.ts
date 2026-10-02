@@ -289,6 +289,12 @@ export interface Sprite {
    * every ancestor with square corners (a rounded one has to hold all of
    * it). */
   clip?: Rect;
+  /** The radius of `clip`'s corners, in device pixels: a circular arc at
+   * each of the four, as a card with a `borderRadius` cuts what it holds.
+   * 0 when left out. A clipping ancestor with square corners that would
+   * cut the clip again keeps the part with its element, since one box
+   * cannot take both. */
+  clipRadius?: number;
   /** Draws the part where it is in the window, as `paint` would, but at
    * opacity 1 and untransformed. */
   paint(ctx: Context2D): void;
