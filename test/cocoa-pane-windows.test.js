@@ -144,6 +144,18 @@ async function settle(...apps) {
   }
 }
 
+/** Settle until `predicate` holds. The pane's first mount imports its
+ * module from disk, which is I/O no count of turns is sure to outlast on a
+ * slow runner; everything after it is the channel's microtasks. */
+async function until(apps, predicate, what, { tries = 400, delay = 2 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    if (predicate()) return;
+    await settle(...apps);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  assert.fail(`timed out waiting for ${what}`);
+}
+
 function find(node, test) {
   if (test(node)) return node;
   for (const child of node.children ?? []) {
@@ -213,15 +225,27 @@ async function mount(paneProps = {}) {
   const root = await createRoot({ app: host });
   roots.push(root);
   root.render(tree());
-  await settle(host, pane);
   const hostWnd = [...host._windows.values()][0];
-  const frameBox = find(
-    hostWnd._reactX11Node,
-    (n) => n.props?.focusable === true && n.abs?.width === 600,
+  const frameBoxNow = () =>
+    find(
+      hostWnd._reactX11Node,
+      (n) => n.props?.focusable === true && n.abs?.width === 600,
+    );
+  // mounted, laid out in the host, and told so: the first pane-rect is
+  // what lets the pane's windows out (`CocoaApp._postWindow`)
+  await until(
+    [host, pane],
+    () =>
+      Boolean(
+        pane._paneWindow?._reactX11Node &&
+        pane._paneOutbox === null &&
+        frameBoxNow(),
+      ),
+    'the pane to mount and be laid out in the host',
   );
-  assert.ok(frameBox, 'the frame is laid out in the host');
+  await settle(host, pane);
+  const frameBox = frameBoxNow();
   const paneWnd = pane._paneWindow;
-  assert.ok(paneWnd?._reactX11Node, 'the pane is mounted');
   const trigger = () =>
     find(paneWnd._reactX11Node, (n) => n.props?.role === 'combobox');
   /** The host's window for one of the pane's, by what the pane made. */
@@ -232,6 +256,16 @@ async function mount(paneProps = {}) {
     const last = made.at(-1);
     return last ? hostNative.windows.get(last[0]) : null;
   };
+  /** Settle until the host shows a window of `kind` that is still up. */
+  const shows = (kind, what) =>
+    until(
+      [host, pane],
+      () => {
+        const w = hosted(kind);
+        return Boolean(w && w.shown && !w.destroyed && w.id !== hostWnd._key);
+      },
+      what,
+    );
   const open = async () => {
     const t = trigger().abs;
     const s = host.scale;
@@ -241,7 +275,7 @@ async function mount(paneProps = {}) {
       (frameBox.abs.x + t.x + 20) / s,
       (frameBox.abs.y + t.y + t.height / 2) / s,
     );
-    await settle(host, pane);
+    await shows('popup', 'the menu to show');
   };
   return {
     host,
@@ -253,6 +287,7 @@ async function mount(paneProps = {}) {
     frameBox,
     trigger,
     hosted,
+    shows,
     open,
     picks,
     closes,
@@ -409,6 +444,7 @@ test('a popup the pane opens before the host has laid it out waits for it, and i
   // of a screen the pane had not been told its place on. Sent then, the
   // host was not listening yet — the window was announced to nobody.
   const m = await mount({ pinned: true });
+  await m.shows('popup', 'the pinned popup to show');
   const popup = m.hosted('popup');
   assert.ok(popup, 'the host made it');
   const mark = find(
@@ -449,6 +485,7 @@ test('a pane that goes takes its windows with it', async () => {
 test("a dialog a pane opens is a managed window the host makes, centred over the pane, and its close button is the pane's", async () => {
   const m = await mount();
   await m.update({ dialog: true });
+  await m.shows('normal', 'the dialog to show');
   const dialog = m.hosted('normal');
   assert.notStrictEqual(dialog.id, m.hostWnd.windowNumber, 'a second window');
   assert.strictEqual(dialog.options.title, 'Settings');
