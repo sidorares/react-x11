@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.34.0](https://github.com/sidorares/react-x11/compare/v2.33.0...v2.34.0) (2026-10-02)
+
+
+### Features
+
+* **cocoa:** a sprite may be inside another of its element's, parent, its layer lifted in the other's and the other's raster painted without it, so a spinner turning in a card that fades runs in the render server, where it ran on its element's clock and painted the card's layer again at every frame ([#842](https://github.com/sidorares/react-x11/issues/842)) ([a1f89ea](https://github.com/sidorares/react-x11/commit/a1f89eadfe0013e5a9b4c964279d46be9a6164cb))
+
 ## [2.33.0](https://github.com/sidorares/react-x11/compare/v2.32.0...v2.33.0) (2026-10-02)
 
 
