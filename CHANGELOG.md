@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.27.0](https://github.com/sidorares/react-x11/compare/v2.26.3...v2.27.0) (2026-10-02)
+
+
+### Features
+
+* **cocoa:** a surface drawn under an alpha below 1 is drawn from its pixels scaled by it, at a fifth of what CoreGraphics' own alpha cost, and the context says so as fadesSurfacesCheaply ([#812](https://github.com/sidorares/react-x11/issues/812)) ([be174bf](https://github.com/sidorares/react-x11/commit/be174bfbd8f055da433d3bf1642943d2b473d0af))
+
+
+### Bug Fixes
+
+* **deps:** ntk 8.17.8, so the playground loads without SharedArrayBuffer ([#809](https://github.com/sidorares/react-x11/issues/809)) ([855bddd](https://github.com/sidorares/react-x11/commit/855bddd2948db492675c40ac8c6f7973cd4a7196))
+
+
+### Performance Improvements
+
+* **deps:** @windowkit/appkit 0.18.0, whose ctxDrawSurfaceFaded draws a surface under an alpha below 1 at a fifth of what CoreGraphics' own alpha cost ([#814](https://github.com/sidorares/react-x11/issues/814)) ([bb95109](https://github.com/sidorares/react-x11/commit/bb95109d6d91ef89926a21e0d17899396c52f6de))
+
 ## [2.26.3](https://github.com/sidorares/react-x11/compare/v2.26.2...v2.26.3) (2026-09-30)
 
 
