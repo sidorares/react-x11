@@ -29,6 +29,13 @@
 // ask for: on an older one nothing is asked and every part is drawn by its
 // element.
 //
+// A part none of which shows — scrolled out of its pane, or outside its own
+// clip — keeps its layer, cut to show nothing, up to a budget of raster for
+// such parts: its element's clock would otherwise run for it, and it is
+// already where its animation has it the frame a scroll brings it back. A
+// clip with round corners that a square ancestor cuts again is a box of its
+// own inside a box of the square one's.
+//
 // A part may be inside another of its element's (`parent`): a spinner in a
 // card that fades. Its layer is lifted inside the parent's, so it fades,
 // turns and is cut with it, and the parent's raster leaves it out — the
@@ -50,6 +57,11 @@ import { isVideoFrames } from '../videoframes.js';
 // upload for every new version.
 const MAX_SIDE = 8192;
 
+// The raster a window keeps for parts that show nothing — scrolled out of
+// their pane, or outside their own clip — in device pixels: 32 MB. Past it
+// such a part is its element's, which runs it on its own clock.
+const HIDDEN_BUDGET = 8 * 1024 * 1024;
+
 // Sorted after the element's children, which its own drawing comes after
 // (`Node.paint` paints the children first), and before its next sibling.
 const AFTER_CHILDREN = Number.MAX_SAFE_INTEGER;
@@ -60,6 +72,13 @@ const ORIGIN = Object.freeze({ x: 0, y: 0 });
 
 // what a part with no part lifted inside it is handed
 const NO_KIDS = Object.freeze(new Set());
+
+// keyframes already found good, by the property they were found good for
+const CHECKED = new WeakMap();
+
+// where a part can be about its origin, by its one transform animation's
+// keyframes, and what that was worked out for (`extentOf`)
+const EXTENTS = new WeakMap();
 
 // what a part's raster holds before its first paint
 const UNPAINTED = Symbol('unpainted');
@@ -99,8 +118,13 @@ function isAnimation(a) {
   if (!finite(a.duration) || !(a.duration > 0)) return false;
   const values = a.values;
   if (!Array.isArray(values) || values.length < 2) return false;
-  const value = a.property === 'opacity' ? finite : isMatrix;
-  if (!values.every(value)) return false;
+  // an element hands the same keyframes over from frame to frame: they
+  // are read once
+  if (CHECKED.get(values) !== a.property) {
+    const value = a.property === 'opacity' ? finite : isMatrix;
+    if (!values.every(value)) return false;
+    CHECKED.set(values, a.property);
+  }
   if (a.keyTimes !== undefined) {
     const t = a.keyTimes;
     if (!Array.isArray(t) || t.length !== values.length || t[0] !== 0) {
@@ -227,11 +251,38 @@ function unionRect(a, b) {
 function extentOf(sprite) {
   const reach = sprite.reach ?? sprite.rect;
   const origin = originOf(sprite);
-  let box = mapRect(reach, sprite.transform ?? IDENTITY, origin);
+  const m0 = sprite.transform ?? IDENTITY;
+  // About its origin, where it can be is the same for a part that only
+  // moved: kept by its keyframes, which an element hands over from frame
+  // to frame, rather than every keyframe mapped every frame.
+  const rel = {
+    x: reach.x - origin.x,
+    y: reach.y - origin.y,
+    width: reach.width,
+    height: reach.height,
+  };
+  let turns = null;
   for (const a of sprite.animations ?? []) {
     if (a.property !== 'transform') continue;
-    for (const m of a.values) box = unionRect(box, mapRect(reach, m, origin));
+    turns = turns === null ? a.values : undefined;
   }
+  const key = `${rel.x},${rel.y},${rel.width},${rel.height},${m0.join(',')}`;
+  let about = turns ? EXTENTS.get(turns) : null;
+  if (about?.key !== key) {
+    let box = mapRect(rel, m0, ORIGIN);
+    for (const a of sprite.animations ?? []) {
+      if (a.property !== 'transform') continue;
+      for (const m of a.values) box = unionRect(box, mapRect(rel, m, ORIGIN));
+    }
+    about = { key, box };
+    if (turns) EXTENTS.set(turns, about);
+  }
+  const box = {
+    x: about.box.x + origin.x,
+    y: about.box.y + origin.y,
+    width: about.box.width,
+    height: about.box.height,
+  };
   const x = Math.floor(box.x) - RASTER_PAD;
   const y = Math.floor(box.y) - RASTER_PAD;
   return {
@@ -332,6 +383,8 @@ export class SpriteLayers {
       this.hosts.delete(host);
       if (!host.destroyed) changed.add(host);
     }
+    // the raster kept for parts that show nothing, this frame
+    let hidden = 0;
     for (const [host, list] of offers) {
       const was = this.hosts.get(host);
       const now = new Map();
@@ -378,17 +431,31 @@ export class SpriteLayers {
         };
         const extent = extentOf(sprite);
         const bounds = cut.clip ? intersectRects(extent, cut.clip) : extent;
-        if (!bounds) continue;
         if (parent) {
           // the parent was asked about everywhere it can be, and its layer
           // carries this one: nothing more to ask where it stays inside the
           // parent's raster, and its element draws it where it does not
-          if (!rectContains(rasterRectOf(parent.sprite), bounds)) continue;
+          if (bounds && !rectContains(rasterRectOf(parent.sprite), bounds)) {
+            continue;
+          }
           cut.bounds = bounds;
+        } else if (!bounds) {
+          // its own clip shows nothing of it
+          cut.bounds = null;
         } else if (!this.promotion._clear(host, bounds, cut)) {
           continue;
         }
         const shown = cut.bounds;
+        // A part that shows nothing stays on its layer, cut to show nothing,
+        // so that its element's clock is not kept running for it, and is
+        // where it should be the frame a scroll brings it into view — but
+        // for a source, and past the budget of raster kept for such parts.
+        if (!shown) {
+          if (contents !== null) continue;
+          const px = raster.width * raster.height;
+          if (hidden + px > HIDDEN_BUDGET) continue;
+          hidden += px;
+        }
         let state = was?.get(sprite.key);
         // a clip that comes or goes is a layer in a box or out of one: lifted
         // again, rather than a running layer moved between parents — and so
@@ -397,6 +464,7 @@ export class SpriteLayers {
         if (
           state &&
           (Boolean(state.clip) !== Boolean(cut.clip) ||
+            Boolean(state.outer) !== Boolean(cut.outer) ||
             state.contents !== contents ||
             state.parent !== parent)
         ) {
@@ -411,10 +479,12 @@ export class SpriteLayers {
             cut.clip !== null,
             contents,
             parent,
+            Boolean(cut.outer),
           );
         }
         state.sprite = sprite;
         state.clip = cut.clip;
+        state.outer = cut.outer ?? null;
         state.radius = cut.radius;
         state.order = parent ? null : [...place, AFTER_CHILDREN, index];
         state.kids = [];
@@ -423,7 +493,7 @@ export class SpriteLayers {
         // frame on; where it went since, it is the element's own claims
         // that move the hole. A child is under its parent's layer, whose
         // raster leaves it out instead (`sync`).
-        if (lifting && !parent) this.promotion._claim(root, shown);
+        if (lifting && !parent && shown) this.promotion._claim(root, shown);
         state.extent = shown;
         now.set(sprite.key, state);
       }
@@ -473,16 +543,25 @@ export class SpriteLayers {
     return isVideoFrames(contents) && this.videos;
   }
 
-  _lift(host, key, clipped, contents = null, parent = null) {
+  _lift(host, key, clipped, contents = null, parent = null, outered = false) {
     const layer = this.native.createLayer();
     // a part cut to a clip is in a box of the clip's size that masks to it,
     // and the box is what stands among the layers above the bitmap — or
-    // among its parent's children, for a part inside another's layer
+    // among its parent's children, for a part inside another's layer. A
+    // clip with round corners that a square one cuts again is in a box of
+    // its own inside a box of the square one's (`outer`).
     const above = parent ? parent.layer : this.promotion.rootVisual.layer;
     let box = null;
+    let outerBox = null;
     if (clipped) {
       box = this.native.createLayer();
-      this.native.addSublayer(above, box);
+      if (outered) {
+        outerBox = this.native.createLayer();
+        this.native.addSublayer(above, outerBox);
+        this.native.addSublayer(outerBox, box);
+      } else {
+        this.native.addSublayer(above, box);
+      }
       this.native.addSublayer(box, layer);
     } else {
       this.native.addSublayer(above, layer);
@@ -492,6 +571,9 @@ export class SpriteLayers {
       key,
       layer,
       box,
+      outerBox,
+      outerProps: {},
+      outer: null, // the square clips around a rounded one, device pixels
       // the part whose layer this one is in, and the parts in this one's
       parent,
       kids: [],
@@ -528,7 +610,9 @@ export class SpriteLayers {
    *  element drawing it again. */
   _drop(state, root) {
     state.lift?.release();
-    this.native.removeFromSuperlayer(state.box ?? state.layer);
+    this.native.removeFromSuperlayer(
+      state.outerBox ?? state.box ?? state.layer,
+    );
     state.raster.release(this.native);
     for (const run of state.runs.values()) this._ends().delete(run.caId);
     state.runs.clear();
@@ -571,16 +655,40 @@ export class SpriteLayers {
     // where its layer's coordinates start: the window's corner, or the
     // corner of its parent's raster, for a part inside another's layer
     const base = state.parent?.rect ?? ORIGIN;
+    // in a box of the square clips around its own, where a square one cuts
+    // a rounded clip again: placed from the window's corner, at the part's
+    // place among the layers
+    const outer = state.outer;
+    if (state.outerBox) {
+      const frame = [
+        (outer.x - base.x) / s,
+        (outer.y - base.y) / s,
+        outer.width / s,
+        outer.height / s,
+      ];
+      const was = state.outerProps;
+      if (!sameMatrix(was.frame, frame) || was.zPosition !== z) {
+        this.native.setLayerProps(state.outerBox, {
+          frame,
+          masksToBounds: true,
+          zPosition: z,
+        });
+        state.outerProps = { frame, zPosition: z };
+      }
+    }
     // in its box, where it is cut to a clip: placed from the clip's corner,
-    // and the box at the part's place among the layers
+    // and the box at the part's place among the layers, or from the outer
+    // box's corner inside it
     const clip = state.clip;
     if (state.box) {
+      const from = state.outerBox ? outer : base;
       const frame = [
-        (clip.x - base.x) / s,
-        (clip.y - base.y) / s,
+        (clip.x - from.x) / s,
+        (clip.y - from.y) / s,
         clip.width / s,
         clip.height / s,
       ];
+      const boxZ = state.outerBox ? 0 : z;
       // its corners rounded where the clip's are: a circle's arc, as wide
       // as the box allows
       const cornerRadius =
@@ -588,16 +696,16 @@ export class SpriteLayers {
       const was = state.boxProps;
       if (
         !sameMatrix(was.frame, frame) ||
-        was.zPosition !== z ||
+        was.zPosition !== boxZ ||
         was.cornerRadius !== cornerRadius
       ) {
         this.native.setLayerProps(state.box, {
           frame,
           masksToBounds: true,
           cornerRadius,
-          zPosition: z,
+          zPosition: boxZ,
         });
-        state.boxProps = { frame, zPosition: z, cornerRadius };
+        state.boxProps = { frame, zPosition: boxZ, cornerRadius };
       }
     }
     const ox = state.box ? clip.x : base.x;
@@ -749,7 +857,9 @@ export class SpriteLayers {
     for (const lifted of this.hosts.values()) {
       for (const state of lifted.values()) {
         state.lift?.release();
-        this.native.removeFromSuperlayer(state.box ?? state.layer);
+        this.native.removeFromSuperlayer(
+          state.outerBox ?? state.box ?? state.layer,
+        );
         state.raster.release(this.native);
         for (const run of state.runs.values()) this._ends().delete(run.caId);
       }

@@ -530,9 +530,19 @@ test('a clip with round corners rounds the box the part is cut in, as wide as th
       part('a', A, { clip: inside, clipRadius: 12 }),
     ]);
     assert.deepEqual(stateOf(m, node, 'a')?.clip, inside, 'inside the pane');
+    assert.equal(stateOf(m, node, 'a').outerBox, null, 'one box');
+    // cut again by the pane: the rounded box in a box of the pane's
     reoffer(node, [part('a', A, { clip: across, clipRadius: 12 })]);
     m.frame();
-    assert.ok(stateOf(m, node, 'a') === undefined, 'cut again by the pane');
+    const state = stateOf(m, node, 'a');
+    assert.ok(state, 'lifted');
+    assert.ok(state.outerBox.parent === rootLayer(m), 'outer on the root');
+    assert.ok(state.box.parent === state.outerBox, 'box in the outer');
+    assert.ok(state.layer.parent === state.box, 'layer in the box');
+    assert.deepEqual(state.outerBox.props.frame, [10, 5, 100, 60]);
+    assert.equal(state.outerBox.props.masksToBounds, true);
+    assert.deepEqual(state.box.props.frame, [-10, -5, 150, 100]);
+    assert.equal(state.box.props.cornerRadius, 6);
     reoffer(node, [part('a', A, { clip: across })]);
     m.frame();
     assert.deepEqual(
@@ -540,6 +550,7 @@ test('a clip with round corners rounds the box the part is cut in, as wide as th
       { x: 20, y: 10, width: 200, height: 120 },
       'square, cut to the pane',
     );
+    assert.equal(stateOf(m, node, 'a').outerBox, null, 'in one box again');
     await cleanupCocoa();
   }
   {
@@ -556,7 +567,7 @@ test('a clip with round corners rounds the box the part is cut in, as wide as th
   }
 });
 
-test('a clip that comes or goes lifts the part again, in a box or out of one; one that moves moves the box; one that leaves nothing showing keeps the part with its element', async (t) => {
+test('a clip that comes or goes lifts the part again, in a box or out of one; one that moves moves the box; one that leaves nothing showing keeps the part on its layer, cut to show nothing', async (t) => {
   const cut = { x: 0, y: 0, width: 100, height: 240 };
   const { m, node } = await shown(t, stage(), [part('a', A)]);
   const plain = stateOf(m, node, 'a');
@@ -581,13 +592,53 @@ test('a clip that comes or goes lifts the part again, in a box or out of one; on
   const again = stateOf(m, node, 'a');
   assert.equal(again.box, null);
   assert.equal(boxed.box.parent, null, 'the box went with its layer');
-  // a clip clear of the part: nothing of it shows, and it is not lifted
+  // a clip clear of the part: nothing of it shows, and its layer stays,
+  // in a box of the clip that shows none of it — no clock of its
+  // element's to run for something nobody can see
   reoffer(node, [
     part('a', A, { clip: { x: 300, y: 0, width: 50, height: 50 } }),
   ]);
   m.frame();
-  assert.ok(stateOf(m, node, 'a') === undefined, 'nothing shows');
-  assert.deepEqual(node.liftedCalls.at(-1), [], 'drawn by its element');
+  const hidden = stateOf(m, node, 'a');
+  assert.ok(hidden, 'kept');
+  assert.deepEqual(hidden.box.props.frame, [150, 0, 25, 25]);
+  assert.deepEqual(node.liftedCalls.at(-1), ['a']);
+});
+
+test('a part a scroll takes out of its pane stays on its layer, cut by the pane to show nothing, and shows again as it comes back; past a budget of raster for such parts, its element draws it', async (t) => {
+  // a pane of 200×120 device pixels at (20, 10) that clips the stage
+  const pane = (child) =>
+    box(at(10, 5, 100, 60, { overflow: 'hidden' }), child);
+  const { m, node } = await shown(t, pane(stage()), [
+    part('a', A, { animations: [fade] }),
+  ]);
+  const state = stateOf(m, node, 'a');
+  assert.ok(state, 'lifted, in the pane');
+  // the element scrolled: the part is below the pane now
+  const below = { ...A, y: 300 };
+  reoffer(node, [part('a', below, { animations: [fade] })]);
+  m.frame();
+  assert.ok(stateOf(m, node, 'a') === state, 'the same layer, kept');
+  assert.equal(state.extent, null, 'showing nothing');
+  assert.deepEqual(node.liftedCalls.at(-1), ['a'], 'still lifted');
+  reoffer(node, [part('a', A, { animations: [fade] })]);
+  m.frame();
+  assert.ok(stateOf(m, node, 'a') === state, 'shown again on it');
+  assert.ok(state.extent, 'showing');
+  // one with a clip of its own, scrolled out with it: the pane cuts the
+  // clip to nothing, and the box shows nothing rather than no box at all
+  const own = { x: 40, y: 290, width: 80, height: 60 };
+  reoffer(node, [part('a', below, { animations: [fade], clip: own })]);
+  m.frame();
+  const cut = stateOf(m, node, 'a');
+  assert.ok(cut, 'kept');
+  assert.ok(cut.layer.parent === cut.box, 'in its box');
+  assert.deepEqual(cut.box.props.frame.slice(2), [0, 0], 'of no size');
+  await cleanupCocoa();
+  // a raster bigger than the budget, showing nothing: its element's
+  const big = { x: 40, y: 400, width: 3000, height: 3000 };
+  const out = await shown(t, pane(stage()), [part('b', big)]);
+  assert.ok(stateOf(out.m, out.node, 'b') === undefined, 'past the budget');
 });
 
 test("a part inside another of its element's goes in the parent's layer, placed from the corner of its raster, and the parent's paint is handed it and painted again whenever the parts inside it change", async (t) => {

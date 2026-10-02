@@ -79,6 +79,11 @@ const rectsOverlap = (a, b) =>
   a.y < b.y + b.height &&
   b.y < a.y + a.height;
 
+// `a` cut to `b`: their overlap, or a clip of no size where they have none,
+// which hides what it holds rather than holding it whole
+const cutTo = (a, b) =>
+  intersectRects(a, b) ?? { x: b.x, y: b.y, width: 0, height: 0 };
+
 const containsRect = (outer, inner) =>
   inner.x >= outer.x &&
   inner.y >= outer.y &&
@@ -615,13 +620,23 @@ export class CocoaPromotion {
         !(parent.style?.borderRadius > 0)
       ) {
         const inner = insetRect(parent.abs, borderReach(parent));
-        // a clip with round corners cut again is no box's shape
-        if (cut.radius > 0 && cut.clip && !containsRect(inner, cut.clip)) {
-          return false;
+        // a clip with round corners cut again is no one box's shape: the
+        // square ones go in a box of their own around it (`outer`)
+        if (cut.radius > 0 && cut.clip) {
+          if (cut.outer || !containsRect(inner, cut.clip)) {
+            cut.outer = cut.outer ? cutTo(cut.outer, inner) : inner;
+          }
+        } else {
+          cut.clip = cut.clip ? cutTo(cut.clip, inner) : inner;
         }
-        cut.clip = cut.clip ? intersectRects(cut.clip, inner) : inner;
-        bounds = cut.clip && intersectRects(bounds, cut.clip);
-        if (!bounds) return false;
+        bounds = intersectRects(bounds, cut.clip);
+        if (bounds && cut.outer) bounds = intersectRects(bounds, cut.outer);
+        // nothing of the part shows: its layer is kept, cut to show nothing,
+        // and there is nothing it could be under or over until it does
+        if (!bounds) {
+          cut.bounds = null;
+          return true;
+        }
       }
       const order = parent.paintOrder();
       for (let j = order.indexOf(n) + 1; j < order.length; j++) {

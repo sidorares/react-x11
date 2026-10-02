@@ -1750,8 +1750,12 @@ transform it is animated through:
   is cut there as the bitmap is. A rounded ancestor has to hold all of it,
   since one box cannot take its corners. A `clip` of your own may have
   round corners — a card with a radius, cutting what it holds — and the
-  box takes them; then an ancestor with square corners that would cut it
-  again keeps the part yours, for the same reason.
+  box takes them; an ancestor with square corners that cuts it again puts
+  that box in a box of its own. A part none of which shows — scrolled out
+  of its pane, or outside its own clip — stays on its layer, cut to show
+  nothing, so that its animation runs where it would and none of yours is
+  spent on it; past a budget of raster for such parts (32 MB a window), it
+  is yours to draw.
 - **Neither the element nor any ancestor fades**: their group on the bitmap
   would leave the layer out of it.
 - **Your inside is yours.** Offer only a part that nothing you draw after it
