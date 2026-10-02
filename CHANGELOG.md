@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.30.0](https://github.com/sidorares/react-x11/compare/v2.29.0...v2.30.0) (2026-10-02)
+
+
+### Features
+
+* **cocoa:** a &lt;Select&gt;'s list is the platform's own menu where the bridge drops one, the chosen option over the trigger and AppKit's tracking, and nativeMenu asks for it under a drawn trigger too, where every select's menu on macOS was a popup drawn to look like an NSMenu ([#829](https://github.com/sidorares/react-x11/issues/829)) ([a0ced20](https://github.com/sidorares/react-x11/commit/a0ced2042d006ee58f2673ff2d332e6205b1e5fe))
+* **cocoa:** a sprite is cut to its clip and to every clipping ancestor's with square corners, its layer in a box that masks to them, so a part under overflow: hidden or scrolled half out of its pane is lifted, where it ran on the JavaScript clock ([#828](https://github.com/sidorares/react-x11/issues/828)) ([ba7c9fa](https://github.com/sidorares/react-x11/commit/ba7c9fa0380fc51d32fca420f4806083ea4a2f5c)), closes [#827](https://github.com/sidorares/react-x11/issues/827)
+
+
+### Bug Fixes
+
+* **cocoa:** a window a &lt;Frame&gt; pane makes besides its own, a menu, a dropdown's sheet, a tooltip or a dialog, is made by the host and shown where the pane placed it, where it was an NSWindow in a process that runs no AppKit and never reached the screen ([#825](https://github.com/sidorares/react-x11/issues/825)) ([be4ecf7](https://github.com/sidorares/react-x11/commit/be4ecf748cf966253eec3a7a712e6a0e47557d68))
+
 ## [2.29.0](https://github.com/sidorares/react-x11/compare/v2.28.0...v2.29.0) (2026-10-02)
 
 

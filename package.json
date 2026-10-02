@@ -1,6 +1,6 @@
 {
   "name": "react-x11",
-  "version": "2.29.0",
+  "version": "2.30.0",
   "description": "react renderer with X11 as a target",
   "main": "./src/index.js",
   "files": [
