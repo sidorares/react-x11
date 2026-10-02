@@ -12,6 +12,7 @@ import {
   interpolate,
   ease,
   isLayoutProp,
+  TEXT_LAYOUT_PROPS,
 } from '../styles.js';
 import { GRID_CONTAINER_PROPS, GRID_ITEM_PROPS } from '../grid.js';
 import { isPlaced } from '../layouts.js';
@@ -19,8 +20,12 @@ import { desktopSettings, watchDesktopSettings } from '../desktopsettings.js';
 import { watchWindowState, windowStateSnapshot } from '../windowstate.js';
 import { shadowExtentOf } from './boxpaint.js';
 import { inThemeWalk } from './cascade.js';
-import { insetRect } from './rects.js';
+import { insetRect, intersectRects, outerPixels } from './rects.js';
 import { shallowEqual } from './util.js';
+
+/** The loopable properties that reach past the node's box without moving
+ *  anything: a ring that grows draws further out than the node did. */
+const REACH_PROPS = new Set(['outlineWidth', 'outlineOffset']);
 
 /** Two values of a grid property that lay out the same: an inline
  *  `gridTemplateAreas` array is a new array every render. */
@@ -443,7 +448,76 @@ export class NodeAnimation {
       return false;
     }
     if (desktopSettings(root.app).animations === false) return false;
-    return !this._hiddenInTree();
+    if (this._hiddenInTree()) return false;
+    // last, since it is the one that measures — and a hidden subtree's
+    // rects are wherever it was when it went
+    this._outOfSight = this._loopsOutOfSight();
+    return !this._outOfSight;
+  }
+
+  /**
+   * Whether nothing this node's loops draw can be seen: all of it is cut
+   * away by the boxes that clip it, or lies outside the window — a spinner
+   * in a row scrolled out of its list, a bar in a panel scrolled away.
+   * Judged against the arrangement the last layout pass left, and again
+   * after every pass that moved anything (`_recheckLoopSight`).
+   *
+   * Never from where a frame of the loop has the node *now*: a block that
+   * slides across a track is off it at the start of every crossing, and a
+   * loop stopped there would rest there, unseen, for good. What is judged is
+   * what holds every frame (`_loopReach`), and a loop whose frames can move
+   * what is around it is never judged out of sight at all.
+   */
+  _loopsOutOfSight() {
+    const window = this.root?.abs;
+    if (!this._placed || !window) return false;
+    const reach = this._loopReach();
+    if (!reach) return false;
+    let out = reach.rect;
+    for (let n = reach.from.parent; n && out; n = n.parent) {
+      if (n.isWindow) break;
+      if (n.clipsChildren()) out = intersectRects(out, outerPixels(n.abs));
+    }
+    return (
+      !out ||
+      !intersectRects(out, {
+        x: 0,
+        y: 0,
+        width: window.width,
+        height: window.height,
+      })
+    );
+  }
+
+  /**
+   * What every frame of this node's loops stays inside, as `{ rect, from }`
+   * — `from` is the node whose clipping ancestors cut `rect` — or null when
+   * nothing short of the window holds it.
+   *
+   * A loop on a colour, an opacity or a radius moves nothing and grows
+   * nothing, so it draws where the node and what it holds already reach.
+   * One that grows the node's outline, or moves or sizes a node out of the
+   * flow, can put it anywhere in the nearest box that clips it — and nowhere
+   * else, since a node out of the flow sizes nothing around it; with no such
+   * box, anywhere in the window. One that moves or sizes a node in the flow
+   * moves its siblings and can resize every box above it, the clipping ones
+   * among them, so no box holds it.
+   */
+  _loopReach() {
+    let inPlace = true;
+    for (const { prop } of this._loops ?? []) {
+      if (REACH_PROPS.has(prop)) {
+        inPlace = false;
+      } else if (isLayoutProp(prop) || TEXT_LAYOUT_PROPS.has(prop)) {
+        if (this.style?.position !== 'absolute') return null;
+        inPlace = false;
+      }
+    }
+    if (inPlace) return { rect: this.paintBounds(), from: this };
+    for (let n = this.parent; n && !n.isWindow; n = n.parent) {
+      if (n.clipsChildren()) return { rect: outerPixels(n.abs), from: n };
+    }
+    return null;
   }
 
   /** Whether anything between this node and its window has taken it off the
@@ -577,6 +651,22 @@ export class WindowAnimation {
   /** Re-ask every loop in this window whether it may run. */
   _refreshLoops() {
     for (const node of [...this._loopNodes]) node._updateLoops();
+  }
+
+  /**
+   * A pass moved things: a loop it put out of sight stops, and one it
+   * brought back runs again (`_loopsOutOfSight`) — from the top, as every
+   * stop here resumes, since nobody saw where it had got to. Only the loops
+   * whose answer changed are asked again, so a pass that moved nothing of
+   * theirs costs a walk up from each.
+   */
+  _recheckLoopSight() {
+    for (const node of [...this._loopNodes]) {
+      const out = node._loopsOutOfSight();
+      if (out === (node._outOfSight === true)) continue;
+      node._outOfSight = out;
+      node._updateLoops();
+    }
   }
 
   /** A node in this window started a transition. */

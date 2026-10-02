@@ -3,7 +3,8 @@
 //
 // A transition stops because it arrives. A loop never does, so most of what
 // is worth pinning here is the *stopping*: unmapped, minimized, obscured,
-// hidden by a style, unmounted, and a desktop that asked for less motion.
+// hidden by a style, unmounted, a desktop that asked for less motion, and
+// scrolled or clipped out of sight.
 // Each one is a window that would otherwise keep drawing frames nobody can
 // see — a battery going down with nothing on screen to show for it, which
 // no other test would ever notice.
@@ -370,6 +371,119 @@ test('a desktop that asked for less motion never gets a loop', async () => {
       'turning it back on is live, not a restart of the app',
     );
   });
+});
+
+/** A pane 100px tall over a column of rows, `row` the one `at` px down it. */
+const pane = (row, at = 300) =>
+  h(
+    'box',
+    { style: { width: 200, height: 100, overflow: 'scroll' } },
+    h('box', { style: { height: at, flexShrink: 0 } }),
+    row,
+    h('box', { style: { height: 400, flexShrink: 0 } }),
+  );
+
+const PULSE = {
+  height: 40,
+  flexShrink: 0,
+  backgroundColor: '#3b82f6',
+  opacity: 1,
+  animation: { opacity: { to: 0.3, duration: 1000, alternate: true } },
+};
+
+test('a loop stops while its node is scrolled out of its pane, and runs again when it is back', async () => {
+  await withClock(pane(h('box', { style: PULSE })), ({ window, frame }) => {
+    const scroller = window.children[0];
+    const dot = scroller.children[1];
+    window.flush();
+    assert.strictEqual(window._animating.size, 0, '300px down a 100px pane');
+    assert.strictEqual(dot.style.opacity, 1, 'at rest, where it was declared');
+
+    scroller.scrollTo(250);
+    window.flush();
+    assert.strictEqual(window._animating.size, 1, 'scrolled into view');
+    frame(500);
+    assert.strictEqual(dot.style.opacity, 0.65, 'from the top: nobody saw it');
+
+    scroller.scrollTo(0);
+    window.flush();
+    assert.strictEqual(window._animating.size, 0, 'and out again');
+    assert.strictEqual(dot.style.opacity, 1);
+  });
+});
+
+test('a loop stops while a box above it clips it away, and while it is outside the window', async () => {
+  const card = (height, top = 0) =>
+    h(
+      'box',
+      { style: { width: 200, height, overflow: 'hidden', marginTop: top } },
+      h('box', { style: PULSE }),
+    );
+  await withClock(card(0), async ({ window, render }) => {
+    window.flush();
+    assert.strictEqual(window._animating.size, 0, 'a card with no height');
+    await render(card(60));
+    window.flush();
+    assert.strictEqual(window._animating.size, 1, 'opened');
+    await render(card(60, 300));
+    window.flush();
+    assert.strictEqual(window._animating.size, 0, 'below a 200px window');
+  });
+});
+
+test('a block that slides across a track is judged by the track, not by where a crossing has it', async () => {
+  await withClock(
+    pane(
+      h(ProgressBar, {
+        indeterminate: true,
+        style: { width: 200, flexShrink: 0 },
+      }),
+      0,
+    ),
+    ({ window, frame }) => {
+      const scroller = window.children[0];
+      const block = scroller.children[1].children[0];
+      window.flush();
+      assert.ok(block.abs.x + block.abs.width <= 0, 'off the track at 0');
+      assert.strictEqual(window._animating.size, 1, 'and still crossing');
+      frame(1050);
+      window.flush();
+      assert.strictEqual(window._animating.size, 1, 'off its far end too');
+
+      scroller.scrollTo(200);
+      window.flush();
+      assert.strictEqual(window._animating.size, 0, 'the track scrolled away');
+      scroller.scrollTo(0);
+      window.flush();
+      assert.strictEqual(window._animating.size, 1, 'and back');
+    },
+  );
+});
+
+test('a loop that can move what is around it runs wherever it is', async () => {
+  const breathing = {
+    height: 20,
+    flexShrink: 0,
+    animation: { height: { to: 40, duration: 1000, alternate: true } },
+  };
+  await withClock(
+    h(
+      'box',
+      null,
+      pane(h('box', { style: breathing })),
+      // …and a block out of the flow with nothing clipping it, which can
+      // be anywhere in the window by the next crossing
+      h('box', { style: { ...SLIDE, top: 300 } }),
+    ),
+    ({ window }) => {
+      window.flush();
+      assert.strictEqual(
+        window._animating.size,
+        2,
+        'a height in the flow moves its siblings and sizes the pane',
+      );
+    },
+  );
 });
 
 test('a loop declaration says what is wrong with it, at the style', () => {

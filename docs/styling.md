@@ -1390,10 +1390,22 @@ every way of going off the screen is wired to it:
 | anything above the node hides it — `display: 'none'`, `<Suspense>`, `<Activity>`                                           |     |
 | the node unmounts, or the style stops declaring the loop                                                                   |     |
 | the desktop asked for **reduced motion** ([system.md](system.md#usedesktopsettings--how-the-desktop-wants-an-app-to-feel)) |     |
+| all the loop can draw is out of sight — scrolled out of its pane, clipped away by a box above it, off the window           |     |
 
 Each one leaves the frame clock idle, and every one of them runs the loop
 again when it goes away — with its phase reset, since a loop that resumes
 mid-cycle would have been drawing where nobody could see it.
+
+Out of sight is judged after each layout pass, by what **every** frame of
+the loop can reach and never by where the current one has the node: the
+block of `<ProgressBar indeterminate>` starts each crossing off its track,
+and is judged by the track it slides in. A loop on a colour, an opacity or
+a radius reaches what the node and its children cover. One on the outline,
+or one that moves or sizes a node out of the flow (`position: 'absolute'`),
+reaches the nearest box that clips it, or the whole window when nothing
+does. And one that moves or sizes a node in the flow is never out of sight
+at all: each of its frames can move the node's siblings and resize the
+boxes above it, so it runs for as long as its window is up.
 
 Reduced motion is honoured in core, once, for every loop in every
 application: `Gtk/EnableAnimations` off means loops do not start. What core
