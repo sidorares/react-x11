@@ -307,9 +307,14 @@ test('on the Cocoa surface presenter the group composites a surface at the alpha
   mounted.frame();
   const alphas = mounted.native.of('ctxSetGlobalAlpha').map(([, a]) => a);
   assert.ok(alphas.includes(0.4), `composited at 0.4: ${alphas}`);
+  // from a surface of its own, its pixels scaled by the alpha on a bridge
+  // that can, where CoreGraphics' own alpha costs fifteen times the draw
+  // (#810) — which the recording bridge is, answering every verb
+  const faded = mounted.native.of('ctxDrawSurfaceFaded');
+  assert.ok(faded.length > 0, 'from a surface of its own');
   assert.ok(
-    mounted.native.of('ctxDrawSurface').length > 0,
-    'from a surface of its own',
+    faded.some((args) => args[10] === 0.4),
+    `faded at 0.4: ${faded.map((args) => args[10])}`,
   );
 });
 

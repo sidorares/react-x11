@@ -1343,6 +1343,9 @@ async function main() {
   });
   const sctx: Context2D = surface.getContext('2d');
   void sctx;
+  // where a group faded on a surface is the cheap way to fade one
+  const cheap: boolean | undefined = sctx.fadesSurfacesCheaply;
+  void cheap;
   surface.render((c: Context2D) => void c).clear();
   const survived: boolean = surface.copyWithin(
     { x: 0, y: 0, width: surface.width, height: surface.height },

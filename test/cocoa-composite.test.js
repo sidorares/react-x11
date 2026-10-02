@@ -34,7 +34,11 @@ const CANVAS_OPS = [
   'multiply',
 ];
 
-function fakeNative({ verbs = true, vocabulary = new Set(CANVAS_OPS) } = {}) {
+function fakeNative({
+  verbs = true,
+  vocabulary = new Set(CANVAS_OPS),
+  faded = true,
+} = {}) {
   const calls = [];
   let seq = 0;
   const native = {
@@ -71,10 +75,16 @@ function fakeNative({ verbs = true, vocabulary = new Set(CANVAS_OPS) } = {}) {
     native.blitSurface = (src, sx, sy, w, h, dst, dx, dy, clip) =>
       calls.push(['blitSurface', src.id, sx, sy, w, h, dst.id, dx, dy, clip]);
   }
+  if (faded) {
+    // @windowkit/appkit's ctxDrawSurface with the alpha passed again (#810)
+    native.ctxDrawSurfaceFaded = (dst, src, ...rest) =>
+      calls.push(['ctxDrawSurfaceFaded', dst.id, src.id, ...rest]);
+  }
   // Everything else the context syncs is a no-op — but the two verbs this
   // is about are exactly what the context feature-detects, so a bridge
   // without them has to answer undefined rather than a no-op function.
   const absent = new Set(verbs ? [] : ['ctxSetBlendMode', 'blitSurface']);
+  if (!faded) absent.add('ctxDrawSurfaceFaded');
   return new Proxy(native, {
     get: (target, key) =>
       absent.has(key)
@@ -106,7 +116,9 @@ const blit = (native) => {
   const [, sx, sy, w, h, , dx, dy, clip] = calls[0];
   return [sx, sy, w, h, dx, dy, clip];
 };
-const drew = (native) => native.of('ctxDrawSurface').length;
+/** The draws a test saw, either verb: what is not a blit. */
+const drew = (native) =>
+  native.of('ctxDrawSurface').length + native.of('ctxDrawSurfaceFaded').length;
 
 // --- the property -------------------------------------------------------------
 
@@ -279,6 +291,75 @@ describe('what makes it draw instead', () => {
     ctx.drawImage({ _surfaceHandle: dst }, 0, 0);
     assert.equal(native.of('blitSurface').length, 0);
     assert.equal(drew(native), 1);
+  });
+});
+
+// --- under an alpha -------------------------------------------------------------
+
+describe('a surface under an alpha below 1', () => {
+  test('is drawn from its pixels scaled by the alpha, which is passed', () => {
+    const { ctx, native, src } = context();
+    ctx.globalAlpha = 0.6;
+    ctx.drawImage(src, 4, 6);
+    assert.deepEqual(native.of('ctxDrawSurfaceFaded'), [
+      [1, 2, 0, 0, 40, 20, 4, 6, 40, 20, 0.6],
+    ]);
+    assert.equal(native.of('ctxDrawSurface').length, 0);
+  });
+
+  test('at an alpha of 1 is drawn as it always was', () => {
+    const { ctx, native, src } = context();
+    ctx.drawImage(src, 0, 0);
+    assert.equal(native.of('ctxDrawSurface').length, 1);
+    assert.equal(native.of('ctxDrawSurfaceFaded').length, 0);
+  });
+
+  test('and back at 1 after a restore', () => {
+    const { ctx, native, src } = context();
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.restore();
+    ctx.drawImage(src, 0, 0);
+    assert.equal(native.of('ctxDrawSurfaceFaded').length, 0);
+  });
+
+  const asEver = (name, set) =>
+    test(name, () => {
+      const { ctx, native, src } = context();
+      ctx.globalAlpha = 0.6;
+      set(ctx);
+      ctx.drawImage(src, 0, 0);
+      assert.equal(native.of('ctxDrawSurface').length, 1);
+      assert.equal(native.of('ctxDrawSurfaceFaded').length, 0);
+    });
+  // a shadow is drawn from the image and the alpha together
+  asEver('casting a blurred shadow is drawn as it always was', (ctx) => {
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 4;
+  });
+  asEver('casting a shadow at an offset is too', (ctx) => {
+    ctx.shadowColor = '#000';
+    ctx.shadowOffsetX = 3;
+  });
+  test('a shadow in a transparent colour casts nothing, and stops nothing', () => {
+    const { ctx, native, src } = context();
+    ctx.globalAlpha = 0.6;
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetY = 2;
+    ctx.drawImage(src, 0, 0);
+    assert.equal(native.of('ctxDrawSurfaceFaded').length, 1);
+  });
+
+  test('over a bridge without the verb is drawn as it always was', () => {
+    const { ctx, native, src } = context({ faded: false });
+    ctx.globalAlpha = 0.6;
+    ctx.drawImage(src, 0, 0);
+    assert.equal(native.of('ctxDrawSurface').length, 1);
+  });
+
+  test('says whether it is cheap: with the verb, and not without it', () => {
+    assert.equal(context().ctx.fadesSurfacesCheaply, true);
+    assert.equal(context({ faded: false }).ctx.fadesSurfacesCheaply, undefined);
   });
 });
 
@@ -526,5 +607,84 @@ describe(
       assert.deepEqual(at(6, 6), [255, 0, 0, 128]);
       assert.deepEqual(at(0, 0), [43, 138, 62, 255]);
     });
+  },
+);
+
+// --- under an alpha, in pixels ------------------------------------------------
+
+const hasFaded = bridge && typeof bridge.ctxDrawSurfaceFaded === 'function';
+
+describe(
+  'under an alpha, against the real bridge',
+  {
+    skip: hasFaded
+      ? false
+      : bridge
+        ? 'this @windowkit/appkit has no ctxDrawSurfaceFaded'
+        : 'the @windowkit/appkit bridge is not loadable here',
+  },
+  () => {
+    const W = 96;
+    const H = 64;
+
+    /** A source whose pixels differ by where they are, translucent in
+     *  places, so a draw a pixel off, or faded twice, is a difference. */
+    const source = () => {
+      const s = bridge.createSurface(40, 24, 1);
+      for (let y = 0; y < 24; y++) {
+        for (let x = 0; x < 40; x++) {
+          const a = (x * 7 + y * 3) % 5 === 0 ? 0.5 : 1;
+          bridge.ctxSetFillColor(s, x / 40, y / 24, ((x + y) % 8) / 8, a);
+          bridge.ctxFillRect(s, x, y, 1, 1);
+        }
+      }
+      return s;
+    };
+
+    /** `src` drawn at `alpha` into a fresh destination, by the context, over
+     *  the bridge as it is or with the faded verb hidden. Premultiplied. */
+    const drawn = (src, alpha, faded) => {
+      const dst = bridge.createSurface(W, H, 1);
+      const native = faded
+        ? bridge
+        : new Proxy(bridge, {
+            get: (t, k) => (k === 'ctxDrawSurfaceFaded' ? undefined : t[k]),
+          });
+      const ctx = new BackendContext2D(
+        native,
+        () => dst,
+        () => 1,
+      );
+      ctx.fillStyle = 'rgba(43, 138, 62, 0.7)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = alpha;
+      ctx.drawImage({ _surfaceHandle: src }, 11, 7);
+      const px = Buffer.from(bridge.ctxGetImageData(dst, 0, 0, W, H));
+      // straight colour back to premultiplied: a unit at an alpha of 77
+      // reads back as three
+      for (let i = 0; i < px.length; i += 4) {
+        for (let c = 0; c < 3; c++) {
+          px[i + c] = Math.round((px[i + c] * px[i + 3]) / 255);
+        }
+      }
+      return px;
+    };
+
+    for (const alpha of [0.05, 0.6, 0.97]) {
+      test(`at ${alpha}, the colours the draw under the alpha comes to`, () => {
+        const src = source();
+        const fast = drawn(src, alpha, true);
+        const slow = drawn(src, alpha, false);
+        let worst = 0;
+        for (let i = 0; i < fast.length; i++) {
+          worst = Math.max(worst, Math.abs(fast[i] - slow[i]));
+        }
+        assert.ok(worst <= 1, `a channel off by ${worst}`);
+        assert.ok(
+          fast.some((v, i) => v !== drawn(src, 0, false)[i]),
+          'and the source landed',
+        );
+      });
+    }
   },
 );
