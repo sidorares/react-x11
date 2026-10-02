@@ -1534,7 +1534,7 @@ card on an M1 Pro:
 | a transparency layer at alpha .6          | 1.30 |
 | its pixels scaled by .6, then drawn at 1  | 0.25 |
 
-The bridge's `ctxDrawSurfaceFaded` (@windowkit/appkit) is the last row:
+The bridge's `ctxDrawSurfaceFaded` (`@windowkit/appkit` 0.18.0) is the last row:
 `ctxDrawSurface` with the alpha passed again, since CoreGraphics keeps no
 getter for the one `ctxSetGlobalAlpha` set, which scales the source rect's
 premultiplied pixels into a bitmap of their own and draws that at 1. The
