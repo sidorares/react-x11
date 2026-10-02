@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.31.0](https://github.com/sidorares/react-x11/compare/v2.30.0...v2.31.0) (2026-10-02)
+
+
+### Features
+
+* **image:** &lt;image&gt; shows WebP, and under Bun decodes every format with Bun.Image off the JavaScript thread, where a WebP did not decode at all and a 1080p JPEG held the JavaScript thread for ~110ms ([#832](https://github.com/sidorares/react-x11/issues/832)) ([80aed23](https://github.com/sidorares/react-x11/commit/80aed23049c67df4c9fda5f5149b56f7b360edc7))
+
+
+### Bug Fixes
+
+* **layout:** nothing grows in the pass that measures floors, and an empty box stretched there is floored at its own edges, so a &lt;Select&gt; picked to a longer value or narrowed in place shows its caption, where its spacer kept the room the first caption left and the new one was elided ([#830](https://github.com/sidorares/react-x11/issues/830)) ([c39965e](https://github.com/sidorares/react-x11/commit/c39965e2a390e2f548e5f0871e4f576cfd456c57))
+
 ## [2.30.0](https://github.com/sidorares/react-x11/compare/v2.29.0...v2.30.0) (2026-10-02)
 
 
