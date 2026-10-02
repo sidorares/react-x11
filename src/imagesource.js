@@ -6,8 +6,9 @@
 // and the `cacheKey` cache live here, where a test needs no server; the node
 // half in nodes/image.js is only lifecycle — when to resolve, when to claim
 // damage, when to let go.
-import { Image, decodeImage } from 'ntk/image';
+import { Image } from 'ntk/image';
 
+import { decodeImageBytes } from './imagedecode.js';
 import { x11Ntk } from './ntkroot.js';
 
 /**
@@ -42,7 +43,7 @@ export function isPathImageSource(src) {
   );
 }
 
-/** …normalized for ntk's `loadImage`, which wants a string or a real URL. */
+/** …normalized for `readFile`, which wants a string or a real URL. */
 export const toLoadablePath = (src) =>
   typeof src === 'string' || src instanceof URL ? src : new URL(src.href);
 
@@ -139,9 +140,9 @@ const describe = (value) =>
 
 /** Stated once, so every error lists the same set of accepted forms. */
 const SRC_FORMS =
-  'a file path or file URL (PNG/JPEG), encoded PNG/JPEG bytes (Buffer or ' +
-  'Uint8Array), raw RGBA ({ width, height, data }), an ntk Image/Surface, ' +
-  "or a symbol by name ({ symbol: 'speaker.wave.3.fill' })";
+  'a file path or file URL (PNG/JPEG/WebP), encoded PNG/JPEG/WebP bytes ' +
+  '(Buffer or Uint8Array), raw RGBA ({ width, height, data }), an ntk ' +
+  "Image/Surface, or a symbol by name ({ symbol: 'speaker.wave.3.fill' })";
 
 function validateServerSource(kind, desc) {
   const shape =
@@ -198,7 +199,7 @@ function validateRawSource(src) {
       'react-x11: <image src={{ width, height, data }}> wants straight ' +
         '(non-premultiplied) RGBA bytes — data.length must be ' +
         `width × height × 4 = ${want}, got ${bytes ?? describe(data)}. ` +
-        'For encoded PNG/JPEG bytes pass the buffer itself as `src`.',
+        'For encoded PNG/JPEG/WebP bytes pass the buffer itself as `src`.',
     );
   }
 }
@@ -254,14 +255,17 @@ export function validateImageProps(props) {
 }
 
 /**
- * Decode a synchronous source into an ntk `Image`: encoded bytes through the
- * PNG/JPEG decoders, raw RGBA wrapped as-is (no copy — the object is treated
- * as immutable content from here on). File paths stay async and do not come
- * here. May throw on corrupt bytes; the caller treats that as a content
- * failure, because encoded bytes usually arrive from outside the program.
+ * Decode an in-memory source into an ntk `Image`: encoded bytes through the
+ * decoder ladder in imagedecode.js, raw RGBA wrapped as-is (no copy — the
+ * object is treated as immutable content from here on). Returns the `Image`,
+ * or a promise of one where the bytes decode off the JavaScript thread
+ * (under Bun) or their decoder loads on demand (WebP elsewhere). File paths
+ * do not come here. May throw or reject on bytes that do not decode; the
+ * caller treats that as a content failure, because encoded bytes usually
+ * arrive from outside the program.
  */
 export function decodeImageSource(src) {
-  if (src instanceof Uint8Array) return decodeImage(src);
+  if (src instanceof Uint8Array) return decodeImageBytes(src);
   return new Image({ width: src.width, height: src.height, data: src.data });
 }
 
@@ -317,9 +321,10 @@ const sourceCaches = new WeakMap();
 /**
  * Take a hold on the entry for `key`, creating it with `load()` on first
  * use. `load` returns `{ image }` for a synchronous source or `{ promise }`
- * for a file read — the promise resolves an `Image` or, on content failure,
- * `null` (never rejects; the loader reports the failure once, not per
- * holder). Every acquire is paired with a `releaseImageSource`.
+ * for a file read or a decode that lands later — the promise resolves an
+ * `Image` or, on content failure, `null` (never rejects; the loader reports
+ * the failure once, not per holder). Every acquire is paired with a
+ * `releaseImageSource`.
  */
 export function acquireImageSource(app, key, load) {
   let cache = sourceCaches.get(app);

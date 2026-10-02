@@ -206,6 +206,12 @@ await esbuild.build({
     keysym: path.join(shimsDir, 'keysym.js'),
     // heavy optional ntk dep no demo needs
     pngjs: path.join(stubsDir, 'pngjs.js'),
+    // react-x11's WebP decoder for runtimes without one, imported on the
+    // first WebP (src/imagedecode.js): as heavy, and as unused here
+    'image-in-browser/lib/src/formats/webp-decoder.js': path.join(
+      stubsDir,
+      'webp-decoder.js',
+    ),
     // The D-Bus transport: node-only, dynamically imported by src/bus.js, and
     // six node builtins deep. The stub throws on import, which is the same
     // answer a Node 20 install gives — see the file for why that is the right

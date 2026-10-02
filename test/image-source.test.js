@@ -1,6 +1,8 @@
 // <image> sources beyond a file path (issue #367): in-memory pixels in three
 // forms, `cacheKey` as the caller-controlled identity behind them, and the
-// two server-side sources that composite without an upload.
+// two server-side sources that composite without an upload. Bytes that
+// decode a moment later — any format under Bun, WebP elsewhere — are driven
+// through a stand-in Bun whose decode lands when the test says so.
 //
 // The unit half runs against the mock app — classification, validation, the
 // refcounted cache, ownership on unmount. The pixel half runs against the
@@ -28,12 +30,22 @@ import {
   cleanup,
   createMockApp,
   expectPixel,
+  waitFor,
+  waitForPixel,
 } from '../src/testing/index.js';
+import {
+  LOSSY,
+  encodePng,
+  realBun,
+  removeStandInBun,
+  standInBun,
+} from './fixtures/images.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 afterEach(cleanup);
+afterEach(removeStandInBun);
 
 /** Raw straight-RGBA source: `pixels` is rows of [r, g, b] triples. */
 function raw(pixels) {
@@ -212,6 +224,108 @@ test('encoded PNG bytes decode without a temp file', async () => {
   assert.equal(node.image?.width, 2);
   assert.equal(node.image?.height, 2);
 });
+
+/** A stand-in Bun whose decode lands when `open()` is called, as `pixels`. */
+function gatedBun(pixels) {
+  let open;
+  const gate = new Promise((resolve) => (open = resolve));
+  const seen = standInBun(() =>
+    gate.then(() => encodePng(raw(pixels), { stored: true })),
+  );
+  return { seen, open };
+}
+
+test(
+  'bytes decoded off the JavaScript thread take no room until they land, then reflow',
+  {
+    skip: realBun,
+  },
+  async () => {
+    const { open } = gatedBun([[RED, GREEN, BLUE]]);
+    const { node } = await mounted(
+      h('image', { src: png([[RED]]), style: { alignSelf: 'flex-start' } }),
+    );
+    assert.equal(node.image, null, 'still decoding');
+    assert.deepStrictEqual([node.abs.width, node.abs.height], [0, 0]);
+    open();
+    await waitFor(() =>
+      assert.deepStrictEqual([node.abs.width, node.abs.height], [3, 1]),
+    );
+    assert.equal(node._ownedImage, node.image, 'owned, so freed on unmount');
+  },
+);
+
+test(
+  'a decode that lands after its source changed is dropped',
+  {
+    skip: realBun,
+  },
+  async () => {
+    const { open } = gatedBun([[RED, GREEN, BLUE]]);
+    const app = createMockApp();
+    const root = await createRoot({ app });
+    const render = (src) =>
+      root.render(
+        h('window', { width: 200, height: 200 }, h('image', { src })),
+      );
+    render(png([[RED]]));
+    await tick();
+    const node = app.windows[0]._reactX11Node.children[0];
+    const replacement = raw([[WHITE]]);
+    render(replacement);
+    await tick();
+    assert.equal(node.image?.width, 1, 'the new source, synchronously');
+    open();
+    await tick();
+    await tick();
+    assert.equal(node.image?.width, 1, 'the stale decode was not adopted');
+    root.render(null);
+    await tick();
+  },
+);
+
+test(
+  'a node gone before its decode lands never takes the image',
+  {
+    skip: realBun,
+  },
+  async () => {
+    const { open } = gatedBun([[RED]]);
+    const { root, node } = await mounted(h('image', { src: png([[RED]]) }));
+    root.render(null);
+    await tick();
+    open();
+    await tick();
+    await tick();
+    assert.equal(node.image, null);
+    assert.equal(node._ownedImage, null);
+  },
+);
+
+test(
+  'two <image>s with one cacheKey share one decode that lands later',
+  {
+    skip: realBun,
+  },
+  async () => {
+    const { seen, open } = gatedBun([[BLUE, BLUE]]);
+    const app = createMockApp();
+    const root = await createRoot({ app });
+    root.render(
+      h(
+        'window',
+        { width: 200, height: 200 },
+        h('image', { key: 'a', src: png([[BLUE]]), cacheKey: 'later' }),
+        h('image', { key: 'b', src: png([[BLUE]]), cacheKey: 'later' }),
+      ),
+    );
+    await tick();
+    const [a, b] = app.windows[0]._reactX11Node.children;
+    open();
+    await waitFor(() => assert.ok(a.image && a.image === b.image));
+    assert.equal(seen.inputs.length, 1, 'decoded once for both');
+  },
+);
 
 test('an ntk Image passed as src is used as-is and never destroyed', async () => {
   const image = new ntk.Image(raw([[RED]]));
@@ -440,6 +554,19 @@ test('encoded PNG bytes render, and a cacheKey survives a source rebuild', async
   );
   assert.equal(node.image, first, 'rebuilt bytes, same key: no re-decode');
   await expectPixel(ctx, 10, 10, GREEN, { tolerance: 4 });
+});
+
+test('WebP bytes render', async () => {
+  // 16x16 quadrants: red, green / blue, white
+  const { ctx, windowNode } = await renderX11(
+    h('image', { src: LOSSY, style: { alignSelf: 'flex-start' } }),
+  );
+  await waitForPixel(ctx, 3, 3, RED, { tolerance: 8 });
+  await expectPixel(ctx, 12, 3, GREEN, { tolerance: 8 });
+  await expectPixel(ctx, 3, 12, BLUE, { tolerance: 8 });
+  await expectPixel(ctx, 12, 12, WHITE, { tolerance: 8 });
+  const node = windowNode.children[0];
+  assert.deepStrictEqual([node.abs.width, node.abs.height], [16, 16]);
 });
 
 test('one ntk Image in two <image>s is one server upload', async () => {

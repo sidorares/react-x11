@@ -16,11 +16,7 @@ import {
   toLoadablePath,
   validateImageProps,
 } from '../imagesource.js';
-// Namespace import for `Surface`, the same shape and the same reason as
-// `paintcache.js`: a named import of something an older ntk does not export
-// is a *load-time* SyntaxError, which would take the renderer down rather
-// than the one feature that needs it.
-import { loadImage } from 'ntk/image';
+import { loadImageFile } from '../imagedecode.js';
 import { symbolWeight, symbolsFor, warnOnce } from '../symbols.js';
 import { intrinsicSize } from './layout.js';
 import { Node } from './node.js';
@@ -31,6 +27,18 @@ import { DEV } from './util.js';
  * `cacheKey` and a `{ id, … }` descriptor rebuilt with the same numbers are
  * both "nothing changed". */
 const IMAGE_SOURCE_PROPS = new Set(['src', 'picture', 'drawable', 'cacheKey']);
+
+const BYTES_FAILED = 'react-x11: <image src> bytes did not decode:';
+
+/** A load that never rejects: a failure is logged and resolves null. */
+const reported = (promise, prefix) =>
+  promise.then(
+    (image) => image,
+    (err) => {
+      console.error(prefix, err.message);
+      return null;
+    },
+  );
 
 export class ImageNode extends Node {
   constructor(props, app) {
@@ -133,7 +141,7 @@ export class ImageNode extends Node {
     }
     if (cacheKey != null) {
       const entry = acquireImageSource(this.app, cacheKey, () =>
-        this._loadEntry(src),
+        this._load(src),
       );
       this._hold = entry;
       if (entry.image) {
@@ -148,63 +156,54 @@ export class ImageNode extends Node {
       }
       return;
     }
-    if (isPathImageSource(src)) {
-      this._loadFile(src);
-      return;
-    }
-    const image = this._decode(src);
+    const { image, promise } = this._load(src);
     if (image) {
       this._ownedImage = image;
       this.image = image;
+    } else if (promise) {
+      this._adopt(promise);
     }
   }
 
-  /** `{ image }` or `{ promise }` for the cache. Failures resolve to null
-   * and are reported once, here — not per node holding the key. */
-  _loadEntry(src) {
+  /**
+   * `{ image }` for a source decoded on the spot, `{ promise }` for a file
+   * read or a decode that lands later — off the JavaScript thread under
+   * Bun, or behind a decoder loaded on demand. The promise resolves an
+   * Image, or null on a content failure, which is reported once, here: not
+   * per node holding the key.
+   */
+  _load(src) {
     if (isPathImageSource(src)) {
       return {
-        promise: loadImage(toLoadablePath(src)).then(
-          (image) => image,
-          (err) => {
-            console.error(
-              `react-x11: failed to load image ${src}:`,
-              err.message,
-            );
-            return null;
-          },
+        promise: reported(
+          loadImageFile(toLoadablePath(src)),
+          `react-x11: failed to load image ${src}:`,
         ),
       };
     }
-    return { image: this._decode(src) };
-  }
-
-  _decode(src) {
+    let decoded;
     try {
-      return decodeImageSource(src);
+      decoded = decodeImageSource(src);
     } catch (err) {
       // corrupt or unrecognized bytes are a content failure, not a
       // programming error: log and show nothing, like a missing file
-      console.error(
-        'react-x11: <image src> bytes did not decode:',
-        err.message,
-      );
-      return null;
+      console.error(BYTES_FAILED, err.message);
+      return { image: null };
     }
+    return typeof decoded?.then === 'function'
+      ? { promise: reported(decoded, BYTES_FAILED) }
+      : { image: decoded };
   }
 
-  async _loadFile(src) {
+  /** Take an Image that lands after the frame that asked for it — unless
+   * the source changed or the node went first, in which case it was never
+   * painted, so nothing was uploaded and there is nothing to free. */
+  async _adopt(promise) {
     const token = ++this._loadToken;
-    try {
-      const image = await loadImage(toLoadablePath(src));
-      if (token !== this._loadToken || this.destroyed) return;
-      this._ownedImage = image;
-      this._setImage(image);
-    } catch (err) {
-      if (token === this._loadToken && !this.destroyed) {
-        console.error(`react-x11: failed to load image ${src}:`, err.message);
-      }
-    }
+    const image = await promise;
+    if (!image || token !== this._loadToken || this.destroyed) return;
+    this._ownedImage = image;
+    this._setImage(image);
   }
 
   /** Adopt pixels that arrived after the frame that asked for them. A size
@@ -238,7 +237,7 @@ export class ImageNode extends Node {
   }
 
   _releaseSource() {
-    this._loadToken++; // orphan any in-flight file read
+    this._loadToken++; // orphan any in-flight read or decode
     if (this._hold) {
       releaseImageSource(this.app, this._hold);
       this._hold = null;
