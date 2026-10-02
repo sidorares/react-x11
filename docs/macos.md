@@ -1855,12 +1855,12 @@ MacBook's built-in panel, a monitor carrying its own EDID profile — the
 window was more saturated than its CSS colours, and a promoted node changed
 colour on its way onto its layer and again on its way back: `#3b82f6` read
 (59, 130, 246) in the bitmap and (78, 128, 238) on its layer on the
-built-in panel. `@windowkit/appkit` 0.19.0, the range this package asks
-for, names every IOSurface it makes sRGB, and `setLayerContentsIOSurface`
-names one that names nothing, which covers a `<glarea>`'s x11-dri frames
-too (windowkit/appkit#98, #99). On it the bitmap, a promoted layer, a
-`<Frame>` pane and a `<glarea>` read the same numbers on all three displays
-measured. Three consequences:
+built-in panel. `@windowkit/appkit` 0.19.0 and every release after it,
+which this package asks for, name every IOSurface they make sRGB, and
+`setLayerContentsIOSurface` names one that names nothing, which covers a
+`<glarea>`'s x11-dri frames too (windowkit/appkit#98, #99). On it the
+bitmap, a promoted layer, a `<Frame>` pane and a `<glarea>` read the same
+numbers on all three displays measured. Three consequences:
 
 - **Every window on such a display is colour-managed now**, as Safari and
   Chrome manage a page, and looks less saturated than it did before 0.19.0:
