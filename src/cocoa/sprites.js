@@ -25,6 +25,7 @@
 // element.
 
 import { RASTER_PAD, RasterState } from './presenter.js';
+import { intersectRects } from '../nodes/rects.js';
 import { DEV } from '../nodes/util.js';
 
 // Past this many device pixels on a side a part is drawn by its element: a
@@ -109,6 +110,7 @@ function isSprite(sprite) {
   if (sprite == null || typeof sprite.key !== 'string') return false;
   if (!isRect(sprite.rect) || typeof sprite.paint !== 'function') return false;
   if (sprite.reach !== undefined && !isRect(sprite.reach)) return false;
+  if (sprite.clip !== undefined && !isRect(sprite.clip)) return false;
   if (sprite.opacity !== undefined && !finite(sprite.opacity)) return false;
   if (sprite.transform !== undefined && !isMatrix(sprite.transform)) {
     return false;
@@ -304,18 +306,30 @@ export class SpriteLayers {
         if (now.has(sprite.key)) continue;
         const raster = rasterRectOf(sprite);
         if (raster.width > MAX_SIDE || raster.height > MAX_SIDE) continue;
+        // what shows of everywhere it can be: inside its own clip, and the
+        // clips of its element's ancestors, which cut its layer (`_clear`)
+        const cut = { clip: sprite.clip ?? null, bounds: null };
         const extent = extentOf(sprite);
-        if (!this.promotion._clear(host, extent)) continue;
+        const bounds = cut.clip ? intersectRects(extent, cut.clip) : extent;
+        if (!bounds || !this.promotion._clear(host, bounds, cut)) continue;
+        const shown = cut.bounds;
         let state = was?.get(sprite.key);
+        // a clip that comes or goes is a layer in a box or out of one: lifted
+        // again, rather than a running layer moved between parents
+        if (state && Boolean(state.clip) !== Boolean(cut.clip)) {
+          this._drop(state, root);
+          state = null;
+        }
         const lifting = !state;
-        if (lifting) state = this._lift(host, sprite.key);
+        if (lifting) state = this._lift(host, sprite.key, cut.clip !== null);
         state.sprite = sprite;
+        state.clip = cut.clip;
         state.order = [...place, AFTER_CHILDREN, index];
-        // the bitmap under where it can be repaints without it, from this
+        // the bitmap under where it shows repaints without it, from this
         // frame on; where it went since, it is the element's own claims
         // that move the hole
-        if (lifting) this.promotion._claim(root, extent);
-        state.extent = extent;
+        if (lifting) this.promotion._claim(root, shown);
+        state.extent = shown;
         now.set(sprite.key, state);
       }
       if (was) {
@@ -356,13 +370,25 @@ export class SpriteLayers {
     }
   }
 
-  _lift(host, key) {
+  _lift(host, key, clipped) {
     const layer = this.native.createLayer();
-    this.native.addSublayer(this.promotion.rootVisual.layer, layer);
+    // a part cut to a clip is in a box of the clip's size that masks to it,
+    // and the box is what stands among the layers above the bitmap
+    let box = null;
+    if (clipped) {
+      box = this.native.createLayer();
+      this.native.addSublayer(this.promotion.rootVisual.layer, box);
+      this.native.addSublayer(box, layer);
+    } else {
+      this.native.addSublayer(this.promotion.rootVisual.layer, layer);
+    }
     return {
       host,
       key,
       layer,
+      box,
+      boxProps: {},
+      clip: null, // device pixels, window coordinates
       raster: new RasterState(),
       painted: UNPAINTED,
       rect: null, // the raster's rect, device pixels, window coordinates
@@ -383,7 +409,7 @@ export class SpriteLayers {
    *  forgotten, and the bitmap under where it could be repaints with the
    *  element drawing it again. */
   _drop(state, root) {
-    this.native.removeFromSuperlayer(state.layer);
+    this.native.removeFromSuperlayer(state.box ?? state.layer);
     state.raster.release(this.native);
     for (const run of state.runs.values()) this._ends().delete(run.caId);
     state.runs.clear();
@@ -415,14 +441,31 @@ export class SpriteLayers {
     state.rect = rect;
     const origin = originOf(sprite);
     const m = sprite.transform ?? IDENTITY;
+    // in its box, where it is cut to a clip: placed from the clip's corner,
+    // and the box at the part's place among the layers
+    const clip = state.clip;
+    if (state.box) {
+      const frame = [clip.x / s, clip.y / s, clip.width / s, clip.height / s];
+      const was = state.boxProps;
+      if (!sameMatrix(was.frame, frame) || was.zPosition !== z) {
+        this.native.setLayerProps(state.box, {
+          frame,
+          masksToBounds: true,
+          zPosition: z,
+        });
+        state.boxProps = { frame, zPosition: z };
+      }
+    }
+    const ox = state.box ? clip.x : 0;
+    const oy = state.box ? clip.y : 0;
     const next = {
       bounds: [0, 0, rect.width / s, rect.height / s],
       anchorPoint: [
         (origin.x - rect.x) / rect.width,
         (origin.y - rect.y) / rect.height,
       ],
-      position: [origin.x / s, origin.y / s],
-      zPosition: z,
+      position: [(origin.x - ox) / s, (origin.y - oy) / s],
+      zPosition: state.box ? 0 : z,
       opacity: Math.min(1, Math.max(0, sprite.opacity ?? 1)),
       matrix: m,
     };
@@ -552,7 +595,7 @@ export class SpriteLayers {
   destroy() {
     for (const lifted of this.hosts.values()) {
       for (const state of lifted.values()) {
-        this.native.removeFromSuperlayer(state.layer);
+        this.native.removeFromSuperlayer(state.box ?? state.layer);
         state.raster.release(this.native);
         for (const run of state.runs.values()) this._ends().delete(run.caId);
       }
