@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.35.0](https://github.com/sidorares/react-x11/compare/v2.34.0...v2.35.0) (2026-10-02)
+
+
+### Features
+
+* **cocoa:** @windowkit/appkit ^0.22.0, so a &lt;video src&gt; plays with AVFoundation, a VideoFrames sink goes on a layer with no window frame per push, a select drops AppKit's own menu and text on a Retina display is set at its point size, where the range admitted 0.19 alone and none of the four reached a Mac ([#845](https://github.com/sidorares/react-x11/issues/845)) ([5e3e97d](https://github.com/sidorares/react-x11/commit/5e3e97dd186439f765d67826b2b1dd1bc816be16))
+* **cocoa:** a sprite none of which shows stays on its layer, cut to show nothing, and a rounded clip a square ancestor cuts again is a box in a box, so a page of shimmer cards in a pane that scrolls is all on layers, where the cards outside the pane or at its edge kept their element's clock running ([#844](https://github.com/sidorares/react-x11/issues/844)) ([fb507a2](https://github.com/sidorares/react-x11/commit/fb507a2152c6d72d557bb36b2692bfccedb8d50d))
+
 ## [2.34.0](https://github.com/sidorares/react-x11/compare/v2.33.0...v2.34.0) (2026-10-02)
 
 
