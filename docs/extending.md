@@ -1759,7 +1759,12 @@ transform it is animated through:
 - **Neither the element nor any ancestor fades**: their group on the bitmap
   would leave the layer out of it.
 - **Your inside is yours.** Offer only a part that nothing you draw after it
-  overlaps. The presenter cannot see inside your `paint`.
+  overlaps — but for another part you offer after it, since that one's layer
+  stands above: list your parts in the order you paint them, and they stack
+  in it. The presenter cannot see inside your `paint`, so a part it turns
+  down is yours to draw, in the bitmap under every layer, and every part
+  listed before it that it overlaps is turned down with it, in that frame;
+  one it does not reach keeps its layer.
 
 A part can be inside another of yours — a spinner in a card that fades —
 by naming it as its `parent`, earlier in the list. Its layer goes in the
