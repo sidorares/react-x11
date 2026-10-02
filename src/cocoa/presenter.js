@@ -29,7 +29,12 @@ import { cssColorStraight } from 'ntk/color';
 import { Node } from '../nodes/node.js';
 import { addDamageRect, damageToPaint } from '../nodes/damage.js';
 import { intersectRects } from '../nodes/rects.js';
-import { EASING_CONTROL_POINTS, TRANSITION_CONTROL_POINTS } from '../styles.js';
+import { now as animationNow } from '../nodes/animation.js';
+import {
+  EASING_CONTROL_POINTS,
+  TRANSITION_CONTROL_POINTS,
+  resolveBorderWidths,
+} from '../styles.js';
 import { BackendContext2D } from '../backend/context2d.js';
 
 export const RASTER_PAD = 2; // antialiasing/italic overhang outside the ink bounds
@@ -361,6 +366,33 @@ const ANIMATED_KEY_PATHS = Object.freeze({
   opacity: { keyPath: 'opacity' },
 });
 
+/**
+ * An inset of a node out of the flow moves that node and nothing else — no
+ * sibling, not its parent — so a loop on one is its layer's position: an
+ * offset added to where the layout put the node, which is at the inset's
+ * declared value while the render server runs the loop (the style is the
+ * model). Only for a node no pointer lands on (`pointerEvents: 'none'`),
+ * since input is hit against the layout's rect, which holds still: an
+ * indeterminate bar's block, a highlight that sweeps along a track. Which
+ * axis, and which way a larger value moves the layer; `start` and `end` are
+ * mirrored under RTL.
+ */
+const INSET_KEY_PATHS = Object.freeze({
+  left: { keyPath: 'position.x', axis: 'x', sign: 1 },
+  right: { keyPath: 'position.x', axis: 'x', sign: -1 },
+  start: { keyPath: 'position.x', axis: 'x', sign: 1, logical: true },
+  end: { keyPath: 'position.x', axis: 'x', sign: -1, logical: true },
+  top: { keyPath: 'position.y', axis: 'y', sign: 1 },
+  bottom: { keyPath: 'position.y', axis: 'y', sign: -1 },
+});
+
+/** Does a loop on `prop` move its node, where a presenter runs it
+ *  (`INSET_KEY_PATHS`)? */
+export const movesNode = (prop) => Object.hasOwn(INSET_KEY_PATHS, prop);
+
+// a length or a share of the room: `12`, `'-40%'`
+const PERCENT = /^\s*(-?(?:\d+\.?\d*|\.\d+))%\s*$/;
+
 // the ids the bridge reports an animation's end under: unique per process,
 // looked up per app (`_animationEnds`)
 let animationSeq = 0;
@@ -544,12 +576,16 @@ export class LayerAnimations {
    * is in its bitmap, not on its layer.
    */
   take(node, prop, entry) {
-    const map = ANIMATED_KEY_PATHS[prop];
+    const map = ANIMATED_KEY_PATHS[prop] ?? INSET_KEY_PATHS[prop];
     if (!map || !stylePaintsPlain(node, node._targetStyle ?? node.style)) {
       return false;
     }
-    if (this._value(map, entry.from) == null) return false;
-    if (this._value(map, entry.to) == null) return false;
+    if (map.axis) {
+      if (!this._insetOffsets(node, prop, entry)) return false;
+    } else {
+      if (this._value(map, entry.from) == null) return false;
+      if (this._value(map, entry.to) == null) return false;
+    }
     let pending = this.pending.get(node);
     if (!pending) this.pending.set(node, (pending = new Map()));
     pending.set(prop, entry);
@@ -590,6 +626,78 @@ export class LayerAnimations {
       : null;
   }
 
+  /**
+   * A loop on an inset of `node` as its layer's offsets from where the
+   * layout puts it, `[from, to]` in points — or null where it cannot be
+   * one: not a loop, a node in the flow or one a pointer can land on, an
+   * inset with no declared value to rest at, or a value that is neither a
+   * length nor a percentage. A percentage is a share of the parent's
+   * padding box, which is what the layout places a node out of the flow
+   * in, so the offsets change when the parent's size does (`follow`).
+   */
+  _insetOffsets(node, prop, entry) {
+    const map = INSET_KEY_PATHS[prop];
+    const style = node._targetStyle ?? node.style ?? {};
+    if (!entry.loop || style.position !== 'absolute') return null;
+    if (style.pointerEvents !== 'none') return null;
+    const parent = node.parent;
+    if (!parent?.abs) return null;
+    const edges = resolveBorderWidths(parent.style ?? {}, parent.direction);
+    const room =
+      map.axis === 'x'
+        ? parent.abs.width - edges.left - edges.right
+        : parent.abs.height - edges.top - edges.bottom;
+    const length = (value) => {
+      if (typeof value === 'number')
+        return Number.isFinite(value) ? value : null;
+      const share = typeof value === 'string' ? PERCENT.exec(value) : null;
+      return share ? (Number(share[1]) / 100) * room : null;
+    };
+    const rest = length(style[prop]);
+    const from = length(entry.from);
+    const to = length(entry.to);
+    if (rest === null || from === null || to === null) return null;
+    const sign = map.logical && node.direction === 'rtl' ? -map.sign : map.sign;
+    return [
+      (sign * (from - rest)) / this.scale,
+      (sign * (to - rest)) / this.scale,
+    ];
+  }
+
+  /**
+   * The offsets of a loop moving `node` as the layout has them now: one
+   * whose parent changed size runs again where it has got to in its cycle
+   * (`headStart`), and one that cannot run there any more goes back to the
+   * clock. Before `apply`, which attaches what this hands back.
+   */
+  follow(node, layer) {
+    const live = this.live.get(node);
+    if (!live) return;
+    for (const [id, run] of [...live]) {
+      if (!run.offsets) continue;
+      const offsets = this._insetOffsets(node, run.prop, run.entry);
+      if (
+        offsets &&
+        offsets[0] === run.offsets[0] &&
+        offsets[1] === run.offsets[1]
+      ) {
+        continue;
+      }
+      live.delete(id);
+      this._ends().delete(id);
+      this.native.removeAnimation(layer, run.key);
+      if (!offsets) {
+        node._offloadEnded(run.prop, run.entry);
+        continue;
+      }
+      run.entry.headStart = animationNow() - run.entry.start;
+      let pending = this.pending.get(node);
+      if (!pending) this.pending.set(node, (pending = new Map()));
+      pending.set(run.prop, run.entry);
+    }
+    if (live.size === 0) this.live.delete(node);
+  }
+
   /** The frame's half: attach what `take` accepted to `layer`, after the
    *  model value went out, inside the same transaction. */
   apply(node, layer) {
@@ -597,16 +705,32 @@ export class LayerAnimations {
     if (!pending) return;
     this.pending.delete(node);
     for (const [prop, entry] of pending) {
-      const map = ANIMATED_KEY_PATHS[prop];
+      const map = ANIMATED_KEY_PATHS[prop] ?? INSET_KEY_PATHS[prop];
       const id = `rx${++animationSeq}`;
       const key = `${prop}:${id}`;
       const opts = { duration: entry.duration / 1000, id };
+      let offsets = null;
+      if (map.axis) {
+        // an inset: the layer's offset from where the layout put it, added
+        // to its position — as the layout has the parent now, which may not
+        // be what it was at the swap
+        offsets = this._insetOffsets(node, prop, entry);
+        if (!offsets) {
+          node._offloadDeclined(prop, entry);
+          continue;
+        }
+      }
       if (entry.loop) {
         // a loop replaces whatever ran for the property: its declaration
         // changed, and a loop restarts from the top when it does
         this._removeLive(node, prop);
-        opts.from = this._value(map, entry.from);
-        opts.to = this._value(map, entry.to);
+        if (offsets) {
+          [opts.from, opts.to] = offsets;
+          opts.additive = true;
+        } else {
+          opts.from = this._value(map, entry.from);
+          opts.to = this._value(map, entry.to);
+        }
         opts.timing = EASING_CONTROL_POINTS[entry.easing];
         opts.repeat = Infinity;
         opts.autoreverse = entry.alternate;
@@ -645,7 +769,7 @@ export class LayerAnimations {
       // looked up after the removals above, which may have pruned the map
       let live = this.live.get(node);
       if (!live) this.live.set(node, (live = new Map()));
-      live.set(id, { prop, key, entry });
+      live.set(id, { prop, key, entry, offsets });
       this._ends().set(id, (ev) => this._animationEnded(node, id, ev));
     }
   }
@@ -992,7 +1116,9 @@ export class CocoaLayerPresenter {
     visual.set(
       propBoxProps(node, this.window.app, this.scale, parentOrigin, order),
     );
-    // after the model value went out, inside the same transaction
+    // after the model value went out, inside the same transaction: what
+    // moves the node, as the layout has its parent now, then what waits
+    this.animations.follow(node, visual.layer);
     this.animations.apply(node, visual.layer);
   }
 

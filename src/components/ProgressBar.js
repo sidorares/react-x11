@@ -88,6 +88,10 @@ export function ProgressBar({
           start: moving ? `-${BLOCK}` : '30%',
           borderRadius: height / 2,
           backgroundColor: color ?? theme.accent,
+          // Nothing to press: the bar is the track. Said so, a presenter
+          // that runs the slide as the block's position (macOS) may, since
+          // input would otherwise be hit where the layout left the block.
+          pointerEvents: 'none',
           ...(moving && {
             animation: { start: { to: '100%', duration: CROSSING_MS } },
           }),

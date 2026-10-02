@@ -14,6 +14,7 @@ import React from 'react';
 import { CocoaApp } from '../src/cocoa/app.js';
 import { withFrameClock } from '../src/testing/index.js';
 import { interpolate } from '../src/styles.js';
+import { ProgressBar } from '../src/components/index.js';
 import {
   cleanupCocoa,
   fakeCocoaBridge,
@@ -429,18 +430,20 @@ test("an ancestor's border ring is painted after the node: promoted only clear o
   }
 });
 
-test('a clipping ancestor with square corners cuts the layer to its box; one with round corners has to hold the whole of it', async () => {
-  for (const [radius, left, promoted, clip] of [
+test('a clipping ancestor cuts the layer to its box, square corners or round', async () => {
+  for (const [radius, left, clip] of [
     // held whole: on the window root, as it always was
-    [0, 20, true, null],
+    [0, 20, null],
     // half out: in a box of the clip's size, which masks to it
-    [0, 80, true, [10, 10, 100, 60]],
+    [0, 80, [10, 10, 100, 60]],
     // all out: the same box, showing none of it, as an element's part that
     // shows nothing stays on its layer — the render server runs what
     // nobody sees rather than the clock
-    [0, 120, true, [10, 10, 100, 60]],
-    // a curve no box is cut to
-    [8, 80, false, null],
+    [0, 120, [10, 10, 100, 60]],
+    // round corners: the box has them too
+    [8, 80, [10, 10, 100, 60]],
+    // …and holding it clear of its corners is holding it whole
+    [8, 20, null],
   ]) {
     const frame = at(10, 10, 100, 60, {
       overflow: 'hidden',
@@ -455,30 +458,52 @@ test('a clipping ancestor with square corners cuts the layer to its box; one wit
     await m.render(box(frame, box({ ...chip, backgroundColor: '#0000ff' })));
     m.frame();
     const label = `radius ${radius}, left ${left}`;
-    assert.equal(node._promoted, promoted, label);
-    if (promoted) {
-      const layer = layerOf(m, node);
-      if (clip) {
-        const cut = layer.parent;
-        assert.equal(cut.parent, rootLayer(m), `${label}: the box is above`);
-        assert.deepEqual(
-          cut.props.frame,
-          clip,
-          `${label}: the clip, in points`,
-        );
-        assert.equal(cut.props.masksToBounds, true);
-        assert.deepEqual(
-          layer.props.frame,
-          [left, 10, 40, 20],
-          `${label}: placed from the clip's corner`,
-        );
-        assert.equal(layer.props.zPosition, 0, 'the box has its place');
-      } else {
-        assert.equal(layer.parent, rootLayer(m), label);
-      }
+    assert.equal(node._promoted, true, label);
+    const layer = layerOf(m, node);
+    if (clip) {
+      const cut = layer.parent;
+      assert.equal(cut.parent, rootLayer(m), `${label}: the box is above`);
+      assert.deepEqual(cut.props.frame, clip, `${label}: the clip, in points`);
+      assert.equal(cut.props.masksToBounds, true);
+      assert.equal(cut.props.cornerRadius, radius, `${label}: its corners`);
+      assert.deepEqual(
+        layer.props.frame,
+        [left, 10, 40, 20],
+        `${label}: placed from the clip's corner`,
+      );
+      assert.equal(layer.props.zPosition, 0, 'the box has its place');
+    } else {
+      assert.equal(layer.parent, rootLayer(m), label);
     }
     await cleanupCocoa();
   }
+});
+
+test('a round clip a square one cuts again is a box in a box', async () => {
+  // the card runs past the pane's edge, and the chip into the card's
+  // lower right corner
+  const pane = at(0, 0, 130, 60, { overflow: 'hidden' });
+  const card = at(60, 10, 80, 40, { overflow: 'hidden', borderRadius: 10 });
+  const chip = at(50, 20, 40, 20, {
+    backgroundColor: '#ff0000',
+    transition: { backgroundColor: 120 },
+  });
+  const m = await mountCocoa(box(pane, box(card, box(chip))));
+  const node = m.node.children[0].children[0].children[0];
+  await m.render(
+    box(pane, box(card, box({ ...chip, backgroundColor: '#0000ff' }))),
+  );
+  m.frame();
+  assert.equal(node._promoted, true);
+  const layer = layerOf(m, node);
+  const inner = layer.parent;
+  const outer = inner.parent;
+  assert.equal(outer.parent, rootLayer(m));
+  assert.deepEqual(outer.props.frame, [0, 0, 130, 60], 'the square clip');
+  assert.equal(outer.props.masksToBounds, true);
+  assert.deepEqual(inner.props.frame, [60, 10, 80, 40], 'the round one in it');
+  assert.equal(inner.props.cornerRadius, 10);
+  assert.deepEqual(layer.props.frame, [50, 20, 40, 20]);
 });
 
 test('a row under a scrollbar runs in the render server, the thumb drawn over it on a layer of its own above it and out of the bitmap, and back in the bitmap once no layer is under it', async () => {
@@ -578,6 +603,72 @@ test('a loop given back carries on where the render server had it, and is handed
     assert.equal(opts.delay, undefined);
   } finally {
     clock.restore();
+  }
+});
+
+test('an indeterminate bar slides in the render server: its block on a layer cut to the rounded track, the slide an offset from where the layout rests it, and no frames', async () => {
+  const clock = withFrameClock();
+  try {
+    const bar = (width) =>
+      h(ProgressBar, { indeterminate: true, style: { width } });
+    const m = await mountCocoa(bar(200));
+    const track = m.node.children[0];
+    const block = track.children[0];
+    assert.equal(block._promoted, true);
+    assert.equal(m.node._animating.size, 0, 'no frames, and no layout passes');
+    const layer = layerOf(m, block);
+    const cut = layer.parent;
+    assert.deepEqual(cut.props.frame, [0, 0, 200, 8], 'the track');
+    assert.equal(cut.props.cornerRadius, 4, 'with its round ends');
+    assert.deepEqual(
+      layer.props.frame,
+      [-80, 0, 80, 8],
+      'at -40%, where the layout rests it',
+    );
+    const [, keyPath, opts] = m.native.of('addAnimation').at(-1);
+    assert.equal(keyPath, 'position.x');
+    assert.equal(opts.additive, true);
+    assert.deepEqual([opts.from, opts.to], [0, 280], 'across 140% of it');
+    assert.equal(opts.repeat, Infinity);
+    assert.equal(opts.duration, 1.1);
+
+    // a track twice as wide is twice as far, from where the crossing was
+    clock.advance(550);
+    await m.render(bar(400));
+    m.frame();
+    assert.equal(block._promoted, true);
+    const [, , again] = m.native.of('addAnimation').at(-1);
+    assert.deepEqual([again.from, again.to], [0, 560]);
+    assert.equal(again.timeOffset, 0.55);
+    assert.equal(m.native.of('removeAnimation').length, 1, 'the old one went');
+    assert.equal(m.node._animating.size, 0);
+  } finally {
+    clock.restore();
+  }
+});
+
+test('a loop that moves a box a pointer can land on stays on the clock, where input is hit', async () => {
+  const sweep = (pointerEvents) =>
+    box(
+      at(0, 0, 200, 20, { overflow: 'hidden' }),
+      box(
+        at(0, 0, 40, 20, {
+          backgroundColor: '#ff0000',
+          pointerEvents,
+          left: 0,
+          animation: { left: { to: 160, duration: 900, alternate: true } },
+        }),
+      ),
+    );
+  for (const [pointerEvents, promoted] of [
+    [undefined, false],
+    ['none', true],
+  ]) {
+    const m = await mountCocoa(sweep(pointerEvents));
+    const node = m.node.children[0].children[0];
+    assert.equal(node._promoted, promoted, `pointerEvents ${pointerEvents}`);
+    assert.equal(m.node._animating.has(node), !promoted);
+    await cleanupCocoa();
   }
 });
 

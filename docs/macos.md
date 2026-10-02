@@ -1738,7 +1738,17 @@ and nothing else.
 to get wrong: a node is promoted because it has a transition or a loop on
 a property a layer can express — a plain `<box>`'s `backgroundColor`,
 `borderColor`, `borderWidth`, `borderRadius`, `opacity` — for as long as
-it has one and a second after, and returns to the bitmap then. The second is
+it has one and a second after, and returns to the bitmap then. A loop on
+an inset of a box out of the flow is one as well, where no pointer lands
+on the box (`position: 'absolute'`, `pointerEvents: 'none'`): it moves
+that box and nothing else, so it is the layer's position, an offset added
+to where the layout rests the box, and a percentage is a share of the
+parent's padding box, run again where it has got to when the parent's size
+changes (`LayerAnimations.follow`). The pointer is the condition because
+input is hit against the layout's rect, which holds still while the layer
+moves. `<ProgressBar indeterminate>`'s block is one: a bar cost a layout
+pass and a frame at the display's rate, 16% of a core on an M1 Pro at
+75 Hz, and costs nothing now. The second is
 `IDLE_GRACE_MS`: a hover card fades in and, a moment later, out; a palette
 step ends one transition and starts the next; a toast pulses again.
 Demoting on the last frame of each cost a layer and a repaint of the hole
@@ -1760,12 +1770,13 @@ no ancestor's border ring or focus ring (both are painted after the
 children), and no ancestor that fades, because the layer would not fade
 with it: a box inside a faded box stays in the
 group's pixels, on the clock, where a layer on the root was drawn at full
-strength until #817. A clipping ancestor with square corners cuts the
-layer to its box: the layer goes in a box of the clip's size that masks to
-it, the way an element's part is cut (below), so a row half scrolled out
-of its list is promoted, and one none of which shows is kept on a layer
-that shows nothing. One with round corners has to hold the whole of the
-node, since no box is cut to a curve. All of it is answered from
+strength until #817. A clipping ancestor cuts the layer to its box: the
+layer goes in a box of the clip's size that masks to it, the way an
+element's part is cut (below), so a row half scrolled out of its list is
+promoted, and one none of which shows is kept on a layer that shows
+nothing. The innermost clip with round corners that does not hold the node
+gives the box its corners, and a square clip that cuts that one again is a
+box around the box, as for a part. All of it is answered from
 `paintOrder()` and the cached paint reach, and the same test runs again
 every frame, later-painted nodes first, so a node that becomes
 overlapped, hidden, clipped round, faded around or non-plain (a `:hover`
