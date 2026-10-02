@@ -19,6 +19,7 @@ const h = React.createElement;
 export function fakeCocoaBridge({ screens } = {}) {
   const calls = [];
   const released = new Set();
+  const players = new Map();
   const fonts = new Map();
   let seq = 0;
   let backendCb = null;
@@ -141,6 +142,35 @@ export function fakeCocoaBridge({ screens } = {}) {
       surfaces: ['NV12', 'BGRA'],
       frames: ['NV12', 'I420', 'BGRA'],
     }),
+
+    // --- the player (@windowkit/appkit's createPlayer and the rest): an id,
+    // its AVPlayerLayer as a layer, and a frame to copy whenever the test
+    // says one is new (`playerFrame`); its events are the test's to emit -------
+    createPlayer(url, options) {
+      const id = ++seq;
+      const layer = { layer: ++seq, props: {}, sublayers: [], parent: null };
+      players.set(id, { url, options, layer, fresh: false, size: null });
+      return { id, layer };
+    },
+    playerSet() {},
+    playerSeek() {},
+    playerCopyFrame(id, surface) {
+      const p = players.get(id);
+      if (!p?.fresh || !p.size) return null;
+      p.fresh = false;
+      const written =
+        p.size.width === surface.width && p.size.height === surface.height;
+      return { ...p.size, time: 0, written };
+    },
+    releasePlayer(id) {
+      players.delete(id);
+    },
+    /** A new frame of `width` x `height` is showing in player `id`. */
+    playerFrame(id, width, height) {
+      const p = players.get(id);
+      if (p) Object.assign(p, { fresh: true, size: { width, height } });
+    },
+    players,
     scrollSurface: () => true,
 
     // --- native bezels (the shape of cocoa-bezel-cache.test.js's fake) ---------

@@ -18,11 +18,11 @@
 // own `paint`, at opacity 1 and untransformed, and paints again when its
 // `version` changes; its opacity and its transform are the layer's, and so
 // are its animations, keyframes the bridge hands to Core Animation. Or it is
-// a **source**, the part's `contents` — a `<video>`'s frames — which the
-// presenter does not paint at all: the source shows itself on the layer
-// (src/cocoa/video.js), between frames and on its own clock, and the layer
-// is exactly the part's rect. A source this bridge cannot show is a part
-// declined, drawn by its element like any other. A
+// a **source**, the part's `contents` — a `<video>`'s frames, or its player —
+// which the presenter does not paint at all: the source shows itself on the
+// layer (src/cocoa/video.js, src/cocoa/player.js), between frames and on its
+// own clock, and the layer is exactly the part's rect. A source this bridge
+// cannot show is a part declined, drawn by its element like any other. A
 // transform is CSS's matrix, which the bridge takes from
 // `@windowkit/appkit` 0.19 (`transformForms()`) along with the negative
 // delay a part joined half way through needs, so that is the bridge sprites
@@ -30,6 +30,7 @@
 // element.
 
 import { RASTER_PAD, RasterState } from './presenter.js';
+import { CocoaPlayer, PlayerLift } from './player.js';
 import { VideoLift, canLiftVideo } from './video.js';
 import { intersectRects } from '../nodes/rects.js';
 import { DEV } from '../nodes/util.js';
@@ -418,8 +419,10 @@ export class SpriteLayers {
     }
   }
 
-  /** Can this bridge show `contents` on a layer by itself? */
+  /** Can this bridge show `contents` on a layer by itself? A player always
+   *  can: it was made by this bridge, with the layer it plays into. */
   _canShow(contents) {
+    if (contents instanceof CocoaPlayer) return !contents.released;
     return isVideoFrames(contents) && this.videos;
   }
 
@@ -458,7 +461,12 @@ export class SpriteLayers {
       order: null,
       // what shows itself on the layer, for a part with a source
       contents,
-      lift: contents ? new VideoLift(this.native, contents, layer) : null,
+      lift:
+        contents === null
+          ? null
+          : contents instanceof CocoaPlayer
+            ? new PlayerLift(this.native, contents, layer)
+            : new VideoLift(this.native, contents, layer),
     };
   }
 
@@ -558,6 +566,8 @@ export class SpriteLayers {
     }
     if (any) this.native.setLayerProps(state.layer, out);
     state.props = next;
+    // a source that fills the layer with a layer of its own
+    state.lift?.layout?.(next.bounds);
     // after the model went out, in the same transaction
     this._syncAnimations(state, sprite);
   }

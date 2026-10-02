@@ -157,6 +157,25 @@ export interface ScrollableNode extends DrawnNode {
 }
 
 /** `<textinput>` / `<textarea>`. */
+/**
+ * A `<video>`, as its `ref` sees it: HTMLMediaElement's imperative half.
+ * `play`, `pause` and `seek` act on `src`'s player and do nothing for a sink,
+ * which plays what it is pushed.
+ */
+export interface VideoNode extends DrawnNode {
+  /** Play — from the start if the item has ended. */
+  play(): void;
+  pause(): void;
+  /** To `seconds` in, exactly. */
+  seek(seconds: number): void;
+  /** Seconds in; for a sink, its newest frame's `time`, or 0. */
+  readonly currentTime: number;
+  /** Seconds; `Infinity` for a live stream and for a sink, NaN before it is
+   * known. */
+  readonly duration: number;
+  readonly paused: boolean;
+}
+
 export interface TextInputNode extends DrawnNode {
   /**
    * The control's current text. Inside an `onChange` handler this is the

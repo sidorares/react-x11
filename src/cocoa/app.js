@@ -39,6 +39,7 @@ import { CocoaColorSampler } from './screencolor.js';
 import { CocoaFilePanels } from './filepanels.js';
 import { CocoaFontManager } from './fonts.js';
 import { releaseImageUpload } from '../backend/context2d.js';
+import { CocoaPlayer, canPlay } from './player.js';
 import { CocoaSurface } from './surface.js';
 import { CocoaSymbols } from './symbols.js';
 import { CocoaWindow, FRAME_SLACK_MS } from './window.js';
@@ -217,6 +218,16 @@ export class CocoaApp {
     // The tray items (src/cocoa/statusitem.js), by the bridge's handle —
     // which is what a click event names them by.
     this._statusItems = new Map();
+    // `<video src>`'s players (src/cocoa/player.js), by the bridge's id — what
+    // a `player-*` event names them by. `createPlayer` is there only over a
+    // bridge that plays (@windowkit/appkit's player verbs): its presence is
+    // what `useSupports('mediaPlayback')` and `<video src>` ask
+    // (src/mediaplayback.js), so an app over an older bridge, or a test's
+    // fake without them, refuses `src` the way X11 does.
+    this._players = new Map();
+    if (canPlay(native)) {
+      this.createPlayer = (src, options) => new CocoaPlayer(this, src, options);
+    }
 
     // 'surface' (the measured default) or 'layers' — the retained CALayer
     // presenter, opt-in while docs/macos.md's measure-first gate is open.
@@ -1368,6 +1379,12 @@ export class CocoaApp {
         return this._window(ev)?._created(ev);
       case 'surface-released':
         return this._routeSurfaceReleased(ev);
+      case 'player-metadata':
+      case 'player-state':
+      case 'player-time':
+      case 'player-ended':
+      case 'player-error':
+        return this._players.get(ev.id)?._event(ev);
       default:
         return undefined;
     }
