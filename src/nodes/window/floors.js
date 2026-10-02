@@ -136,11 +136,14 @@ export function receivesFloor(child, axis) {
  * A differential run over random trees, laid out with and without the
  * rule, found why each clause is there. An auto basis is yoga's own
  * measurement of the content, which can come out short of what the content
- * needs, and the floor is what holds the item open. A named size that can
- * grow is written as the size it grew to in the measuring pass, which the
- * floor then keeps. And a `flexBasis` of its own is where the basis comes
- * from instead of the size, and a percentage one is a different length in a
- * measuring pass than in the real one.
+ * needs, and the floor is what holds the item open. A named size that could
+ * grow was written as the size it grew to in the measuring pass, which the
+ * floor then kept; nothing grows in that pass any more
+ * (`setMeasuringShrink`), so its floor is the size itself, but the clause
+ * stays until the random trees are run against it again. And a `flexBasis`
+ * of its own is where the basis comes from instead of the size, and a
+ * percentage one is a different length in a measuring pass than in the real
+ * one.
  */
 function floorIsNamedSize(child, axis) {
   const style = child.style;
@@ -473,6 +476,17 @@ function markHeightStale(node, root, hit, stop = root) {
  * pass has to be told, or every node would shrink to nothing and answer that
  * the content needs no room — which is true of no content anywhere.
  *
+ * And nothing grows. A min-content measurement hands out no free space, but
+ * a box with a size of its own has some in this pass all the same — a
+ * `width: 400` row is 400 wide whatever is offered at the root — and an item
+ * that grew into it was read back at the size it grew to: an empty spacer as
+ * its share of the row, a box that clips as its share. That share is a fact
+ * about the item's siblings, not its content, and the extent is cached as
+ * content (`contentSpan`), so it outlived the siblings it came from. A
+ * `<Select>`'s trigger is a caption, a growing spacer and a chevron in a row
+ * of its own width: the spacer's floor was the room the first caption left
+ * over, and a longer caption picked later was elided at the old one's width.
+ *
  * Every child of a node being measured is told, so that the node's own
  * layout is the one it always was; below a child whose extent is still
  * good nothing is, since nothing in there is read. `out` collects what was
@@ -485,8 +499,10 @@ export function setMeasuringShrink(node, axis, out) {
     // not read and the floors are not written back through
     if (child.style.display === 'none') continue;
     const shrink = namesOwnFloor(child, axis) ? 1 : 0;
-    if ((child.style.flexShrink ?? 1) !== shrink) {
+    const grows = child.style.flexGrow > 0;
+    if ((child.style.flexShrink ?? 1) !== shrink || grows) {
       child.yoga.setFlexShrink(shrink);
+      if (grows) child.yoga.setFlexGrow(0);
       out.push(child);
     }
     // not into a layout host's children: they are not flex items, and
@@ -585,20 +601,53 @@ const ACROSS_EDGES = [
   Yoga.EDGE_ALL,
 ];
 
+/** …and a vertical one. */
+const DOWN_EDGES = [
+  Yoga.EDGE_TOP,
+  Yoga.EDGE_BOTTOM,
+  Yoga.EDGE_VERTICAL,
+  Yoga.EDGE_ALL,
+];
+
 /** Whether an in-flow child of a column is as wide as something other than
  *  its content: a width it names, or the column's, which it stretches to
  *  unless an alignment or an `auto` margin says otherwise. */
 function widthNotItsOwn(yoga, items) {
   const width = yoga.getWidth().unit;
   if (width === Yoga.UNIT_POINT || width === Yoga.UNIT_PERCENT) return true;
+  return stretches(yoga, items, ACROSS_EDGES);
+}
+
+/** Whether an item is stretched across its container, whose alignment is
+ *  `items`: unless its own alignment or an `auto` margin on one of `edges`
+ *  — the ones across the container — says otherwise. A size of its own on
+ *  that axis is the caller's to rule out. */
+function stretches(yoga, items, edges) {
   const self = yoga.getAlignSelf();
   if ((self === Yoga.ALIGN_AUTO ? items : self) !== Yoga.ALIGN_STRETCH) {
     return false;
   }
-  for (const edge of ACROSS_EDGES) {
+  for (const edge of edges) {
     if (yoga.getMargin(edge).unit === Yoga.UNIT_AUTO) return false;
   }
   return true;
+}
+
+/** Whether `node`'s size along `axis` is its container's cross size rather
+ *  than anything of its own: an item in flow, stretched, naming no size on
+ *  that axis. */
+function stretchedAlong(node, axis) {
+  const parent = node.parent;
+  if (!parent || parent._host !== null || !inFlow(node)) return false;
+  if (mainAxisOf(parent) === axis) return false;
+  const yoga = node.yoga;
+  const size = (axis === 'width' ? yoga.getWidth() : yoga.getHeight()).unit;
+  if (size === Yoga.UNIT_POINT || size === Yoga.UNIT_PERCENT) return false;
+  return stretches(
+    yoga,
+    parent.yoga.getAlignItems(),
+    axis === 'width' ? ACROSS_EDGES : DOWN_EDGES,
+  );
 }
 
 /**
@@ -637,6 +686,7 @@ function heightFollowsParent(yoga) {
 export function restoreShrink(shrunk) {
   for (const child of shrunk) {
     child.yoga.setFlexShrink(child.style.flexShrink ?? 1);
+    if (child.style.flexGrow > 0) child.yoga.setFlexGrow(child.style.flexGrow);
   }
 }
 
@@ -804,6 +854,11 @@ export function contentSpan(node, axis, intrinsic, root, read = true) {
   }
   // a span nobody reads, and — for a leaf — a measurement nobody needs
   if (!read) return 0;
+  const edges =
+    yoga.getComputedPadding(startEdge) +
+    yoga.getComputedPadding(endEdge) +
+    yoga.getComputedBorder(startEdge) +
+    yoga.getComputedBorder(endEdge);
   if (start === Infinity) {
     // A leaf: nothing inside to look at, and what the pass did to it may
     // have been a stretch rather than a measurement. So it is asked again.
@@ -814,7 +869,7 @@ export function contentSpan(node, axis, intrinsic, root, read = true) {
     // rather than joining it in a `max`, because a measured leaf's base size
     // is its max-content width — the whole line, unwrapped — and taking the
     // larger of the two would floor every label at the width it would like
-    // to be. A leaf that measures nothing has only its own box to report.
+    // to be.
     //
     // **Down**, it is what the leaf measured before the collapse squashed
     // it: a height at a settled width is not a leaf's to give.
@@ -825,15 +880,21 @@ export function contentSpan(node, axis, intrinsic, root, read = true) {
         undefined,
         Yoga.MEASURE_MODE_UNDEFINED,
       )?.width;
-      return measured ?? own;
+      if (measured !== undefined) return measured;
+    } else if (node._measureFn) {
+      return Math.max(own, intrinsic?.get(node) ?? 0);
     }
-    return Math.max(own, intrinsic?.get(node) ?? 0);
+    // A leaf that measures nothing has only its own box to report: padding
+    // and border, a basis, a ratio — what the pass laid it out at, now that
+    // nothing grows in it (`setMeasuringShrink`) — except where the box was
+    // its container's, stretched across it. Then it is the leaf's edges and
+    // nothing more: the stretch is as wide as its siblings were, and the
+    // extent outlives them. So is what it was laid out at before the
+    // collapse, which grew: a spacer in a column of a height of its own was
+    // floored at the room the column had left over, whatever later came to
+    // need it.
+    return stretchedAlong(node, axis) ? edges : own;
   }
-  const edges =
-    yoga.getComputedPadding(startEdge) +
-    yoga.getComputedPadding(endEdge) +
-    yoga.getComputedBorder(startEdge) +
-    yoga.getComputedBorder(endEdge);
   return end - start + edges;
 }
 

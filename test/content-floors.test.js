@@ -364,18 +364,37 @@ test('scrolling does not re-measure the floors', async () => {
 test('flex: 1 is grow 1, shrink 1, basis 0', async () => {
   const a = React.createRef();
   const b = React.createRef();
+  const c = React.createRef();
+  const d = React.createRef();
   const { root } = await mount(
     box(
-      { flexDirection: 'row', width: 120 },
-      h('box', { ref: a, style: { flex: 1 } }, box({ width: 200, height: 10 })),
-      h('box', { ref: b, style: { flex: 2 } }),
+      null,
+      box(
+        { flexDirection: 'row', width: 120 },
+        h('box', { ref: a, style: { flex: 1 } }),
+        h('box', { ref: b, style: { flex: 2 } }),
+      ),
+      box(
+        { flexDirection: 'row', width: 120 },
+        h(
+          'box',
+          { ref: c, style: { flex: 1 } },
+          box({ width: 200, height: 10 }),
+        ),
+        h('box', { ref: d, style: { flex: 2 } }),
+      ),
     ),
   );
-  // the basis is 0, so the 200px inside `a` counts for nothing in the share
-  // — and the floor is *its* min-content, which is what stops it at 200
   assert.strictEqual(b.current.abs.width, 80, 'two shares of three');
   assert.strictEqual(a.current.style.flexBasis, 0);
   assert.strictEqual(a.current.style.flexShrink, 1);
+  // the basis is 0, so the 200px inside `c` counts for nothing in the share
+  // — and the floor is *its* min-content, which is what stops it at 200.
+  // `d` holds nothing, so nothing holds it: it gives way, as it does in
+  // Chrome, Firefox and Safari. It kept 80 here once, the share the pass
+  // measuring the floors had grown it into.
+  assert.strictEqual(c.current.abs.width, 200, 'held at its content');
+  assert.strictEqual(d.current.abs.width, 0, 'and nothing left over');
   await root.unmount();
 });
 
@@ -781,6 +800,87 @@ test('an absolutely positioned box of a set size that only moved measures no flo
   app.windows[0].flushFrame?.();
   await tick();
   assert.strictEqual(measured, 1, 'a new size measures them');
+});
+
+// --- what the pass hands out is not content ----------------------------------
+//
+// The pass that measures floors offers the root no room, but a box with a
+// size of its own has room inside it all the same, and its children are laid
+// out in it. What an item was *given* there — a share of free space it grew
+// into, its container's cross size it was stretched to — is about its
+// siblings, while the extent read back from it is cached as its content, on a
+// node nothing marks dirty when a sibling changes. So each of these held a box
+// at what its siblings had once left it.
+
+test('a spacer that grew in a row gives the room back to a label that grows', async () => {
+  // `<Select>`'s trigger: a caption, a spacer that grows and the chevron, in
+  // a row as wide as the control. The spacer was floored at the room the
+  // first caption left, and a longer one picked later was squeezed into the
+  // old one's width, its `…` in a trigger with room to spare.
+  registerElement('label', {
+    create: (props, app) => new LabelNode(props, app),
+  });
+  try {
+    const label = React.createRef();
+    const spacer = React.createRef();
+    const row = (width, length) =>
+      box(
+        { flexDirection: 'row', width },
+        h('label', { ref: label, length }),
+        h('box', { ref: spacer, style: { flexGrow: 1 } }),
+        box({ width: 10, height: 10 }),
+      );
+    const { app, root } = await mount(row(200, 20));
+    assert.strictEqual(spacer.current.abs.width, 170);
+    await rerender(app, root, row(200, 120));
+    assert.strictEqual(label.current.abs.width, 120, 'the label whole');
+    assert.strictEqual(spacer.current.abs.width, 70, 'the spacer the rest');
+    // …and the row narrowed in place, which is a change to the row alone
+    await rerender(app, root, row(150, 120));
+    assert.strictEqual(label.current.abs.width, 120);
+    assert.strictEqual(spacer.current.abs.width, 20);
+    await root.unmount();
+  } finally {
+    unregisterElement('label');
+  }
+});
+
+test('a spacer that grew down a column gives the room back as well', async () => {
+  // The same down a column of a height of its own, where the height a spacer
+  // was floored at came from the pass before the collapse, which grew it.
+  const spacer = React.createRef();
+  const column = (height, tall) =>
+    box(
+      { height },
+      box({ height: tall }),
+      h('box', { ref: spacer, style: { flexGrow: 1 } }),
+      box({ height: 10 }),
+    );
+  const { app, root } = await mount(column(150, 20));
+  assert.strictEqual(spacer.current.abs.height, 120);
+  await rerender(app, root, column(150, 100));
+  assert.strictEqual(spacer.current.abs.height, 40, 'what the box left');
+  await rerender(app, root, column(120, 100));
+  assert.strictEqual(spacer.current.abs.height, 10, 'and the column');
+  await root.unmount();
+});
+
+test('a leaf stretched across a column does not hold it at a sibling’s old width', async () => {
+  // The divider is as wide as the column, which the box below it made 100
+  // wide. Read back as the divider's own width, that held the column at 100
+  // after the box became 5 wide.
+  const col = React.createRef();
+  const row = (width) =>
+    box(
+      { flexDirection: 'row', width: 200 },
+      h('box', { ref: col }, box({ height: 1 }), box({ width, height: 10 })),
+      box({ width: 190, height: 10, flexShrink: 0 }),
+    );
+  const { app, root } = await mount(row(100));
+  assert.strictEqual(col.current.abs.width, 100, 'its content holds it');
+  await rerender(app, root, row(5));
+  assert.strictEqual(col.current.abs.width, 5);
+  await root.unmount();
 });
 
 // --- a change inside a box that sizes itself ----------------------------------
@@ -1830,12 +1930,15 @@ test('cells of a named width that neither shrink nor grow owe no width pass', as
   await root.unmount();
 });
 
-test('a named size that can grow keeps the floor it grew to', async () => {
-  // The other half of the rule, found by laying random trees out both ways: a
-  // measuring pass lays a growing item out at the size it grew to, the floor
-  // written from that joins the flex line's resolution, and the space the
-  // line hands out comes out differently without it. Taken off this
-  // `flexShrink: 0` item of a named height, its share of the column moved.
+test('a named size that can grow is floored at its size, not at what it grew to', async () => {
+  // The other half of the rule, found by laying random trees out both ways:
+  // the measuring pass laid a growing item out at the size it grew to, the
+  // floor written from that joined the flex line's resolution, and the space
+  // the line handed out came out differently without it — 53 with the floor,
+  // 49 without. Neither was right. Nothing grows in that pass now
+  // (`setMeasuringShrink`), so the floor is the 45 the item names, and the
+  // column's free space goes to its other growing item, whose own floor of
+  // 104 takes all of it. Chrome, Firefox and Safari all give 45.
   const grows = React.createRef();
   const { root } = await mount(
     box(
@@ -1857,8 +1960,7 @@ test('a named size that can grow keeps the floor it grew to', async () => {
       ),
     ),
   );
-  // 53 is what the floor gives, as it did before the rule; without it, 49
-  assert.strictEqual(size(grows)[1], 53);
+  assert.strictEqual(size(grows)[1], 45);
   await root.unmount();
 });
 
