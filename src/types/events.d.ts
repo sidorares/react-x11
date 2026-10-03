@@ -7,6 +7,7 @@
 import type { RefObject } from 'react';
 import type { DrawnNode, NtkWindow, TextInputNode } from './nodes.js';
 import type { MenuShortcut } from './components.js';
+import type { PrimaryModifier } from '../keysyms.js';
 
 /** The raw ntk/X11 event a synthetic one was made from. */
 export interface NativeEvent {
@@ -331,7 +332,7 @@ export interface ChangeEvent<T = TextInputNode> extends Omit<
 }
 
 /**
- * `<textinput onSubmit>` — Enter, or Ctrl+Enter in a `<textarea>`. Same
+ * `<textinput onSubmit>` — Enter, or Ctrl+Enter in a `<textarea>` (⌘↩ on Cocoa). Same
  * shape as {@link ChangeEvent}; `nativeEvent` is the X key event.
  */
 export interface SubmitEvent<T = TextInputNode> extends Omit<
@@ -556,7 +557,8 @@ export interface AcceleratorOptions {
  * Exact on Control/Alt/Shift/Super, indifferent to Caps Lock and Num Lock,
  * matched against the Latin keysym so a layout switch does not turn it off,
  * and behind whatever a focused element consumed with `preventDefault()`.
- * See docs/events.md.
+ * `Control` is the app's primary modifier: ⌘ on the Cocoa backend, the key
+ * its menus print. See docs/events.md.
  *
  * With no `scope` the binding belongs to the tree's top-level `<window>`, or,
  * in an app that has none, to the root-level `<popup>` holding the keyboard —
@@ -569,10 +571,25 @@ export function useAccelerator(
   options?: AcceleratorOptions,
 ): void;
 
+export interface MatchesShortcutOptions {
+  /**
+   * The app's primary modifier — `primaryModifier(app)` from
+   * `react-x11/keysyms`. `'Super'` reads a chord's `Control` (and its
+   * `Super`) as ⌘ and wants ⌃ up, which is the Cocoa backend's rule;
+   * `'Control'`, the default, reads the chord literally.
+   */
+  primary?: PrimaryModifier;
+}
+
 /**
  * Whether a key event presses any alternative of a `shortcut` — the matcher
  * the menus and {@link useAccelerator} both run on, for an application
- * dispatching chords its own way.
+ * dispatching chords its own way. Pass the app's primary modifier to match
+ * the way they do:
+ *
+ * ```ts
+ * matchesShortcut(ev, [['Control', 'S']], { primary: primaryModifier(app) });
+ * ```
  */
 export function matchesShortcut(
   ev: {
@@ -584,4 +601,5 @@ export function matchesShortcut(
     metaKey?: boolean;
   },
   shortcut: MenuShortcut | undefined,
+  options?: MatchesShortcutOptions,
 ): boolean;

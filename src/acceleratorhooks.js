@@ -9,6 +9,8 @@
 import { useEffect, useMemo, useRef } from 'react';
 
 import { matchesShortcut } from './accelerators.js';
+import { useAppOrNull } from './appcontext.js';
+import { primaryModifier } from './keysyms.js';
 import { useTopLevelWindow } from './windowid.js';
 
 /**
@@ -52,10 +54,20 @@ function warnUnanchored() {
  * *not* a dependency: a chord pressed three minutes from now must run the
  * handler from the current render, and re-registering on every render would
  * also reorder the bindings under it.
+ *
+ * `reserves(ev)`, read the same way, says the key belongs to something
+ * outside the window that answers it by itself — a delegated `MenuBar`'s
+ * key equivalents on the Cocoa backend — so no binding gets it
+ * (`EventManager._runAccelerators`).
  */
-export function useAcceleratorEntry(anchorRef, handle, enabled = true) {
-  const live = useRef(handle);
-  live.current = handle;
+export function useAcceleratorEntry(
+  anchorRef,
+  handle,
+  enabled = true,
+  reserves = null,
+) {
+  const live = useRef({ handle, reserves });
+  live.current = { handle, reserves };
   useEffect(() => {
     if (!enabled) return undefined;
     const manager = anchorRef.current?.root?.events;
@@ -65,7 +77,8 @@ export function useAcceleratorEntry(anchorRef, handle, enabled = true) {
     }
     return manager.registerAccelerator({
       anchor: () => anchorRef.current ?? null,
-      handle: (ev) => live.current?.(ev) ?? false,
+      handle: (ev) => live.current.handle?.(ev) ?? false,
+      reserves: (ev) => live.current.reserves?.(ev) ?? false,
     });
   }, [anchorRef, enabled]);
 }
@@ -78,7 +91,8 @@ export function useAcceleratorEntry(anchorRef, handle, enabled = true) {
  * a shortcut can be moved into or out of a menu without being rewritten, and
  * the same rules apply to it: exact on Control/Alt/Shift/Super, indifferent
  * to Caps Lock and Num Lock, matched against the Latin keysym so it survives
- * a layout switch, and behind whatever a focused element consumed with
+ * a layout switch, `Control` meaning ⌘ on the Cocoa backend
+ * (`primaryModifier`), and behind whatever a focused element consumed with
  * `preventDefault()`.
  *
  * The handler is called with the key event, and the key is consumed.
@@ -106,12 +120,14 @@ export function useAccelerator(shortcut, handler, options = {}) {
       },
     [scope, owner],
   );
-  const live = useRef({ shortcut, handler });
-  live.current = { shortcut, handler };
+  const primary = primaryModifier(useAppOrNull());
+  const live = useRef({ shortcut, handler, primary });
+  live.current = { shortcut, handler, primary };
   useAcceleratorEntry(
     anchorRef,
     (ev) => {
-      if (!matchesShortcut(ev, live.current.shortcut)) return false;
+      const { shortcut: chords, primary: mod } = live.current;
+      if (!matchesShortcut(ev, chords, { primary: mod })) return false;
       live.current.handler?.(ev);
       return true;
     },

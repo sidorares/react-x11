@@ -248,6 +248,35 @@ export function ctrlChordLetter(ev) {
 }
 
 /**
+ * The modifier this app's shortcuts are pressed with: `'Super'` — ⌘ — where
+ * the backend says so (the Cocoa app does, as `app.primaryModifier`), and
+ * `'Control'` everywhere else.
+ *
+ * A backend fact, not a platform one: an X11 app under XQuartz keeps Ctrl,
+ * which is what every other X client on that display answers to.
+ */
+export function primaryModifier(app) {
+  return app?.primaryModifier === 'Super' ? 'Super' : 'Control';
+}
+
+/**
+ * Is the primary modifier down for this event — ⌘ on the Cocoa backend,
+ * Ctrl everywhere else? The test the built-in editors put in front of their
+ * Undo/Cut/Copy/Paste/Select All chords, so the keys the edit menu prints
+ * beside each row are the keys that do it.
+ *
+ * ```js
+ * if (primaryModifierHeld(ev, node.app) && ctrlChordLetter(ev) === keysymOf('d'))
+ *   duplicateLine();
+ * ```
+ */
+export function primaryModifierHeld(ev, app) {
+  return primaryModifier(app) === 'Super'
+    ? Boolean(ev?.metaKey)
+    : Boolean(ev?.ctrlKey);
+}
+
+/**
  * The X11 modifier mask bits, as they arrive on `ev.nativeEvent.buttons`
  * and as `fireEvent` takes them. Bit 3 (Mod1) is Alt and bit 6 (Mod4) is
  * Super on virtually every layout; those four — Shift, Control, Mod1, Mod4

@@ -50,6 +50,36 @@ export function ctrlChordLetter(ev: {
   codepoint?: number | null;
 }): number | null;
 
+/** The modifier token a shortcut's primary means, in a menu `shortcut`'s
+ * vocabulary. */
+export type PrimaryModifier = 'Control' | 'Super';
+
+/**
+ * The modifier this app's shortcuts are pressed with: `'Super'` — ⌘ — where
+ * the backend says so (the Cocoa app does, as `app.primaryModifier`), and
+ * `'Control'` everywhere else. A backend fact, not a platform one: an X11
+ * app under XQuartz keeps Ctrl, like every other X client on that display.
+ */
+export function primaryModifier(
+  app?: { primaryModifier?: PrimaryModifier } | null,
+): PrimaryModifier;
+
+/**
+ * Is the primary modifier down for this event — ⌘ on the Cocoa backend, Ctrl
+ * everywhere else? What the built-in editors test before their
+ * Undo/Cut/Copy/Paste/Select All chords, so the keys the edit menu prints
+ * are the keys that do it.
+ *
+ * ```js
+ * if (primaryModifierHeld(ev, node.app) && ctrlChordLetter(ev) === keysymOf('d'))
+ *   duplicateLine();
+ * ```
+ */
+export function primaryModifierHeld(
+  ev: { ctrlKey?: boolean; metaKey?: boolean } | null | undefined,
+  app?: { primaryModifier?: PrimaryModifier } | null,
+): boolean;
+
 /**
  * The keysym an X11 key *name* stands for — `'Return'`, `'plus'`, `'F5'`,
  * `'s'` — or `undefined` for a name nothing here knows.

@@ -739,7 +739,7 @@ export interface TextInputProps extends DrawnProps<TextInputNode> {
    * both read naturally.
    */
   onChange?: (ev: ChangeEvent<TextInputNode>) => void;
-  /** Enter — or Ctrl+Enter in a `<textarea>`. */
+  /** Enter — or Ctrl+Enter in a `<textarea>` (⌘↩ on the Cocoa backend). */
   onSubmit?: (ev: SubmitEvent<TextInputNode>) => void;
   placeholder?: string;
   placeholderColor?: Color;

@@ -579,6 +579,10 @@ export interface MenuItem {
    * the menu is mounted, without the menu being opened (#351). `enabled`
    * and `visible` gate the binding with the row. `accelerators={false}` on
    * the menu turns that off for an app with a dispatcher of its own.
+   *
+   * `Control` is the primary modifier: on the Cocoa backend `[['Control',
+   * 'S']]` is drawn `⌘S`, bound to ⌘S, and installed in the macOS menu bar
+   * as ⌘S — which then answers it by itself (docs/events.md).
    */
   shortcut?: MenuShortcut;
   /** With `toggleState`, draws a check mark or a radio dot in the gutter. */
@@ -654,8 +658,10 @@ export interface MenuBarProps extends WidgetProps {
   /**
    * Honour the items' own `shortcut`s while this bar is mounted — including
    * when the desktop's panel has taken the menu over, since the panel draws
-   * the rows but the key is pressed in this window. On by default; `false`
-   * leaves the chords to an app that dispatches its own.
+   * the rows but the key is pressed in this window. The macOS menu bar is the
+   * exception: it answers the ⌘ chords it holds as key equivalents itself,
+   * and the window leaves those alone. On by default; `false` leaves the
+   * chords to an app that dispatches its own.
    */
   accelerators?: boolean;
   fontSize?: number;

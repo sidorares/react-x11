@@ -267,6 +267,66 @@ test('the popup is the size of the rows, not the size of nothing', async () => {
   await root.unmount();
 });
 
+test("the shortcuts are printed in the app's primary modifier: Ctrl, or ⌘", async () => {
+  const { app, root, wnd, editor } = await mount();
+  const shortcuts = () =>
+    editor._editMenu._editMenuRows
+      .filter((row) => !row.separator)
+      .map((row) => row.shortcut);
+
+  rightClick(wnd);
+  assert.deepStrictEqual(shortcuts(), [
+    'Ctrl+Z',
+    'Ctrl+X',
+    'Ctrl+C',
+    'Ctrl+V',
+    'Ctrl+A',
+  ]);
+  closeEditMenu(editor);
+
+  // what the Cocoa app says about itself (src/cocoa/app.js)
+  app.primaryModifier = 'Super';
+  rightClick(wnd);
+  assert.deepStrictEqual(shortcuts(), ['⌘Z', '⌘X', '⌘C', '⌘V', '⌘A']);
+
+  await root.unmount();
+});
+
+test('the window losing focus closes the menu, and takes the keyboard nowhere', async () => {
+  // The user went to another application. No press reaches us for that —
+  // on Cocoa the grab only redirects presses between windows of ours — so
+  // the window's own blur is what closes it, the way it closes `Menu`.
+  const { root, wnd, editor } = await mount();
+  wnd.emit('mousedown', { x: 10, y: 10, keycode: 1 });
+  wnd.emit('mouseup', { x: 10, y: 10, keycode: 1 });
+  rightClick(wnd);
+  assert.strictEqual(editMenuOpen(editor), true);
+
+  // ntk's SetInputFocus: handing focus back to the element must not take the
+  // keyboard off the application the user just switched to
+  let raised = 0;
+  wnd.focus = () => {
+    raised += 1;
+  };
+  wnd.emit('blur', { buttons: 0, time: 1 });
+  assert.strictEqual(editMenuOpen(editor), false, 'closed');
+  assert.strictEqual(editor.focused, true, 'the element keeps its focus');
+  assert.strictEqual(raised, 0, 'and the window did not take the keyboard');
+  assert.strictEqual(
+    wnd._reactX11Node._windowFocusListeners.size,
+    0,
+    'nothing left listening',
+  );
+
+  // closed some other way, it stops listening too
+  wnd.emit('focus', { buttons: 0, time: 2 });
+  rightClick(wnd);
+  closeEditMenu(editor);
+  assert.strictEqual(wnd._reactX11Node._windowFocusListeners.size, 0);
+
+  await root.unmount();
+});
+
 test('closeEditMenu is idempotent, and an unmount takes the menu with it', async () => {
   const { root, wnd, editor } = await mount();
   rightClick(wnd);

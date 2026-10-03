@@ -226,6 +226,32 @@ disagrees still has the raw mask: `ev.nativeEvent.buttons` is the state
 field as it arrived, and `MOD` in `react-x11/keysyms` names its bits
 (`MOD.Mod3`, `MOD.Lock` for Caps Lock, and so on).
 
+### The primary modifier {#primary-modifier}
+
+**On the Cocoa backend the editing chords are ⌘, not Ctrl.** ⌘ arrives as
+`metaKey` (the DOM's own macOS mapping), and the app says which of the two its
+shortcuts are pressed with: `app.primaryModifier` is `'Super'` there and absent
+everywhere else, X11 under XQuartz included. The built-in editors read it, so
+`<textinput>`'s Undo, Cut, Copy, Paste and Select All are ⌘Z, ⌘X, ⌘C, ⌘V and
+⌘A on a Mac, Redo is ⇧⌘Z, and the right-click menu prints them that way. A ⌃
+or ⌘ chord the field has no answer for is never typed as text — AppKit hands
+over the key's bare character with either held. A widget with chords of its
+own asks the same question with `primaryModifierHeld`:
+
+```js
+import { ctrlChordLetter, keysymOf, primaryModifierHeld } from 'react-x11/keysyms';
+
+onKeyDown={(ev) => {
+  if (primaryModifierHeld(ev, app) && ctrlChordLetter(ev) === keysymOf('d'))
+    duplicateLine();
+}}
+```
+
+It is the same rule a menu bar's `shortcut` follows there, where `Control`
+means ⌘ ([globalmenu.md](globalmenu.md#shortcuts-are-a-list-not-a-string)),
+and the one [accelerators](#the-chord) follow: `useAccelerator([['Control',
+'K']])` is ⌘K on a Mac, and a drawn `ContextMenu` prints and answers `⌘S`.
+
 ## Handlers
 
 | handler                                                           | notes                                                                                                                                                       |
@@ -310,7 +336,9 @@ Ctrl+S calls `save()` without the menu being opened. The same array is what
 `aria-keyshortcuts` announces and what crosses the bus when the desktop's
 panel draws the menu ([globalmenu.md](globalmenu.md)) — and it stays bound in
 that case, because the panel draws the rows but the key is pressed in your
-window and nothing else is going to deliver it.
+window and nothing else is going to deliver it. (The macOS menu bar is the
+exception, and answers the ⌘ chords it shows by itself —
+[below](#the-macos-menu-bar).)
 
 For a shortcut that is not in a menu — there are always some —
 `useAccelerator` takes the same chords, so one can be moved into or out of a
@@ -333,8 +361,23 @@ The key is named the way X names it, which is what `gdk_keyval_name()` emits
 and what a panel's importer parses: `plus` rather than `+`, `Prior` rather
 than `PgUp`, `Return` rather than `Enter`. A one-character name is that
 character. `keysymFromName()` in `react-x11/keysyms` is the resolver, and
-`matchesShortcut(ev, shortcut)` the matcher, for an application dispatching
-chords its own way.
+`matchesShortcut(ev, shortcut, { primary })` the matcher, for an application
+dispatching chords its own way.
+
+**`Control` is the app's primary modifier**: Ctrl, except on the Cocoa
+backend, where it is ⌘ — the key a Mac user saves with, the key a drawn row
+prints (`⌘S`, `⇧⌘Z`) and the key the binding answers
+([The primary modifier](#primary-modifier)). `Super` is ⌘ there too, so a
+chord cannot ask for ⌃ on a Mac; a chord is matched with it up. The menus and
+`useAccelerator` read the app's answer themselves, and `matchesShortcut` takes
+it as an option, since it is a pure function with no app to ask:
+
+```js
+import { matchesShortcut } from 'react-x11';
+import { primaryModifier } from 'react-x11/keysyms';
+
+matchesShortcut(ev, [['Control', 'S']], { primary: primaryModifier(app) });
+```
 
 Four rules, all of which a hand-rolled `onKeyDown` gets subtly differently:
 
@@ -352,6 +395,8 @@ Four rules, all of which a hand-rolled `onKeyDown` gets subtly differently:
 - **`enabled` and `visible` gate it.** A dimmed item's chord fires nothing,
   and neither does an item inside a submenu whose parent is disabled — a
   command you cannot reach by opening the menu is not one a key should reach.
+- **`Control` is the primary modifier**, above — exact on it as on the rest,
+  so ⌃⌘S does not fire a ⌘S binding either.
 
 ### Who gets the key first
 
@@ -399,6 +444,26 @@ else for a shortcut to belong to, and it is the window the keys are arriving
 on. A binding that lands on nothing at all — no window and no popup either —
 warns once in development and names `scope`, rather than leaving a chord that
 is drawn, announced and dead.
+
+### The macOS menu bar {#the-macos-menu-bar}
+
+On the Cocoa backend a `MenuBar` is drawn by the system
+([globalmenu.md](globalmenu.md)), which installs each item's chord as an
+`NSMenu` key equivalent where it can spell one — a single chord on a
+character key — and AppKit then runs the item on a ⌘ chord by itself. It does
+so _after_ the window has seen the key, whatever the window did with it. So
+those chords are **reserved**: the window's accelerators are not offered them
+at all, neither the bar's own binding nor a `useAccelerator` on the same
+chord, whichever mounted last, and the item runs once. A chord the menu bar
+cannot spell — a function key, a second alternative, `plus` — or one with no
+`Control` or `Super` in it stays the window's, and fires the way it does
+anywhere else.
+
+The reservation cannot reach steps 1 and 3 above, which run before it: an
+`onKeyDown` that answers ⌘S for itself, or a focused field answering ⌘C beside
+an Edit menu whose Copy says ⌘C, runs alongside the menu item rather than
+instead of it — `preventDefault()` there does not reach AppKit. Leave a chord
+the menu bar shows to the menu bar.
 
 ## The wheel {#wheel}
 

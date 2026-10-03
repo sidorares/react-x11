@@ -86,6 +86,9 @@ export function editMenuColors(theme) {
 export function editMenuItems(actions = {}, { canPaste = true } = {}) {
   const has = (verb) => typeof actions[verb] === 'function';
   const selected = Boolean(actions.hasSelection);
+  // `Control` is the primary modifier here, as it is in a menu bar's chord:
+  // ⌘ on the Cocoa backend, which is what the editors answer there and what
+  // `editMenuGeometry` prints when it is told so
   const groups = [
     [
       has('undo') && {
@@ -147,8 +150,12 @@ export function editMenuItems(actions = {}, { canPaste = true } = {}) {
  * @param {Array<{id?, label?, shortcut?, type?, enabled?}>} items
  * @param {(text: string) => number|null} [measure] text width, or null when
  *   nothing can be measured yet
+ * @param {number} [scale]
+ * @param {{primary?: 'Control'|'Super'}} [options] the app's primary
+ *   modifier (keysyms.js): `'Super'` prints the shortcuts the Mac way —
+ *   `⌘Z`, `⇧⌘Z` — since ⌘ is what the text controls answer there
  */
-export function editMenuGeometry(items, measure, scale = 1) {
+export function editMenuGeometry(items, measure, scale = 1, { primary } = {}) {
   const widthOf = (text) => {
     if (!text) return 0;
     const w = measure?.(text);
@@ -161,7 +168,7 @@ export function editMenuGeometry(items, measure, scale = 1) {
   let widest = 0;
   for (const item of items) {
     const separator = isSeparator(item);
-    const shortcut = formatShortcut(item.shortcut);
+    const shortcut = formatShortcut(item.shortcut, { primary });
     const height = (separator ? SEPARATOR_HEIGHT : ROW_HEIGHT) * scale;
     rows.push({ ...item, separator, shortcut, y, height });
     y += height;

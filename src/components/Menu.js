@@ -24,9 +24,11 @@ import {
   useDismissOnWindowBlur,
 } from './anchor.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
-import { useGlobalMenu } from '../globalmenu.js';
+import { useGlobalMenuExport } from '../globalmenu.js';
 import { acceleratedItem } from '../accelerators.js';
 import { useAcceleratorEntry } from '../acceleratorhooks.js';
+import { useAppOrNull } from '../appcontext.js';
+import { primaryModifier } from '../keysyms.js';
 import { useTopLevelWindow } from '../windowid.js';
 import { MENU_TEXT_WEIGHT } from '../faces.js';
 import {
@@ -121,12 +123,17 @@ function menuMetrics(theme, native, fontSize) {
   };
 }
 
+// `primary` rides along with the sizes because it is one too: the shortcut
+// column is measured from the same string the row then draws — `⌘S` on the
+// Cocoa backend, `Ctrl+S` elsewhere — and the binding matches the key that
+// string names (`useMenuAccelerators`).
 function useMenuMetrics(fontSize) {
   const theme = useTheme();
   const native = useNativeControls();
+  const primary = primaryModifier(useAppOrNull());
   return useMemo(
-    () => menuMetrics(theme, native, fontSize),
-    [theme, native, fontSize],
+    () => ({ ...menuMetrics(theme, native, fontSize), primary }),
+    [theme, native, fontSize, primary],
   );
 }
 
@@ -272,7 +279,9 @@ function menuListWidth(node, items, metrics) {
       size: metrics.fontSize,
       weight: metrics.weight,
     }).width;
-    const accelerator = formatShortcut(item.shortcut);
+    const accelerator = formatShortcut(item.shortcut, {
+      primary: metrics.primary,
+    });
     const shortcut = accelerator
       ? measureLabel(node, accelerator, {
           size: metrics.fontSize,
@@ -471,7 +480,9 @@ function MenuRow({
   }
   const dim = !isEnabled(item);
   const submenu = hasSubmenu(item);
-  const accelerator = formatShortcut(item.shortcut);
+  const accelerator = formatShortcut(item.shortcut, {
+    primary: metrics.primary,
+  });
   const rowInk = dim ? theme.textMuted : active ? theme.hoverText : theme.text;
   if (process.env.NODE_ENV !== 'production') checkShortcut(item);
   return h(
@@ -489,7 +500,9 @@ function MenuRow({
       // the label alone: without it, name-from-contents would read the
       // shortcut and the submenu arrow into the name ("New Ctrl+N")
       'aria-label': typeof item.label === 'string' ? item.label : undefined,
-      'aria-keyshortcuts': ariaKeyShortcuts(item.shortcut),
+      'aria-keyshortcuts': ariaKeyShortcuts(item.shortcut, {
+        primary: metrics.primary,
+      }),
       'aria-checked': item.toggleType
         ? ariaChecked(item.toggleState)
         : undefined,
@@ -922,17 +935,40 @@ function handleMenuKey(
  * `anchorRef` is what the binding hangs off — the bar, or the window when
  * there is no bar to hang off — and decides what a modal `<popup>` takes it
  * away from (`EventManager._runAccelerators`).
+ *
+ * `primary` is the app's primary modifier, so a chord's `Control` is ⌘ on
+ * the Cocoa backend — the key the row prints, and the key the macOS menu
+ * bar installs. Which is where the one exception comes from:
+ * `answeredElsewhere(shortcut)` names the chords a delegate fires the item
+ * for by itself. The bridge hands JS every key *before* AppKit dispatches
+ * it, so ⌘S reaches the window's bindings and then the menu bar's key
+ * equivalent; selecting here too would save twice. So such a chord is
+ * *reserved*: spent before any binding in the window is offered it, this
+ * one included, and left to the menu bar — a `useAccelerator` on ⌘S
+ * mounted after the bar would otherwise be the same double run by another
+ * route. A chord the menu bar cannot spell (F5, a second alternative,
+ * `plus`) is not one, and stays this binding's.
  */
-function useMenuAccelerators(items, select, anchorRef, enabled) {
+function useMenuAccelerators(
+  items,
+  select,
+  anchorRef,
+  { enabled, primary, answeredElsewhere },
+) {
   useAcceleratorEntry(
     anchorRef,
     (ev) => {
-      const item = acceleratedItem(items, ev);
+      const item = acceleratedItem(items, ev, { primary });
       if (!item) return false;
       select(item);
       return true;
     },
     enabled,
+    answeredElsewhere &&
+      ((ev) => {
+        const item = acceleratedItem(items, ev, { primary });
+        return Boolean(item && answeredElsewhere(item.shortcut));
+      }),
   );
 }
 
@@ -970,7 +1006,10 @@ export function ContextMenu({
     onSelect?.(item);
   };
 
-  useMenuAccelerators(items, select, ref, accelerators);
+  useMenuAccelerators(items, select, ref, {
+    enabled: accelerators,
+    primary: metrics.primary,
+  });
 
   // the wrapper keeps the focus the right-click gave it, so `onBlur` below
   // never fires when the *window* loses focus — and the menu is holding a
@@ -1101,7 +1140,10 @@ export function MenuBar({
   // `visible` as a property, so hiding one there is a patch the panel applies
   // rather than a structural change that renumbers everything after it.
   const bar = useMemo(() => visibleItems(menus), [menus]);
-  const delegated = useGlobalMenu(menus, { onSelect, enabled: globalMenu });
+  const { delegated, answersShortcut } = useGlobalMenuExport(menus, {
+    onSelect,
+    enabled: globalMenu,
+  });
 
   // What the bar turned out to be, which is the one thing here that cannot
   // be worked out in a render: layout runs on the frame clock, after the
@@ -1263,7 +1305,11 @@ export function MenuBar({
     }),
     [owner],
   );
-  useMenuAccelerators(menus, select, acceleratorAnchor, accelerators);
+  useMenuAccelerators(menus, select, acceleratorAnchor, {
+    enabled: accelerators,
+    primary: metrics.primary,
+    answeredElsewhere: delegated ? answersShortcut : null,
+  });
 
   const moveMenu = (dir) => {
     if (!entries.length) return;

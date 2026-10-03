@@ -14,6 +14,7 @@ import { lastInputTime } from '../inputtime.js';
 import {
   ctrlChordLetter,
   MOD,
+  primaryModifierHeld,
   XK_BACKSPACE,
   XK_RETURN,
   XK_KP_ENTER,
@@ -550,7 +551,9 @@ export class TextInputNode extends Node {
       this._moveCaret(this._chars().length, ev.shiftKey);
       return true;
     }
-    if (ev.ctrlKey) {
+    // Ctrl, or ⌘ on the Cocoa backend (`primaryModifierHeld`): the keys the
+    // edit menu prints beside its rows are the keys that do what they say
+    if (primaryModifierHeld(ev, this.app)) {
       const letter = ctrlChordLetter(ev);
       if (letter === 0x61 /* a */) {
         this._selectAll();
@@ -562,10 +565,12 @@ export class TextInputNode extends Node {
       } else if (letter === 0x76 /* v */) {
         this._pasteFrom();
       } else if (letter === 0x7a /* z */) {
-        // Ctrl+Shift+Z redoes, the way it does in GTK and Qt
+        // Ctrl+Shift+Z redoes, the way it does in GTK and Qt — and ⇧⌘Z is
+        // the Mac's own redo
         if (ev.shiftKey) this.redo();
         else this.undo();
-      } else if (letter === 0x79 /* y */) {
+      } else if (letter === 0x79 /* y */ && !ev.metaKey) {
+        // Ctrl+Y is Windows' redo; ⌘Y is nobody's, so it is not taken
         this.redo();
       } else {
         // A chord this field has no answer for is not the field's: Ctrl+S
@@ -576,6 +581,11 @@ export class TextInputNode extends Node {
       }
       return true;
     }
+    // …and a chord on the other one is not text either. AppKit hands over
+    // the key's bare character with ⌘ or ⌃ held, so ⌘S in a focused field
+    // typed an `s` before this, and ⌃A typed an `a` once ⌘ became the
+    // primary — Ctrl and Super chords are commands on every backend.
+    if (ev.ctrlKey || ev.metaKey) return false;
     if (ev.codepoint != null && ev.codepoint >= 0x20 && ev.codepoint !== 0x7f) {
       const ch = String.fromCodePoint(ev.codepoint);
       this._insert(ch, 'type');

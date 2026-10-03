@@ -207,6 +207,58 @@ test('`aas` is a list of alternatives, and any of them counts', () => {
   );
 });
 
+test("under a primary of 'Super', `Control` is ⌘ and ⌃ is not a match", () => {
+  // The Cocoa backend's rule (`app.primaryModifier`): the key the menu bar
+  // installs and the row prints for `['Control', 'S']` is ⌘S, so that is
+  // the key the binding answers — and exactly that key, on the same four
+  // bits as anywhere else.
+  const mac = { primary: 'Super' };
+  const save = ['Control', 'S'];
+  const s = keysymOf('s');
+  assert.equal(matchesChord(ev(s, { metaKey: true }), save, mac), true, '⌘S');
+  assert.equal(matchesChord(ev(s, { ctrlKey: true }), save, mac), false, '⌃S');
+  assert.equal(
+    matchesChord(ev(s, { ctrlKey: true, metaKey: true }), save, mac),
+    false,
+    '⌃⌘S is a different chord',
+  );
+  assert.equal(
+    matchesChord(ev(s, { metaKey: true, shiftKey: true }), save, mac),
+    false,
+    '⇧⌘S is Save As',
+  );
+  assert.equal(
+    matchesChord(
+      ev(s, { metaKey: true, shiftKey: true }),
+      ['Control', 'Shift', 'S'],
+      mac,
+    ),
+    true,
+  );
+  // `Super` is ⌘ there too, and naming both is still one ⌘
+  for (const chord of [
+    ['Super', 'S'],
+    ['Control', 'Super', 'S'],
+  ]) {
+    assert.equal(matchesChord(ev(s, { metaKey: true }), chord, mac), true);
+  }
+  assert.equal(
+    matchesShortcut(ev(s, { metaKey: true }), [['F2'], save], mac),
+    true,
+    'and matchesShortcut passes it on',
+  );
+  // with no primary, or Control's, the chord means what it says
+  assert.equal(matchesChord(ev(s, { metaKey: true }), save), false);
+  assert.equal(
+    matchesChord(ev(s, { ctrlKey: true }), save, { primary: 'Control' }),
+    true,
+  );
+  // …and acceleratedItem finds the item the row says ⌘S beside
+  const item = { label: 'Save', shortcut: [save] };
+  assert.equal(acceleratedItem([item], ev(s, { metaKey: true }), mac), item);
+  assert.equal(acceleratedItem([item], ev(s, { ctrlKey: true }), mac), null);
+});
+
 test('the token vocabulary is the one the menu draws from', () => {
   // The names are X11's, which is what `gdk_keyval_name()` emits and what a
   // panel's importer parses — so the matcher and the row read one table.

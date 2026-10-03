@@ -5,6 +5,7 @@
 import { deviceAnchorArea, windowOrigin } from '../anchor.js';
 import { armPasteState, canPaste } from '../pastestate.js';
 import {
+  primaryModifier,
   XK_RETURN,
   XK_KP_ENTER,
   XK_UP,
@@ -125,6 +126,7 @@ export function openEditMenu(node, at, actions = {}) {
     items,
     (text) => app?.fonts?.layout(text, style)?.width,
     s,
+    { primary: primaryModifier(app) },
   );
   const deviceAt = at && {
     ...at,
@@ -221,6 +223,17 @@ export function openEditMenu(node, at, actions = {}) {
   node._editMenu = popup;
   // read *before* the menu takes the keyboard, and handed back on close
   node._editMenuRestore = node._focusManager()?.focused ?? null;
+  // The window losing focus closes it — the user went to another
+  // application, ⌘-Tab or a click on its window. Neither reaches us as a
+  // press: the grab redirects presses only between windows of ours on Cocoa,
+  // and a popup panel never takes the keyboard there, so this is the one
+  // event that says so. The node keeps its focus across the blur, so nothing
+  // in the tree hears it either; the same answer `Menu` and `Select` give
+  // (`useDismissOnWindowBlur`, components/anchor.js).
+  node._editMenuOffBlur =
+    node.root?.onWindowFocusChange?.((focused) => {
+      if (!focused) closeEditMenu(node);
+    }) ?? null;
   // the menu takes the keyboard so arrows and Escape reach it rather than
   // the element behind it
   popup.events?.focus?.(canvas);
@@ -241,6 +254,8 @@ export function closeEditMenu(node) {
   const popup = node?._editMenu;
   if (!popup) return;
   node._editMenu = null;
+  node._editMenuOffBlur?.();
+  node._editMenuOffBlur = null;
   const restore = node._editMenuRestore;
   node._editMenuRestore = null;
   // the popup is a child, so a node destroyed while its menu was up took the
@@ -255,6 +270,10 @@ export function closeEditMenu(node) {
   // menu and a ring appearing on the way back would be news to nobody. A
   // surface that was not focusable in the first place, or that stopped being
   // on screen while the menu was up, gets nothing back rather than the
-  // destroyed menu canvas keeping the keyboard.
-  events.focus(events._canRestoreTo(restore) ? restore : null, 'pointer');
+  // destroyed menu canvas keeping the keyboard. And a restore, which takes
+  // the window no keyboard: a menu closed because the user went to another
+  // application must not drag them back to this one.
+  events.focus(events._canRestoreTo(restore) ? restore : null, 'pointer', {
+    restoring: true,
+  });
 }

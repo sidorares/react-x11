@@ -1697,7 +1697,9 @@ select all, **dead keys and Compose**
 ([events.md](events.md#composition)), Backspace/Delete, arrows (+Shift extends), Home/End, Ctrl+A,
 Ctrl+C/X/V on CLIPBOARD, middle-click paste from PRIMARY, selections own
 PRIMARY (X11 conventions, select-all included; [X11 only](clipboard.md#primary-is-x11-only)), **Ctrl+Z / Ctrl+Shift+Z** (Ctrl+Y too) to undo
-and redo, and a **right-click menu**. Focusable by default; shows the text
+and redo, and a **right-click menu**. On the Cocoa backend the chords are ⌘
+instead — ⌘A, ⌘C/X/V, ⌘Z / ⇧⌘Z — and ⌃ types nothing
+([events.md](events.md#primary-modifier)). Focusable by default; shows the text
 cursor. `ev.preventDefault()` in your `onKeyDown`/`onMouseDown` suppresses
 the built-in editing behavior. To copy or paste from anywhere else — a
 canvas, a list, your own menu item — see [clipboard.md](clipboard.md).
@@ -1782,7 +1784,7 @@ becomes its own entry, and undoing steps back through it.
 
 Multi-line editable text on the same editing core as `<textinput>`:
 word-wraps at the content width, Enter inserts a newline (Ctrl+Enter fires
-`onSubmit`), Up/Down move between visual lines keeping a goal column,
+`onSubmit`, ⌘↩ on the Cocoa backend), Up/Down move between visual lines keeping a goal column,
 Home/End go to the start/end of the visual (wrapped) line, selection spans
 lines, and the view scrolls vertically to follow the caret (mouse wheel
 scrolls too).
@@ -1791,10 +1793,10 @@ The wheel reaches it through the same chain a `<box overflow="scroll">` is
 in, so a field whose text fits passes the gesture out to the pane or the
 window behind it rather than swallowing it.
 
-| prop            |                                                   |
-| --------------- | ------------------------------------------------- |
-| `rows`          | preferred height in text lines (default 3)        |
-| everything else | as `<textinput>` (`onSubmit` fires on Ctrl+Enter) |
+| prop            |                                                                |
+| --------------- | -------------------------------------------------------------- |
+| `rows`          | preferred height in text lines (default 3)                     |
+| everything else | as `<textinput>` (`onSubmit` fires on Ctrl+Enter, ⌘↩ on Cocoa) |
 
 ## `<image>`
 

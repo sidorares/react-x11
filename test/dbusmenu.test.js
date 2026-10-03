@@ -130,6 +130,29 @@ describe('shortcuts', () => {
     assert.equal(formatShortcut([['Control', 'S'], ['F2']]), 'Ctrl+S');
   });
 
+  test('where the primary modifier is ⌘, a chord prints the way a Mac menu prints it', () => {
+    const mac = (shortcut) => formatShortcut(shortcut, { primary: 'Super' });
+    // `Control` is the primary modifier, so ⌘ — and so is `Super`
+    assert.equal(mac([['Control', 'S']]), '⌘S');
+    assert.equal(mac([['Super', 'space']]), '⌘Space');
+    // glyphs, no separators, in the Mac's one order whatever order the
+    // chord was written in
+    assert.equal(mac([['Control', 'Shift', 'Z']]), '⇧⌘Z');
+    assert.equal(mac([['Shift', 'Control', 'Alt', 's']]), '⌥⇧⌘S');
+    assert.equal(mac([['Alt', 'F4']]), '⌥F4');
+    // the keys a Mac menu draws as glyphs, and the punctuation as before
+    assert.equal(mac([['Control', 'Return']]), '⌘↩');
+    assert.equal(mac([['Control', 'BackSpace']]), '⌘⌫');
+    assert.equal(mac([['Control', 'Left']]), '⌘←');
+    assert.equal(mac([['Control', 'plus']]), '⌘+');
+    assert.equal(mac([['F5']]), 'F5');
+    // and the default is the default
+    assert.equal(
+      formatShortcut([['Control', 'S']], { primary: 'Control' }),
+      'Ctrl+S',
+    );
+  });
+
   test('anything that is not aas formats as nothing at all', () => {
     _resetShortcutWarning();
     for (const bad of ['Ctrl+S', [], undefined, null, [[]], [['Control']]]) {
