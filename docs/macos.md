@@ -1872,9 +1872,10 @@ drawing it would like lifted — `sprites()`, asked every frame like
 Each lifted part is a layer of its own on the window root, in the same
 paint order as the promoted nodes (`src/cocoa/sprites.js`): its content a
 raster painted once by the part's own `paint`, its opacity and its
-transform — a matrix, which the bridge takes from `@windowkit/appkit` 0.19 —
-properties of the layer, and its animations keyframes the render server
-runs. The rules are the ones above, asked of the element at everywhere the
+transform — a matrix, which the bridge takes from `@windowkit/appkit` 0.19,
+or a matrix3d for a part turned out of the plane, which Core Animation draws
+in its perspective on the GPU — properties of the layer, and its animations
+keyframes the render server runs. The rules are the ones above, asked of the element at everywhere the
 part can be over its animations, with the element's own fade added to its
 ancestors': the element vouches for its inside, and leaves a hole where a
 lifted part is from the frame `spritesLifted` tells it so. A part given back

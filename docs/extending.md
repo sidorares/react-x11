@@ -1728,7 +1728,14 @@ are round), a `paint` that draws it **where it is in the
 window, at opacity 1 and untransformed** — the layer carries both — and a
 `version` whose change paints it again. Its `opacity` and its `transform`, CSS's `matrix(a, b, c,
 d, e, f)` as an array with `e` and `f` in device pixels, about an `origin`
-that defaults to the rect's centre, are what the layer shows at rest. Its
+that defaults to the rect's centre, are what the layer shows at rest. A
+part turned out of the plane hands over `matrix3d()`'s sixteen numbers
+instead, column by column, its translation and the distance its perspective
+divides by in device pixels: Core Animation draws the layer through the
+whole matrix, perspective and all, on the GPU. The presenter lifts such a
+part only where none of its corners is behind the viewer, at rest or in
+any keyframe, since past that plane its picture has no bounds, and asks
+about it where its corners are seen rather than where it was laid out. Its
 `animations` are keyframes for one of those two properties each: `values`,
 `keyTimes`, a `timings` curve per segment, a `duration`, a `repeat`
 (`Infinity` loops), `autoreverse`, and `hold` to stay on the last value. A
@@ -1826,8 +1833,10 @@ pixels moves the layer, but a move to another fraction of a pixel, or a new
 size, paints it again.
 
 Sprites need `@windowkit/appkit` 0.19 or later, which takes a transform as
-a matrix and a negative delay as one begun in the past: on an older bridge
-nothing is asked, and the element draws everything.
+a matrix or a matrix3d and a negative delay as one begun in the past: on an
+older bridge nothing is asked, and the element draws everything. A bridge
+that lists `matrix` and not `matrix3d` among its `transformForms()` lifts
+the parts in the plane and leaves those out of it to their elements.
 
 ### Elements that own a real X window
 

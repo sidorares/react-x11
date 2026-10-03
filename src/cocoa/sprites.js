@@ -27,7 +27,10 @@
 // `@windowkit/appkit` 0.19 (`transformForms()`) along with the negative
 // delay a part joined half way through needs, so that is the bridge sprites
 // ask for: on an older one nothing is asked and every part is drawn by its
-// element.
+// element. Or it is CSS's `matrix3d()`, a part turned out of the plane and
+// seen in a perspective, which Core Animation draws through the whole
+// matrix on the GPU: a part none of whose corners is behind the viewer, on a
+// bridge that takes one (`matrix3d`).
 //
 // A part none of which shows — scrolled out of its pane, or outside its own
 // clip — keeps its layer, cut to show nothing, up to a budget of raster for
@@ -68,6 +71,14 @@ const AFTER_CHILDREN = Number.MAX_SAFE_INTEGER;
 
 const IDENTITY = Object.freeze([1, 0, 0, 1, 0, 0]);
 
+// what a part with no bounds may reach (`_underDrawn`)
+const EVERYWHERE = Object.freeze({
+  x: -1e9,
+  y: -1e9,
+  width: 2e9,
+  height: 2e9,
+});
+
 const ORIGIN = Object.freeze({ x: 0, y: 0 });
 
 // what a part with no part lifted inside it is handed
@@ -98,7 +109,20 @@ const isRect = (r) =>
   r.width > 0 &&
   r.height > 0;
 
-const isMatrix = (m) => Array.isArray(m) && m.length === 6 && m.every(finite);
+// CSS's `matrix(a, b, c, d, e, f)`, or its `matrix3d()`'s sixteen numbers
+const isMatrix = (m) =>
+  Array.isArray(m) && (m.length === 6 || m.length === 16) && m.every(finite);
+
+const isSolid = (m) => m.length === 16;
+
+/** Does `sprite` turn out of the plane, at rest or in an animation? */
+function solidSprite(sprite) {
+  if (sprite.transform && isSolid(sprite.transform)) return true;
+  for (const a of sprite.animations ?? []) {
+    if (a.property === 'transform' && a.values.some(isSolid)) return true;
+  }
+  return false;
+}
 
 const isCurve = (t) =>
   typeof t === 'string' ||
@@ -203,12 +227,15 @@ const originOf = (sprite) =>
     y: sprite.rect.y + sprite.rect.height / 2,
   };
 
-/** `rect` through `m` about `origin`: the bounds of its four corners. */
+/** `rect` through `m` about `origin`: the bounds of its four corners, or
+ *  null where `m` is a matrix3d that puts a corner behind the viewer, past
+ *  which the plane's picture has no bounds. */
 function mapRect(rect, m, origin) {
   let x0 = Infinity;
   let y0 = Infinity;
   let x1 = -Infinity;
   let y1 = -Infinity;
+  const solid = isSolid(m);
   for (const [px, py] of [
     [rect.x, rect.y],
     [rect.x + rect.width, rect.y],
@@ -217,8 +244,18 @@ function mapRect(rect, m, origin) {
   ]) {
     const dx = px - origin.x;
     const dy = py - origin.y;
-    const x = m[0] * dx + m[2] * dy + m[4] + origin.x;
-    const y = m[1] * dx + m[3] * dy + m[5] + origin.y;
+    let x;
+    let y;
+    if (solid) {
+      // column-major, as `matrix3d()` writes it: the point (dx, dy, 0, 1)
+      const w = m[3] * dx + m[7] * dy + m[15];
+      if (!(w > W_NEAR)) return null;
+      x = (m[0] * dx + m[4] * dy + m[12]) / w + origin.x;
+      y = (m[1] * dx + m[5] * dy + m[13]) / w + origin.y;
+    } else {
+      x = m[0] * dx + m[2] * dy + m[4] + origin.x;
+      y = m[1] * dx + m[3] * dy + m[5] + origin.y;
+    }
     if (x < x0) x0 = x;
     if (y < y0) y0 = y;
     if (x > x1) x1 = x;
@@ -226,6 +263,10 @@ function mapRect(rect, m, origin) {
   }
   return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 }
+
+// A corner whose w is this close to the viewer's plane is as good as behind
+// it: projected that near, it lands off any window.
+const W_NEAR = 1e-6;
 
 function unionRect(a, b) {
   if (!a) return b;
@@ -242,7 +283,8 @@ function unionRect(a, b) {
 /**
  * Everywhere `sprite` can draw while its animations run: its reach through
  * its own transform and every transform it is animated through, out to
- * whole pixels and the antialiasing a raster is padded for. Between two
+ * whole pixels and the antialiasing a raster is padded for — or null, where
+ * one of those puts a corner of it behind the viewer. Between two
  * keyframes Core Animation interpolates the matrices by their parts, which
  * stays within a pixel of the two for the densely sampled keyframes a CSS
  * transform arrives as; an element whose keyframes are far apart, or whose
@@ -271,12 +313,18 @@ function extentOf(sprite) {
   if (about?.key !== key) {
     let box = mapRect(rel, m0, ORIGIN);
     for (const a of sprite.animations ?? []) {
-      if (a.property !== 'transform') continue;
-      for (const m of a.values) box = unionRect(box, mapRect(rel, m, ORIGIN));
+      if (a.property !== 'transform' || !box) continue;
+      for (const m of a.values) {
+        const at = mapRect(rel, m, ORIGIN);
+        box = at && unionRect(box, at);
+        if (!box) break;
+      }
     }
     about = { key, box };
     if (turns) EXTENTS.set(turns, about);
   }
+  // a corner behind the viewer, at rest or on the way: nowhere bounded
+  if (!about.box) return null;
   const box = {
     x: about.box.x + origin.x,
     y: about.box.y + origin.y,
@@ -311,7 +359,31 @@ function rasterRectOf(sprite) {
 }
 
 const sameMatrix = (a, b) =>
-  a === b || (a != null && b != null && a.every((v, i) => v === b[i]));
+  a === b ||
+  (a != null &&
+    b != null &&
+    a.length === b.length &&
+    a.every((v, i) => v === b[i]));
+
+/**
+ * A part's matrix in device pixels as the bridge takes it, in points: its
+ * translation over the scale and, for a matrix3d, its perspective row times
+ * it — S⁻¹·M·S, with S scaling x, y and z, so that a turn and a perspective
+ * of so many CSS pixels look the same at any scale.
+ */
+function inPoints(m, s) {
+  if (!isSolid(m)) {
+    return { matrix: [m[0], m[1], m[2], m[3], m[4] / s, m[5] / s] };
+  }
+  const p = m.slice();
+  p[12] /= s;
+  p[13] /= s;
+  p[14] /= s;
+  p[3] *= s;
+  p[7] *= s;
+  p[11] *= s;
+  return { matrix3d: p };
+}
 
 /**
  * The lifted parts of every element in one window: a layer each, its raster,
@@ -326,9 +398,10 @@ export class SpriteLayers {
     this.app = promotion.app;
     // a matrix and a negative delay are what a CSS animation needs from the
     // bridge, and @windowkit/appkit 0.19 is where both are
-    this.supported = Boolean(
-      this.native.transformForms?.()?.includes?.('matrix'),
-    );
+    const forms = this.native.transformForms?.();
+    this.supported = Boolean(forms?.includes?.('matrix'));
+    // and a part turned out of the plane, its matrix3d, the same release
+    this.solid = Boolean(forms?.includes?.('matrix3d'));
     // and a video's frames on a layer need its video surfaces
     this.videos = canLiftVideo(this.native);
     this.hosts = new Map(); // element -> Map(key -> state)
@@ -429,7 +502,12 @@ export class SpriteLayers {
           radius: sprite.clip ? (sprite.clipRadius ?? 0) : 0,
           bounds: null,
         };
+        // turned out of the plane, on a bridge that takes no matrix3d
+        if (!this.solid && solidSprite(sprite)) continue;
         const extent = extentOf(sprite);
+        // a corner behind the viewer: the element draws it, which it can cut
+        // where the plane meets the viewer's
+        if (!extent) continue;
         const bounds = cut.clip ? intersectRects(extent, cut.clip) : extent;
         if (parent) {
           // the parent was asked about everywhere it can be, and its layer
@@ -544,8 +622,9 @@ export class SpriteLayers {
         drawn.push(state.extent);
         continue;
       }
-      // the element draws it, where its own clip lets it show
-      const extent = extentOf(sprite);
+      // the element draws it, where its own clip lets it show — anywhere,
+      // for one with a corner behind the viewer and no clip
+      const extent = extentOf(sprite) ?? EVERYWHERE;
       const shows = sprite.clip ? intersectRects(extent, sprite.clip) : extent;
       if (shows) drawn.push(shows);
     }
@@ -776,7 +855,7 @@ export class SpriteLayers {
       }
     }
     if (!sameMatrix(prev.matrix, m)) {
-      out.transform = { matrix: [m[0], m[1], m[2], m[3], m[4] / s, m[5] / s] };
+      out.transform = inPoints(m, s);
       any = true;
     }
     if (any) this.native.setLayerProps(state.layer, out);
@@ -843,9 +922,7 @@ export class SpriteLayers {
       const opts = {
         values:
           a.property === 'transform'
-            ? a.values.map((m) => ({
-                matrix: [m[0], m[1], m[2], m[3], m[4] / s, m[5] / s],
-              }))
+            ? a.values.map((m) => inPoints(m, s))
             : a.values,
         duration: a.duration / 1000,
         id: caId,
