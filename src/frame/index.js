@@ -412,6 +412,9 @@ export function Frame({
       rect,
       props: s.table.snapshot(p),
       env: bridgedEnv(e, b),
+      // whether this side plays the pane's `<video src>`s for it — the
+      // Cocoa host does, for a pane process that cannot (paneplayer.js)
+      ...(paneApp?.playsForPanes && { players: true }),
     });
 
     return () => {
@@ -613,6 +616,8 @@ function PaneHostView({
         host.popUpMenu?.(msg);
       } else if (msg?.type === 'pane-menu-cancel') {
         host.cancelMenu?.(msg.menu);
+      } else if (msg?.type === 'pane-player') {
+        host.player?.(msg);
       } else if (msg?.type === 'pane-present' && msg.window != null) {
         host.presentWindow?.(msg);
       } else if (msg?.type === 'pane-cursor' && msg.window != null) {

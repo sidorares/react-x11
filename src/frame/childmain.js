@@ -225,10 +225,14 @@ export async function runFrameChild(transport, options = {}) {
   // (the Cocoa one) takes the channel itself: geometry and input in,
   // presents out. Feature-detected — the X11 pane path has a real window
   // and a real server and needs none of this.
-  root.app.attachPaneChannel?.({
-    send: (msg) => transport.send(msg),
-    onMessage: (cb) => transport.onMessage(cb),
-  });
+  root.app.attachPaneChannel?.(
+    {
+      send: (msg) => transport.send(msg),
+      onMessage: (cb) => transport.onMessage(cb),
+    },
+    // what the host does for the pane that a pane cannot do itself
+    { players: Boolean(hello.players) },
+  );
 
   let closing = false;
   const close = async () => {

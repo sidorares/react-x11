@@ -2138,8 +2138,10 @@ picture: the video is drawn for as long as the rounded clip holds it.
 
 Where `useSupports('mediaPlayback')` is true, `src` is a file or URL the
 platform plays with its own decoder, audio, seeking and streaming — on macOS
-AVFoundation, over a bridge with its player verbs (`createPlayer`).
-A path, a `file://` URL and an `http(s)` one, HLS included, all play.
+AVFoundation, over a bridge with its player verbs (`createPlayer`), and in
+a `<Frame>` pane, whose host plays it and sends the frames down
+([frame.md](frame.md#sizing-stacking-input)). A path, a `file://` URL and an
+`http(s)` one, HLS included, all play.
 
 ```jsx
 const ref = useRef(null);

@@ -1982,7 +1982,10 @@ while it plays, which answers only when there is a new one, so a covered
 30fps clip is thirty frames a second of the window's, each bounded to the
 picture, in the colours the player's layer shows. Over a bridge without the
 verbs `createPlayer` is absent from the app, `useSupports('mediaPlayback')`
-is false, and `src` refuses as it does on X11.
+is false, and `src` refuses as it does on X11. A `<Frame>` pane runs no
+AppKit, so nothing there would ever hear a player's events: its host plays
+its videos for it and sends the frames down (docs/frame.md, "A pane's
+videos").
 docs/architecture/video.md is the design record.
 
 ## Running as an app bundle
