@@ -1,6 +1,7 @@
 // <textinput>: a single-line editable field — value, caret and selection,
 // the keys, the mouse, the clipboard, the edit menu and painting. Undo/redo
-// is in edithistory.js and IME composition in preedit.js, installed below.
+// is in edithistory.js, IME composition in preedit.js and the Mac's editing
+// keys in textkeys.js, installed below.
 
 import { localTextStyleChanged } from '../styles.js';
 import { Yoga } from '../yoga.js';
@@ -32,6 +33,7 @@ import { installMethods } from './install.js';
 import { Node } from './node.js';
 import { TextInputPreedit } from './preedit.js';
 import { rangeBands } from './text.js';
+import { TextInputKeys } from './textkeys.js';
 
 /**
  * How long a caret stays in each of its two states, in milliseconds, on a
@@ -487,7 +489,11 @@ export class TextInputNode extends Node {
     const previous = this._keyNative;
     this._keyNative = ev.nativeEvent ?? null;
     try {
-      if (this._editKeyDown(ev)) ev.preventDefault();
+      // Where the app's shortcuts are ⌘ the keys are the Mac's (textkeys.js),
+      // and they come first: ⌃← and ⌃A mean something else to them than
+      // to the bindings in `_editKeyDown`.
+      const answered = this._macKeyDown(ev) ?? this._editKeyDown(ev);
+      if (answered) ev.preventDefault();
     } finally {
       this._keyNative = previous;
     }
@@ -1152,4 +1158,9 @@ export class TextInputNode extends Node {
 }
 
 // Undo/redo and IME composition live in their own files (see install.js).
-installMethods(TextInputNode, TextInputHistory, TextInputPreedit);
+installMethods(
+  TextInputNode,
+  TextInputHistory,
+  TextInputPreedit,
+  TextInputKeys,
+);

@@ -290,7 +290,9 @@ export class CocoaApp {
     // the text controls' Undo/Cut/Copy/Paste/Select All answer ⌘ rather
     // than ⌃, and the edit menu prints them the way a Mac menu does. The
     // menu bar already read a chord's `Control` as ⌘ (cocoa/globalmenu.js);
-    // this is the same rule for everything else that reads one.
+    // this is the same rule for everything else that reads one. Text is
+    // edited the Mac way with it too: ⌥ moves by word, ⌘ to the ends of a
+    // line and the document, ⌃ is Emacs's (src/nodes/textkeys.js).
     this.primaryModifier = 'Super';
 
     // AppKit-rendered control bezels. Its *presence* is the capability:
@@ -1566,6 +1568,8 @@ export class CocoaApp {
       keysym: decoded.keysym,
       baseKeysym: decoded.baseKeysym,
       codepoint: decoded.codepoint,
+      // more than one character, which no code point carries (keymap.js)
+      text: decoded.text,
       buttons: modifierMask(ev),
       group: 0,
       time: ev.time,

@@ -17,8 +17,10 @@ import {
   scrollbarHit,
   paintScrollbarThumb,
 } from './scrollbars.js';
+import { installMethods } from './install.js';
 import { rangeBands } from './text.js';
 import { CARET_WIDTH, CARET_RESERVE, TextInputNode } from './textinput.js';
+import { TextAreaKeys } from './textkeys.js';
 
 /**
  * <textarea>: multi-line editable text on the same editing core as
@@ -27,6 +29,8 @@ import { CARET_WIDTH, CARET_RESERVE, TextInputNode } from './textinput.js';
  * between visual lines keeping a goal column, Home/End are wrap-aware,
  * selection spans lines, and the view scrolls vertically to follow the
  * caret (wheel scrolls too). `rows` (default 3) sets the preferred height.
+ * Where the app's shortcuts are ⌘, the keys are the Mac's (textkeys.js):
+ * ⌘↑/⌘↓ for the ends of the value, ⌥↑/⌥↓ for a paragraph's.
  */
 export class TextAreaNode extends TextInputNode {
   /**
@@ -265,17 +269,11 @@ export class TextAreaNode extends TextInputNode {
       return true;
     }
     if ((k === XK_HOME || k === XK_END) && layout && this.value.length > 0) {
-      const pos = layout.caretPosition(this._caret);
-      const line = layout.lines[pos.line];
-      const y = line.y + (line.ascent + line.descent) / 2;
-      // indexAt clamps into the line: far left = line start; just past the
-      // right edge = end of visible content (before the newline)
-      const i =
-        k === XK_HOME
-          ? layout.indexAt(-1e6, y)
-          : layout.indexAt(line.x + line.width + 0.01, y);
       this._goalX = null;
-      this._moveCaret(i, ev.shiftKey);
+      this._moveCaret(
+        this._lineEdge(this._caret, k === XK_HOME ? -1 : 1),
+        ev.shiftKey,
+      );
       return true;
     }
     this._goalX = null;
@@ -391,3 +389,5 @@ export class TextAreaNode extends TextInputNode {
     ctx.restore();
   }
 }
+
+installMethods(TextAreaNode, TextAreaKeys);

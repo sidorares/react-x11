@@ -140,10 +140,14 @@ export interface KeyboardEvent<T = DrawnNode> extends SyntheticEvent<T> {
    * group and sends no other notice. */
   group: number;
   /** Unicode code point, undefined when the key produces no character —
-   * which includes every key a composition took (see `composing`). */
+   * which includes every key a composition took (see `composing`), a dead
+   * key on the Cocoa backend, and a key that typed more than one character
+   * there, whose text arrives as a composition that starts and ends on it. */
   codepoint?: number;
   /** The character the key produced, undefined for non-printing keys and
-   * for keys a composition took. */
+   * for the keys `codepoint` is undefined for. On the Cocoa backend it is
+   * what the layout typed with ⌥ applied — `ß` for ⌥S — while `keysym` is
+   * still the key. */
   key?: string;
   /** Whether this key belongs to an open composition — a dead key, or a key
    * of a Compose sequence. Its text arrives on the composition events
