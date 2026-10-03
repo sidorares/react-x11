@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.37.0](https://github.com/sidorares/react-x11/compare/v2.36.0...v2.37.0) (2026-10-03)
+
+
+### Features
+
+* **test:** renderX11 takes an appearance option and react-x11/test exports setAppearance, so a test can pin reduced motion, contrast and the accent and change them while mounted ([#854](https://github.com/sidorares/react-x11/issues/854)) ([9d90caa](https://github.com/sidorares/react-x11/commit/9d90caa74cd945177cb06407dfc5cc9d32a621fd))
+
 ## [2.36.0](https://github.com/sidorares/react-x11/compare/v2.35.0...v2.36.0) (2026-10-02)
 
 
