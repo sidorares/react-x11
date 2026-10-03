@@ -46,7 +46,13 @@ import {
   resolveTokens,
 } from '../../src/style.js';
 import type { Style } from '../../src/style.js';
-import { ctrlChordLetter, keysymOf } from '../../src/keysyms.js';
+import {
+  ctrlChordLetter,
+  keysymOf,
+  primaryModifier,
+  primaryModifierHeld,
+} from '../../src/keysyms.js';
+import type { PrimaryModifier } from '../../src/keysyms.js';
 import { closeEditMenu, editMenuOpen, openEditMenu } from '../../src/index.js';
 import type { EditMenuActions } from '../../src/index.js';
 
@@ -236,9 +242,17 @@ class SparklineNode extends Node {
 
   // A widget that answers a chord of its own reads the letter from keysyms
   // rather than copying the Shift rule.
-  handleKey(ev: { keysym?: number; codepoint: number }): boolean {
+  // …behind the app's primary modifier, which is ⌘ on the Cocoa backend
+  handleKey(ev: {
+    keysym?: number;
+    codepoint: number;
+    ctrlKey: boolean;
+    metaKey: boolean;
+  }): boolean {
     const letter: number | null = ctrlChordLetter(ev);
-    return letter === keysymOf('d');
+    const primary: PrimaryModifier = primaryModifier(this.app);
+    void primary;
+    return primaryModifierHeld(ev, this.app) && letter === keysymOf('d');
   }
 }
 

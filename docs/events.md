@@ -226,6 +226,32 @@ disagrees still has the raw mask: `ev.nativeEvent.buttons` is the state
 field as it arrived, and `MOD` in `react-x11/keysyms` names its bits
 (`MOD.Mod3`, `MOD.Lock` for Caps Lock, and so on).
 
+### The primary modifier {#primary-modifier}
+
+**On the Cocoa backend the editing chords are ⌘, not Ctrl.** ⌘ arrives as
+`metaKey` (the DOM's own macOS mapping), and the app says which of the two its
+shortcuts are pressed with: `app.primaryModifier` is `'Super'` there and absent
+everywhere else, X11 under XQuartz included. The built-in editors read it, so
+`<textinput>`'s Undo, Cut, Copy, Paste and Select All are ⌘Z, ⌘X, ⌘C, ⌘V and
+⌘A on a Mac, Redo is ⇧⌘Z, and the right-click menu prints them that way. A ⌃
+or ⌘ chord the field has no answer for is never typed as text — AppKit hands
+over the key's bare character with either held. A widget with chords of its
+own asks the same question with `primaryModifierHeld`:
+
+```js
+import { ctrlChordLetter, keysymOf, primaryModifierHeld } from 'react-x11/keysyms';
+
+onKeyDown={(ev) => {
+  if (primaryModifierHeld(ev, app) && ctrlChordLetter(ev) === keysymOf('d'))
+    duplicateLine();
+}}
+```
+
+It is the same rule a menu bar's `shortcut` follows there, where `Control`
+means ⌘ ([globalmenu.md](globalmenu.md#shortcuts-are-a-list-not-a-string)).
+Accelerators (`useAccelerator`, a drawn `MenuBar`'s bindings) still match a
+chord's `Control` literally.
+
 ## Handlers
 
 | handler                                                           | notes                                                                                                                                                       |

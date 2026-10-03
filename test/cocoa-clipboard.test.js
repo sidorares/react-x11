@@ -129,7 +129,7 @@ describe('selecting text leaves the pasteboard alone', () => {
     assert.equal(pb.text, ELSEWHERE);
   });
 
-  test('select-all, by call and by Ctrl+A — and Ctrl+C still copies', async () => {
+  test('select-all, by call and by ⌘A — and ⌘C still copies', async () => {
     const { native, app, wnd, doc } = await mountDocument();
     const pb = pasteboardOn(native, ELSEWHERE);
     const everything = 'Release notes\nEverything below this can be copied.';
@@ -141,7 +141,7 @@ describe('selecting text leaves the pasteboard alone', () => {
 
     doc.current.clearSelection();
     doc.current.focus();
-    press(app, wnd, { ...KEY_A, control: true });
+    press(app, wnd, { ...KEY_A, command: true });
     await tick();
     assert.equal(doc.current.selectedText(), everything);
     assert.deepEqual(pasteboardCalls(native), []);
@@ -149,13 +149,13 @@ describe('selecting text leaves the pasteboard alone', () => {
 
     // The same `copy()` the selection's own() goes through, asked for
     // CLIPBOARD this time: the one write the pasteboard should see.
-    press(app, wnd, { ...KEY_C, control: true });
+    press(app, wnd, { ...KEY_C, command: true });
     await tick();
     assert.deepEqual(native.of('pasteboardWriteText'), [[everything]]);
     assert.equal(pb.text, everything);
   });
 
-  test('shift+arrows and select-all in a field — and Ctrl+C still copies', async () => {
+  test('shift+arrows and select-all in a field — and ⌘C still copies', async () => {
     const input = React.createRef();
     const { native, app, wnd } = await mountCocoa(
       h('textinput', { ref: input, defaultValue: 'hello world' }),
@@ -171,13 +171,13 @@ describe('selecting text leaves the pasteboard alone', () => {
     assert.equal(input.current._selectedText(), 'ld', 'the premise');
     assert.deepEqual(pasteboardCalls(native), []);
 
-    press(app, wnd, { ...KEY_A, control: true });
+    press(app, wnd, { ...KEY_A, command: true });
     await tick();
     assert.equal(input.current._selectedText(), 'hello world');
     assert.deepEqual(pasteboardCalls(native), []);
     assert.equal(pb.text, ELSEWHERE);
 
-    press(app, wnd, { ...KEY_C, control: true });
+    press(app, wnd, { ...KEY_C, command: true });
     await tick();
     assert.deepEqual(native.of('pasteboardWriteText'), [['hello world']]);
     assert.equal(pb.text, 'hello world');

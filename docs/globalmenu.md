@@ -91,7 +91,9 @@ own ⌃ — so `[['Control', 'S']]` becomes ⌘S in the menu bar, which is what 
 Mac user expects Save to be. `Super` maps there too; `Shift` and `Alt` are
 themselves. A chord the `NSMenu` spelling cannot express is simply not
 printed beside the item — the binding still fires, because the app's own
-window answers it (below).
+window answers it (below). The text controls' own chords follow the same rule
+there, and so does the edit menu that prints them
+([events.md](events.md#primary-modifier)).
 
 The key is named the way GDK names it, so `plus` rather than `+` and `Prior`
 rather than `PgUp`, because that is what a panel's importer parses. Menus print

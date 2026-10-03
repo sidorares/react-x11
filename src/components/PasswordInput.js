@@ -4,7 +4,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { createStyles } from '../styles.js';
-import { useClipboard } from '../appcontext.js';
+import { useAppOrNull, useClipboard } from '../appcontext.js';
 import { windowIdOf } from '../windowid.js';
 import { useTheme } from './theme.js';
 import { Icon } from './Icon.js';
@@ -19,6 +19,7 @@ import {
   XK_KP_ENTER,
   XK_RETURN,
   ctrlChordLetter,
+  primaryModifierHeld,
 } from '../keysyms.js';
 
 const h = React.createElement;
@@ -169,6 +170,7 @@ export function PasswordInput({
   const inputRef = useRef(null);
   const hideTimer = useRef(null);
   const clipboard = useClipboard();
+  const app = useAppOrNull();
   const [ownValue, setOwnValue] = useState(defaultValue ?? '');
   const [ownRevealed, setOwnRevealed] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -282,13 +284,16 @@ export function PasswordInput({
       if (ev.shiftKey) paste('CLIPBOARD');
       return;
     }
-    if (ev.ctrlKey) {
+    if (ev.ctrlKey || ev.metaKey) {
       const letter = ctrlChordLetter(ev);
       // Ctrl+U clears the line, as readline and every pinentry on the desktop
-      // do; Ctrl+V pastes. Nothing for C, X or A — there is no selection to
-      // copy, and the secret does not leave by the clipboard.
-      if (letter === CTRL_U) commit('');
-      else if (letter === CTRL_V) paste('CLIPBOARD');
+      // do; Ctrl+V pastes — ⌘V on the Cocoa backend, where ⌃U still clears,
+      // as it does in a Mac terminal. Nothing for C, X or A — there is no
+      // selection to copy, and the secret does not leave by the clipboard.
+      // Any other chord is a command and never a character of the secret.
+      if (letter === CTRL_U && ev.ctrlKey) commit('');
+      else if (letter === CTRL_V && primaryModifierHeld(ev, app))
+        paste('CLIPBOARD');
       return;
     }
     // A printable character and only that: a control code is not text, and

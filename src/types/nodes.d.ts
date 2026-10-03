@@ -243,5 +243,11 @@ export interface NtkApp {
   createWindow(args?: Record<string, unknown>): NtkWindow;
   rootWindow(screen?: number): NtkWindow;
   close(): Promise<void>;
+  /**
+   * The modifier shortcuts are pressed with on this backend: `'Super'` (⌘)
+   * on Cocoa, absent — Ctrl — everywhere else. Read it through
+   * `primaryModifierHeld` from `react-x11/keysyms`.
+   */
+  readonly primaryModifier?: 'Control' | 'Super';
   [key: string]: any;
 }

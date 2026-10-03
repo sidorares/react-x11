@@ -286,6 +286,13 @@ export class CocoaApp {
     // X11's, where every toolkit hovers in a window without the keyboard.
     this.hoverNeedsActiveWindow = true;
 
+    // Shortcuts are pressed with ⌘ here (src/keysyms.js `primaryModifier`):
+    // the text controls' Undo/Cut/Copy/Paste/Select All answer ⌘ rather
+    // than ⌃, and the edit menu prints them the way a Mac menu does. The
+    // menu bar already read a chord's `Control` as ⌘ (cocoa/globalmenu.js);
+    // this is the same rule for everything else that reads one.
+    this.primaryModifier = 'Super';
+
     // AppKit-rendered control bezels. Its *presence* is the capability:
     // `useSupports('nativeControls')` and the widget set's `controls:
     // 'auto'` policy both test for this property, so a backend without it

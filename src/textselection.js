@@ -30,7 +30,7 @@
 
 import { callHandler } from './errors.js';
 import { lastInputTime } from './inputtime.js';
-import { ctrlChordLetter } from './keysyms.js';
+import { ctrlChordLetter, primaryModifierHeld } from './keysyms.js';
 import { codePoints, wordRangeAt } from './textrange.js';
 // --- who is showing a selection ------------------------------------------
 //
@@ -201,14 +201,14 @@ export class TextSelection {
   }
 
   /**
-   * Ctrl+A and Ctrl+C, run as this element's default action — which is why a
-   * surface is a focus target (a11y.js): the copy has to have somewhere to
-   * arrive. Nothing else is bound. A read-only document has no caret, so
-   * shift+arrows would be caret browsing, which is a mode rather than a
-   * default.
+   * Ctrl+A and Ctrl+C — ⌘A and ⌘C on the Cocoa backend — run as this
+   * element's default action, which is why a surface is a focus target
+   * (a11y.js): the copy has to have somewhere to arrive. Nothing else is
+   * bound. A read-only document has no caret, so shift+arrows would be caret
+   * browsing, which is a mode rather than a default.
    */
   keyDown(ev) {
-    if (!ev.ctrlKey) return;
+    if (!primaryModifierHeld(ev, this.node.app)) return;
     const letter = ctrlChordLetter(ev);
     if (letter === 0x61 /* a */) {
       this.selectAll();

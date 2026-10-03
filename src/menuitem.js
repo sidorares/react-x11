@@ -112,21 +112,62 @@ const KEY_LABELS = {
   Next: 'PgDn',
 };
 
+// The Mac prints a chord as glyphs, in one fixed order whatever order the
+// chord was written in — ⌃⌥⇧⌘ — and with nothing between them: `⇧⌘Z`, never
+// `Cmd+Shift+Z`. `Control` and `Super` are both ⌘ there, for the reason
+// `primaryModifier` gives below: a cross-platform chord is written in the
+// primary modifier, and the Mac's is Command.
+const MAC_MODIFIER_ORDER = ['Alt', 'Shift', 'Command'];
+const MAC_MODIFIER_GLYPHS = { Alt: '⌥', Shift: '⇧', Command: '⌘' };
+
+// The keys a Mac menu draws as a glyph rather than a word. The rest are
+// `KEY_LABELS`' answer, which is already the Mac's for punctuation.
+const MAC_KEY_LABELS = {
+  Return: '↩',
+  KP_Enter: '⌤',
+  Tab: '⇥',
+  BackSpace: '⌫',
+  Delete: '⌦',
+  Escape: '⎋',
+  Left: '←',
+  Right: '→',
+  Up: '↑',
+  Down: '↓',
+  Prior: '⇞',
+  Next: '⇟',
+  Home: '↖',
+  End: '↘',
+};
+
+const keyLabel = (key, labels) =>
+  labels[key] ??
+  KEY_LABELS[key] ??
+  (key.length === 1 ? key.toUpperCase() : key);
+
 /**
  * One `aas` alternative — `['Control', 'S']` — as the string a menu row
- * shows: `Ctrl+S`.
+ * shows: `Ctrl+S`, or `⌘S` where the primary modifier is ⌘.
  *
  * A single-character key is upper-cased because that is how every toolkit
  * prints one, and because dbusmenu carries the *key*, not the character it
  * types: `['Control', 's']` and `['Control', 'S']` are the same binding and
  * must not render differently.
  */
-function formatChord(chord) {
+function formatChord(chord, primary) {
   const { modifiers, key } = splitChord(chord);
-  const parts = [...modifiers].map((token) => MODIFIER_LABELS[token]);
-  if (key != null) {
-    parts.push(KEY_LABELS[key] ?? (key.length === 1 ? key.toUpperCase() : key));
+  if (primary === 'Super') {
+    const held = new Set(
+      [...modifiers].map((token) =>
+        token === 'Control' || token === 'Super' ? 'Command' : token,
+      ),
+    );
+    const glyphs = MAC_MODIFIER_ORDER.filter((token) => held.has(token))
+      .map((token) => MAC_MODIFIER_GLYPHS[token])
+      .join('');
+    return glyphs + (key == null ? '' : keyLabel(key, MAC_KEY_LABELS));
   }
+  const parts = [...modifiers].map((token) => MODIFIER_LABELS[token]);
+  if (key != null) parts.push(keyLabel(key, {}));
   return parts.join('+');
 }
 
@@ -137,11 +178,14 @@ function formatChord(chord) {
  * modifier tokens ending in the key. Only the first alternative is drawn —
  * a row has one shortcut column, and a menu that printed `Ctrl+S / F2` in it
  * would be wider than the menu for the benefit of the rarer binding.
+ *
+ * `primary` is the app's `primaryModifier` (keysyms.js): `'Super'` draws the
+ * chord the way a Mac menu does, `⇧⌘Z` for `['Control', 'Shift', 'Z']`.
  */
-export function formatShortcut(shortcut) {
+export function formatShortcut(shortcut, { primary = 'Control' } = {}) {
   const first = shortcut?.[0];
   if (!Array.isArray(first) || first.length === 0) return '';
-  return formatChord(first);
+  return formatChord(first, primary);
 }
 
 // What UI Events calls the modifiers, which is what `aria-keyshortcuts` is

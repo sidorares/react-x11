@@ -768,7 +768,10 @@ dispatcher never sees platform structs:
   scrolls.
 - Modifiers: `modifierFlags` → `shiftKey/ctrlKey/altKey/metaKey`
   (⌘ = meta, ⌥ = alt — the DOM's own macOS convention, which the event
-  API borrowed already).
+  API borrowed already). The app says ⌘ is what shortcuts are pressed
+  with (`primaryModifier: 'Super'`), so the text controls answer ⌘Z/⌘C/⌘V
+  and their edit menu prints `⌘C`
+  ([events.md](events.md#primary-modifier)).
 - Keys: `keyCode` (kVK) + `characters`/`charactersIgnoringModifiers` →
   `keysym` (rule above), `codepoint`, `key`, `repeat`. The Latin-chord
   rule from `keyboard.js` (shortcuts keep working under a Cyrillic

@@ -10,6 +10,7 @@ import {
   XK_PAGE_UP,
   XK_PAGE_DOWN,
   XK_END,
+  primaryModifierHeld,
 } from '../keysyms.js';
 import {
   scrollbarGeometry,
@@ -235,7 +236,8 @@ export class TextAreaNode extends TextInputNode {
     const layout = this._valueLayout();
 
     if (k === XK_RETURN || k === XK_KP_ENTER) {
-      if (ev.ctrlKey) {
+      // Ctrl+Enter, ⌘↩ on the Cocoa backend
+      if (primaryModifierHeld(ev, this.app)) {
         this._fireValueEvent('onSubmit', this.value, ev.nativeEvent);
         return true;
       }

@@ -331,7 +331,7 @@ export interface ChangeEvent<T = TextInputNode> extends Omit<
 }
 
 /**
- * `<textinput onSubmit>` — Enter, or Ctrl+Enter in a `<textarea>`. Same
+ * `<textinput onSubmit>` — Enter, or Ctrl+Enter in a `<textarea>` (⌘↩ on Cocoa). Same
  * shape as {@link ChangeEvent}; `nativeEvent` is the X key event.
  */
 export interface SubmitEvent<T = TextInputNode> extends Omit<
