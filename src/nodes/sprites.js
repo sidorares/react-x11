@@ -25,9 +25,12 @@ export class NodeSprites {
    * - `version`: compared with `===` from frame to frame; a change paints
    *   the part again. Left out, it is painted once.
    * - `opacity`, and `transform` — CSS's `matrix(a, b, c, d, e, f)` as an
-   *   array, `e` and `f` in device pixels — about `origin`, a point in
-   *   device pixels that defaults to `rect`'s centre: the values the layer
-   *   shows when no animation is running on it.
+   *   array, `e` and `f` in device pixels, or `matrix3d()`'s sixteen
+   *   numbers for a part turned out of the plane and seen in a perspective
+   *   — about `origin`, a point in device pixels that defaults to `rect`'s
+   *   centre: the values the layer shows when no animation is running on
+   *   it. A matrix3d part is lifted only where none of its corners is behind
+   *   the viewer, at rest or in any keyframe.
    * - `animations`: what the render server runs on it, each `{ id,
    *   property: 'opacity' | 'transform', values, keyTimes, timings,
    *   duration, delay, repeat, autoreverse, hold }`, with times in

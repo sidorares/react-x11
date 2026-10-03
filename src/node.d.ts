@@ -237,6 +237,23 @@ export interface PaintCachePlan {
  */
 export type SpriteMatrix = [number, number, number, number, number, number];
 
+/**
+ * CSS's `matrix3d()`: sixteen numbers, column by column, a point
+ * (x, y, z, 1) going to the first three rows over the fourth — a turn out
+ * of the plane and the perspective it is seen in, about the sprite's
+ * `origin`. Its translation (the 13th to 15th) is in device pixels, and so
+ * is the distance its perspective row divides by. A presenter lifts a
+ * sprite with one only where none of its corners is behind the viewer, at
+ * rest or in any keyframe, and where its bridge takes one.
+ */
+// prettier-ignore
+export type SpriteMatrix3D = [
+  number, number, number, number,
+  number, number, number, number,
+  number, number, number, number,
+  number, number, number, number,
+];
+
 /** A cubic-bezier's control points `[x1, y1, x2, y2]`, `x1` and `x2` in
  *  0..1, or one of Core Animation's curve names. */
 export type SpriteTiming = [number, number, number, number] | string;
@@ -252,8 +269,9 @@ export interface SpriteAnimation {
   id: string;
   property: 'opacity' | 'transform';
   /** At least two: opacities, or matrices for a transform — sampled densely
-   * where the element interpolates in a way the render server would not. */
-  values: number[] | SpriteMatrix[];
+   * where the element interpolates in a way the render server would not.
+   * A transform's may be `matrix3d`s, in any mix with `matrix`es. */
+  values: number[] | (SpriteMatrix | SpriteMatrix3D)[];
   /** One per value, 0 to 1, never decreasing; evenly spaced when left out. */
   keyTimes?: number[];
   /** One curve per segment, so one fewer than `values`; linear when left
@@ -321,7 +339,7 @@ export interface Sprite {
   /** What the layer shows when no animation runs on it; 1 when left out. */
   opacity?: number;
   /** …and the transform, about `origin`; the identity when left out. */
-  transform?: SpriteMatrix;
+  transform?: SpriteMatrix | SpriteMatrix3D;
   /** Device pixels, window coordinates; `rect`'s centre when left out. */
   origin?: { x: number; y: number };
   animations?: SpriteAnimation[];

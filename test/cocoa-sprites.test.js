@@ -313,6 +313,108 @@ test('a transform is a matrix in points, about the origin, and so is every keyfr
   ]);
 });
 
+/** CSS's `matrix3d()`, column by column: the identity with a perspective
+ *  row of `px` across, and a translation of (`tx`, `ty`), in device pixels. */
+// prettier-ignore
+const leaning = (px, tx = 0, ty = 0) => [
+  1, 0, 0, px,
+  0, 1, 0, 0,
+  0, 0, 1, 0,
+  tx, ty, 0, 1,
+];
+
+test('a transform out of the plane is a matrix3d in points, about the origin, its perspective scaled with it, and so is every keyframe', async (t) => {
+  const { m, node } = await shown(t, stage(), [
+    part('a', A, {
+      transform: leaning(0.001, 10, 4),
+      animations: [
+        {
+          id: 'turn',
+          property: 'transform',
+          values: [leaning(0), leaning(0.002, 20, 8)],
+          duration: 500,
+        },
+      ],
+    }),
+  ]);
+  const state = stateOf(m, node, 'a');
+  assert.ok(state, 'lifted');
+  // at scale 2: the translation halved, the perspective row doubled
+  assert.deepEqual(state.layer.props.transform, {
+    matrix3d: leaning(0.002, 5, 2),
+  });
+  // the anchor at the origin, rect's centre: as for a matrix of the plane
+  assert.deepEqual(state.layer.props.position, [40, 30]);
+  const [, keyPath, opts] = m.native.of('addAnimation')[0];
+  assert.equal(keyPath, 'transform');
+  assert.deepEqual(opts.values, [
+    { matrix3d: leaning(0) },
+    { matrix3d: leaning(0.004, 10, 4) },
+  ]);
+});
+
+test('a part a matrix3d puts behind the viewer, at rest or on the way, is drawn by its element', async (t) => {
+  // w is 1 + k·x about the centre: A's left edge is 40 device pixels from
+  // it and B's 20, so 0.03 puts A's behind the viewer and 0.06 B's
+  const { m, node } = await shown(t, stage(), [
+    part('a', A, { transform: leaning(0.03) }),
+    part('b', B, {
+      animations: [
+        {
+          id: 'turn',
+          property: 'transform',
+          values: [leaning(0), leaning(0.06)],
+          duration: 500,
+        },
+      ],
+    }),
+  ]);
+  assert.ok(stateOf(m, node, 'a') === undefined, 'at rest');
+  assert.ok(stateOf(m, node, 'b') === undefined, 'on the way');
+  assert.deepEqual(node.paints.at(-1), ['a', 'b'], 'the element draws both');
+});
+
+test('a part out of the plane is asked about where its corners are seen, which is not where it is laid out', async (t) => {
+  // seen leaning away to the left: w is 0.6 at A's left edge, which lands
+  // 67 device pixels left of its centre, where it was laid out 40
+  const over = (left) =>
+    h('box', {
+      key: 'over',
+      style: at(left, 25, 8, 5, { backgroundColor: '#00ff00' }),
+    });
+  const { m, node } = await shown(
+    t,
+    [stage(), over(8)],
+    [part('a', A, { transform: leaning(0.01) })],
+  );
+  assert.ok(stateOf(m, node, 'a') === undefined, 'over where it is seen');
+  await m.render([stage(), over(150)]);
+  m.frame();
+  assert.ok(stateOf(m, node, 'a'), 'lifted once nothing is over it');
+});
+
+test('a bridge that takes no matrix3d lifts a part in the plane and leaves one out of it to its element', async (t) => {
+  const flat = new Proxy(fakeCocoaBridge(), {
+    get: (target, k) =>
+      k === 'transformForms'
+        ? () => ['translate', 'rotate', 'scale', 'matrix']
+        : target[k],
+  });
+  const { m, node } = await shown(
+    t,
+    stage(),
+    [
+      part('a', A, { transform: [1, 0, 0, 1, 4, 0] }),
+      part('b', B, { transform: leaning(0.001) }),
+    ],
+    { native: flat },
+  );
+  assert.equal(m.promotion.sprites.solid, false);
+  assert.ok(stateOf(m, node, 'a'), 'in the plane');
+  assert.ok(stateOf(m, node, 'b') === undefined, 'out of it');
+  assert.deepEqual(node.paints.at(-1), ['b']);
+});
+
 test('a new version paints the part again; the same one, or a move by whole pixels, does not', async (t) => {
   const { m, node } = await shown(t, stage(), [part('a', A, { version: 1 })]);
   const state = stateOf(m, node, 'a');
