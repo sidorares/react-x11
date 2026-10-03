@@ -1570,6 +1570,36 @@ alpha, as before, and so does a bridge without the verb.
 `test/cocoa-composite.test.js` pins the decisions over a fake bridge, and,
 where the real bridge has the verb, that its colours are the draw's.
 
+### Drawing a surface through a matrix
+
+Every context the bridge makes resamples an image at
+`kCGInterpolationMedium`, and at medium CoreGraphics resamples the whole
+source for a draw through a matrix, whatever the clip. A surface drawn a
+tile at a time — a box in perspective, each tile under its own clip and the
+matrix of the plane over it, as `<Html>` draws one — so costs each tile all
+of the surface: 784 tiles of a 1400×1120 surface took 200ms on an M1 Pro,
+and 27ms at `kCGInterpolationLow`, which is bilinear, what a layer in
+perspective is drawn with. Keeping the CGImage the draw makes of the
+surface between draws changed nothing.
+
+The context takes canvas's own properties for it —
+
+```js
+ctx.save();
+ctx.imageSmoothingQuality = 'low';
+// …the tiles…
+ctx.restore();
+```
+
+— `imageSmoothingEnabled`, false for the nearest pixel, and
+`imageSmoothingQuality`, `'low'`, `'medium'` or `'high'`, over
+`ctxSetImageSmoothing` (@windowkit/appkit 0.23.0, windowkit/appkit#109).
+Both are state `save` and `restore` keep. A context starts at `'medium'`,
+where the bridge's contexts were always made, and not at canvas's `'low'`:
+an image drawn small keeps the quality it was drawn at. A bridge without
+the verb keeps both where they start, so a caller knows whether an
+assignment took by reading it back, as with `globalCompositeOperation`.
+
 ### A shadow from a tile
 
 CoreGraphics blurs a shadow on every fill that has one set, and what it
@@ -2244,7 +2274,8 @@ surface into another ✅ (`ctxDrawSurface`), shift a band in place ✅
 (`ctxSetBlendMode`, 0.7.0) and a row memcpy between surfaces of any two
 sizes ✅ (`blitSurface`, 0.7.0 — issue #498; the context feature-detects
 both, so an older bridge draws every composite as a CGImage under
-source-over). Still 🆕: a pattern fill (`createPattern`,
+source-over), and the resampling an `imageSmoothingQuality` sets ✅
+(`ctxSetImageSmoothing`, 0.23.0). Still 🆕: a pattern fill (`createPattern`,
 which `<Flow>`'s grid tiles ask for), radial gradients, and an explicit
 free (a surface goes with its handle's finalizer). The alternative — rasterize JS-side and use the raw-buffer
 upload — stays open; the API supports both so the choice can be

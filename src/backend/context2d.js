@@ -393,6 +393,13 @@ function meets(a, b) {
   );
 }
 
+/** The qualities `imageSmoothingQuality` takes, canvas's. */
+const SMOOTHING_QUALITIES = new Set(['low', 'medium', 'high']);
+
+/** What the bridge is told to resample with: the quality, or the nearest
+ *  pixel where smoothing is off. */
+const smoothingOf = (st) => (st.smoothing ? st.smoothingQuality : 'none');
+
 /**
  * The off switch for shadow tiles (src/backend/shadowtiles.js): every
  * shadow drawn by the bridge, as before them. For measuring the tiles
@@ -453,6 +460,9 @@ export class BackendContext2D {
       // null: nothing clipped. A rect (surface pixels): that rect. NON_RECT:
       // a clip this class cannot name.
       clip: null,
+      // how an image drawn scaled or turned is resampled
+      smoothing: true,
+      smoothingQuality: 'medium',
     };
     // What this bridge can do, asked once. Both verbs arrived together in
     // @windowkit/appkit 0.7.0, and anything older is a bridge that draws
@@ -461,6 +471,12 @@ export class BackendContext2D {
     // blit path is simply never taken.
     this._blendModes = typeof native.ctxSetBlendMode === 'function';
     this._blits = typeof native.blitSurface === 'function';
+    // and how an image is resampled, @windowkit/appkit 0.23.0's — asked
+    // with `in` as well, as `ctxPath` is below: a test's bridge that answers
+    // every name must not look like one that has it
+    this._smoothing =
+      'ctxSetImageSmoothing' in native &&
+      typeof native.ctxSetImageSmoothing === 'function';
     this._onDirty = null;
     // the recorded path, and whether the native one still matches it (a
     // chunked stroke leaves only its last chunk behind)
@@ -526,6 +542,10 @@ export class BackendContext2D {
       // holding another op has anything to say
       if (this._blendModes && st.gco !== 'source-over') {
         n.ctxSetBlendMode(surface, st.gco);
+      }
+      // and one made at 'medium', which a context starts at
+      if (this._smoothing && smoothingOf(st) !== 'medium') {
+        n.ctxSetImageSmoothing(surface, smoothingOf(st));
       }
       // a fresh surface is unclipped, whatever the old one had in force
       st.clip = null;
@@ -640,6 +660,48 @@ export class BackendContext2D {
     // composite the fallback draw would have blended.
     if (this._native.ctxSetBlendMode(this._s(), value) === false) return;
     this._state.gco = value;
+  }
+
+  /**
+   * Canvas's `imageSmoothingEnabled` and `imageSmoothingQuality`: how an
+   * image or a surface drawn scaled or turned is resampled — the nearest
+   * pixel with smoothing off, and otherwise `'low'`, which is bilinear,
+   * `'medium'` or `'high'`. A context starts at `'medium'`, which is what
+   * the bridge makes its contexts at, and not at canvas's `'low'`: an image
+   * drawn small keeps the quality it was drawn at. Both are state `save`
+   * and `restore` keep.
+   *
+   * On macOS `'medium'` resamples the whole source for a draw through a
+   * matrix, whatever the clip, so a surface drawn a tile at a time through
+   * a perspective — `<Html>`'s box out of the plane — costs each tile all
+   * of it: 784 tiles of a 1400x1120 surface took 200 ms on an M1 Pro, and
+   * 27 at `'low'` (windowkit/appkit#109).
+   *
+   * A bridge with no `ctxSetImageSmoothing` keeps both where they start,
+   * so a caller learns whether an assignment took by reading it back, as
+   * with `globalCompositeOperation`.
+   */
+  get imageSmoothingEnabled() {
+    return this._state.smoothing;
+  }
+
+  set imageSmoothingEnabled(value) {
+    if (!this._smoothing) return;
+    // the surface first: a fresh one is told the state it is taking over
+    const surface = this._s();
+    this._state.smoothing = !!value;
+    this._native.ctxSetImageSmoothing(surface, smoothingOf(this._state));
+  }
+
+  get imageSmoothingQuality() {
+    return this._state.smoothingQuality;
+  }
+
+  set imageSmoothingQuality(value) {
+    if (!this._smoothing || !SMOOTHING_QUALITIES.has(value)) return;
+    const surface = this._s();
+    this._state.smoothingQuality = value;
+    this._native.ctxSetImageSmoothing(surface, smoothingOf(this._state));
   }
 
   /**
