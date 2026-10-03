@@ -1705,6 +1705,11 @@ export class EventManager {
    *
    * `entry.handle(ev)` answers whether it took the key.
    *
+   * `entry.reserves(ev)`, optional, answers whether something *outside* the
+   * window is going to answer this key whatever we do — the macOS menu
+   * bar's key equivalents (`MenuBar`, delegated). Such a key is spent
+   * before any binding is offered it (`_runAccelerators`).
+   *
    * Registrations live on the **top-level** manager, which is the one thing
    * a `<popup>`, a nested `<window>` and the window itself all share — the
    * same grouping `_keyManager` resolves keys through. So a chord reaches
@@ -1740,11 +1745,30 @@ export class EventManager {
    * A menu that is *open* suppresses them by another route entirely: it
    * `preventDefault()`s the keys it is being driven with, one layer above
    * this (`components/Menu.js`).
+   *
+   * And a key one of them *reserves* reaches none of them. The Cocoa bridge
+   * shows us every key before `[NSApp sendEvent:]`, where the menu bar's
+   * key equivalent then runs its item regardless — so a binding here that
+   * answered ⌘S too would be a second command on one key, whichever of the
+   * two mounted last. Neither gate applies to that: the menu bar is not in
+   * the window, and a modal `<popup>` does not take keys from it.
    */
   _runAccelerators(ev) {
     const owner = this.topLevelManager;
     const entries = owner._accelerators;
     if (!entries?.size) return;
+    for (const entry of entries) {
+      let reserved = false;
+      try {
+        reserved = Boolean(entry.reserves?.(ev));
+      } catch (error) {
+        reportHandlerError(entry.anchor(), 'an accelerator', error);
+      }
+      if (reserved) {
+        ev.preventDefault();
+        return;
+      }
+    }
     const scopeRoot = owner._scopeRoot();
     const trapped = scopeRoot !== owner.node;
     for (const entry of [...entries].reverse()) {

@@ -204,19 +204,21 @@ const ARIA_MODIFIERS = {
  * dbusmenu's `aas` already has — so unlike the drawn menu, **every**
  * alternative is announced rather than only the first: a screen reader is
  * reading them out, not fitting them in a column.
+ *
+ * `primary` is `formatShortcut`'s: under `'Super'` a `Control` is ⌘, which
+ * UI Events calls `Meta`, so what is announced is what is drawn and bound.
  */
-export function ariaKeyShortcuts(shortcut) {
+export function ariaKeyShortcuts(shortcut, { primary = 'Control' } = {}) {
   if (!isValidShortcut(shortcut)) return undefined;
+  const name = (token) => {
+    if (!MODIFIER_TOKENS.has(token)) return KEY_LABELS[token] ?? token;
+    return primary === 'Super' && token === 'Control'
+      ? 'Meta'
+      : ARIA_MODIFIERS[token];
+  };
+  // a chord naming both `Control` and `Super` is one ⌘ there, said once
   return shortcut
-    .map((chord) =>
-      chord
-        .map((token) =>
-          MODIFIER_TOKENS.has(token)
-            ? ARIA_MODIFIERS[token]
-            : (KEY_LABELS[token] ?? token),
-        )
-        .join('+'),
-    )
+    .map((chord) => [...new Set(chord.map(name))].join('+'))
     .join(' ');
 }
 

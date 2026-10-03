@@ -1325,14 +1325,20 @@ with no D-Bus in sight. The macOS adapter consumes precisely that:
   standard Edit menu so text controls get theirs.
 - **Accelerators invert.** On X11 the app window matches chords itself;
   in `NSMenu` the key equivalent belongs to the item. The adapter maps
-  chords → `keyEquivalent` + modifier mask, and `useMenuAccelerators`
-  disarms for delegated bars (it already re-anchors on delegation — the
-  macOS case is "never arm"). The chord grammar gains one token:
-  **`Primary`** — ⌘ on macOS, `Control` elsewhere — because
-  `[['Control','S']]` written literally would demand ⌃S on a Mac.
-  `matchesShortcut`/`useAccelerator` accept it too, so non-menu
-  shortcuts follow the same convention. Existing menus keep working;
-  examples and docs move to `Primary`.
+  chords → `keyEquivalent` + modifier mask, reading `Control` as ⌘: a
+  cross-platform chord is written in the _primary_ modifier, and
+  `[['Control','S']]` taken literally would demand ⌃S on a Mac. No
+  `Primary` token was needed for that — `Control` already is one — and the
+  window's own matching reads it the same way (`app.primaryModifier`,
+  `matchesShortcut(ev, shortcut, { primary })`), so `useAccelerator` and a
+  drawn row answer and print ⌘ too. A delegated bar's bindings are **not**
+  disarmed wholesale, as first planned: the menu bar answers only the
+  chords it can spell, and F5, `plus` or a second alternative would have
+  gone dead. Instead `useMenuAccelerators` _reserves_ exactly the ones it
+  does answer (`answersShortcut`, cocoa/globalmenu.js), so no binding in
+  the window takes them — the bridge shows JS every key before
+  `[NSApp sendEvent:]`, and an item answered by both would run twice
+  ([events.md](events.md#the-macos-menu-bar)).
 - `ContextMenu` defaults to a native `NSMenu` popup on this backend
   (same adapter, `popUpMenuPositioningItem:`), with the drawn popup as
   the seam (`native={false}`) — the drawn one exists, works, and some

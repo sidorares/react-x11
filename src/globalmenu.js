@@ -54,7 +54,7 @@
 // third-party menus consume dbusmenu. A second exporter is roughly double the
 // work for no consumer that the first one does not already reach.
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { loadTransport, sessionBus } from './bus.js';
 import { desktopIntegrationEnabled } from './desktopintegration.js';
@@ -539,7 +539,20 @@ export function _resetGlobalMenuState() {
  * it. It is exported for a component that draws its own bar and wants the
  * same behaviour.
  */
-export function useGlobalMenu(
+export function useGlobalMenu(menus, options) {
+  return useGlobalMenuExport(menus, options).delegated;
+}
+
+/**
+ * `useGlobalMenu`, with the one more thing `MenuBar` needs to know about the
+ * delegate: which shortcuts it answers by itself. A panel answers none — it
+ * draws the rows, and the key is pressed in our window — but the macOS menu
+ * bar answers the ⌘ chords it holds as key equivalents, and a bar that
+ * matched them as well would run the item twice
+ * (`CocoaGlobalMenuExport.answersShortcut`). Read at key time, so it is
+ * whatever delegate is live then. Not public.
+ */
+export function useGlobalMenuExport(
   menus,
   { onSelect, onAboutToShow, enabled = true } = {},
 ) {
@@ -586,5 +599,10 @@ export function useGlobalMenu(
     exportRef.current?.update(menus ?? []);
   }, [menus]);
 
-  return enabled && exported;
+  const answersShortcut = useCallback(
+    (shortcut) => Boolean(exportRef.current?.answersShortcut?.(shortcut)),
+    [],
+  );
+
+  return { delegated: enabled && exported, answersShortcut };
 }

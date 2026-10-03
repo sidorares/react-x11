@@ -25,6 +25,16 @@
 // bit 1 and Num Lock is normally Mod2, so neither is in the comparison to
 // begin with. This is the line every hand-rolled binding gets wrong, which is
 // most of why it is here rather than in an application.
+//
+// ## Which modifier `Control` is
+//
+// The app's primary one (`primaryModifier`, src/keysyms.js): Ctrl, except on
+// the Cocoa backend, where a cross-platform chord's `Control` is ⌘ — the rule
+// a menu bar's key equivalents (cocoa/globalmenu.js) and a drawn row's label
+// (`formatShortcut`) already follow, so the key a menu prints is the key that
+// fires it. `Super` is ⌘ there too, and ⌃ has no token: a chord is matched
+// with it up. The matcher is pure, so the primary is an option rather than
+// something it looks up; the hooks hand it the app's.
 
 import {
   isEnabled,
@@ -68,17 +78,21 @@ export function chordKeysym(chord) {
  * The second path is **letters excluded** deliberately: it is exactly what
  * would make Ctrl+Shift+S fire a Ctrl+S binding, which is the thing the
  * modifier comparison is here to prevent.
+ *
+ * `primary` is the app's primary modifier: `'Super'` reads `Control` as ⌘,
+ * the way the Cocoa backend's menus print and install it.
  */
-export function matchesChord(ev, chord) {
+export function matchesChord(ev, chord, { primary = 'Control' } = {}) {
   const { modifiers, key } = splitChord(chord);
   if (key == null) return false;
   const wanted = keysymFromName(key);
   if (wanted === undefined) return false;
 
-  const ctrl = modifiers.has('Control');
+  const mac = primary === 'Super';
+  const ctrl = !mac && modifiers.has('Control');
   const alt = modifiers.has('Alt');
   const shift = modifiers.has('Shift');
-  const meta = modifiers.has('Super');
+  const meta = modifiers.has('Super') || (mac && modifiers.has('Control'));
   if (
     Boolean(ev?.ctrlKey) !== ctrl ||
     Boolean(ev?.altKey) !== alt ||
@@ -98,11 +112,14 @@ export function matchesChord(ev, chord) {
   return (!shift || Boolean(ev?.shiftKey)) && ev?.codepoint === wanted;
 }
 
-/** Does this key event press any alternative of an `aas` shortcut? */
-export function matchesShortcut(ev, shortcut) {
+/**
+ * Does this key event press any alternative of an `aas` shortcut? `options`
+ * is `matchesChord`'s: `{ primary }`.
+ */
+export function matchesShortcut(ev, shortcut, options) {
   if (!Array.isArray(shortcut)) return false;
   return shortcut.some(
-    (chord) => Array.isArray(chord) && matchesChord(ev, chord),
+    (chord) => Array.isArray(chord) && matchesChord(ev, chord, options),
   );
 }
 
@@ -117,11 +134,11 @@ export function matchesShortcut(ev, shortcut) {
  * the walk goes on, so a disabled "Save" does not also swallow the key from
  * whatever else claims it.
  */
-export function acceleratedItem(items, ev) {
+export function acceleratedItem(items, ev, options) {
   for (const item of visibleItems(items)) {
     if (isSeparator(item) || !isEnabled(item)) continue;
-    if (matchesShortcut(ev, item.shortcut)) return item;
-    const inner = acceleratedItem(item.items, ev);
+    if (matchesShortcut(ev, item.shortcut, options)) return item;
+    const inner = acceleratedItem(item.items, ev, options);
     if (inner) return inner;
   }
   return null;

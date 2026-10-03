@@ -93,7 +93,9 @@ themselves. A chord the `NSMenu` spelling cannot express is simply not
 printed beside the item — the binding still fires, because the app's own
 window answers it (below). The text controls' own chords follow the same rule
 there, and so does the edit menu that prints them
-([events.md](events.md#primary-modifier)).
+([events.md](events.md#primary-modifier)), and so do the window's own
+bindings: `useAccelerator`, and a drawn `MenuBar` or `ContextMenu`, which
+prints `⌘S` beside the row ([events.md](events.md#the-chord)).
 
 The key is named the way GDK names it, so `plus` rather than `+` and `Prior`
 rather than `PgUp`, because that is what a panel's importer parses. Menus print
@@ -109,6 +111,13 @@ That matters most in exactly this case. When the panel draws the menu, the
 keyboard is where the user is — so the app's own window still has to, and
 `MenuBar` keeps its bindings when it stops drawing. `accelerators={false}`
 turns them off for an application with a dispatcher of its own.
+
+The macOS menu bar is the one delegate that **does** deliver keys: it runs an
+item on the ⌘ chord it installed as its key equivalent, and it does that after
+the window has already seen the key. So there `MenuBar` reserves those chords
+— no binding in the window answers them, its own included, and the item runs
+once — and keeps answering the rest, the chords no `NSMenu` key equivalent can
+spell ([events.md](events.md#the-macos-menu-bar)).
 
 ## What happens on the wire
 

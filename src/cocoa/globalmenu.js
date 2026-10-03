@@ -35,6 +35,9 @@ const FLAG_COMMAND = 1 << 20;
  * user presses. Multi-chord sequences and non-character keys have no
  * NSMenu spelling and are dropped (the shortcut still works — the app's
  * own key handling is untouched; only the menu's hint goes unshown).
+ *
+ * `named` is the modifiers the chord itself asked for, before the ⌘ a bare
+ * key is given so that NSMenu has something to show.
  */
 function keyEquivalent(shortcut) {
   const chord = Array.isArray(shortcut) ? shortcut[0] : null;
@@ -48,7 +51,26 @@ function keyEquivalent(shortcut) {
     else key = part;
   }
   if (typeof key !== 'string' || [...key].length !== 1) return null;
-  return { key: key.toLowerCase(), modifiers: modifiers || FLAG_COMMAND };
+  return {
+    key: key.toLowerCase(),
+    modifiers: modifiers || FLAG_COMMAND,
+    named: modifiers,
+  };
+}
+
+/**
+ * Does the menu bar answer this `shortcut` itself, on the chord the app
+ * wrote? The ones it holds as a key equivalent that carries ⌘ because the
+ * chord said `Control` or `Super`: AppKit offers a ⌘ key to the main menu's
+ * `performKeyEquivalent:` inside `[NSApp sendEvent:]`, so the item fires
+ * with no help from us. A bare key padded out to ⌘ is not one — the chord
+ * names the bare key, and the window still answers that.
+ *
+ * The bridge shows JS every key before AppKit sees it, so a `MenuBar` that
+ * matched these too would run the item twice (`useMenuAccelerators`).
+ */
+export function answersShortcut(shortcut) {
+  return Boolean(keyEquivalent(shortcut)?.named & FLAG_COMMAND);
 }
 
 /**
@@ -115,6 +137,15 @@ export class CocoaGlobalMenuExport {
   update(menus) {
     this.nodes = snapshot(menus ?? [], this.alloc);
     if (this.app._activeGlobalMenu === this) this._install();
+  }
+
+  /**
+   * The delegate's half of the key: the shortcuts the menu bar answers on
+   * its own, which the window must then leave alone (`answersShortcut`).
+   * The D-Bus export has no such method, because a panel delivers no keys.
+   */
+  answersShortcut(shortcut) {
+    return answersShortcut(shortcut);
   }
 
   _install() {

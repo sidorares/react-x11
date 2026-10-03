@@ -8,7 +8,12 @@
  */
 import React, { useRef, useState } from 'react';
 import { startTrace } from 'react-x11/debug';
-import { XK_MULTI_KEY, isDeadKeysym, keysymFromName } from 'react-x11/keysyms';
+import {
+  XK_MULTI_KEY,
+  isDeadKeysym,
+  keysymFromName,
+  primaryModifier,
+} from 'react-x11/keysyms';
 import { Surface, decodeImageBytes } from 'react-x11/ntk';
 import type { DecodedImage } from 'react-x11/ntk';
 import type { Context2D, GlAreaNode } from 'react-x11/node';
@@ -1887,6 +1892,16 @@ function _System() {
     [['Control', 'S']],
   );
   void chord;
+  // …matched the way the menus match it: `Control` is ⌘ on the Cocoa backend
+  const asTheMenusDo: boolean = matchesShortcut(
+    { keysym: keysymFromName('s'), metaKey: true },
+    [['Control', 'S']],
+    { primary: primaryModifier(useApp()) },
+  );
+  void asTheMenusDo;
+  matchesShortcut({ keysym: 0x73 }, [['Control', 'S']], { primary: 'Super' });
+  // @ts-expect-error — the primary is a modifier token, and only these two
+  matchesShortcut({ keysym: 0x73 }, [['Control', 'S']], { primary: 'Meta' });
 
   const keys: KeyboardState = useKeyboardState();
   const layout: string | null = keys.layout;
