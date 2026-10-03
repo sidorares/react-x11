@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.38.0](https://github.com/sidorares/react-x11/compare/v2.37.0...v2.38.0) (2026-10-03)
+
+
+### Features
+
+* **cocoa:** a &lt;Frame&gt; pane's &lt;video src&gt; plays, on a player its host makes for it, where a pane runs no AppKit and a player made there never heard from AVFoundation, so a page's video in the browser example sat on its poster and a press did nothing ([#856](https://github.com/sidorares/react-x11/issues/856)) ([85651c6](https://github.com/sidorares/react-x11/commit/85651c6d038d355c1a630a2c483585f4e9dafa3f))
+
+
+### Performance Improvements
+
+* **cocoa:** a node inside a scroll pane that is scrolling gets no layer and keeps none, so a wheel over a list whose rows fade on hover costs a frame what it did before rows could go on layers, 57% of a core where it took 66% ([#857](https://github.com/sidorares/react-x11/issues/857)) ([4e6cca8](https://github.com/sidorares/react-x11/commit/4e6cca8c6c0415b02733f311c27ff70b7ec87c46))
+
 ## [2.37.0](https://github.com/sidorares/react-x11/compare/v2.36.0...v2.37.0) (2026-10-03)
 
 
