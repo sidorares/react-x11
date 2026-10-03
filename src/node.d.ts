@@ -73,6 +73,19 @@ export interface Context2D {
    * `'globalCompositeOperation' in ctx`.
    */
   globalCompositeOperation?: string;
+  /**
+   * Canvas's: whether an image drawn scaled or turned is smoothed, or
+   * drawn as its nearest pixels. Native contexts only (macOS, Windows), and
+   * only where the bridge can set it: assign and read back to know.
+   */
+  imageSmoothingEnabled?: boolean;
+  /**
+   * Canvas's: how it is smoothed, `'low'` being bilinear. A native context
+   * starts at `'medium'`, which on macOS resamples the whole source for a
+   * draw through a matrix whatever the clip — so a surface drawn a tile at
+   * a time is far cheaper at `'low'`.
+   */
+  imageSmoothingQuality?: 'low' | 'medium' | 'high';
   save(): void;
   restore(): void;
   translate(x: number, y: number): void;
