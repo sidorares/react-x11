@@ -1503,16 +1503,19 @@ export class BackendContext2D {
     this._dirty();
   }
 
-  clip(pathOrRule) {
-    if (
-      pathOrRule != null &&
-      typeof pathOrRule === 'object' &&
-      !this._replayPath(pathOrRule)
-    ) {
-      return;
-    }
+  /**
+   * `clip()`, `clip(rule)`, `clip(path)`, `clip(path, rule)`, as canvas has
+   * them and as `fill` takes them. The rule reaches the bridge as the flag
+   * `ctxFill` takes: SvgView cuts to a `<clipPath>` with its `clip-rule`, and
+   * a ring clipped `evenodd` by nonzero is a filled square. A bridge that
+   * predates the flag ignores it and clips nonzero, as every bridge did.
+   */
+  clip(pathOrRule, maybeRule) {
+    const hasPath = pathOrRule != null && typeof pathOrRule === 'object';
+    const rule = hasPath ? maybeRule : pathOrRule;
+    if (hasPath && !this._replayPath(pathOrRule)) return;
     this._state.clip = this._clipAfter();
-    this._native.ctxClip(this._path());
+    this._native.ctxClip(this._path(), rule === 'evenodd');
   }
 
   /**
@@ -1528,6 +1531,10 @@ export class BackendContext2D {
    * sets — the damage rect, a scroll viewport, a square-cornered `overflow`
    * — are whole pixels under a translate, and those are the ones this
    * recognises.
+   *
+   * It answers for either fill rule. One rect is one closed subpath, wound
+   * once round everything inside it, so `evenodd` and `nonzero` cut the
+   * same pixels; a path of more than one shape is never a rect here.
    */
   _pathRect() {
     const cmds = this._cmds;
