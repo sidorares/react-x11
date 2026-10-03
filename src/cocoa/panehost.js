@@ -8,6 +8,11 @@
 // sheet, a tooltip, a dialog. A pane process runs no AppKit, so each is an
 // NSWindow made here, showing the ring the pane draws it into the same way
 // (`CocoaPaneSubwindow`, src/cocoa/panewindow.js), with its input sent back.
+//
+// And the players its `<video src>`s ask for, which a process with no
+// AppKit would never hear from: each is a player here, its events and its
+// frames sent back (`HostedPlayer`, src/cocoa/paneplayer.js).
+import { HostedPlayer } from './paneplayer.js';
 import { withoutActions } from './quiet.js';
 
 /** One shared surface on glass: a sublayer of a window's root layer, its
@@ -135,6 +140,39 @@ export class CocoaPaneHost extends PaneLayer {
     this._windows = new Map();
     /** @type {Map<number, () => void>} the pane's open menus, by its id */
     this._menus = new Map();
+    /** @type {Map<string, HostedPlayer>} the pane's players, by its id */
+    this._players = new Map();
+  }
+
+  /**
+   * A `pane-player` message: one of the pane's `<video src>`s made, steered
+   * or let go of its player. A player that cannot be made says so the way
+   * one that cannot play does, as a `player-error`.
+   */
+  player(msg) {
+    if (this.destroyed) return;
+    if (msg.op !== 'create') {
+      this._players.get(msg.player)?.handle(msg);
+      if (msg.op === 'release') this._players.delete(msg.player);
+      return;
+    }
+    if (this._players.has(msg.player)) return;
+    try {
+      this._players.set(
+        msg.player,
+        new HostedPlayer(this.app, (m) => this._send?.(m), msg),
+      );
+    } catch (err) {
+      this._send?.({
+        type: 'pane-player-event',
+        player: msg.player,
+        ev: {
+          type: 'player-error',
+          id: msg.player,
+          message: err?.message ?? String(err),
+        },
+      });
+    }
   }
 
   /**
@@ -298,12 +336,15 @@ export class CocoaPaneHost extends PaneLayer {
   }
 
   /** The pane is going, and every window it had here goes with it — a pane
-   * that crashed with a menu open leaves no menu behind. */
+   * that crashed with a menu open leaves no menu behind, and one that
+   * crashed playing leaves no sound. */
   destroy() {
     if (this.destroyed) return;
     for (const cancel of [...this._menus.values()]) cancel();
     this._menus.clear();
     for (const entry of [...this._windows.values()]) this._drop(entry);
+    for (const hosted of this._players.values()) hosted.release();
+    this._players.clear();
     super.destroy();
   }
 }

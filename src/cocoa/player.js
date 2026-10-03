@@ -24,24 +24,16 @@ export function canPlay(native) {
 }
 
 /**
- * One file or URL, playing or not. `width`/`height` are the picture's once
- * the item is ready (0 before), `duration` its length in seconds (`Infinity`
- * for a live stream, NaN before it is known).
+ * What a player knows and who hears it: the state its `player-*` events
+ * say, the same whichever process the player is in — this one's
+ * (`CocoaPlayer`), or a `<Frame>` host's on a pane's behalf
+ * (src/cocoa/paneplayer.js). `width`/`height` are the picture's once the
+ * item is ready (0 before), `duration` its length in seconds (`Infinity`
+ * for a live stream, NaN before it is known). A subclass sends `set` and
+ * `seek` on.
  */
-export class CocoaPlayer {
-  constructor(app, src, options = {}) {
-    this.app = app;
-    this._native = app._native;
-    const made = this._native.createPlayer(String(src), {
-      autoPlay: Boolean(options.autoPlay),
-      loop: Boolean(options.loop),
-      muted: Boolean(options.muted),
-      volume: typeof options.volume === 'number' ? options.volume : 1,
-      rate: typeof options.playbackRate === 'number' ? options.playbackRate : 1,
-    });
-    this.id = made.id;
-    /** the AVPlayerLayer, a layer handle */
-    this.layer = made.layer;
+export class PlayerState {
+  constructor() {
     this.width = 0;
     this.height = 0;
     this.duration = NaN;
@@ -51,11 +43,9 @@ export class CocoaPlayer {
     this.error = null;
     this.released = false;
     this._listeners = new Set();
-    app._players.set(this.id, this);
   }
 
-  /** A `player-*` event from the bridge: the state it says, then whoever
-   *  listens. */
+  /** A `player-*` event: the state it says, then whoever listens. */
   _event(ev) {
     if (this.released) return;
     switch (ev.type) {
@@ -96,6 +86,36 @@ export class CocoaPlayer {
     return () => this._listeners.delete(fn);
   }
 
+  play() {
+    // HTML plays an ended item from its start
+    if (this.ended) this.seek(0);
+    this.set({ paused: false });
+  }
+
+  pause() {
+    this.set({ paused: true });
+  }
+}
+
+/** One file or URL, played by this process's bridge. */
+export class CocoaPlayer extends PlayerState {
+  constructor(app, src, options = {}) {
+    super();
+    this.app = app;
+    this._native = app._native;
+    const made = this._native.createPlayer(String(src), {
+      autoPlay: Boolean(options.autoPlay),
+      loop: Boolean(options.loop),
+      muted: Boolean(options.muted),
+      volume: typeof options.volume === 'number' ? options.volume : 1,
+      rate: typeof options.playbackRate === 'number' ? options.playbackRate : 1,
+    });
+    this.id = made.id;
+    /** the AVPlayerLayer, a layer handle */
+    this.layer = made.layer;
+    app._players.set(this.id, this);
+  }
+
   /** What `paused`, `playbackRate`, `volume`, `muted` and `loop` say now;
    *  what is left out stays. */
   set({ paused, playbackRate, volume, muted, loop } = {}) {
@@ -109,16 +129,6 @@ export class CocoaPlayer {
     if (typeof muted === 'boolean') settings.muted = muted;
     if (typeof loop === 'boolean') settings.loop = loop;
     this._native.playerSet(this.id, settings);
-  }
-
-  play() {
-    // HTML plays an ended item from its start
-    if (this.ended) this.seek(0);
-    this.set({ paused: false });
-  }
-
-  pause() {
-    this.set({ paused: true });
   }
 
   seek(seconds) {

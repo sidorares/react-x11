@@ -6,7 +6,7 @@
 // Six messages, all objects with a `type`:
 //
 //   parent → child
-//     hello    { protocol, src, display, rect, props, env }   first, once
+//     hello    { protocol, src, display, rect, props, env, players? }   first, once
 //     update   { props, env }        full snapshots, one per parent commit
 //     unmount  {}                    run close handlers, unmount, exit
 //

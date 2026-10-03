@@ -39,6 +39,7 @@ import { CocoaColorSampler } from './screencolor.js';
 import { CocoaFilePanels } from './filepanels.js';
 import { CocoaFontManager } from './fonts.js';
 import { releaseImageUpload } from '../backend/context2d.js';
+import { PanePlayer, canShowPanePlayers } from './paneplayer.js';
 import { CocoaPlayer, canPlay } from './player.js';
 import { CocoaSurface } from './surface.js';
 import { CocoaSymbols } from './symbols.js';
@@ -224,8 +225,17 @@ export class CocoaApp {
     // what `useSupports('mediaPlayback')` and `<video src>` ask
     // (src/mediaplayback.js), so an app over an older bridge, or a test's
     // fake without them, refuses `src` the way X11 does.
+    //
+    // A `<Frame>` pane plays nothing itself. It runs no NSApplication, so
+    // nothing pumps the bridge's events there: AVFoundation opened the item
+    // and its `player-*` events never arrived, and a page's video sat on
+    // its poster as a player nobody could start. A host that plays for it
+    // says so in the hello, and `attachPaneChannel` puts the pane's player
+    // here then (src/cocoa/paneplayer.js); one that does not leaves a pane
+    // refusing `src`, its poster shown and `onError` told.
     this._players = new Map();
-    if (canPlay(native)) {
+    const pane = options.pane ?? process.env.REACT_X11_FRAME === '1';
+    if (canPlay(native) && !pane) {
       this.createPlayer = (src, options) => new CocoaPlayer(this, src, options);
     }
 
@@ -520,6 +530,15 @@ export class CocoaApp {
    */
   createPaneHost(wnd, { send } = {}) {
     return new CocoaPaneHost(this, wnd, { send });
+  }
+
+  /**
+   * Whether this app plays a pane's `<video src>` for it — the pane host
+   * makes the player and sends its frames down (src/cocoa/paneplayer.js).
+   * What a `<Frame>` tells its pane in the hello.
+   */
+  get playsForPanes() {
+    return !this._paneMode && canPlay(this._native);
   }
 
   /**
@@ -909,9 +928,11 @@ export class CocoaApp {
   /**
    * The pane's end of the frame channel (childmain hands it over,
    * feature-detected so the X11 pane path never notices): geometry and
-   * input come in, pane-present and pane-cursor go out.
+   * input come in, pane-present and pane-cursor go out. `players` is the
+   * host's word that it plays the pane's `<video src>`s, which makes
+   * `createPlayer` here — before the pane's first render, which asks.
    */
-  attachPaneChannel(channel) {
+  attachPaneChannel(channel, { players = false } = {}) {
     if (!this._paneMode) return;
     this._paneSend = (msg) => {
       try {
@@ -920,7 +941,19 @@ export class CocoaApp {
         // the host is going away; its shutdown owns the rest
       }
     };
+    if (players && canShowPanePlayers(this._native)) {
+      this.createPlayer = (src, options) => new PanePlayer(this, src, options);
+    }
     channel.onMessage((msg) => {
+      // a player is the app's, not a window's
+      if (msg?.type === 'pane-player-event') {
+        this._players.get(msg.player)?._event(msg.ev);
+        return;
+      }
+      if (msg?.type === 'pane-player-frame') {
+        this._players.get(msg.player)?._frame(msg);
+        return;
+      }
       const pane = this._paneWindow ?? [...this._windows.values()][0];
       if (!pane) return;
       if (msg?.type === 'pane-rect') {

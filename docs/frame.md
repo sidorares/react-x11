@@ -287,6 +287,22 @@ ring in it (`src/cocoa/panehost.js`):
 - **The pane's windows go with it.** A pane that exits or unmounts takes
   every window the host shows for it, and their grab.
 
+**A pane's videos.** A Cocoa pane runs no AppKit, so a player it made would
+open the item and never hear AVFoundation say a word — a `<video src>` in a
+pane sat on its poster and could not be started. So the host plays it
+(`src/cocoa/paneplayer.js`): the hello tells the pane the host plays for
+it, which is what makes `useSupports('mediaPlayback')` true there, and the
+pane's `<video>` holds a player whose verbs go up as `pane-player` messages
+and whose events come back down. The picture comes down the way the pane's
+own goes up, the other way round: the host copies the frame showing into
+one of a ring of three shared IOSurfaces and names it, and the pane copies
+it out into the element's surface. A pane has no layers to lift a part
+onto, so its video is always drawn, which costs the copy a covered video
+costs in a window — the frame once into the ring, once out of it. A host
+over a bridge with no player says nothing in the hello, and the pane
+refuses `src` as X11 does. A pane that exits takes its players, and their
+sound, with it.
+
 `backgroundColor` in the frame's `style` is what shows before the pane's
 first frame and after one dies — the same server-painted rectangle
 `<foreign>` documents.

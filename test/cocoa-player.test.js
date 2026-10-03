@@ -12,11 +12,14 @@ import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 
-import { NoMediaPlaybackError, useSupports } from '../src/index.js';
+import { CocoaApp } from '../src/cocoa/app.js';
+import { NoMediaPlaybackError, createRoot, useSupports } from '../src/index.js';
+import { setScaleForTests } from '../src/scale.js';
 import {
   cleanupCocoa,
   fakeCocoaBridge,
   mountCocoa,
+  tick,
 } from './helpers/cocoa-bridge.js';
 
 const h = React.createElement;
@@ -272,4 +275,49 @@ test('a bridge with no player refuses src, as X11 does', async () => {
   assert.equal(typeof app.createPlayer, 'undefined');
   assert.equal(errors.length, 1);
   assert.ok(errors[0] instanceof NoMediaPlaybackError);
+});
+
+test('a <Frame> pane its host does not play for refuses src', async () => {
+  // a pane runs no NSApplication, so AVFoundation's KVO would never reach
+  // it — a player of its own is one nobody can start, and the host's is
+  // one only a host that says so in the hello lends it
+  // (test/cocoa-pane-players.test.js)
+  const native = fakeCocoaBridge();
+  const app = new CocoaApp(native, { pane: true });
+  setScaleForTests(app, 2, 'cocoa');
+  app._frameInterval = 0;
+  let deliver = null;
+  app.attachPaneChannel({
+    send() {},
+    onMessage: (cb) => {
+      deliver = cb;
+    },
+  });
+  let supported = null;
+  function Probe() {
+    supported = useSupports('mediaPlayback');
+    return null;
+  }
+  const errors = [];
+  const root = await createRoot({ app });
+  try {
+    root.render(
+      h('window', { width: 200, height: 120, embeddable: true }, [
+        h(Probe, { key: 'probe' }),
+        video({ onError: (e) => errors.push(e) }),
+      ]),
+    );
+    await tick();
+    // laid out by the host, and a frame painted: the element asks then
+    deliver({ type: 'pane-rect', width: 200, height: 120, scale: 2 });
+    app._tickFrames();
+    await tick();
+    assert.equal(typeof app.createPlayer, 'undefined');
+    assert.equal(supported, false);
+    assert.equal(native.of('createPlayer').length, 0);
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0] instanceof NoMediaPlaybackError);
+  } finally {
+    await root.unmount();
+  }
 });
