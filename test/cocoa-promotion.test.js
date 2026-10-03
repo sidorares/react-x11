@@ -507,68 +507,141 @@ test('a round clip a square one cuts again is a box in a box', async () => {
 });
 
 test('a row under a scrollbar runs in the render server, the thumb drawn over it on a layer of its own above it and out of the bitmap, and back in the bitmap once no layer is under it', async () => {
-  const row = {
-    height: 20,
-    marginTop: 50,
-    flexShrink: 0,
-    backgroundColor: '#ff0000',
-    animation: {
-      backgroundColor: { to: '#00ff00', duration: 900, alternate: true },
-    },
-  };
-  let pane = null;
-  const m = await mountCocoa(
-    h(
-      'box',
-      {
-        ref: (x) => (pane = x),
-        style: { width: 200, height: 100, overflow: 'scroll' },
-        scrollbarColor: '#0000ff80',
+  const clock = withFrameClock();
+  try {
+    const row = {
+      height: 20,
+      marginTop: 50,
+      flexShrink: 0,
+      backgroundColor: '#ff0000',
+      animation: {
+        backgroundColor: { to: '#00ff00', duration: 900, alternate: true },
       },
-      box(row),
-      box({ height: 1000, flexShrink: 0 }),
-    ),
-  );
-  const node = pane.children[0];
-  const thumbOf = () => pane._scrollbars()[0];
-  assert.ok(
-    node.abs.x + node.abs.width > thumbOf().x &&
-      node.abs.y > thumbOf().y + thumbOf().height,
-    'across the track, below the thumb',
-  );
-  assert.equal(node._promoted, true);
-  assert.equal(m.promotion.thumbs.size, 0, 'nothing under the thumb');
-  assert.ok(!pane._thumbsLifted);
+    };
+    let pane = null;
+    const m = await mountCocoa(
+      h(
+        'box',
+        {
+          ref: (x) => (pane = x),
+          style: { width: 200, height: 100, overflow: 'scroll' },
+          scrollbarColor: '#0000ff80',
+        },
+        box(row),
+        box({ height: 1000, flexShrink: 0 }),
+      ),
+    );
+    const node = pane.children[0];
+    const thumbOf = () => pane._scrollbars()[0];
+    assert.ok(
+      node.abs.x + node.abs.width > thumbOf().x &&
+        node.abs.y > thumbOf().y + thumbOf().height,
+      'across the track, below the thumb',
+    );
+    assert.equal(node._promoted, true);
+    assert.equal(m.promotion.thumbs.size, 0, 'nothing under the thumb');
+    assert.ok(!pane._thumbsLifted);
 
-  pane.scrollTo(40);
-  m.frame();
-  assert.equal(node._promoted, true, 'the thumb over it takes nothing back');
-  const layers = m.promotion.thumbs.get(pane);
-  assert.ok(layers, 'the thumb is on a layer');
-  assert.equal(pane._thumbsLifted, true, 'and out of the bitmap');
-  const thumb = layers.get('y').layer;
-  const bar = thumbOf();
-  assert.equal(thumb.parent, rootLayer(m));
-  assert.deepEqual(thumb.props.frame, [
-    bar.x / 2,
-    bar.y / 2,
-    bar.width / 2,
-    bar.height / 2,
-  ]);
-  assert.deepEqual(thumb.props.backgroundColor, [0, 0, 1, 128 / 255]);
-  assert.equal(thumb.props.cornerRadius, 3);
-  assert.ok(
-    thumb.props.zPosition > layerOf(m, node).props.zPosition,
-    "above the row, as it is painted after the pane's children",
-  );
-  assert.equal(m.node._animating.size, 0, 'and no frames');
+    pane.scrollTo(40);
+    m.frame();
+    // a pane that is scrolling keeps what is in it in the bitmap, where its
+    // blit carries it: a layer would move every frame
+    assert.equal(node._promoted, false, 'off its layer while the pane moves');
+    assert.ok(m.node._animating.has(node), 'the clock has the loop');
+    assert.equal(m.promotion.thumbs.size, 0);
 
-  pane.scrollTo(0);
-  m.frame();
-  assert.equal(m.promotion.thumbs.size, 0, 'no layer under it');
-  assert.equal(thumb.parent, null);
-  assert.ok(!pane._thumbsLifted, 'painted in the bitmap again');
-  assert.equal(node._promoted, true);
+    clock.advance(250);
+    m.frame();
+    assert.equal(node._promoted, true, 'the pane still: handed over again');
+    const layers = m.promotion.thumbs.get(pane);
+    assert.ok(layers, 'the thumb is on a layer');
+    assert.equal(pane._thumbsLifted, true, 'and out of the bitmap');
+    const thumb = layers.get('y').layer;
+    const bar = thumbOf();
+    assert.equal(thumb.parent, rootLayer(m));
+    assert.deepEqual(thumb.props.frame, [
+      bar.x / 2,
+      bar.y / 2,
+      bar.width / 2,
+      bar.height / 2,
+    ]);
+    assert.deepEqual(thumb.props.backgroundColor, [0, 0, 1, 128 / 255]);
+    assert.equal(thumb.props.cornerRadius, 3);
+    assert.ok(
+      thumb.props.zPosition > layerOf(m, node).props.zPosition,
+      "above the row, as it is painted after the pane's children",
+    );
+    assert.equal(m.node._animating.size, 0, 'and no frames');
+
+    pane.scrollTo(0);
+    m.frame();
+    assert.equal(m.promotion.thumbs.size, 0, 'no layer under it');
+    assert.equal(thumb.parent, null);
+    assert.ok(!pane._thumbsLifted, 'painted in the bitmap again');
+    clock.advance(250);
+    m.frame();
+    assert.equal(node._promoted, true);
+    assert.equal(m.promotion.thumbs.size, 0, 'the thumb clear of it');
+  } finally {
+    clock.restore();
+  }
+});
+
+test('a row whose fade starts while its list scrolls stays in the bitmap, and one that has a layer gives it back, until the list has been still a quarter of a second', async () => {
+  const clock = withFrameClock();
+  try {
+    const row = (bg) => ({
+      height: 20,
+      flexShrink: 0,
+      backgroundColor: bg,
+      transition: { backgroundColor: 80 },
+    });
+    let pane = null;
+    const list = (a, b) =>
+      h(
+        'box',
+        {
+          key: 'pane',
+          ref: (x) => (pane = x),
+          style: { width: 200, height: 100, overflow: 'scroll' },
+        },
+        kbox('a', row(a)),
+        kbox('b', row(b)),
+        kbox('rest', { height: 1000, flexShrink: 0 }),
+      );
+    const m = await mountCocoa(list('#ff0000', '#ff0000'));
+    const [a, b] = pane.children;
+
+    // the pointer's row fades in a still list: a layer, as before
+    await m.render(list('#00ff00', '#ff0000'));
+    m.frame();
+    assert.equal(a._promoted, true);
+
+    // a wheel step: the row with a layer gives it back, and the row the
+    // pointer comes to fades on the clock
+    pane.scrollTo(10);
+    await m.render(list('#00ff00', '#00ff00'));
+    m.frame();
+    assert.equal(a._promoted, false, 'given back as the list moves');
+    assert.equal(b._promoted, false, 'not taken while it moves');
+    assert.ok(m.node._animating.has(b), 'its fade on the clock');
+
+    // a frame between two steps is still the scroll
+    clock.advance(100);
+    await m.render(list('#ff0000', '#00ff00'));
+    m.frame();
+    assert.equal(a._promoted, false, 'nor between its steps');
+
+    // still for a quarter of a second, the clock's fades done: the next
+    // fade is a layer's again
+    clock.advance(250);
+    m.frame();
+    await m.render(list('#00ff00', '#00ff00'));
+    m.frame();
+    assert.equal(a._promoted, true);
+  } finally {
+    clock.restore();
+  }
 });
 
 test('a loop given back carries on where the render server had it, and is handed over again where the clock had got to', async () => {

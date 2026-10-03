@@ -1801,6 +1801,26 @@ pane at its tracks — and the thumb is back in the bitmap in the frame no
 layer is under it any more. Without it every row of a list was under the
 track, and a list of pulsing rows was the clock's at the display's rate.
 
+**Not while the pane scrolls.** A node inside a pane that scrolled in the
+last 250 ms gets no layer, keeps none and is offered none (`_scrolling`):
+its layer would move every frame the pane is painted anyway, and the
+pane's blit carries it in the bitmap. The window marks the panes a frame
+scrolls (`_pendingScrolls`), and promotion notes them before anything
+else, since a wheel steps a pane 60 times a second against a display's 75
+or 120 and the frames between its steps are still the scroll. A refusal
+for it is not remembered for the layout, as the others are, since a
+scroll ends without laying anything out. The case is a list whose rows
+fade on hover: a wheel brings row after row under the pointer, and each
+kept a layer for the grace, was asked every frame whether it might stay
+and had its raster synced as the pane moved it. On components' 100,000-row
+`<Table>` that cost a wheel 29% more of every frame than painting the
+fades in the bitmap did, 57% of a core to 66%. A loop on a row comes off
+with the rest, carries on on the clock where it had got to, and is offered
+again a quarter of a second after the pane stops. So a pane that code
+scrolls every frame, a ticker or a smooth scroll of its own, keeps
+everything in it on the clock for as long as it moves: its layers would
+have moved every frame too.
+
 **A loop the clock runs is offered again.** Nothing about a loop ever asks
 twice — a transition ends and the next one is offered afresh, but a loop
 turned down at its start would run on the clock, a frame every refresh,
