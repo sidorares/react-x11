@@ -1609,6 +1609,39 @@ an image drawn small keeps the quality it was drawn at. A bridge without
 the verb keeps both where they start, so a caller knows whether an
 assignment took by reading it back, as with `globalCompositeOperation`.
 
+### A filter's colour functions
+
+`filter`, canvas's again, is a CSS filter list the context applies to what
+it draws after it, and `save` and `restore` keep it:
+
+```js
+ctx.save();
+ctx.filter = 'grayscale(1)';
+ctx.drawImage(surface, x, y); // grey
+ctx.restore();
+```
+
+The context applies the colour functions — `grayscale()`, `sepia()`,
+`saturate()`, `hue-rotate()`, `invert()`, `brightness()`, `contrast()` —
+and `opacity()` (`src/backend/filter.js`). Each of them leaves alpha as it
+is, so it is a linear map of premultiplied colour, and drawing a shape in
+the colour it makes of a fill's is drawing the shape and filtering it: a
+fill, a stroke, a gradient's stops, a glyph run's ink and a symbol are
+filtered so, at no cost. An image, a surface and a text layout that
+carries colours of its own are filtered by their pixels — read with
+`ctxGetImageData`, run through the matrices, put on a bitmap of their own
+and drawn — which is a pass over the pixels on the JavaScript thread for
+every draw. A shadow is cast after the filter, in its own colour, and
+faded with what `opacity()` fades.
+
+`blur()`, `drop-shadow()` and a `url()` reach past what is drawn, which
+this does not apply, so a list with one in it does not stick; nor does
+any on a bridge without the pixel verbs. As with the other properties
+here, a caller knows by reading `filter` back. `<Html>` draws a CSS
+`filter`'s colour functions so where it sticks, and from a read back
+where it does not — X11, whose server runs no colour matrix and answers a
+read a round trip later.
+
 ### A shadow from a tile
 
 CoreGraphics blurs a shadow on every fill that has one set, and what it
