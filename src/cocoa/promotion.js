@@ -28,7 +28,9 @@
 // square corners cuts the layer to its box, a row half out of its list as
 // much as a spinner inside a card. A scrollbar's thumb drawn over it goes
 // on a layer of its own above it instead (`_syncThumbs`). And no ancestor
-// may fade, because the layer would not be faded with it. Declining is always
+// may fade, because the layer would not be faded with it. Nor may it be in a
+// pane that is scrolling (`_scrolling`): its layer would move every frame
+// the bitmap is painted anyway. Declining is always
 // safe: the frame clock runs the animation exactly as it does without this
 // file. The same test runs again every frame, so a node that becomes
 // overlapped, hidden, clipped, faded or non-plain returns to the bitmap in
@@ -36,6 +38,7 @@
 // loop the clock runs is offered again once the scene would take it
 // (`wouldTake`), where it is in its cycle. docs/macos.md §"Layer
 // promotion" is the account.
+import { now } from '../nodes/animation.js';
 import { BoxNode } from '../nodes/box.js';
 import { addDamageRect, damageToPaint } from '../nodes/damage.js';
 import { intersectRects } from '../nodes/rects.js';
@@ -70,6 +73,19 @@ const THUMB_COLOUR = 'rgba(0, 0, 0, 0.25)';
 // for 48 cards. A second is longer than any such gap and shorter than a
 // user's attention span for a layer that is only holding still.
 const IDLE_GRACE_MS = 1000;
+
+// How long after a pane last scrolled a node inside it may have a layer
+// again (`_scrolling`). A wheel steps a pane sixty times a second against a
+// display's 75 or 120, so a scroll has still frames in it, and a node
+// promoted in one of those came off its layer again in the next. And a
+// sprinkle of fades on rows scrolled under the pointer is the case it is
+// for: on a 100,000-row table each hovered row kept a layer for the grace,
+// asked again every frame whether it might stay and its raster synced as
+// the pane moved it, and a wheel cost 29% more of every frame than painting
+// the fades in the bitmap did (react-x11-components' perf sweep, round 45).
+// A loop on a row comes off with the rest and is offered again once the
+// pane has been still this long (`wouldTake`).
+const SCROLL_QUIET_MS = 250;
 
 // Past this many bare-rect claims on one raster the passes cost more than
 // the repaint they save (the layer presenter's rule, per raster).
@@ -327,6 +343,8 @@ export class CocoaPromotion {
     // layers are under
     this.thumbs = new Map(); // pane -> Map(axis -> { layer, props })
     this._thumbsWanted = null;
+    // when each scroll pane last scrolled, on the frame clock (`_scrolling`)
+    this._scrolledAt = new WeakMap(); // pane -> ms
     this._claiming = false;
   }
 
@@ -474,6 +492,9 @@ export class CocoaPromotion {
    */
   frame(root, layoutRan) {
     if (layoutRan) this.layoutGen++;
+    // before anything can return early: a still frame between a wheel's
+    // steps has to know the pane was moving in the one before
+    this._noteScrolls(root);
     // what elements offer, asked before anything is decided: an answer is
     // about the element's own drawing, not about the layers
     const offers = this.sprites.ask(root);
@@ -506,12 +527,16 @@ export class CocoaPromotion {
           const { node, key } = candidates[i];
           if (this.promoted.has(node) || !this.animations.has(node)) continue;
           const cut = { thumbs: new Set(), round: true };
-          const reach = key && promotableNode(node) ? reachOf(node) : null;
+          const scrolling = this._scrolling(node);
+          const reach =
+            key && promotableNode(node) && !scrolling ? reachOf(node) : null;
           if (reach && this._clear(node, reach, cut)) {
             for (const pane of cut.thumbs) wanted.add(pane);
             this._promote(node, root, clipOf(cut, reach));
           } else {
-            this.denied.set(node, this.layoutGen);
+            // a scene answers the same way until it is laid out again; a
+            // scroll is over in a moment, and lays nothing out to say so
+            if (!scrolling) this.denied.set(node, this.layoutGen);
             this.animations.drop(node, true);
           }
         }
@@ -552,6 +577,7 @@ export class CocoaPromotion {
   _mayStay(node, key) {
     if (!key || !promotableNode(node)) return false;
     if (this.releasing.has(node)) return false; // its grace ran out
+    if (this._scrolling(node)) return false;
     const cut = { thumbs: new Set(), round: true };
     const reach = reachOf(node);
     if (!reach || !this._clear(node, reach, cut)) return false;
@@ -573,6 +599,9 @@ export class CocoaPromotion {
     if (this.window.destroyed || node.destroyed) return false;
     if (this.promoted.has(node)) return true;
     if (!promotableNode(node) || !this._paintKey(node)) return false;
+    // asked before the frame, by the window's loop pass
+    this._noteScrolls(node.root);
+    if (this._scrolling(node)) return false;
     const reach = reachOf(node);
     if (!reach) return false;
     if (!this._clear(node, reach, { thumbs: new Set(), round: true })) {
@@ -583,6 +612,30 @@ export class CocoaPromotion {
     // nothing out — no longer stands
     this.denied.delete(node);
     return true;
+  }
+
+  /** The panes `root`'s frame scrolled: the window keeps them until it
+   *  takes the frame's damage, which is after this. */
+  _noteScrolls(root) {
+    const pending = root?._pendingScrolls;
+    if (!pending?.size) return;
+    const t = now();
+    for (const pane of pending) this._scrolledAt.set(pane, t);
+  }
+
+  /**
+   * Is `node` inside a pane that is scrolling — one that moved this frame,
+   * or within `SCROLL_QUIET_MS` of it? Its layer would move every frame
+   * the pane is painted anyway, and the frame keeps the node in the bitmap,
+   * where a pane's scroll blit carries it.
+   */
+  _scrolling(node) {
+    const t = now();
+    for (let n = node.parent; n && !n.isWindow; n = n.parent) {
+      const at = this._scrolledAt.get(n);
+      if (at !== undefined && t - at < SCROLL_QUIET_MS) return true;
+    }
+    return false;
   }
 
   _promote(node, root, clip = null) {
