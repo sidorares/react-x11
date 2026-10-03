@@ -73,7 +73,7 @@ export function useAppearanceWhen(enabled) {
  * | `selection` | the fill under a selected menu or list row — a darker cut of the accent on macOS — or **null** |
  * | `contrast` | `'normal'` or `'high'` |
  * | `reducedMotion` | `true` when the user asked for less animation |
- * | `source` | `'portal'`, `'xsettings'`, `'macos'`, `'cache'`, or null |
+ * | `source` | `'portal'`, `'xsettings'`, `'macos'`, `'windows'`, `'cache'`, `'test'` (pinned by `react-x11/test`), or null |
  *
  * **`'no-preference'` means use your own default**, not "use light". And
  * `accent` is null far more often than not, so fall back to your own brand

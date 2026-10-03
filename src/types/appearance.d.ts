@@ -20,10 +20,10 @@ export type ColorSchemePreference = 'system' | 'light' | 'dark';
  *
  * `'cache'` is the answer this machine gave last time, read off disk before
  * the first render so it does not start from the defaults. A real rung
- * replaces it a moment later.
+ * replaces it a moment later. `'test'` is a value `react-x11/test` pinned.
  */
 export type AppearanceSource =
-  'portal' | 'xsettings' | 'macos' | 'cache' | null;
+  'portal' | 'xsettings' | 'macos' | 'windows' | 'cache' | 'test' | null;
 
 export interface SystemAppearance {
   readonly colorScheme: ColorScheme;

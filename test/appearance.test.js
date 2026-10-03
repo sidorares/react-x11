@@ -654,6 +654,43 @@ describe('the macOS rung', () => {
     }
   });
 
+  // **A pin outlives a ladder that was already climbing.** A test that
+  // follows the real desktop starts the ladder, and the watcher it spawned
+  // can answer after the next test has pinned: taken, that answer paints the
+  // pinned test in this Mac's colours. Same for anything a rung says later.
+  test('an answer that lands while a test pin is held is refused', async () => {
+    const spawned = [];
+    _setMacOSSpawnForTests(() => fakeWatcher(spawned));
+    try {
+      await withNoBus(async () => {
+        const ladder = systemAppearance();
+        await pollUntil(() => spawned.length === 1, 'the watcher');
+        setAppearanceForTests({ colorScheme: 'dark', reducedMotion: true });
+        spawned[0].stdout.write('{"dark":false,"accent":[1,0,0]}\n');
+        await ladder;
+        assert.deepEqual(
+          [
+            appearanceSnapshot().source,
+            appearanceSnapshot().colorScheme,
+            appearanceSnapshot().accent,
+            appearanceSnapshot().reducedMotion,
+          ],
+          ['test', 'dark', null, true],
+        );
+
+        // released, the desktop is asked again and its answer is taken
+        setAppearanceForTests(null);
+        const again = systemAppearance();
+        await pollUntil(() => spawned.length === 2, 'a fresh watcher');
+        spawned[1].stdout.write('{"dark":false,"accent":[1,0,0]}\n');
+        assert.equal((await again).source, 'macos');
+        assert.equal(appearanceSnapshot().accent, '#ff0000');
+      });
+    } finally {
+      _setMacOSSpawnForTests(null);
+    }
+  });
+
   // Dying *before* answering is osascript failing, not a change: replacing
   // that one would loop on whatever is wrong with it.
   test('a watcher that dies before answering is not replaced', async () => {
@@ -1014,6 +1051,49 @@ describe('the remembered answer', () => {
       await systemAppearance();
     });
     await assert.rejects(() => fs.stat(cachedFile()), { code: 'ENOENT' });
+  });
+
+  // `cleanup()` releases after every test, and releasing falls back to the
+  // defaults. Those are not an answer either: written, they replaced the
+  // developer's remembered desktop once per test, and the next app they ran
+  // drew its first frame light on a dark desktop.
+  test('a test pin and its release leave the remembered answer alone', async () => {
+    const remembered = JSON.stringify({
+      v: 1,
+      colorScheme: 'dark',
+      accent: '#ed5b00',
+      reducedMotion: true,
+    });
+    await write(remembered);
+    _resetAppearance();
+    setAppearanceForTests({ colorScheme: 'light', contrast: 'high' });
+    assert.equal(await fs.readFile(cachedFile(), 'utf8'), remembered);
+    await cleanup();
+    assert.equal(await fs.readFile(cachedFile(), 'utf8'), remembered);
+    // and, released, it is what the next read is served from again
+    assert.equal(appearanceSnapshot().source, 'cache');
+    assert.equal(appearanceSnapshot().colorScheme, 'dark');
+  });
+
+  test('cleanup releases a pin, and only a pin', async () => {
+    // no Mac to answer, on a Mac too, so XSETTINGS is the rung that does
+    _setMacOSSpawnForTests(() => {
+      throw new Error('no osascript here');
+    });
+    try {
+      await withNoBus(async () => {
+        const app = {};
+        setXSettingsForTests(app, new Map([['Net/ThemeName', 'Yaru-dark']]));
+        await systemAppearance({ app });
+        await cleanup();
+        // a suite that resolved the appearance for real keeps it
+        assert.equal(appearanceSnapshot().source, 'xsettings');
+        assert.equal(appearanceSnapshot().colorScheme, 'dark');
+        endXSettings(app);
+      });
+    } finally {
+      _setMacOSSpawnForTests(null);
+    }
   });
 });
 

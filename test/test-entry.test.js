@@ -6,8 +6,11 @@
 // something.
 import { test, afterEach, describe } from 'node:test';
 import assert from 'node:assert';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import React from 'react';
 
 import {
@@ -24,13 +27,14 @@ import {
   waitForPixel,
   countPixels,
   withFrameClock,
+  setAppearance,
   createMockApp,
   XK_RETURN,
   XK_ESCAPE,
   XK_DOWN,
   keysymOf,
 } from '../src/testing/index.js';
-import { Button, Select, Dialog } from '../src/index.js';
+import { Button, Select, Dialog, useSystemAppearance } from '../src/index.js';
 
 const h = React.createElement;
 const require = createRequire(import.meta.url);
@@ -602,4 +606,139 @@ test('the wheel is drivable both ways: notches, and a touchpad', async () => {
   await userEvent.wheel(pane, { deltaY: 0.5, smooth: true });
   assert.deepStrictEqual(deltas.at(-1), [24, true]);
   assert.strictEqual(pane.scrollY, 120);
+});
+
+// **The desktop's appearance, pinned and changed.** An app's component that
+// follows reduced motion, contrast or the accent has to be testable the way
+// one that follows the scheme is — first render and live change both — or
+// its tests inject the value through a prop and test a different component.
+describe("the desktop's appearance", () => {
+  const seen = [];
+  function Motion() {
+    const { reducedMotion, colorScheme, source } = useSystemAppearance();
+    seen.push(`${source}:${colorScheme}:${reducedMotion}`);
+    return h('text', null, reducedMotion ? 'still' : 'moving');
+  }
+
+  test('a component reading reducedMotion re-renders when the pin changes', async () => {
+    seen.length = 0;
+    const { getByText, queryByText } = await renderX11(h(Motion), {
+      fonts,
+      colorScheme: 'dark',
+      appearance: { reducedMotion: true },
+    });
+    // pinned from the very first render, not corrected a frame later
+    assert.strictEqual(seen[0], 'test:dark:true');
+    assert.ok(getByText('still'));
+
+    await setAppearance({ reducedMotion: false });
+    assert.ok(getByText('moving'));
+    assert.strictEqual(queryByText('still'), null);
+    // merged over the pin: naming one value kept the scheme
+    assert.strictEqual(seen.at(-1), 'test:dark:false');
+
+    await setAppearance({ reducedMotion: true });
+    assert.ok(getByText('still'));
+    assert.strictEqual(seen.at(-1), 'test:dark:true');
+  });
+
+  // The flush reaches the screen, not only React: the accent goes through
+  // the palette into a `$token` the node tree resolves, and a pixel is the
+  // only thing that proves the frame was painted.
+  test('the change is painted by the time setAppearance resolves', async () => {
+    const { ctx } = await renderX11(
+      h('box', {
+        style: { width: 40, height: 40, backgroundColor: '$accent' },
+      }),
+      { fonts, appearance: { accent: '#f7821b', contrast: 'high' } },
+    );
+    await expectPixel(ctx, 5, 5, '#f7821b', { tolerance: 2 });
+    await setAppearance({ accent: '#1f9ede' });
+    await expectPixel(ctx, 5, 5, '#1f9ede', { tolerance: 2 });
+  });
+
+  // A pinned value is the test's, and the remembered answer is the
+  // developer's: running a suite must leave the file their next app starts
+  // from as it found it.
+  test('a pin never reaches the cache a real app starts from', async () => {
+    const savedHome = process.env.XDG_CACHE_HOME;
+    const savedOff = process.env.REACT_X11_NO_APPEARANCE_CACHE;
+    const home = mkdtempSync(join(tmpdir(), 'rx11-test-pin-'));
+    process.env.XDG_CACHE_HOME = home;
+    delete process.env.REACT_X11_NO_APPEARANCE_CACHE;
+    try {
+      await renderX11(h(Motion), {
+        fonts,
+        colorScheme: 'dark',
+        appearance: { reducedMotion: true, accent: '#f7821b' },
+      });
+      await setAppearance({ contrast: 'high' });
+      await cleanup();
+      assert.strictEqual(
+        existsSync(join(home, 'react-x11', 'appearance.json')),
+        false,
+      );
+    } finally {
+      if (savedHome === undefined) delete process.env.XDG_CACHE_HOME;
+      else process.env.XDG_CACHE_HOME = savedHome;
+      if (savedOff !== undefined) {
+        process.env.REACT_X11_NO_APPEARANCE_CACHE = savedOff;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  // Each of these would otherwise pass a test that proved nothing.
+  test('a pin that would pin nothing, or be lost, throws', async () => {
+    const box = h('box', { style: { flexGrow: 1 } });
+    await assert.rejects(
+      () => renderX11(box, { appearance: { reduceMotion: true } }),
+      /no appearance value `reduceMotion`.*reducedMotion/s,
+    );
+    await assert.rejects(
+      () => renderX11(box, { appearance: { reducedMotion: 'yes' } }),
+      /`reducedMotion` is true or false/,
+    );
+    await assert.rejects(
+      () => renderX11(box, { appearance: { source: 'portal' } }),
+      /cannot set `source`/,
+    );
+    await assert.rejects(
+      () =>
+        renderX11(box, {
+          colorScheme: 'system',
+          appearance: { reducedMotion: true },
+        }),
+      /colorScheme: 'system'.*`appearance`/s,
+    );
+    await assert.rejects(
+      () => renderX11(box, { colorScheme: 'Dark' }),
+      /'light' \(the default\), 'dark' or 'system', not "Dark"/,
+    );
+
+    await renderX11(box, { fonts });
+    await assert.rejects(
+      () => setAppearance({ contrast: 'more' }),
+      /`contrast` is 'normal' or 'high'/,
+    );
+    await cleanup();
+
+    // Before a render, the render's own pin would replace it in silence
+    await setAppearance({ reducedMotion: true });
+    const err = await renderX11(box, { fonts }).then(
+      () => assert.fail('the render should refuse'),
+      (e) => e,
+    );
+    assert.match(err.message, /setAppearance\(\) was called before renderX11/);
+    assert.match(err.message, /appearance: \{"reducedMotion":true\}/);
+    // and the anchor it sends the developer to is there
+    assert.match(err.message, /docs\/testing\.md#the-desktops-appearance/);
+    const doc = readFileSync(
+      fileURLToPath(new URL('../docs/testing.md', import.meta.url)),
+      'utf8',
+    );
+    assert.match(doc, /^## The desktop's appearance$/m);
+    // the refusal is spent: the next render is a plain one
+    await renderX11(box, { fonts });
+  });
 });
