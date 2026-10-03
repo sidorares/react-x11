@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.39.0](https://github.com/sidorares/react-x11/compare/v2.38.0...v2.39.0) (2026-10-03)
+
+
+### Features
+
+* **cocoa:** a sprite turned out of the plane goes on a layer through its matrix3d, so a box an element draws in a perspective is drawn by Core Animation on the GPU ([#859](https://github.com/sidorares/react-x11/issues/859)) ([2d7ae80](https://github.com/sidorares/react-x11/commit/2d7ae8068095661463ff6c2caa0bea07df7e3802))
+
 ## [2.38.0](https://github.com/sidorares/react-x11/compare/v2.37.0...v2.38.0) (2026-10-03)
 
 
