@@ -192,6 +192,11 @@ function shallowEqual(a, b) {
 
 const EMPTY_PROPS = {};
 
+/** How long a rect sent to a pane that acknowledges sizes waits for its
+ *  `pane-sized` before the newest is sent anyway: a frame of a slow page,
+ *  several times over, so a lost answer costs a pause and not the size. */
+export const PANE_SIZED_WAIT_MS = 500;
+
 /**
  * A module of this application, mounted in its own process, its window
  * embedded here.
@@ -552,7 +557,54 @@ function PaneHostView({
     // moves when the box does and when the window does, so it is sent on
     // layout, on a scroll that shifts the box, and on every anchor change
     // of the window, which a move of the window is.
+    //
+    // **The newest rect wins.** A drag sends the host a size a frame, and a
+    // pane whose page takes longer than that to lay out was sent them
+    // faster than it could take them: a pipe hands a pane process one
+    // message a turn of its loop, with a frame in between, so the pane laid
+    // out and painted every size the drag passed through, one a frame, and
+    // went on resizing seconds after the edge stopped. A pane that says it
+    // has painted a size (`pane-sized`) is sent one rect at a time: what
+    // the host comes to while one is out replaces what was waiting, and goes
+    // when the pane says it has painted the last. A pane that never says so
+    // is sent every rect, as before, and one that goes quiet is sent the
+    // newest anyway after `PANE_SIZED_WAIT_MS`.
     let sent = null;
+    let pending = null;
+    let acks = false;
+    let inFlight = false;
+    let waiting = null;
+    const transmit = (rect) => {
+      sent = rect;
+      s.trySend?.({
+        type: 'pane-rect',
+        width: rect.width,
+        height: rect.height,
+        scale: rect.scale,
+        ...(rect.screen && { screen: rect.screen }),
+      });
+      if (!acks) return;
+      inFlight = true;
+      if (waiting) clearTimeout(waiting);
+      waiting = setTimeout(sized, PANE_SIZED_WAIT_MS);
+    };
+    const sameRect = (a, b) =>
+      !!a &&
+      !!b &&
+      a.width === b.width &&
+      a.height === b.height &&
+      a.scale === b.scale &&
+      a.screen?.x === b.screen?.x &&
+      a.screen?.y === b.screen?.y;
+    const sized = () => {
+      if (waiting) clearTimeout(waiting);
+      waiting = null;
+      inFlight = false;
+      const next = pending;
+      pending = null;
+      // a drag that came back to where it was sent from waits for nothing
+      if (next && !sameRect(next, sent)) transmit(next);
+    };
     const syncSize = () => {
       host.setRect(node.abs);
       const sc = node.scale ?? 1;
@@ -565,23 +617,10 @@ function PaneHostView({
             y: Math.round(origin.y + node.abs.y),
           }
         : null;
-      if (
-        sent &&
-        sent.width === width &&
-        sent.height === height &&
-        sent.screen?.x === screen?.x &&
-        sent.screen?.y === screen?.y
-      ) {
-        return;
-      }
-      sent = { width, height, screen };
-      s.trySend?.({
-        type: 'pane-rect',
-        width,
-        height,
-        scale: sc,
-        ...(screen && { screen }),
-      });
+      const rect = { width, height, scale: sc, screen };
+      if (sameRect(rect, pending ?? sent)) return;
+      if (inFlight) pending = rect;
+      else transmit(rect);
     };
     const origAbsolutize = node.absolutize.bind(node);
     node.absolutize = (ox, oy) => {
@@ -625,6 +664,11 @@ function PaneHostView({
       } else if (msg?.type === 'pane-present') {
         host.setRect(node.abs);
         host.present(msg.id, msg);
+      } else if (msg?.type === 'pane-sized') {
+        // the pane has painted the rect it was last sent: the newest one
+        // waiting goes now, and from here on one is out at a time
+        acks = true;
+        sized();
       } else if (msg?.type === 'pane-cursor') {
         // The pane names its cursor as an element that draws names one for
         // a point: this box is the node the host's pointer is over, so the
@@ -637,6 +681,8 @@ function PaneHostView({
     });
     return () => {
       off();
+      if (waiting) clearTimeout(waiting);
+      waiting = null;
       offAnchor?.();
       offFocus?.();
       node.defaultCursor = undefined;

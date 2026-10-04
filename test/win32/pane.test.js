@@ -34,6 +34,9 @@ function makePane({ width = 200, height = 100, scale = 1 } = {}) {
 
 const rect = (x, y, width, height) => ({ x, y, width, height });
 
+/** What the pane told the host about its buffer. */
+const presents = (app) => app.sent.filter((m) => m.type === 'pane-present');
+
 describe('win32 pane: which region a frame paints', () => {
   it('paints the whole pane until the buffers have been through the chain', () => {
     const { wnd, node } = makePane();
@@ -141,9 +144,9 @@ describe('win32 pane: publishing the buffer', () => {
     // A host that is listening before the pane has drawn must not be told to
     // show a buffer with nothing in it.
     wnd.setPaneSize(200, 100, 1);
-    assert.deepEqual(app.sent, []);
+    assert.deepEqual(presents(app), []);
     wnd.presentFrame(node, null);
-    assert.deepEqual(app.sent, [
+    assert.deepEqual(presents(app), [
       { type: 'pane-present', id: 0xf01, width: 200, height: 100 },
     ]);
   });
@@ -161,9 +164,27 @@ describe('win32 pane: publishing the buffer', () => {
     // A present sent before the host subscribed is lost, and nothing
     // acknowledges one — so the next rect the host sends is the recovery.
     wnd.setPaneSize(200, 100, 1); // same size: still a pane-rect
-    assert.deepEqual(app.sent, [
+    assert.deepEqual(presents(app), [
       { type: 'pane-present', id: 0xf01, width: 200, height: 100 },
     ]);
+  });
+
+  it('says it has painted a size the host sent: at once where it changes nothing, after the frame that paints it otherwise', () => {
+    // The host sends a pane one rect at a time once it hears this
+    // (src/frame/index.js): sent every size a drag passed through, a pane
+    // whose page lays out slower than a frame painted them all, one a frame,
+    // seconds after the drag.
+    const { wnd, app, node } = makePane();
+    wnd.presentFrame(node, null);
+    const sized = () => app.sent.filter((m) => m.type === 'pane-sized').length;
+    wnd.setPaneSize(200, 100, 1);
+    assert.equal(sized(), 1, 'the size it has is painted already');
+    wnd.setPaneSize(300, 150, 1);
+    assert.equal(sized(), 1, 'not before the frame at the new size');
+    wnd.presentFrame(node, null);
+    assert.equal(sized(), 2, 'after it');
+    wnd.presentFrame(node, null);
+    assert.equal(sized(), 2, 'and once');
   });
 
   it('says why when it cannot reach the host at all', () => {

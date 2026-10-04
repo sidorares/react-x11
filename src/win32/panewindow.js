@@ -99,6 +99,8 @@ export class Win32PaneWindow {
     this._recent = new Array(STALE_FRAMES - 1).fill(null);
     this._owesFull = true;
     this._drawn = false;
+    // a size from the host not yet presented (`_sized`)
+    this._owesSized = false;
 
     this.id = PANE_ID_BASE + nextPaneWindow++;
     this.windowId = this.id;
@@ -143,14 +145,23 @@ export class Win32PaneWindow {
     this._publish();
     const w = Math.max(1, Math.round(width * this.scale));
     const h = Math.max(1, Math.round(height * this.scale));
-    if (w === this.width && h === this.height) return;
+    // The host sends the next rect when this one is painted (`pane-sized`,
+    // src/frame/index.js): one that changes nothing is painted already.
+    if (w === this.width && h === this.height) {
+      this._sized();
+      return;
+    }
     this.width = w;
     this.height = h;
-    if (!this._native.paneResize(this._pane, w, h)) return;
+    if (!this._native.paneResize(this._pane, w, h)) {
+      this._sized();
+      return;
+    }
     // Fresh buffers, undefined contents — the same standing start the
     // constructor sets up, for the same reason.
     this._owesFull = true;
     this._recent.fill(null);
+    this._owesSized = true;
     this.emit('resize', {
       width: w,
       height: h,
@@ -159,6 +170,14 @@ export class Win32PaneWindow {
       moved: false,
       resized: true,
     });
+  }
+
+  /** Tell the host the size it last sent is on screen, so it sends the
+   *  newest it has come to since — rather than every size a drag passed
+   *  through, one a frame, long after the drag. */
+  _sized() {
+    if (this.destroyed) return;
+    this.app._paneSend?.({ type: 'pane-sized' });
   }
 
   /** Tell the host which buffer is this pane's, once there is a frame in it.
@@ -293,6 +312,10 @@ export class Win32PaneWindow {
     if (!this._drawn) {
       this._drawn = true;
       this._publish();
+    }
+    if (this._owesSized) {
+      this._owesSized = false;
+      this._sized();
     }
   }
 

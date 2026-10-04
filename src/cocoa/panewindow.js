@@ -57,6 +57,8 @@ export class CocoaPaneWindow {
     this._dirty = false;
     this._flushDamage = 'full';
     this._seq = 0;
+    // a size from the host not yet presented (`pane-sized`)
+    this._owesSized = false;
     this._presentedAt = -Infinity;
     this._reactX11Node = null;
     // Where the pane's corner is on the screen, in device pixels, as the
@@ -89,6 +91,10 @@ export class CocoaPaneWindow {
     const moved =
       screen != null && (screen.x !== this.x || screen.y !== this.y);
     const resized = w !== this.width || h !== this.height;
+    // The host sends the next rect when this one is painted (`pane-sized`,
+    // src/frame/index.js): one that changes no size is painted already.
+    if (resized) this._owesSized = true;
+    else this._post({ type: 'pane-sized' });
     if (!moved && !resized) return;
     if (moved) {
       this.x = screen.x;
@@ -308,6 +314,10 @@ export class CocoaPaneWindow {
       width: this.width,
       height: this.height,
     });
+    if (this._owesSized) {
+      this._owesSized = false;
+      this._post({ type: 'pane-sized' });
+    }
     this._presentedAt = performance.now();
     this._shownIndex = this._drawIndex;
     // the next buffer round the ring — two behind what the host will be
