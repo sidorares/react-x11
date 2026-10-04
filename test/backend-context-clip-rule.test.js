@@ -8,10 +8,16 @@
 // with its `clip-rule` (sidorares/ntk#529): a ring clipped `evenodd` on X11
 // came out a filled square on macOS and Windows. The rule now reaches the
 // bridge as the flag `ctxFill` takes.
+//
+// Two layers, as elsewhere in the Cocoa tests. The first runs everywhere: a
+// fake bridge records what reaches the natives, which is the whole of what
+// the JS decides. The second runs where @windowkit/appkit loads, 0.24.0 or
+// later (windowkit/appkit#111, `CGContextEOClip`), and ends in pixels.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { BackendContext2D } from '../src/backend/context2d.js';
+import { loadNative } from '../src/cocoa/native.js';
 
 /** a bridge that records the path and clip calls, and no-ops the rest */
 function context() {
@@ -181,3 +187,63 @@ describe('the rect a blit is held to', () => {
     assert.deepEqual(blits(calls), [['blit', [60, 10, 60, 20]]]);
   });
 });
+
+// --- over the real bridge -----------------------------------------------------
+
+let bridge = null;
+if (process.platform === 'darwin') {
+  try {
+    bridge = loadNative();
+  } catch {
+    bridge = null;
+  }
+}
+
+describe(
+  'over the real bridge',
+  {
+    skip: bridge ? false : 'the @windowkit/appkit bridge is not loadable here',
+  },
+  () => {
+    const W = 60;
+
+    /** black through the clip `set` cuts, on a clear surface; alpha at a point */
+    function clipped(set) {
+      const surface = bridge.createSurface(W, W, 1);
+      const ctx = new BackendContext2D(
+        bridge,
+        () => surface,
+        () => 1,
+      );
+      ctx.save();
+      set(ctx);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, W);
+      ctx.restore();
+      return (x, y) => bridge.ctxGetImageData(surface, x, y, 1, 1)[3];
+    }
+
+    test("clip('evenodd') leaves a ring's hole undrawn, and clip() draws it", () => {
+      const evenodd = clipped((ctx) => {
+        ring(ctx);
+        ctx.clip('evenodd');
+      });
+      assert.equal(evenodd(5, 5), 255, 'the ring is drawn');
+      assert.equal(evenodd(20, 20), 0, 'the hole is not');
+      assert.equal(evenodd(50, 50), 0, 'nothing outside it is');
+      const nonzero = clipped((ctx) => {
+        ring(ctx);
+        ctx.clip();
+      });
+      assert.equal(nonzero(20, 20), 255, 'nonzero fills the hole');
+    });
+
+    test("clip(path, 'evenodd') cuts the path it is handed the same way", () => {
+      // what SvgView hands over for a <clipPath> with clip-rule="evenodd"
+      const at = clipped((ctx) => ctx.clip(RING_PATH, 'evenodd'));
+      assert.equal(at(5, 5), 255, 'the ring is drawn');
+      assert.equal(at(20, 20), 0, 'the hole is not');
+      assert.equal(at(50, 50), 0, 'nothing outside it is');
+    });
+  },
+);

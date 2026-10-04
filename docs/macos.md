@@ -1642,6 +1642,18 @@ here, a caller knows by reading `filter` back. `<Html>` draws a CSS
 where it does not — X11, whose server runs no colour matrix and answers a
 read a round trip later.
 
+### A clip's fill rule
+
+`clip()`, `clip(rule)`, `clip(path)` and `clip(path, rule)` are canvas's,
+and the rule reaches `ctxClip` as the flag `ctxFill` takes:
+`CGContextEOClip` for `'evenodd'` (@windowkit/appkit 0.24.0,
+windowkit/appkit#111), and a winding geometry or an alternate one on
+Windows (@windowkit/win32 0.0.7, windowkit/win32#12). ntk's SvgView cuts an
+element to its `<clipPath>` with the shape's `clip-rule`, and a ring cut by
+nonzero is the square around it. The rect the context keeps for
+`blitSurface`'s memcpy does not depend on the rule: one rect is one
+subpath wound once, which both rules cut alike.
+
 ### A shadow from a tile
 
 CoreGraphics blurs a shadow on every fill that has one set, and what it
