@@ -252,6 +252,45 @@ means ⌘ ([globalmenu.md](globalmenu.md#shortcuts-are-a-list-not-a-string)),
 and the one [accelerators](#the-chord) follow: `useAccelerator([['Control',
 'K']])` is ⌘K on a Mac, and a drawn `ContextMenu` prints and answers `⌘S`.
 
+The editing keys follow it as well. Where shortcuts are ⌘, `<textinput>` and
+`<textarea>` move and delete the Mac's way — AppKit's own bindings, the table
+every Cocoa field reads — so a Mac user's hands already know them:
+
+| keys                   | does                                                                        |
+| ---------------------- | --------------------------------------------------------------------------- |
+| ⌥← ⌥→                  | a word back or forward                                                      |
+| ⌘← ⌘→, and ⌃← ⌃→       | the start or end of the line                                                |
+| ⌘↑ ⌘↓                  | the start or end of the value                                               |
+| ⌥↑ ⌥↓                  | the start or end of the paragraph, and on to the next                       |
+| ↑ ↓ in a `<textinput>` | its start and its end, as in an NSTextField                                 |
+| ⌥⌫ ⌥⌦                  | delete a word                                                               |
+| ⌘⌫                     | delete to the start of the line                                             |
+| ⌃⌫                     | take the accent off the character before the caret — é to e                 |
+| ⌃A ⌃E                  | the start or end of the paragraph                                           |
+| ⌃B ⌃F, ⌃P ⌃N           | a character back or forward, a line up or down                              |
+| ⌃H ⌃D                  | delete a character back or forward                                          |
+| ⌃K ⌃Y                  | kill to the end of the paragraph — its break, at its end — and yank it back |
+
+Shift extends the selection with every move. "Line" is the line as it is
+drawn, wrapped, and "paragraph" runs between line breaks; in a
+`<textinput>` both are the whole value.
+
+Everywhere else the bindings are GTK's, Qt's and Windows': Ctrl+←/→ and
+Ctrl+⌫/⌦ by word, Ctrl+A to select all. The two sets disagree about Ctrl
+outright — ⌃← is the start of the line on a Mac, and ⌃A the start of the
+paragraph — so a backend has one set or the other, never a mix. Home and
+End move the caret to the ends of the line on every backend: AppKit scrolls without moving it, which a field — one
+line, its caret the point of the keystroke — has no use for.
+
+⌃K's kill buffer is the application's and not the pasteboard, as it is in
+AppKit: a kill leaves what ⌘C copied alone, ⌃Y in one field yanks what ⌃K
+killed in another, and kills one after another add up, so the two that take
+a line and then its break yank back as the line. A `sensitive` field kills
+into nothing, for the reason it offers no Copy.
+
+Any of them is the field's default action, so an `onKeyDown` that calls
+`preventDefault()` keeps the key, as it does every other.
+
 ## Handlers
 
 | handler                                                           | notes                                                                                                                                                       |
@@ -620,6 +659,17 @@ arrive is one the input method declined. `<textinput sensitive>` offers the
 input method none of its text, and `inputMode` on a `<textinput>` tells it
 what to expect ([elements.md](elements.md#textinput)).
 
+The **Cocoa backend has no input method yet** — `NSTextInputClient` is
+[macos.md](macos.md)'s IME work — so its text is what each key event says it
+typed. A dead key such as ⌥E types nothing and shows nothing, and the key
+after it types what macOS put on that key: `é` where the event carries the
+dead key's composition, the bare letter where it does not, never the two
+letters reading the key's own character used to type. A key that typed more
+than one character — the accent and a letter it does not combine with, `´s`
+— commits them as one composition, a start and an end in one, the way an
+input method's commit arrives. Press-and-Hold accents and CJK input wait on
+the same work.
+
 ### Changing the table
 
 ```js
@@ -662,6 +712,15 @@ active, it has to answer them differently:
 
 So `ctrlChordLetter(ev) === keysymOf('z')` matches the physical Z key under
 every layout, and nothing in a widget has to know that a layout exists.
+
+**⌥ types, on the Cocoa backend.** It is the layout's third and fourth level
+there rather than a modifier: ⌥S is `ß` on a US keyboard, and on a German one
+⌥L is `@` and ⌥5 and ⌥8 are `[` and `{` — the only keys that type them. So
+`ev.key` and `ev.codepoint` are what the layout typed, with ⌥, Shift and Caps
+Lock applied, while `ev.keysym` is still the key (`s`) and `ev.altKey` is
+true: an Alt+S accelerator still matches, and a field types `ß`. A ⌘ or ⌃
+chord types nothing and is named by its key, so ⌘⌥S is a chord on S — the
+same split the DOM makes on a Mac.
 `ev.group` is the active XKB group, 0-3, for an application that wants to
 show which layout is live — a switch sends no other notice.
 

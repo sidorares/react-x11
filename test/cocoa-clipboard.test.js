@@ -56,11 +56,12 @@ const pasteboardCalls = (native) =>
     .filter((c) => c.name.startsWith('pasteboard'))
     .map((c) => c.name);
 
-/** A bridge pointer event at the centre of `node`: points, window-relative. */
-function pointerAt(node, type, extra = {}) {
+/** A bridge pointer event at the centre of `node` — or `across` its width,
+ *  0 at its start — in points, window-relative. */
+function pointerAt(node, type, extra = {}, across = 0.5) {
   const wnd = node.root.window;
   const s = wnd.scale;
-  const x = (node.abs.x + node.abs.width / 2) / s;
+  const x = (node.abs.x + node.abs.width * across) / s;
   const y = (node.abs.y + node.abs.height / 2) / s;
   return {
     type,
@@ -116,9 +117,10 @@ describe('selecting text leaves the pasteboard alone', () => {
     const { native, app, doc, heading, body } = await mountDocument();
     const pb = pasteboardOn(native, ELSEWHERE);
 
-    app._route(pointerAt(heading.current, 'mousedown', { button: 1 }));
-    app._route(pointerAt(body.current, 'mousemove'));
-    app._route(pointerAt(body.current, 'mouseup', { button: 1 }));
+    // from the heading's first character to the body's
+    app._route(pointerAt(heading.current, 'mousedown', { button: 1 }, 0));
+    app._route(pointerAt(body.current, 'mousemove', {}, 0));
+    app._route(pointerAt(body.current, 'mouseup', { button: 1 }, 0));
     await tick();
 
     // the premise: the release had a selection to take PRIMARY with

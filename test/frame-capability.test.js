@@ -15,6 +15,7 @@ import { describe, it } from 'node:test';
 import React from 'react';
 
 import { Frame, createRoot } from '../src/index.js';
+import { PANE_SIZED_WAIT_MS } from '../src/frame/index.js';
 import { createMockApp, moveMouse, spinWheel } from './helpers/mock-app.js';
 
 const h = React.createElement;
@@ -249,6 +250,93 @@ describe('<Frame>: the cursor of a composited pane', () => {
     moveMouse(wnd, 50, 50);
     fromPane({ type: 'pane-cursor', cursor: 'pointer' });
     assert.equal(wnd.cursor, 'crosshair');
+    await root.unmount();
+  });
+});
+
+describe('<Frame>: the size of a composited pane', () => {
+  // A drag sends the host a size a frame. A pane whose page lays out slower
+  // than that was sent them faster than it could take them, and laid out
+  // every one, a frame each, seconds after the drag stopped. A pane that
+  // says it has painted a size (`pane-sized`) is sent one at a time, and
+  // the newest the host has come to in the meantime.
+  async function mountPane() {
+    const app = createMockApp();
+    app.createPaneHost = () => ({ setRect() {}, present() {}, destroy() {} });
+    const listeners = [];
+    const rects = [];
+    const transport = () => ({
+      send(msg) {
+        if (msg?.type === 'pane-rect') rects.push(msg.width);
+      },
+      onMessage: (cb) => {
+        listeners.push(cb);
+        setImmediate(() => cb({ type: 'ready', windowId: 1 }));
+        return () => listeners.splice(listeners.indexOf(cb) >>> 0, 1);
+      },
+      onExit: () => () => {},
+      pid: -1,
+    });
+    const frame = h(Frame, {
+      key: 'pane',
+      src: PANE,
+      transport,
+      style: { flexGrow: 1 },
+    });
+    const root = await createRoot({ app });
+    const resize = async (width) => {
+      root.render(h('window', { width, height: 120 }, frame));
+      await settle();
+      app.windows[0].flushFrame?.();
+    };
+    await resize(200);
+    const fromPane = (msg) => {
+      for (const cb of [...listeners]) cb(msg);
+    };
+    return { root, rects, resize, fromPane };
+  }
+
+  it('a pane that never says it has painted a size is sent every one', async () => {
+    const { root, rects, resize } = await mountPane();
+    await resize(180);
+    await resize(160);
+    assert.deepEqual(rects, [200, 180, 160]);
+    await root.unmount();
+  });
+
+  it('one that does is sent one at a time, and the newest when it has painted', async () => {
+    const { root, rects, resize, fromPane } = await mountPane();
+    fromPane({ type: 'pane-sized' });
+    await resize(140);
+    await resize(120);
+    await resize(100);
+    assert.deepEqual(rects, [200, 140], 'nothing more until 140 is painted');
+    fromPane({ type: 'pane-sized' });
+    assert.deepEqual(rects, [200, 140, 100], 'then the newest, past 120');
+    fromPane({ type: 'pane-sized' });
+    assert.deepEqual(rects, [200, 140, 100], 'and nothing when none waits');
+    await root.unmount();
+  });
+
+  it('a drag that comes back to the size out waits for nothing', async () => {
+    const { root, rects, resize, fromPane } = await mountPane();
+    fromPane({ type: 'pane-sized' });
+    await resize(150);
+    await resize(130);
+    await resize(150);
+    fromPane({ type: 'pane-sized' });
+    assert.deepEqual(rects, [200, 150]);
+    await root.unmount();
+  });
+
+  it('one that goes quiet is sent the newest anyway', async () => {
+    const { root, rects, resize, fromPane } = await mountPane();
+    fromPane({ type: 'pane-sized' });
+    await resize(150);
+    await resize(110);
+    assert.deepEqual(rects, [200, 150]);
+    await new Promise((r) => setTimeout(r, PANE_SIZED_WAIT_MS + 100));
+    assert.deepEqual(rects, [200, 150, 110]);
     await root.unmount();
   });
 });

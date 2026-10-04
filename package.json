@@ -1,6 +1,6 @@
 {
   "name": "react-x11",
-  "version": "2.40.0",
+  "version": "2.41.0",
   "description": "react renderer with X11 as a target",
   "main": "./src/index.js",
   "files": [
@@ -111,7 +111,7 @@
   "optionalDependencies": {
     "@windowkit/appkit": "^0.25.0",
     "@windowkit/wayland": "^3.1.1",
-    "@windowkit/win32": "^0.0.7",
+    "@windowkit/win32": "^0.0.9",
     "dbus-native": "^0.16.0",
     "x11-dri": "^0.9.0"
   },

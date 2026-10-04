@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.41.0](https://github.com/sidorares/react-x11/compare/v2.40.0...v2.41.0) (2026-10-04)
+
+
+### Features
+
+* **cocoa:** the text controls edit with the Mac's keys — ⌥ by word, ⌘ to the ends of the line and the value, ⌃A, ⌃E, ⌃K and ⌃Y — and ⌥ types what the layout puts on a key, so ⌥S is ß and a German keyboard has its @ ([#872](https://github.com/sidorares/react-x11/issues/872)) ([670e209](https://github.com/sidorares/react-x11/commit/670e209ffb117e9a139fba71a062e1a2465145db))
+
+
+### Bug Fixes
+
+* **cocoa:** a pane draws only into a buffer the host is done with and the WindowServer has let go of, and waits for the host's answer when there is none, so a page in a &lt;Frame&gt; that repaints while the host is busy is not shown half drawn, where a host two presents behind had the pane draw into the frame on glass or into one the host had yet to look up ([#877](https://github.com/sidorares/react-x11/issues/877)) ([f6a062f](https://github.com/sidorares/react-x11/commit/f6a062f82970cd79dee161cba91170bcafce2fa7))
+* **cocoa:** a pane keeps a buffer it retired until the host has looked up the present that named it, so a page resized in a &lt;Frame&gt; does not flash its next frame half drawn, or another tab's page, where the host found whichever surface the IOSurface id had gone to ([#870](https://github.com/sidorares/react-x11/issues/870)) ([ae956b0](https://github.com/sidorares/react-x11/commit/ae956b02e788fb35e4cb0d77383dae26966ffaf1))
+* **cocoa:** the host keeps a video buffer it retired until the pane has looked up the frame that named it, so a &lt;video&gt; in a &lt;Frame&gt; whose picture changes size is not copied out of the next ring's unwritten buffer, or another process's surface, where the pane found whichever surface the IOSurface id had gone to ([#875](https://github.com/sidorares/react-x11/issues/875)) ([0312ec9](https://github.com/sidorares/react-x11/commit/0312ec9dbc8b4c6d86e48747e0f72fc28e29ebb1))
+* **deps:** @windowkit/appkit ^0.25.0, so a pane that keeps up with its resizes has its last frame anchored at the top left on a Mac, where 2.40.0's range admitted no bridge that reads contentsGravity and the frame was still stretched ([#868](https://github.com/sidorares/react-x11/issues/868)) ([11a1b18](https://github.com/sidorares/react-x11/commit/11a1b1858205d04b7312a1fd9e73520fb388867a))
+* **frame:** a pane is sent the newest rect, one at a time, once it says it has painted the last — where a drag's sizes queued behind a slow page's frames and the pane laid out and painted every one, seconds after the edge stopped ([#876](https://github.com/sidorares/react-x11/issues/876)) ([ee25403](https://github.com/sidorares/react-x11/commit/ee25403362bb3916fc6d4bd631eadff060133b96))
+* **textarea:** a value that ends in a line break has the empty line after it, so Return at the end puts the caret on a line of its own on every backend ([#871](https://github.com/sidorares/react-x11/issues/871)) ([2ad3090](https://github.com/sidorares/react-x11/commit/2ad3090d36c91e7ab4e8fd326ae45d68358c221c))
+* **win32:** the Windows text engine answers ntk's layout contract, and reaches the faces Chrome reaches by name ([#874](https://github.com/sidorares/react-x11/issues/874)) ([9886792](https://github.com/sidorares/react-x11/commit/9886792ccabd7dcf71afbe4ff2cc7f941cbc90d6))
+
 ## [2.40.0](https://github.com/sidorares/react-x11/compare/v2.39.0...v2.40.0) (2026-10-04)
 
 

@@ -1694,15 +1694,20 @@ that is how react-hook-form's `register()` resets a field through its ref.
 
 Interactions: click/drag selection, double-click word select, triple-click
 select all, **dead keys and Compose**
-([events.md](events.md#composition)), Backspace/Delete, arrows (+Shift extends), Home/End, Ctrl+A,
+([events.md](events.md#composition)), Backspace/Delete, arrows (+Shift extends), Ctrl+arrows
+and Ctrl+Backspace/Delete by word, Home/End, Ctrl+A,
 Ctrl+C/X/V on CLIPBOARD, middle-click paste from PRIMARY, selections own
 PRIMARY (X11 conventions, select-all included; [X11 only](clipboard.md#primary-is-x11-only)), **Ctrl+Z / Ctrl+Shift+Z** (Ctrl+Y too) to undo
-and redo, and a **right-click menu**. On the Cocoa backend the chords are ⌘
-instead — ⌘A, ⌘C/X/V, ⌘Z / ⇧⌘Z — and ⌃ types nothing
-([events.md](events.md#primary-modifier)). Focusable by default; shows the text
-cursor. `ev.preventDefault()` in your `onKeyDown`/`onMouseDown` suppresses
-the built-in editing behavior. To copy or paste from anywhere else — a
-canvas, a list, your own menu item — see [clipboard.md](clipboard.md).
+and redo, and a **right-click menu**. On the Cocoa backend the keys are the
+Mac's instead: the chords are ⌘ — ⌘A, ⌘C/X/V, ⌘Z / ⇧⌘Z — ⌥ moves and deletes
+by word, ⌘←/→ and ⌘↑/↓ go to the ends of the line and of the value, ⌘⌫
+deletes to the start of the line, ⌃A, ⌃E, ⌃K, ⌃Y and the rest of AppKit's
+Emacs keys work while any other ⌃ chord types nothing, and ⌥ types what the
+layout puts on a key, `ß` for ⌥S ([events.md](events.md#primary-modifier)).
+Focusable by default; shows the text cursor. `ev.preventDefault()` in your
+`onKeyDown`/`onMouseDown` suppresses the built-in editing behavior. To copy
+or paste from anywhere else — a canvas, a list, your own menu item — see
+[clipboard.md](clipboard.md).
 
 ### The right-click menu
 
@@ -1766,7 +1771,8 @@ word rather than a keystroke; a run of Backspaces coalesces the same way.
 A run ends at whitespace, at anything that moves the caret (arrows,
 Home/End, a click, focus leaving the field), and around edits that are
 their own step whatever surrounds them: a paste, a cut, a replaced
-selection, Ctrl+Backspace, and a `<textarea>` newline. Undo restores the
+selection, Ctrl+Backspace (⌥⌫ and ⌘⌫ on a Mac, and a ⌃K), and a `<textarea>`
+newline. Undo restores the
 selection and puts the caret back where the undone edit started.
 
 A composed character is one entry, not one per keystroke: the accent a dead
@@ -1787,7 +1793,9 @@ word-wraps at the content width, Enter inserts a newline (Ctrl+Enter fires
 `onSubmit`, ⌘↩ on the Cocoa backend), Up/Down move between visual lines keeping a goal column,
 Home/End go to the start/end of the visual (wrapped) line, selection spans
 lines, and the view scrolls vertically to follow the caret (mouse wheel
-scrolls too).
+scrolls too). On the Cocoa backend ⌘←/→ are Home/End, ⌘↑/↓ go to the ends of
+the value and ⌥↑/↓ to the ends of a paragraph
+([events.md](events.md#primary-modifier)).
 
 The wheel reaches it through the same chain a `<box overflow="scroll">` is
 in, so a field whose text fits passes the gesture out to the pane or the
