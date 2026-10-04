@@ -328,7 +328,11 @@ tab's page, on glass for a frame at every few steps of a drag. So the host
 answers each present it has looked up (`pane-shown`), and the pane keeps a
 buffer it retired until the present naming it is answered: that is one
 buffer as a rule, and never more than a ring of them, the oldest freed
-first if the host stops answering.
+first if the host stops answering. A pane's video comes down the same way
+round: the pane answers each frame once it has looked its buffer up, and
+the host keeps a buffer of a ring it retired — a stream that switched
+renditions — until the frame naming it is answered. A lookup that finds a
+surface of another size than its frame says is not copied out of at all.
 
 `backgroundColor` in the frame's `style` is what shows before the pane's
 first frame and after one dies — the same server-painted rectangle
