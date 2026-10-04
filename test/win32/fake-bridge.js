@@ -9,6 +9,33 @@
 // frame reached. The Cocoa scroll-blit test keeps a pixel-holding fake for the
 // same reason.
 
+/** Where the fake breaks `text` into lines at a width of eight pixels a
+ *  character: greedily at spaces, each line keeping the spaces it ends on,
+ *  and a word longer than a line cut where the line ends, as DirectWrite
+ *  cuts one. One line where no width is given. */
+function fakeBreaks(text, maxWidth) {
+  if (!(maxWidth > 0)) return [[0, text.length]];
+  const room = Math.max(1, Math.floor(maxWidth / 8));
+  const breaks = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = start;
+    let fits = start;
+    while (end < text.length) {
+      let word = end;
+      while (word < text.length && text[word] !== ' ') word++;
+      if (word - start > room) break;
+      while (word < text.length && text[word] === ' ') word++;
+      end = word;
+      fits = word;
+    }
+    if (fits === start) fits = Math.min(text.length, start + room);
+    breaks.push([start, fits]);
+    start = fits;
+  }
+  return breaks.length ? breaks : [[0, 0]];
+}
+
 export function createFakeBridge({ layers = true } = {}) {
   const calls = [];
   const record = (name, ...args) => calls.push([name, ...args]);
@@ -153,18 +180,50 @@ export function createFakeBridge({ layers = true } = {}) {
       const handle = nextLayout++;
       record('layoutCreate', text, options, spans);
       bridge.layouts ??= new Map();
-      bridge.layouts.set(handle, { text, options, spans });
+      bridge.layouts.set(handle, {
+        text,
+        options,
+        spans,
+        breaks: fakeBreaks(text, options?.maxWidth),
+      });
       return handle;
     },
     layoutMetrics(handle) {
-      const { text } = bridge.layouts.get(handle);
-      // A monospace-ish fiction: eight pixels a character, one line.
-      return {
-        width: text.length * 8,
+      const { text, options, breaks } = bridge.layouts.get(handle);
+      // A monospace-ish fiction: eight pixels a character, broken at spaces
+      // where a width is given, as DirectWrite breaks: a line's runs and
+      // width keep the space it ends on, and its baseline is from its own
+      // top. A `lineHeight` sets the baseline at 0.8 of the face's, as the
+      // bridge's proportional spacing does, where the ascent and descent it
+      // measures off the face stay what they were.
+      const baseline = options?.lineHeight ? 12 * 0.8 : 12;
+      // A centred line is centred in the box, and with no width the box is
+      // a million pixels wide, as the bridge builds an unbounded layout.
+      const box = options?.maxWidth > 0 ? options.maxWidth : 1e6;
+      const centred = options?.align === 'center';
+      const lines = breaks.map(([start, end], i) => ({
+        start,
+        end,
+        y: i * 16,
         height: 16,
-        minWidth: 8,
-        lineCount: 1,
-        lines: [{ start: 0, end: text.length, y: 0, height: 16, baseline: 12 }],
+        baseline,
+        ...(bridge.measuresLines ? { ascent: 12, descent: 4 } : {}),
+        x: centred
+          ? (box - text.slice(start, end).trimEnd().length * 8) / 2
+          : 0,
+        width: (end - start) * 8,
+        runs: [{ start, end, x: 0, width: (end - start) * 8, rtl: false }],
+      }));
+      const words = text.split(/\s+/).filter(Boolean);
+      return {
+        width: Math.max(
+          0,
+          ...lines.map((l) => text.slice(l.start, l.end).trimEnd().length * 8),
+        ),
+        height: 16 * lines.length,
+        minWidth: Math.max(8, ...words.map((w) => w.length * 8)),
+        lineCount: lines.length,
+        lines,
       };
     },
     layoutRelease(handle) {
@@ -175,7 +234,12 @@ export function createFakeBridge({ layers = true } = {}) {
       return Math.max(0, Math.round(x / 8));
     },
     layoutCaret(handle, unit) {
-      return { x: unit * 8, y: 0, height: 16 };
+      const breaks = bridge.layouts?.get(handle)?.breaks ?? [[0, Infinity]];
+      const at = Math.max(
+        0,
+        breaks.findIndex(([start, end]) => unit >= start && unit <= end),
+      );
+      return { x: (unit - breaks[at][0]) * 8, y: at * 16, height: 16 };
     },
     drawLayout(surface, layout, x, y) {
       record('drawLayout', surface, layout, x, y);
@@ -191,7 +255,34 @@ export function createFakeBridge({ layers = true } = {}) {
       };
     },
     fontExists(name) {
-      return name === 'Segoe UI' || name === 'Consolas';
+      return (
+        name === 'Segoe UI' || name === 'Consolas' || name === 'Times New Roman'
+      );
+    },
+    // GDI's names for faces DirectWrite files under another family
+    fontFamilyOf(name) {
+      return (
+        {
+          'Segoe UI Light': {
+            family: 'Segoe UI',
+            weight: 300,
+            stretch: 5,
+            italic: false,
+          },
+          'Segoe UI Black': {
+            family: 'Segoe UI',
+            weight: 900,
+            stretch: 5,
+            italic: false,
+          },
+          'Consolas Narrow': {
+            family: 'Consolas',
+            weight: 400,
+            stretch: 3,
+            italic: false,
+          },
+        }[name] ?? null
+      );
     },
     listFonts() {
       return ['Segoe UI', 'Consolas'];
