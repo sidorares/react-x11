@@ -25,9 +25,13 @@
 // And for a pane (the process half of a <Frame>, src/cocoa/panewindow.js
 // and panehost.js):
 //
-//   - a rect that changes the pane's size retires its ring on the spot;
-//   - a present naming a buffer the pane has since retired is dropped by
-//     the host, not thrown — the resize crossed the present in the channel.
+//   - a rect that changes the pane's size retires its ring on the spot —
+//     all but a buffer named by a present the host has not looked up yet,
+//     which waits for its `pane-shown`: the system gives a freed IOSurface
+//     id to the next surface made, so the host found another surface under
+//     it, the pane's next ring or another pane's;
+//   - a present whose buffer is gone anyway is dropped by the host, not
+//     thrown.
 //
 // And from #602, the WindowServer's hold on a buffer after a flip:
 //
@@ -62,14 +66,37 @@ const h = React.createElement;
  * does (a `window-resize` event through the backend callback, synchronously,
  * from inside the call), surfaces are handles with a size, and every verb
  * that decides something is recorded.
+ *
+ * IOSurfaces are found by id the way `IOSurfaceLookup` finds them: among
+ * the surfaces something still holds, where a layer showing one holds it.
+ * With `recycleIds`, a freed id goes to the next surface made, the lowest
+ * first — what the system does, measured: three surfaces released, and the
+ * next three made, in this process or another, take their ids. One bridge
+ * handed to two apps is two processes on one machine.
  */
-function fakeBridge({ screens } = {}) {
+function fakeBridge({ screens, recycleIds = false } = {}) {
   const calls = [];
   const released = new Set();
   let seq = 0;
   let backendCb = null;
   // what each layer shows, by the id of the IOSurface its last flip named
   const onGlass = new Map();
+  // the IOSurfaces something holds, by id; the ids free to give out again;
+  // and the surface each layer shows, which it holds
+  const surfaces = new Map();
+  const freeIds = [];
+  const onLayer = new Map();
+  // ids this bridge has given out: one it never did is a surface of some
+  // other process's, which a test names by a number and the lookup finds
+  const issued = new Set();
+  /** A surface nothing holds any more gives up its id. */
+  const drop = (handle) => {
+    if (!released.has(handle.id)) return;
+    if ([...onLayer.values()].includes(handle)) return;
+    if (surfaces.get(handle.iosurfaceId) !== handle) return;
+    surfaces.delete(handle.iosurfaceId);
+    freeIds.push(handle.iosurfaceId);
+  };
   /** A draw into `handle`, recorded when the WindowServer holds it. */
   const drawn = (name, handle) => {
     if (native.held.has(handle?.id)) native.heldDraws.push([name, handle.id]);
@@ -149,7 +176,12 @@ function fakeBridge({ screens } = {}) {
     createSurfaceIOSurface(width, height, scale) {
       const id = ++seq;
       calls.push(['createSurfaceIOSurface', width, height]);
-      return { handle: { id, width, height, scale }, iosurfaceId: id };
+      freeIds.sort((a, b) => a - b);
+      const iosurfaceId = recycleIds && freeIds.length ? freeIds.shift() : id;
+      const handle = { id, width, height, scale, iosurfaceId };
+      surfaces.set(iosurfaceId, handle);
+      issued.add(iosurfaceId);
+      return { handle, iosurfaceId };
     },
     createSurface(width, height, scale) {
       calls.push(['createSurface', width, height]);
@@ -158,19 +190,27 @@ function fakeBridge({ screens } = {}) {
     releaseSurface(handle) {
       calls.push(['releaseSurface', handle.id]);
       released.add(handle.id);
+      if (handle.iosurfaceId != null) drop(handle);
     },
     surfaceSize: (handle) => ({
       width: handle.width,
       height: handle.height,
       scale: handle.scale,
     }),
+    // every surface a lookup found, in order: which one, not only its id
+    looked: [],
     setLayerContentsIOSurface(layer, id) {
       // IOSurfaceLookup answers only a surface some process still holds:
-      // a released id is the native's throw, verbatim
-      if (released.has(id)) {
+      // an id nothing holds is the native's throw, verbatim
+      const surface = surfaces.get(id) ?? null;
+      if (!surface && issued.has(id)) {
         throw new Error('IOSurfaceLookup: no surface with that id');
       }
       calls.push(['flip', id]);
+      native.looked.push(surface);
+      const was = onLayer.get(layer);
+      onLayer.set(layer, surface);
+      if (was && was !== surface) drop(was);
       const before = onGlass.get(layer.root);
       if (native.holdRetired && before != null && before !== id) {
         native.held.add(before);
@@ -284,8 +324,10 @@ function countFlushes(node) {
  * channel messages and presents leaving as them (src/cocoa/panewindow.js).
  * `deliver` is the host speaking; `sent` is what the pane said back.
  */
-async function mountPane(children, { width = 100, height = 80 } = {}) {
-  const native = fakeBridge({});
+async function mountPane(
+  children,
+  { width = 100, height = 80, native = fakeBridge({}) } = {},
+) {
   const app = new CocoaApp(native, { pane: true });
   setScaleForTests(app, 2, 'cocoa');
   setScreensForTests(app, {
@@ -311,6 +353,7 @@ async function mountPane(children, { width = 100, height = 80 } = {}) {
   const flushes = countFlushes(node);
   app._tickFrames();
   const presents = () => sent.filter((m) => m.type === 'pane-present');
+  const deliver = (m) => onMessage(m);
   return {
     native,
     app,
@@ -319,7 +362,9 @@ async function mountPane(children, { width = 100, height = 80 } = {}) {
     flushes,
     presents,
     sent,
-    deliver: (m) => onMessage(m),
+    deliver,
+    /** The host's word that it has looked up every present so far. */
+    answer: () => deliver({ type: 'pane-shown', seq: presents().at(-1).seq }),
   };
 }
 
@@ -1148,10 +1193,12 @@ test('a pane answers a burst of geometry with one frame, not one per message', a
 });
 
 test('a rect that changes the pane size retires the ring on the spot, and the last ring with the window', async () => {
-  const { native, app, wnd, presents, deliver } = await mountPane(
+  const { native, app, wnd, presents, deliver, answer } = await mountPane(
     box({ flexGrow: 1, backgroundColor: '#3498db' }),
   );
   app._presentAll();
+  // the host looks each present up on its next turn, and says so
+  answer();
   const made = () => native.of('createSurfaceIOSurface').length;
   const released = () => native.of('releaseSurface');
   assert.equal(made(), 3, 'the mount ring');
@@ -1172,9 +1219,11 @@ test('a rect that changes the pane size retires the ring on the spot, and the la
   assert.notEqual(after.id, before);
   assert.ok(live.includes(after.id));
   assert.deepEqual([after.width, after.height], [100, 80]);
+  answer();
   // five ticks of a drag: each retires the ring before it
   for (let i = 1; i <= 5; i += 1) {
     deliver({ type: 'pane-rect', width: 100 + i * 4, height: 80 + i * 2 });
+    answer();
   }
   assert.equal(made(), 21);
   assert.equal(released().length, 18);
@@ -1195,34 +1244,122 @@ test('a pane bridge without releaseSurface leaves the retired ring to the finali
   wnd.destroy();
 });
 
-test('the host drops a present of a buffer the pane has since retired, and shows the next', async () => {
-  // The channel is a queue: the pane presented, the host's pane-rect (a
-  // monitor move during startup — a new scale) crossed it, the pane
-  // rebuilt its ring on the rect and released the old one, and only then
-  // did the host read the present. The id names nothing any more.
-  const { native, app, wnd, presents, deliver } = await mountPane(
+test('a present a resize crossed is looked up as the buffer it named, not the surface its id went to', async () => {
+  // The channel is a queue: the pane presented, the host's pane-rect
+  // crossed the present, and the pane made a new ring on the rect before
+  // the host read it. The present carries an IOSurface id, and the system
+  // gives a freed id to the next surface made — here the pane's next ring,
+  // made in the same call that freed the old one. Freed at the rect, the
+  // buffer's id was a buffer of the next ring by the time the host looked:
+  // cleared, or half drawn, on glass for a frame at every few steps of a
+  // drag. So the pane keeps it until the host says it has looked it up.
+  const native = fakeBridge({ recycleIds: true });
+  const { app, wnd, presents, deliver } = await mountPane(
     box({ flexGrow: 1, backgroundColor: '#3498db' }),
+    { native },
   );
   app._presentAll();
   const host = new CocoaPaneHost(
     { _native: native },
     { _layer: { root: 1 }, scale: 2 },
+    { send: deliver },
   );
   const stale = presents().at(-1);
+  const named = wnd._ring[wnd._shownIndex].handle;
+  const freed = (handle) =>
+    native.of('releaseSurface').some(([, id]) => id === handle.id);
   deliver({ type: 'pane-rect', width: 100, height: 80, scale: 1 });
   const fresh = presents().at(-1);
-  assert.notEqual(fresh.id, stale.id);
-  assert.doesNotThrow(() => host.present(stale.id), 'not the host crash');
-  assert.equal(flips(native), 0, 'and nothing flipped for it');
-  host.present(fresh.id);
-  assert.deepEqual(native.of('flip').at(-1), ['flip', fresh.id]);
+  assert.deepEqual([fresh.width, fresh.height], [100, 80]);
+  const freedAtRect = native.of('releaseSurface').length;
+  const keptAtRect = !freed(named);
+  host.present(stale.id, stale);
+  assert.equal(
+    native.looked.at(-1),
+    named,
+    'the frame the present named, not a buffer of the next ring',
+  );
+  assert.ok(keptAtRect, 'kept until the host looked it up');
+  assert.equal(freedAtRect, 2, 'the other two went at the rect');
+  assert.ok(freed(named), 'and once looked up, it goes');
+  assert.equal(wnd._retired.length, 0);
+  host.present(fresh.id, fresh);
+  assert.equal(native.looked.at(-1), wnd._ring[wnd._shownIndex].handle);
+  // a present whose buffer is gone anyway — a pane that died with it in
+  // the channel — is dropped, not the host's crash
+  const gone = native.createSurfaceIOSurface(4, 4, 2, true);
+  native.releaseSurface(gone.handle);
+  const flipped = flips(native);
+  assert.equal(host.present(gone.iosurfaceId, { seq: 99 }), false);
+  assert.equal(flips(native), flipped, 'and nothing flipped for it');
   // any other failure of the flip is still the bug it says it is
   native.setLayerContentsIOSurface = () => {
     throw new TypeError('not a layer');
   };
-  assert.throws(() => host.present(fresh.id), /not a layer/);
+  assert.throws(() => host.present(fresh.id, fresh), /not a layer/);
   host.destroy();
   wnd.destroy();
+});
+
+test("a present a resize crossed is not looked up as another pane's ring, made as one tab closed and another opened", async () => {
+  // Every pane on the machine takes its ids from the one table, so the id
+  // a pane gives up can go to another pane's ring: the host showed another
+  // tab's page in this one for a frame. One bridge for three apps is
+  // three pane processes on one machine.
+  const native = fakeBridge({ recycleIds: true });
+  const page = () => box({ flexGrow: 1, backgroundColor: '#3498db' });
+  const closed = await mountPane(page(), { native });
+  const a = await mountPane(page(), { native });
+  a.app._presentAll();
+  const host = new CocoaPaneHost(
+    { _native: native },
+    { _layer: { root: 1 }, scale: 2 },
+    { send: a.deliver },
+  );
+  const stale = a.presents().at(-1);
+  const named = a.wnd._ring[a.wnd._shownIndex].handle;
+  // a tab closes, a step of a drag resizes this one, and a tab opens
+  closed.wnd.destroy();
+  a.deliver({ type: 'pane-rect', width: 104, height: 82, scale: 2 });
+  const opened = await mountPane(page(), { native });
+  host.present(stale.id, stale);
+  assert.equal(
+    native.looked.at(-1),
+    named,
+    "the frame the present named, not the new tab's",
+  );
+  host.destroy();
+  a.wnd.destroy();
+  opened.wnd.destroy();
+});
+
+test('a host that stops answering has the pane keep no more than a ring of retired buffers', async () => {
+  const { native, app, wnd, deliver } = await mountPane(
+    box({ flexGrow: 1, backgroundColor: '#3498db' }),
+  );
+  app._presentAll();
+  for (let i = 1; i <= 6; i += 1) {
+    deliver({ type: 'pane-rect', width: 100 + i * 4, height: 80 + i * 2 });
+    assert.ok(wnd._retired.length <= 3, `${wnd._retired.length} kept`);
+  }
+  assert.equal(wnd._retired.length, 3, 'the presents of the last three');
+  // the oldest went first: the one the host is likeliest to have seen
+  const kept = wnd._retired.map((s) => s.presentedSeq);
+  assert.deepEqual(
+    kept,
+    [...kept].sort((x, y) => x - y),
+  );
+  const made = native.of('createSurfaceIOSurface').length;
+  assert.equal(native.of('releaseSurface').length, made - 3 - 3);
+  // and an answer that comes after all frees what it covers
+  deliver({ type: 'pane-shown', seq: kept[1] });
+  assert.deepEqual(
+    wnd._retired.map((s) => s.presentedSeq),
+    [kept[2]],
+  );
+  wnd.destroy();
+  assert.equal(native.of('releaseSurface').length, made, 'the rest with it');
+  assert.deepEqual(wnd._retired, []);
 });
 
 test('a pane frame after a full one starts from it, not from the frame its buffer last held', async () => {
