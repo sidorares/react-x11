@@ -290,7 +290,9 @@ export class CocoaApp {
     // the text controls' Undo/Cut/Copy/Paste/Select All answer ⌘ rather
     // than ⌃, and the edit menu prints them the way a Mac menu does. The
     // menu bar already read a chord's `Control` as ⌘ (cocoa/globalmenu.js);
-    // this is the same rule for everything else that reads one.
+    // this is the same rule for everything else that reads one. Text is
+    // edited the Mac way with it too: ⌥ moves by word, ⌘ to the ends of a
+    // line and the document, ⌃ is Emacs's (src/nodes/textkeys.js).
     this.primaryModifier = 'Super';
 
     // AppKit-rendered control bezels. Its *presence* is the capability:
@@ -934,8 +936,9 @@ export class CocoaApp {
 
   /**
    * The pane's end of the frame channel (childmain hands it over,
-   * feature-detected so the X11 pane path never notices): geometry and
-   * input come in, pane-present and pane-cursor go out. `players` is the
+   * feature-detected so the X11 pane path never notices): geometry, input
+   * and the host's word that it has looked a present up come in,
+   * pane-present and pane-cursor go out. `players` is the
    * host's word that it plays the pane's `<video src>`s, which makes
    * `createPlayer` here — before the pane's first render, which asks.
    */
@@ -963,7 +966,12 @@ export class CocoaApp {
       }
       const pane = this._paneWindow ?? [...this._windows.values()][0];
       if (!pane) return;
-      if (msg?.type === 'pane-rect') {
+      if (msg?.type === 'pane-shown') {
+        // the host has looked up this window's presents to `seq`, so the
+        // buffers they named may go (`CocoaPaneWindow._releaseRing`)
+        const wnd = msg.window != null ? this._windows.get(msg.window) : pane;
+        wnd?._shown?.(msg.seq);
+      } else if (msg?.type === 'pane-rect') {
         pane.setPaneSize(msg.width, msg.height, msg.scale, msg.screen);
         this._flushPaneOutbox();
         this._afterInput();
@@ -1560,6 +1568,8 @@ export class CocoaApp {
       keysym: decoded.keysym,
       baseKeysym: decoded.baseKeysym,
       codepoint: decoded.codepoint,
+      // more than one character, which no code point carries (keymap.js)
+      text: decoded.text,
       buttons: modifierMask(ev),
       group: 0,
       time: ev.time,

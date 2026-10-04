@@ -60,6 +60,36 @@ describe('win32 fonts: spans', () => {
     assert.equal(spans[0].weight, 700);
   });
 
+  it('hands on letter spacing and OpenType features, the ligatures off under spacing', () => {
+    // dropped, a `letter-spacing` was set tight on Windows, and <Html>,
+    // which justifies through letter spacing on an engine that cannot,
+    // laid a justified line's words over each other
+    const bridge = createFakeBridge();
+    new Win32FontManager(bridge).layout(
+      [
+        { text: 'spaced', letterSpacing: 2 },
+        { text: 'caps', features: { smcp: 1 } },
+        { text: 'both', letterSpacing: 1, features: { liga: 1, onum: 1 } },
+        { text: 'plain' },
+      ],
+      {},
+    );
+    const [, , , spans] = bridge.calls.find((c) => c[0] === 'layoutCreate');
+    assert.equal(spans[0].letterSpacing, 2);
+    assert.deepEqual(spans[0].features, { liga: 0, clig: 0, dlig: 0, hlig: 0 });
+    assert.equal(spans[1].letterSpacing, undefined);
+    assert.deepEqual(spans[1].features, { smcp: 1 });
+    assert.deepEqual(spans[2].features, {
+      liga: 1,
+      clig: 0,
+      dlig: 0,
+      hlig: 0,
+      onum: 1,
+    });
+    assert.equal(spans[3].letterSpacing, undefined);
+    assert.equal(spans[3].features, undefined);
+  });
+
   it('falls back to 14 only when no size was given at all', () => {
     const bridge = createFakeBridge();
     new Win32FontManager(bridge).layout([{ text: 'x' }], {});
@@ -116,9 +146,73 @@ describe('win32 fonts: families', () => {
     const [, , options] = bridge.calls.find((c) => c[0] === 'layoutCreate');
     assert.equal(options.weight, 700);
   });
+
+  it("reaches a face DirectWrite files under another family, at that face's weight and width", () => {
+    // "Segoe UI Black" is no family to DirectWrite, which groups faces by
+    // weight, width and slope: it is Segoe UI at 900, and a page that named
+    // it fell back to the default face. Blink sets it at its own weight
+    // whatever the request's.
+    const bridge = createFakeBridge();
+    const fonts = new Win32FontManager(bridge);
+    fonts.layout([{ text: 'x', family: 'Consolas Narrow' }], {
+      family: '"Segoe UI Black", sans-serif',
+      weight: 400,
+    });
+    const [, , options, spans] = bridge.calls.find(
+      (c) => c[0] === 'layoutCreate',
+    );
+    assert.equal(options.family, 'Segoe UI');
+    assert.equal(options.weight, 900);
+    assert.equal(spans[0].family, 'Consolas');
+    assert.equal(spans[0].stretch, 3, 'the narrow face, by its width');
+    const light = fonts.match('Segoe UI Light', { weight: 700 });
+    assert.equal(light.family, 'Segoe UI');
+    assert.equal(light.weight, 300);
+    assert.equal(
+      fonts.match('Segoe UI Light', { style: 'italic' }).italic,
+      true,
+      "the request's slope is kept",
+    );
+  });
+
+  it("tries Blink's alternate name where the one asked for is missing", () => {
+    // Windows has Courier only as a bitmap font DirectWrite does not read,
+    // and no Times: Chrome sets each in its Microsoft counterpart
+    const bridge = createFakeBridge();
+    new Win32FontManager(bridge).layout('x', { family: 'Times, serif' });
+    const [, , options] = bridge.calls.find((c) => c[0] === 'layoutCreate');
+    assert.equal(options.family, 'Times New Roman');
+  });
+
+  it('asks a face at its width, for its metrics and its glyphs', () => {
+    const bridge = createFakeBridge();
+    const asked = [];
+    bridge.fontMetrics = (...args) => {
+      asked.push(['metrics', args[4]]);
+      return { ascent: 8, descent: 2, lineGap: 0 };
+    };
+    bridge.fontHandle = (...args) => {
+      asked.push(['handle', args[4]]);
+      return 1;
+    };
+    const face = new Win32FontManager(bridge).match('Consolas Narrow');
+    face.metrics(10);
+    face._handle(10);
+    assert.deepEqual(asked, [
+      ['metrics', 3],
+      ['handle', 3],
+    ]);
+  });
 });
 
 describe('win32 fonts: what is asked of DirectWrite once', () => {
+  it("a face states ntk's lineHeight beside DirectWrite's names", () => {
+    // read off the field, <Html>'s `line-height: normal` was NaN, and every
+    // document with one came up blank
+    const m = manager().match('sans-serif').metrics(20);
+    assert.equal(m.lineHeight, m.ascent + m.descent + m.lineGap);
+  });
+
   it('a face asks for its metrics at a size once', () => {
     // A trimmed `<text>` asks on every placement of its layout, and each
     // answer was DirectWrite resolving the family again — on a graph of
@@ -168,7 +262,149 @@ describe('win32 fonts: the layout it answers', () => {
   });
 
   it('reports a min-content width, which the yoga floors pass asks for', () => {
-    assert.equal(manager().layout('hello', {}).minWidth, 8);
+    assert.equal(manager().layout('hello', {}).minWidth, 40);
+  });
+
+  it('answers a width offer of zero with the paragraph at its min-content width', () => {
+    // yoga's floors pass asks a `<text>` how narrow it can be with an offer
+    // of zero. The bridge builds such a layout unbounded, so the answer was
+    // the whole paragraph on one line, and no text in a flex row could give
+    // way below its full length.
+    const layout = manager().layout('hello wide world', {}, { maxWidth: 0 });
+    assert.equal(layout.width, 40, 'the widest word, not the line');
+  });
+
+  it("answers an eliding line's floor with the mark alone", () => {
+    const layout = manager().layout(
+      'a long title',
+      {},
+      { maxWidth: 0, maxLines: 1, overflow: 'ellipsis' },
+    );
+    assert.equal(layout.width, 8);
+  });
+
+  it('breaks at the width and keeps `maxLines` lines, saying it dropped some', () => {
+    // The bridge read `maxLines: 1` as "do not wrap": a one-line `<text>`
+    // came back as the whole paragraph, as wide as all of it
+    const bridge = createFakeBridge();
+    const layout = new Win32FontManager(bridge).layout(
+      'aaa bbb ccc ddd eee',
+      {},
+      { maxWidth: 64, maxLines: 1 },
+    );
+    assert.equal(layout.lines.length, 1);
+    assert.equal(layout.truncated, true);
+    assert.ok(layout.width <= 64, `within the width: ${layout.width}`);
+    for (const call of bridge.calls.filter((c) => c[0] === 'layoutCreate')) {
+      assert.equal(call[2].maxLines, undefined, 'the bridge is never asked');
+    }
+    const two = manager().layout(
+      'aaa bbb ccc ddd eee',
+      {},
+      { maxWidth: 64, maxLines: 2 },
+    );
+    assert.equal(two.lines.length, 2);
+    const all = manager().layout(
+      'aaa bbb ccc ddd eee',
+      {},
+      { maxWidth: 64, maxLines: 5 },
+    );
+    assert.equal(all.lines.length, 3);
+    assert.equal(all.truncated, false);
+  });
+
+  it('ends an eliding paragraph in an ellipsis that fits beside what it keeps', () => {
+    const bridge = createFakeBridge();
+    const layout = new Win32FontManager(bridge).layout(
+      [{ text: 'aaa bbb ' }, { text: 'ccc ddd', marker: 'link' }],
+      {},
+      { maxWidth: 60, maxLines: 1, overflow: 'ellipsis' },
+    );
+    const last = bridge.calls.filter((c) => c[0] === 'layoutCreate').at(-1);
+    assert.match(last[1], /…$/, `ends in the mark: ${last[1]}`);
+    assert.ok(last[1].length * 8 <= 60, `fits: ${last[1]}`);
+    assert.equal(layout.lines.length, 1);
+    assert.equal(layout.truncated, true);
+  });
+
+  it('measures a line without the space it wrapped at, which its advance keeps', () => {
+    // A line that fitted read as wider than its box, the space a wrap ended
+    // it on included, and <Html> moved every line beside a float below it
+    const layout = manager().layout('aaa bbb ccc', {}, { maxWidth: 64 });
+    assert.equal(layout.lines[0].width, 56);
+    assert.equal(layout.lines[0].advance, 64);
+  });
+
+  it('aligns the lines of a paragraph with no width within its widest', () => {
+    // the bridge aligns an unbounded paragraph in a box a million pixels
+    // wide, and <Html> measured a centred heading in a shrink-to-fit box as
+    // wide as all the room it had
+    const bridge = createFakeBridge();
+    const layout = new Win32FontManager(bridge).layout(
+      'centred',
+      {},
+      { align: 'center' },
+    );
+    assert.equal(layout.lines[0].x, 0);
+    assert.equal(layout.width, 56);
+    const last = bridge.calls.filter((c) => c[0] === 'layoutCreate').at(-1);
+    assert.equal(last[2].maxWidth, 56, 'laid out again at its own width');
+  });
+
+  it('counts a no-break space a line ends on in its width, as ntk does', () => {
+    // DirectWrite leaves it out as it leaves out a space, so a lone one
+    // measured nothing, and <Html> — which spaces an inline box's edges
+    // with one — made every edge a space too wide
+    const bridge = createFakeBridge();
+    const metrics = bridge.layoutMetrics;
+    bridge.layoutMetrics = (handle) => ({ ...metrics(handle), width: 0 });
+    const layout = new Win32FontManager(bridge).layout('\u00a0', {});
+    assert.equal(layout.width, 8);
+    assert.equal(layout.lines[0].width, 8);
+  });
+
+  it("puts each line's baseline from the top of the layout, as ntk does", () => {
+    const layout = manager().layout('aaa bbb ccc', {}, { maxWidth: 64 });
+    assert.deepEqual(
+      layout.lines.map((l) => l.baseline),
+      [12, 28],
+    );
+  });
+
+  it('keeps the ascent and descent the bridge measured off the faces', () => {
+    // under a `lineHeight` the bridge sets the baseline at 0.8 of the
+    // face's; worked out from it, the descent overran the line box and a
+    // line read as shorter than its own strut
+    const bridge = createFakeBridge();
+    bridge.measuresLines = true;
+    const layout = new Win32FontManager(bridge).layout(
+      'x',
+      {},
+      { lineHeight: 1 },
+    );
+    assert.equal(layout.lines[0].ascent, 12);
+    assert.equal(layout.lines[0].descent, 4);
+  });
+
+  it('hangs each run off the span it came from, cut where two spans meet', () => {
+    // what a painter reads a link's underline off: without it <Html> drew no
+    // underline, chip or highlight on Windows
+    const plain = { text: 'ab', size: 12 };
+    const link = { text: 'cd', size: 12, marker: 'link' };
+    const layout = manager().layout([plain, link], {});
+    const runs = layout.lines[0].runs;
+    assert.equal(runs.length, 2);
+    assert.equal(runs[0].span, plain);
+    assert.equal(runs[1].span, link);
+    assert.deepEqual(
+      runs.map((r) => [r.start, r.end, r.x, r.width]),
+      [
+        [0, 2, 0, 16],
+        [2, 4, 16, 16],
+      ],
+    );
+    assert.equal(runs[1].run.size, 12);
+    assert.equal(typeof runs[1].run.font.metrics, 'function');
   });
 
   it('draws through the context, not the native, so one wrapper serves both bridges', () => {

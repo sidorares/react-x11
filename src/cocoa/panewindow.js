@@ -60,6 +60,11 @@ export class CocoaPaneWindow {
     // a size from the host not yet presented (`pane-sized`)
     this._owesSized = false;
     this._presentedAt = -Infinity;
+    // The newest present the host has looked up (`pane-shown`), and the
+    // buffers of retired rings still named by a present it has not: freed
+    // as it does (`_releaseRing`).
+    this._shownSeq = 0;
+    this._retired = [];
     this._reactX11Node = null;
     // Where the pane's corner is on the screen, in device pixels, as the
     // host last said (`setPaneSize`): what a popup the pane anchors to one
@@ -194,11 +199,26 @@ export class CocoaPaneWindow {
    * drag resizes the pane a tick at a time, and each tick retires a ring
    * that the finalizer would have held until a collection happened to run.
    * The host keeps its own reference to whichever buffer its layer shows,
-   * so the frame on glass survives the free; a present of a retired buffer
-   * still in the channel finds no surface, and the host drops it
-   * (`CocoaPaneHost.present`) — the next present is the full frame on the
-   * new ring anyway. Bridges before 0.4 have no `releaseSurface`; there the
-   * finalizer is still the only owner, and this is the drop it always was.
+   * so the frame on glass survives the free.
+   *
+   * All but a buffer a present names that the host has not looked up yet.
+   * The host finds a buffer by its IOSurface id, and the system hands a
+   * freed id to the next surface anyone makes — the three this ring's
+   * successor is about to make, the ring of another pane resized in the
+   * same layout, the host's own window. A present still in the channel
+   * named the id, not the surface, so the host scanned out whatever had it
+   * by the time it looked: a frame of this pane's next ring, cleared or
+   * half drawn, or another tab's page, for a frame at every few steps of a
+   * drag. So that buffer is kept (`_retired`) until the host says it has
+   * looked it up (`pane-shown`, `_shown`), and only then freed: its id
+   * stays its own until nothing can ask for it. That is the buffers of
+   * the presents in flight — one, as a rule, since a present goes a frame
+   * at a time and the host answers on its next turn — and never more than
+   * a ring's worth: a host that stops answering has the oldest freed
+   * anyway, the one it is likeliest to have looked up already.
+   *
+   * Bridges before 0.4 have no `releaseSurface`; there the finalizer is
+   * still the only owner, and this is the drop it always was.
    */
   _releaseRing() {
     const ring = this._ring;
@@ -207,7 +227,39 @@ export class CocoaPaneWindow {
     if (!ring) return;
     const release = this._native.releaseSurface;
     if (typeof release !== 'function') return;
-    for (const s of ring) release.call(this._native, s.handle);
+    for (const s of ring) {
+      if (s.presentedSeq > this._shownSeq) this._retired.push(s);
+      else release.call(this._native, s.handle);
+    }
+    while (this._retired.length > CocoaPaneWindow.RING) {
+      release.call(this._native, this._retired.shift().handle);
+    }
+  }
+
+  /**
+   * The host has looked up every present up to `seq` (`pane-shown`): the
+   * retired buffers they named are its now, or nobody's, and go.
+   */
+  _shown(seq) {
+    if (!(seq > this._shownSeq)) return;
+    this._shownSeq = seq;
+    if (this._retired.length === 0) return;
+    const release = this._native.releaseSurface;
+    this._retired = this._retired.filter((s) => {
+      if (s.presentedSeq > seq) return true;
+      release.call(this._native, s.handle);
+      return false;
+    });
+  }
+
+  /** Every retired buffer, answered or not: the window is going, and so is
+   *  the layer the host showed it on. */
+  _releaseRetired() {
+    const retired = this._retired;
+    this._retired = [];
+    const release = this._native.releaseSurface;
+    if (typeof release !== 'function') return;
+    for (const s of retired) release.call(this._native, s.handle);
   }
 
   _ensureSurface() {
@@ -314,6 +366,9 @@ export class CocoaPaneWindow {
       width: this.width,
       height: this.height,
     });
+    // the buffer is named in the channel until the host says otherwise
+    // (`_releaseRing`)
+    shown.presentedSeq = this._seq;
     if (this._owesSized) {
       this._owesSized = false;
       this._post({ type: 'pane-sized' });
@@ -349,6 +404,7 @@ export class CocoaPaneWindow {
     this.destroyed = true;
     this.app._unregisterWindow(this);
     this._releaseRing();
+    this._releaseRetired();
   }
 }
 

@@ -368,6 +368,25 @@ test('a menu a pane opens is a window the host makes, under the trigger on the s
   );
 });
 
+test('the host answers each present it looks up, the pane’s and its menu’s, so the buffers a resize retires can go', async () => {
+  // A present names its buffer by IOSurface id, and the system gives a
+  // freed id to the next surface anyone makes, so the pane keeps a buffer
+  // it retired until the host says it has looked the present up
+  // (`pane-shown`, `CocoaPaneWindow._releaseRing`) — for each window, by
+  // the id the present named it with.
+  const m = await mount();
+  await m.open();
+  await settle(m.host, m.pane);
+  const sub = [...m.pane._windows.values()].find((w) => w._popup);
+  assert.ok(m.paneWnd._seq > 0 && sub._seq > 0, 'both presented');
+  assert.strictEqual(
+    m.paneWnd._shownSeq,
+    m.paneWnd._seq,
+    'every present of the pane’s own window answered',
+  );
+  assert.strictEqual(sub._shownSeq, sub._seq, 'and of the menu’s');
+});
+
 test("a click in the host's window for the menu picks in the pane, and the menu goes", async () => {
   const m = await mount();
   await m.open();

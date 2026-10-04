@@ -172,16 +172,20 @@ class PaneLayer {
    * A pane-present landed: scan out of the named shared surface.
    *
    * A present names a buffer the pane may since have retired. The channel
-   * is a queue and nothing acknowledges a present, so a pane-rect that
-   * changes the pane's size (or its scale — the host window moved to another
-   * display during startup, which is how this was first hit) can cross a
-   * present already in flight: the pane rebuilds its ring on that rect and
-   * releases the old one (`CocoaPaneWindow._ensureSurface`), and by the
-   * time the host looks the id up the surface is gone. That present is
-   * stale by construction — the pane's full frame on the fresh ring is
-   * queued behind it — so it is dropped, and the layer keeps the frame it
-   * already holds a reference to. Nothing else here throws; any other
-   * error is the bug it says it is.
+   * is a queue, so a pane-rect that changes the pane's size (or its scale —
+   * the host window moved to another display during startup, which is how
+   * this was first hit) can cross a present already in flight: the pane
+   * rebuilds its ring on that rect (`CocoaPaneWindow._ensureSurface`)
+   * before the host has looked the id up. The id is all the present
+   * carries, and the system gives a freed id to the next surface made, so
+   * the pane keeps such a buffer until the host says it has looked it up
+   * (`pane-shown`, which `CocoaPaneHost` sends once it has) — the lookup finds
+   * the frame the present named, a size behind, and the full frame on the
+   * fresh ring is queued behind it. Where the buffer is gone anyway — a
+   * pane that freed it for want of an answer, or one that died with
+   * presents in the channel — the present is dropped, and the layer keeps
+   * the frame it already holds a reference to. Nothing else here throws;
+   * any other error is the bug it says it is.
    */
   present(iosurfaceId, size = null) {
     if (this.destroyed) return false;
@@ -258,6 +262,28 @@ export class CocoaPaneHost extends PaneLayer {
     this._menus = new Map();
     /** @type {Map<string, HostedPlayer>} the pane's players, by its id */
     this._players = new Map();
+  }
+
+  /**
+   * The pane's own present, scanned out (`PaneLayer.present`), and the pane
+   * told: whatever the buffer it named holds is the layer's now, or was
+   * dropped, so the pane may free it (`CocoaPaneWindow._releaseRing`).
+   */
+  present(iosurfaceId, size = null) {
+    const shown = super.present(iosurfaceId, size);
+    this._acknowledge(size?.seq, null);
+    return shown;
+  }
+
+  /** `pane-shown`: the host has looked up the presents to `seq` of the
+   *  pane's own window, or of the one `window` names. */
+  _acknowledge(seq, window) {
+    if (this.destroyed || seq == null) return;
+    this._send?.({
+      type: 'pane-shown',
+      seq,
+      ...(window != null && { window }),
+    });
   }
 
   /**
@@ -375,9 +401,15 @@ export class CocoaPaneHost extends PaneLayer {
   /** A pane-present naming one of the pane's other windows. */
   presentWindow(msg) {
     const entry = this._windows.get(msg.window);
-    if (!entry || this.destroyed) return;
+    if (!entry || this.destroyed) {
+      this._acknowledge(msg.seq, msg.window);
+      return;
+    }
     entry.layer.setRect({ x: 0, y: 0, width: msg.width, height: msg.height });
-    if (!entry.layer.present(msg.id)) return;
+    const shown = entry.layer.present(msg.id);
+    // its ring is the pane's own ring, retired the same way
+    this._acknowledge(msg.seq, msg.window);
+    if (!shown) return;
     entry.presented = true;
     // a transparent window's shadow is the shape of what it shows
     entry.wnd._shadowAfterFlip?.();

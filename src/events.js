@@ -1672,6 +1672,18 @@ export class EventManager {
         // its ordinary turn.
         if (step.consumed) return;
       }
+      // A key that typed more than one character has no code point to type
+      // them with: a backend whose keyboard layout composes on its own says
+      // so with `text` — the accent and a letter it does not combine with,
+      // `´s` (src/cocoa/keymap.js). Committed the way an input method's text
+      // is, a composition that opens and closes on this key, which is where
+      // an element that types inserts it — and like a composed key, it is
+      // the key's whole answer.
+      if (native.text && target.composes !== false) {
+        this._composition('Start', target, '', native);
+        this._composition('End', target, String(native.text), native);
+        return;
+      }
       // The element's own behaviour first, focus traversal after it — Tab is
       // an ordinary defaultable key rather than one the focus manager eats on
       // the way past. Cycling first meant an editor could only keep Tab as an

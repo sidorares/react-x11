@@ -5,8 +5,39 @@
 // have fixed keysyms looked up here by kVK_* virtual key code. NSEvent's
 // three character views map onto the three keysym roles events.js reads:
 //
-//   charsBase    (modifiers stripped)  -> baseKeysym — what chords match
-//   charsShifted (only Shift applied)  -> keysym / codepoint — what was typed
+//   charsBase    (modifiers stripped)        -> baseKeysym — what chords match
+//   chars        (every modifier applied)    -> keysym / codepoint — what was
+//                                               typed, unless ⌘ or ⌃ is held
+//   charsShifted (only Shift applied)        -> keysym / codepoint of a ⌘ or
+//                                               ⌃ chord, which types nothing
+//
+// **⌥ types on a Mac.** It is the layout's third and fourth level: ⌥S is ß on
+// a US keyboard, and on a German one ⌥L is @, ⌥5 [ and ⌥8 { — the only way
+// to type them. `charsShifted` is `charactersIgnoringModifiers`, which drops
+// ⌥ along with everything but Shift, so reading the typed character there
+// made ⌥S type `s` and left a German keyboard no @ at all. `chars` is
+// `characters`, the layout's own answer with ⌥, Shift and Caps Lock applied —
+// Caps Lock is the other thing `charsShifted` leaves out, so a field typed
+// lower case with it on. It is also exactly the DOM's `key` on macOS: ⌥S is
+// `ß`, ⌘S is `s`.
+//
+// There is no input method behind this. The bridge's view swallows
+// `keyDown:` without `interpretKeyEvents:` and is no `NSTextInputClient`
+// (docs/macos.md, "IME"), so these fields are all the text there is. Two
+// consequences, both handled below:
+//
+// - **A dead key types nothing.** ⌥E on a US layout leaves `chars` empty, and
+//   the key it is waiting for decides what the accent becomes. Typing the
+//   key's own letter, which is what reading `charsShifted` did, put an `e` in
+//   the field. Whether the next key's `chars` carries the composed `é` is the
+//   window server's business — an NSEvent built in-process does not carry the
+//   state, and a real keyboard was not measured — so nothing here depends on
+//   it: a composed character is taken as typed, and a plain one is the
+//   accent lost rather than a letter too many.
+// - **A key can type more than one character** — the accent and a letter it
+//   does not combine with, `´s`, where the layout composes. No code point
+//   carries two, so the whole string rides `text` and events.js commits it
+//   the way it commits an input method's text.
 //
 // Function and editing keys type Unicode private-use characters (U+F700…),
 // which must never leak out as code points; the kVK table wins over the
@@ -48,30 +79,56 @@ const VK_KEYSYMS = new Map([
   [111, 0xffc9], // F12
 ]);
 
-const PRIVATE_USE = (cp) => cp >= 0xf700 && cp <= 0xf8ff;
+// The block NSEvent's function-key constants live in (NSUpArrowFunctionKey is
+// U+F700). Not the whole U+F700–U+F8FF range Apple reserves: U+F8FF is the
+// Apple logo, which ⌥⇧K types and the system font draws.
+const FUNCTION_KEY = (cp) => cp >= 0xf700 && cp <= 0xf7ff;
+
+const printable = (cp) => cp != null && cp >= 0x20 && cp !== 0x7f;
 
 function keysymFromChars(chars) {
   if (!chars) return 0;
   const cp = chars.codePointAt(0);
-  if (cp == null || cp < 0x20 || PRIVATE_USE(cp)) return 0;
+  if (!printable(cp) || FUNCTION_KEY(cp)) return 0;
   return keysymOf(String.fromCodePoint(cp));
 }
 
 /**
- * The three key facts events.js reads off a native key event, from the raw
- * @windowkit/appkit payload.
+ * The key facts events.js reads off a native key event, from the raw
+ * @windowkit/appkit payload: `keysym`, `baseKeysym` and `codepoint`, and
+ * `text` when the key typed more than one character.
  */
 export function decodeKey(ev) {
   const fixed = VK_KEYSYMS.get(ev.keyCode);
   if (fixed) {
     return { keysym: fixed, baseKeysym: fixed, codepoint: undefined };
   }
-  const keysym = keysymFromChars(ev.charsShifted);
-  const baseKeysym = keysymFromChars(ev.charsBase) || keysym;
-  const cp = ev.charsShifted?.codePointAt(0);
-  const codepoint =
-    cp != null && cp >= 0x20 && !PRIVATE_USE(cp) ? cp : undefined;
-  return { keysym: keysym || baseKeysym, baseKeysym, codepoint };
+  const baseKeysym =
+    keysymFromChars(ev.charsBase) || keysymFromChars(ev.charsShifted);
+  // A ⌘ or ⌃ chord types nothing, and is named by its key: ⌘⌥S is a chord
+  // on S, not on ß. (`chars` for ⌃S is a control character besides.)
+  // `chars` is absent from a bridge older than the field, and from a test's
+  // event that only says which key it was.
+  const chord = ev.command || ev.control;
+  const typed = chord ? ev.charsShifted : (ev.chars ?? ev.charsShifted);
+  const points = typed ? Array.from(typed) : [];
+  if (points.length > 1) {
+    return {
+      keysym: keysymFromChars(ev.charsShifted) || baseKeysym,
+      baseKeysym,
+      codepoint: undefined,
+      text: typed,
+    };
+  }
+  const keysym = keysymFromChars(typed);
+  const cp = typed?.codePointAt(0);
+  const codepoint = printable(cp) && !FUNCTION_KEY(cp) ? cp : undefined;
+  return {
+    // a dead key typed nothing; the key it sits on is what a chord names
+    keysym: keysym || keysymFromChars(ev.charsShifted) || baseKeysym,
+    baseKeysym,
+    codepoint,
+  };
 }
 
 /** AppKit modifier booleans -> the X-style state mask events carry. */
