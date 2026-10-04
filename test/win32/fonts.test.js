@@ -351,6 +351,18 @@ describe('win32 fonts: the layout it answers', () => {
     assert.equal(last[2].maxWidth, 56, 'laid out again at its own width');
   });
 
+  it('counts a no-break space a line ends on in its width, as ntk does', () => {
+    // DirectWrite leaves it out as it leaves out a space, so a lone one
+    // measured nothing, and <Html> — which spaces an inline box's edges
+    // with one — made every edge a space too wide
+    const bridge = createFakeBridge();
+    const metrics = bridge.layoutMetrics;
+    bridge.layoutMetrics = (handle) => ({ ...metrics(handle), width: 0 });
+    const layout = new Win32FontManager(bridge).layout('\u00a0', {});
+    assert.equal(layout.width, 8);
+    assert.equal(layout.lines[0].width, 8);
+  });
+
   it("puts each line's baseline from the top of the layout, as ntk does", () => {
     const layout = manager().layout('aaa bbb ccc', {}, { maxWidth: 64 });
     assert.deepEqual(

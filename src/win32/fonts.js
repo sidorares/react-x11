@@ -958,7 +958,16 @@ export class Win32FontManager {
         })),
       };
     });
-    return new Win32TextLayout(this, handle, text, { ...raw, lines });
+    // DirectWrite's width leaves out a no-break space a line ends on, as it
+    // leaves out a space, where ntk's counts it as the letter it is to a
+    // line: a lone one measured nothing, and <Html>, which spaces an inline
+    // box's edges with one, made every edge a space too wide. The lines'
+    // own widths keep it, in the whole pixels the bridge answers in.
+    let width = raw.width;
+    for (const line of lines) {
+      width = Math.max(width, Math.ceil(line.width - 1e-3));
+    }
+    return new Win32TextLayout(this, handle, text, { ...raw, width, lines });
   }
 
   /** A stack resolved once (`resolveStack`): a named family is a
