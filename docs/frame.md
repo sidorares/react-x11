@@ -310,17 +310,22 @@ bounds in between, so a page in a pane had its left column drawn scaled a
 little at every step of a window dragged wider, and then drawn back at its
 size. A pane whose frames of a new size come within the window's
 live-resize budget, `createRoot({ cocoa: { resizeWait } })` (50 ms by
-default), has its last frame anchored at the top left at its size instead,
-the window under it showing for a pane frame where the new frame will
-reach. One that falls behind it is stretched, which is the better picture
-of a long wait. Behind is judged by the frames that land: two in a row
-later than the budget, or none at all for longer than it, and a frame well
-inside it anchors the next again. A size the pane is never sent, because a
-newer one replaced it while a frame was being painted, is no frame late,
-and a fast drag of a page that keeps up stays anchored rather than taking
-one look at every step and the other at every frame. Each gesture starts
-out anchored, and `resizeWait: 0` stretches always, as before. A bridge
-before `@windowkit/appkit` 0.25 stretches always too.
+default), has its last frame shown at its size from the top left instead:
+cropped on an axis the layer shrank on, and on one it grew on, its last
+pixel carried over the rest — the last column across a window dragged
+wider, the last row down one dragged taller. A page's edge is mostly its
+background, so the strip continues it, a gradient included, where the
+`<Frame>`'s own background showed through before. Where the edge crosses
+content, a bottom row through a line of text, that content runs down the
+strip in thin lines for the frame it lasts. One that falls behind the
+budget is stretched, which is the better picture of a long wait. Behind is
+judged by the frames that land: two in a row later than the budget, or none
+at all for longer than it, and a frame well inside it shows the next at its
+size again. A size the pane is never sent, because a newer one replaced it
+while a frame was being painted, is no frame late, and a fast drag of a
+page that keeps up stays at its size rather than taking one look at every
+step and the other at every frame. Each gesture starts out at its size, and
+`resizeWait: 0` stretches always, as before.
 
 **A pane's frames are named by id, and the id outlives nothing.** On Cocoa
 a present carries the IOSurface's id, and the host looks it up when it

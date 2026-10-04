@@ -32,10 +32,17 @@ const ASKED_KEPT = 16;
 const GESTURE_GAP_MS = 500;
 
 /** How far inside the budget a frame of a pane that fell behind has to
- *  come for its frames to be anchored again (`_answered`): a pane whose
- *  frames come near the budget keeps one look rather than taking the
- *  other at every frame. */
+ *  come for its frames to be shown at their size again (`_answered`): a
+ *  pane whose frames come near the budget keeps one look rather than taking
+ *  the other at every frame. */
 const KEPT_UP = 0.75;
+
+/** How much of a frame's last pixel is carried over the layer past it
+ *  (`_edgeProps`): its middle, a hundredth of a pixel wide. A centre the
+ *  whole pixel wide stretches what the filter makes of it and the pixel
+ *  before it, a blend of the two ramped across the gap, and Core Animation
+ *  takes a centre of no width for none. */
+const EDGE_SLIVER = 0.01;
 
 /** One shared surface on glass: a sublayer of a window's root layer, its
  * contents the IOSurface the pane last presented into it. */
@@ -51,15 +58,18 @@ class PaneLayer {
     });
     this.destroyed = false;
     this._rect = null;
-    // How the frame the layer holds sits in it while one of the size the
-    // layer was just given is on its way (`_gravityNow`): the gravity set,
-    // Core Animation's own until one is, the sizes asked of the pane with
-    // when each was asked, and whether the pane has fallen behind them.
-    this._gravity = 'resize';
+    // How the frame the layer holds is shown while one of the size the
+    // layer was just given is on its way (`_anchoredNow`, `_edgeProps`):
+    // the sizes asked of the pane with when each was asked, whether the
+    // pane has fallen behind them, the size of the frame it holds, and the
+    // contents rects last set — Core Animation's own, the whole, until any
+    // are.
     this._contentsScale = null;
     this._asked = [];
     this._askedAt = null;
     this._behind = false;
+    this._frame = null;
+    this._edgeKey = `${null}|${null}`;
     // when a frame last answered a size, and how many frames in a row came
     // later than the budget (`_answered`)
     this._answeredAt = -Infinity;
@@ -67,22 +77,21 @@ class PaneLayer {
   }
 
   /**
-   * The gravity a pane's last frame sits in its layer by, until a frame of
-   * the layer's new size lands. The host gives the layer its new size the
-   * moment the window lays out, and the pane's frame of that size comes a
-   * pane frame later: Core Animation's default, `resize`, stretches the
-   * frame it has to the new bounds meanwhile, and a page's left column was
-   * drawn scaled a little at every step of a window dragged wider, and then
-   * at its size again. A pane that keeps up has its frame anchored at the
-   * top left instead, at its size, what it does not cover yet showing the
-   * window under it for a pane frame; one that falls behind the budget is
-   * stretched, which is the better picture for the long wait — a pane
-   * repainting at three frames a second shows a squeezed page, not a page
-   * and a growing strip. The budget is the window's live-resize handshake's
+   * Whether a pane's last frame is shown at its size in its layer until a
+   * frame of the layer's new size lands, or stretched to it. The host gives
+   * the layer its new size the moment the window lays out, and the pane's
+   * frame of that size comes a pane frame later: Core Animation stretches
+   * the frame it has to the new bounds meanwhile, and a page's left column
+   * was drawn scaled a little at every step of a window dragged wider, and
+   * then at its size again. A pane that keeps up has its frame shown at its
+   * size instead, its edge carried over what it does not cover yet
+   * (`_edgeProps`); one that falls behind the budget is stretched, which is
+   * the better picture for the long wait — a pane repainting at three
+   * frames a second shows a squeezed page, not a page and a smeared strip.
+   * The budget is the window's live-resize handshake's
    * (`createRoot({ cocoa: { resizeWait } })`), how long a frame of a new
    * size may take before the old one is shown in its place: 0 stretches
-   * always, as before. A bridge that predates `contentsGravity` ignores it,
-   * and stretches.
+   * always, as before.
    *
    * Behind is a pane whose frames come later than the budget, not one with
    * a size waiting that long. `<Frame>` sends a pane the newest size once
@@ -91,38 +100,84 @@ class PaneLayer {
    * waits until a frame of a later one lands, two pane frames at most. A
    * page that painted in 27 ms answered every size it was sent in 31, and
    * still had one 52 ms old at every step of the drag — so its layer was
-   * stretched at every step and anchored again at every frame, the page
-   * scaling and coming back thirty times a second. Here a size waiting
-   * longer than the budget counts only when no frame has answered any
-   * size in that time, which is a pane that stopped, and a frame that
-   * lands decides the rest (`_answered`).
+   * stretched at every step and shown at its size again at every frame, the
+   * page scaling and coming back thirty times a second. Here a size waiting
+   * longer than the budget counts only when no frame has answered any size
+   * in that time, which is a pane that stopped, and a frame that lands
+   * decides the rest (`_answered`).
    */
-  _gravityNow() {
+  _anchoredNow() {
     const budget = this.app._resizeWait ?? RESIZE_WAIT_MS;
-    if (!(budget > 0)) return 'resize';
+    if (!(budget > 0)) return false;
     // a size asked longer ago than the budget, and no frame of any since
     const oldest = this._asked[0];
     if (oldest && now() - Math.max(oldest.at, this._answeredAt) > budget) {
       this._behind = true;
     }
-    return this._behind ? 'resize' : 'topLeft';
+    return !this._behind;
   }
 
-  /** The props that set the gravity, where it changed. */
-  _gravityProps() {
-    const gravity = this._gravityNow();
-    if (gravity === this._gravity) return null;
-    this._gravity = gravity;
-    // a frame anchored and larger than the layer would hang out of it
-    return { contentsGravity: gravity, masksToBounds: gravity !== 'resize' };
+  /**
+   * The props that show the frame the layer holds in bounds that are not
+   * its size, where they changed. At its size and from the top left, as a
+   * page sits in a window: an axis the layer shrank on is cropped
+   * (`contentsRect`), and on one it grew on the frame's last pixel is
+   * carried over the rest (`contentsCenter`, the part of the contents that
+   * stretches while everything else keeps its size) — the last column
+   * across a window dragged wider, the last row down one dragged taller,
+   * and the corner pixel into the corner. Both rects are the whole when
+   * the frame is stretched, and when it is the layer's size.
+   *
+   * Anchored by gravity alone, the strip the frame did not cover showed
+   * whatever was under the pane, which is the `<Frame>`'s background: in
+   * the browser example's dark mode a dark band 14 to 38 points wide down
+   * the page's right edge, at every step of a fast drag. A page's edge is
+   * mostly its background, so its last pixels continue it: Zen Garden's
+   * about page has a vertical gradient there, which its last column carries
+   * on exactly, where one colour read off the edge put a flat band across
+   * it, three times as far from the page. Where the edge cuts through the
+   * page's content — the bottom row, in a window dragged taller, usually
+   * crosses a line of text — the glyphs run down the strip in thin lines
+   * for the pane frame it lasts, where the settled page has its next line
+   * of text: as far from it, measured, as the flat colour. A bridge that
+   * predates the rects ignores them, and stretches.
+   */
+  _edgeProps() {
+    const frame = this._frame;
+    const rect = this._rect;
+    let crop = null;
+    let edge = null;
+    if (frame && rect && this._anchoredNow()) {
+      const w = Math.min(frame.width, rect.width);
+      const h = Math.min(frame.height, rect.height);
+      if (w < frame.width || h < frame.height) {
+        crop = [0, 0, w / frame.width, h / frame.height];
+      }
+      // in the shown part's own unit square; an axis that did not grow is
+      // all centre, stretched by one
+      const wider = rect.width > w;
+      const taller = rect.height > h;
+      if (wider || taller) {
+        edge = [
+          wider ? (w - 0.5) / w : 0,
+          taller ? (h - 0.5) / h : 0,
+          wider ? EDGE_SLIVER / w : 1,
+          taller ? EDGE_SLIVER / h : 1,
+        ];
+      }
+    }
+    const key = `${crop}|${edge}`;
+    if (key === this._edgeKey) return null;
+    this._edgeKey = key;
+    return { contentsRect: crop, contentsCenter: edge };
   }
 
   /**
    * The props that say how many of the pane's pixels make a point of the
    * layer, where that changed: the window's scale, which the pane draws
-   * at. A frame stretched to the bounds never asked, and one anchored at
-   * its size is shown at it — pixels over `contentsScale` points, so at
-   * the default of 1 a page at 2x came out twice its size.
+   * at. A frame stretched to the bounds never asked, and one shown at its
+   * size is shown at it — pixels over `contentsScale` points, so at the
+   * default of 1 a page at 2x came out twice its size.
    */
   _scaleProps() {
     const scale = this.wnd.scale ?? 1;
@@ -137,7 +192,7 @@ class PaneLayer {
    * the budget put the pane behind, and one well inside it — `KEPT_UP` of
    * it — brings it back: a frame the collector held up stretches nothing,
    * and a pane whose frames come near the budget is not stretched and
-   * anchored by turns.
+   * shown at its size by turns.
    */
   _answered(width, height) {
     const asked = this._asked;
@@ -202,7 +257,7 @@ class PaneLayer {
         zPosition: 1e7,
         hidden: false,
         ...this._scaleProps(),
-        ...this._gravityProps(),
+        ...this._edgeProps(),
       });
     } finally {
       native.txCommit();
@@ -230,22 +285,28 @@ class PaneLayer {
    */
   present(iosurfaceId, size = null) {
     if (this.destroyed) return false;
+    const native = this._native;
+    // The frame and the rects that show it in one transaction: a frame of
+    // a new size shown by the last one's rects is cropped or carried over
+    // by the wrong amount for a refresh.
+    native.txBegin({ disableActions: true });
     try {
-      this._native.setLayerContentsIOSurface(this.layer, iosurfaceId);
-    } catch (err) {
-      if (!/IOSurfaceLookup/.test(err?.message ?? '')) throw err;
-      return false;
-    }
-    // how long the pane took to a frame of a size it was asked for, which
-    // is what the gravity follows (`_gravityNow`)
-    if (size) {
-      this._answered(size.width, size.height);
-      const gravity = this._gravityProps();
-      if (gravity) {
-        withoutActions(this._native, () =>
-          this._native.setLayerProps(this.layer, gravity),
-        );
+      try {
+        native.setLayerContentsIOSurface(this.layer, iosurfaceId);
+      } catch (err) {
+        if (!/IOSurfaceLookup/.test(err?.message ?? '')) throw err;
+        return false;
       }
+      // how long the pane took to a frame of a size it was asked for, which
+      // is what decides how the next is shown (`_anchoredNow`)
+      if (size) {
+        this._answered(size.width, size.height);
+        this._frame = { width: size.width, height: size.height };
+        const edge = this._edgeProps();
+        if (edge) native.setLayerProps(this.layer, edge);
+      }
+    } finally {
+      native.txCommit();
     }
     return true;
   }
