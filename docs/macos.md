@@ -1085,7 +1085,11 @@ command line asking for it. It needs a bridge with `runMain()`,
 - **The resize handshake.** Each flip is a recorded frame committed with
   the size it was painted at, in AppKit's own points, and each window asks
   AppKit to wait for it for `cocoa: { resizeWait }` ms — 50 by default, 0
-  for none. The layer presenter's frame commits its size too.
+  for none. The layer presenter's frame commits its size too. A `<Frame>`
+  pane is held to the same budget the other way round: while its frames of
+  a new size come within it, its layer anchors the last one at its size
+  (`contentsGravity: 'topLeft'`) rather than stretching it, and past it,
+  stretches (docs/frame.md §"Sizing, stacking, input").
 - **The screen layout is pulled.** `listScreens()` is always current — the
   bridge republishes its copy on
   `NSApplicationDidChangeScreenParametersNotification`, and in pump mode

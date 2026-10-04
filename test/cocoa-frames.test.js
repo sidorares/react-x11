@@ -45,6 +45,7 @@ import { CocoaApp, screenLayout } from '../src/cocoa/app.js';
 import { CocoaPaneHost } from '../src/cocoa/panehost.js';
 import { setCompositingForTests } from '../src/compositing.js';
 import { createRoot } from '../src/index.js';
+import { setAnimationClock } from '../src/nodes/animation.js';
 import { setScaleForTests } from '../src/scale.js';
 import { setScreensForTests } from '../src/screens.js';
 
@@ -1333,11 +1334,113 @@ test('the host adds, places and removes the pane with implicit animations off', 
     ),
     [
       ...quiet(['addSublayer', { root: 1 }, host.layer]),
-      ...place([10, 10, 180, 100]),
+      // anchored from the start (`_gravityNow`), the next test's subject
+      ...quiet([
+        'setLayerProps',
+        host.layer,
+        {
+          frame: [10, 10, 180, 100],
+          zPosition: 1e7,
+          hidden: false,
+          contentsScale: 2,
+          contentsGravity: 'topLeft',
+          masksToBounds: true,
+        },
+      ]),
       ...place([10, 10, 280, 160]),
       ...quiet(['removeFromSuperlayer', host.layer]),
     ],
   );
+});
+
+test('a pane that keeps up has its last frame anchored while it grows, and one that falls behind has it stretched', () => {
+  // The host gives the pane's layer its new size as the window lays out,
+  // and the frame of that size comes a pane frame later. Core Animation's
+  // default stretched the frame the layer had to the new bounds in the
+  // meantime: a page's left column scaled a little at every step of a
+  // window dragged wider, and then drawn back at its size. A pane whose
+  // frames of a new size come within the live-resize budget has its frame
+  // anchored at the top left instead; past the budget, stretched.
+  let t = 0;
+  setAnimationClock(() => t);
+  try {
+    const native = fakeBridge();
+    const host = new CocoaPaneHost(
+      { _native: native, _resizeWait: 50 },
+      { _layer: { root: 1 }, scale: 2 },
+    );
+    const gravities = () =>
+      native.calls
+        .filter(
+          ([name, , props]) =>
+            name === 'setLayerProps' && props.contentsGravity,
+        )
+        .map(([, , props]) => [props.contentsGravity, props.masksToBounds]);
+    host.setRect({ x: 0, y: 0, width: 360, height: 200 });
+    assert.deepEqual(
+      gravities(),
+      [['topLeft', true]],
+      'anchored to begin with',
+    );
+    // and shown at its size: a frame anchored is shown at its pixels over
+    // `contentsScale` points, and a page at 2x came out twice its size at
+    // the default of 1
+    assert.equal(
+      native.calls.find(([, , props]) => props?.contentsGravity)[2]
+        .contentsScale,
+      2,
+    );
+    // asked for 400 wide at 10, and a frame of it 20ms later: keeping up
+    t = 10;
+    host.setRect({ x: 0, y: 0, width: 400, height: 200 });
+    t = 30;
+    host.present(7, { width: 401, height: 200 });
+    assert.equal(gravities().length, 1, 'still anchored');
+    // 440 asked at 40 and nothing of it by 200: behind, so stretched, on
+    // the layer's next size
+    t = 40;
+    host.setRect({ x: 0, y: 0, width: 440, height: 200 });
+    t = 200;
+    host.setRect({ x: 0, y: 0, width: 480, height: 200 });
+    assert.deepEqual(
+      gravities().at(-1),
+      ['resize', false],
+      'stretched once behind',
+    );
+    // and a frame of the last size straight after: keeping up again
+    t = 210;
+    host.present(8, { width: 480, height: 200 });
+    assert.deepEqual(gravities().at(-1), ['topLeft', true], 'anchored again');
+    // behind once more — and then a resize of its own, after a pause, which
+    // starts out anchored: the long layout was the last gesture's
+    t = 220;
+    host.setRect({ x: 0, y: 0, width: 520, height: 200 });
+    t = 400;
+    host.setRect({ x: 0, y: 0, width: 560, height: 200 });
+    assert.deepEqual(gravities().at(-1), ['resize', false], 'behind');
+    t = 2000;
+    host.setRect({ x: 0, y: 0, width: 600, height: 200 });
+    assert.deepEqual(gravities().at(-1), ['topLeft', true], 'a new gesture');
+    host.destroy();
+
+    // a budget of 0 waits for no frame: stretched always, as before, and
+    // nothing set to say so
+    const always = fakeBridge();
+    const plain = new CocoaPaneHost(
+      { _native: always, _resizeWait: 0 },
+      { _layer: { root: 1 }, scale: 2 },
+    );
+    plain.setRect({ x: 0, y: 0, width: 360, height: 200 });
+    plain.setRect({ x: 0, y: 0, width: 400, height: 200 });
+    plain.present(9, { width: 400, height: 200 });
+    assert.ok(
+      !always.calls.some(([, , props]) => props?.contentsGravity),
+      'no gravity set',
+    );
+    plain.destroy();
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
 });
 
 // --- the wheel ----------------------------------------------------------------------
