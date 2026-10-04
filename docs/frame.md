@@ -317,6 +317,19 @@ of a long wait. Each gesture starts out anchored, and `resizeWait: 0`
 stretches always, as before. A bridge before `@windowkit/appkit` 0.25
 stretches always too.
 
+**A pane's frames are named by id, and the id outlives nothing.** On Cocoa
+a present carries the IOSurface's id, and the host looks it up when it
+reads the message. A resize has the pane make a new ring of buffers, and
+the system gives a freed id to the next surface anyone makes — the pane's
+next ring, another tab's, the host's own window. A present still in the
+channel when its ring was freed was looked up as whichever surface had
+the id by then: the pane's next frame cleared or half drawn, or another
+tab's page, on glass for a frame at every few steps of a drag. So the host
+answers each present it has looked up (`pane-shown`), and the pane keeps a
+buffer it retired until the present naming it is answered: that is one
+buffer as a rule, and never more than a ring of them, the oldest freed
+first if the host stops answering.
+
 `backgroundColor` in the frame's `style` is what shows before the pane's
 first frame and after one dies — the same server-painted rectangle
 `<foreign>` documents.

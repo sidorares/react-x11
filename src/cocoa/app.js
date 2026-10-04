@@ -934,8 +934,9 @@ export class CocoaApp {
 
   /**
    * The pane's end of the frame channel (childmain hands it over,
-   * feature-detected so the X11 pane path never notices): geometry and
-   * input come in, pane-present and pane-cursor go out. `players` is the
+   * feature-detected so the X11 pane path never notices): geometry, input
+   * and the host's word that it has looked a present up come in,
+   * pane-present and pane-cursor go out. `players` is the
    * host's word that it plays the pane's `<video src>`s, which makes
    * `createPlayer` here — before the pane's first render, which asks.
    */
@@ -963,7 +964,12 @@ export class CocoaApp {
       }
       const pane = this._paneWindow ?? [...this._windows.values()][0];
       if (!pane) return;
-      if (msg?.type === 'pane-rect') {
+      if (msg?.type === 'pane-shown') {
+        // the host has looked up this window's presents to `seq`, so the
+        // buffers they named may go (`CocoaPaneWindow._releaseRing`)
+        const wnd = msg.window != null ? this._windows.get(msg.window) : pane;
+        wnd?._shown?.(msg.seq);
+      } else if (msg?.type === 'pane-rect') {
         pane.setPaneSize(msg.width, msg.height, msg.scale, msg.screen);
         this._flushPaneOutbox();
         this._afterInput();
