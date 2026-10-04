@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.42.0](https://github.com/sidorares/react-x11/compare/v2.41.1...v2.42.0) (2026-10-04)
+
+
+### Features
+
+* **cocoa:** a sprite may be its shadows alone, CSS's outer box-shadows the render server draws and animates on the GPU, so an element hands a glow it would blur a pixel at a time to Core Animation ([#883](https://github.com/sidorares/react-x11/issues/883)) ([a421eba](https://github.com/sidorares/react-x11/commit/a421eba9827e5a9856920728a9f7404c45c2ccb7))
+
+
+### Bug Fixes
+
+* **cocoa:** a pane's last frame shown while its window grows has its last column and row carried over what it does not cover yet, where the `<Frame>`'s background showed through, a dark band down the page's right edge at every step of a fast drag ([#882](https://github.com/sidorares/react-x11/issues/882)) ([86a919a](https://github.com/sidorares/react-x11/commit/86a919a08d5ee0c3e618234b4d543c3486654e0e))
+
 ## [2.41.1](https://github.com/sidorares/react-x11/compare/v2.41.0...v2.41.1) (2026-10-04)
 
 
