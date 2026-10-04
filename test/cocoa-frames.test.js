@@ -42,6 +42,7 @@ import { afterEach, test } from 'node:test';
 import React from 'react';
 
 import { CocoaApp, screenLayout } from '../src/cocoa/app.js';
+import { loadNative } from '../src/cocoa/native.js';
 import { CocoaPaneHost } from '../src/cocoa/panehost.js';
 import { setCompositingForTests } from '../src/compositing.js';
 import { createRoot } from '../src/index.js';
@@ -1441,6 +1442,36 @@ test('a pane that keeps up has its last frame anchored while it grows, and one t
   } finally {
     setAnimationClock(() => Date.now());
   }
+});
+
+test('over the real bridge, the gravity a pane is anchored with is one the bridge reads', (t) => {
+  // `contentsGravity` is @windowkit/appkit 0.25.0's (windowkit/appkit#113).
+  // A bridge before it took the props and left the key unread, so the
+  // frame was stretched as ever; one that reads it turns down a name that
+  // is no gravity, which is how this tells the two apart.
+  let bridge = null;
+  if (process.platform === 'darwin') {
+    try {
+      bridge = loadNative();
+    } catch {
+      bridge = null;
+    }
+  }
+  if (!bridge) {
+    t.skip('the @windowkit/appkit bridge is not loadable here');
+    return;
+  }
+  const layer = bridge.createLayer();
+  bridge.setLayerProps(layer, {
+    contentsGravity: 'topLeft',
+    masksToBounds: true,
+    contentsScale: 2,
+  });
+  bridge.setLayerProps(layer, { contentsGravity: 'resize' });
+  assert.throws(
+    () => bridge.setLayerProps(layer, { contentsGravity: 'upperLeft' }),
+    TypeError,
+  );
 });
 
 // --- the wheel ----------------------------------------------------------------------
