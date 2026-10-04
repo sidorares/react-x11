@@ -975,7 +975,15 @@ export class CocoaWindow {
    * painting a state the next event in the same batch replaces.
    */
   frameInFlight() {
-    if (this.app._batching) return true;
+    return this.app._batching || this.frameHeld();
+  }
+
+  /**
+   * Whether the frame clock holds this window's next frame
+   * (`CocoaApp._tickFrames`): the fence half of `frameInFlight`, without the
+   * batch, which the clock never ticks inside.
+   */
+  frameHeld() {
     return (
       this._awaiting != null &&
       this._surfaceSize?.width === this.width &&
