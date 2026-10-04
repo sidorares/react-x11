@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.40.0](https://github.com/sidorares/react-x11/compare/v2.39.0...v2.40.0) (2026-10-04)
+
+
+### Features
+
+* **backend:** filter on the native context, the colour functions of a CSS filter list applied to everything drawn after it, so &lt;Html&gt; filters an element's group in the paint that draws it on macOS, where it read the group back and drew it a round trip late ([#866](https://github.com/sidorares/react-x11/issues/866)) ([6bee15e](https://github.com/sidorares/react-x11/commit/6bee15e0469577550de9706bba3bbce873dedb83))
+* **cocoa:** ⌘ is the primary modifier — the text controls, the edit menu and accelerators answer and print ⌘, and a menu the macOS menu bar has taken runs each item once ([#863](https://github.com/sidorares/react-x11/issues/863)) ([85370a1](https://github.com/sidorares/react-x11/commit/85370a1ee5a2bad432cca1abf11c307bf33b4f82))
+* **cocoa:** a pane that keeps up with its resizes has its last frame anchored at the top left while the next comes, where Core Animation stretched it to the new size, so a page dragged wider in a &lt;Frame&gt; is not drawn scaled and then drawn back ([#867](https://github.com/sidorares/react-x11/issues/867)) ([d384145](https://github.com/sidorares/react-x11/commit/d384145a4e61995ba2a4ac15ccc694b15e41b094))
+* **cocoa:** imageSmoothingEnabled and imageSmoothingQuality on the native context, over @windowkit/appkit's ctxSetImageSmoothing, so a surface drawn a tile at a time through a perspective at 'low' costs each tile its own pixels where it cost the whole surface ([#861](https://github.com/sidorares/react-x11/issues/861)) ([6f7b479](https://github.com/sidorares/react-x11/commit/6f7b47908d91c6643498766e1d97b0f75a6b383f))
+
+
+### Bug Fixes
+
+* **backend:** clip(rule) and clip(path, rule) hand the fill rule to the macOS and Windows bridges as fill does, where clip took one argument and cut every clip nonzero ([#864](https://github.com/sidorares/react-x11/issues/864)) ([351ae17](https://github.com/sidorares/react-x11/commit/351ae17220cd33c989b6b13c817c2bc713b55903))
+* **deps:** @windowkit/appkit ^0.24.0 and @windowkit/win32 ^0.0.7, so a clip the context hands evenodd is cut evenodd on macOS and Windows, and the smoothing a perspective's tiles ask for reaches a Mac, where the ranges admitted neither bridge's verb ([#865](https://github.com/sidorares/react-x11/issues/865)) ([ca66391](https://github.com/sidorares/react-x11/commit/ca66391210a6b776ac4ce5bc7e7dc181cc140be6))
+
 ## [2.39.0](https://github.com/sidorares/react-x11/compare/v2.38.0...v2.39.0) (2026-10-03)
 
 
