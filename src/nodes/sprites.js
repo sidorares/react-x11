@@ -37,6 +37,12 @@ export class NodeSprites {
    *   milliseconds and `delay` counted from the frame that asks — negative
    *   for one that started before it. An animation is attached once per
    *   `id`: to change one, give it a new id.
+   * - `shadows`, in place of `paint`: a part that is CSS's outer box
+   *   shadows alone, each `{ rect, radius, x, y, blur, color }` in device
+   *   pixels and straight sRGB, the first on top, none falling inside the
+   *   part's `rect` (with `rectRadius` corners); their animations are of
+   *   `shadowBlur`, `shadowColor` and `shadowOffset`, `shadow` saying
+   *   which.
    *
    * Asked every frame, after layout and before the damage is taken, on a
    * window whose presenter lifts sprites; nowhere else. An element whose

@@ -208,6 +208,18 @@ export function fakeCocoaBridge({ screens } = {}) {
     setLayerProps(layer, props) {
       Object.assign(layer.props, props);
     },
+    // a shape layer — a sprite's shadows are masked by one — keeps what it
+    // was given as `shape`
+    createShapeLayer: () => ({
+      layer: ++seq,
+      props: {},
+      shape: {},
+      sublayers: [],
+      parent: null,
+    }),
+    setShapeProps(layer, props) {
+      Object.assign(layer.shape, props);
+    },
     surfaceToLayer(surface, layer) {
       layer.contents = surface.id;
     },

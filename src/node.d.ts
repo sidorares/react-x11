@@ -281,6 +281,30 @@ export type SpriteMatrix3D = [
  *  0..1, or one of Core Animation's curve names. */
 export type SpriteTiming = [number, number, number, number] | string;
 
+/** A colour as a sprite's shadows take it: straight sRGB, red, green, blue
+ *  and alpha each 0 to 1. */
+export type SpriteColor = [number, number, number, number];
+
+/**
+ * A shadow a part casts, as CSS's outer `box-shadow` casts one: the shape of
+ * `rect` with `radius` corners, `x` and `y` away, blurred by `blur` — CSS's
+ * blur radius, a Gaussian of half of it — in `color`. Device pixels, window
+ * coordinates, untransformed like the part's `rect`. A spread is the
+ * element's to fold into `rect` and `radius`, as CSS spells it out.
+ */
+export interface SpriteShadow {
+  rect: Rect;
+  /** The radius of `rect`'s corners: a circular arc at each of the four. 0
+   * when left out. */
+  radius?: number;
+  /** 0 when left out. */
+  x?: number;
+  y?: number;
+  /** 0 when left out: a hard shadow. */
+  blur?: number;
+  color: SpriteColor;
+}
+
 /**
  * An animation the render server runs on a sprite: keyframes for one
  * property, played as CSS plays an animation's iterations.
@@ -290,11 +314,22 @@ export interface SpriteAnimation {
    * reports. An animation is attached once per id: to change one, give it
    * a new id. */
   id: string;
-  property: 'opacity' | 'transform';
+  /** The layer's opacity or transform, or one of its shadows' blur, colour
+   * or offset (`shadow`). */
+  property:
+    'opacity' | 'transform' | 'shadowBlur' | 'shadowColor' | 'shadowOffset';
+  /** Which of the part's `shadows` a shadow's animation is of; 0 when left
+   * out. */
+  shadow?: number;
   /** At least two: opacities, or matrices for a transform — sampled densely
    * where the element interpolates in a way the render server would not.
-   * A transform's may be `matrix3d`s, in any mix with `matrix`es. */
-  values: number[] | (SpriteMatrix | SpriteMatrix3D)[];
+   * A transform's may be `matrix3d`s, in any mix with `matrix`es. A
+   * shadow's are blurs and `[x, y]` offsets in device pixels, or colours. */
+  values:
+    | number[]
+    | (SpriteMatrix | SpriteMatrix3D)[]
+    | SpriteColor[]
+    | [number, number][];
   /** One per value, 0 to 1, never decreasing; evenly spaced when left out. */
   keyTimes?: number[];
   /** One curve per segment, so one fewer than `values`; linear when left
@@ -356,6 +391,19 @@ export interface Sprite {
    * the current frame itself (docs/extending.md).
    */
   contents?: VideoFrames;
+  /**
+   * What the part casts, the first on top, as CSS lists them: a part with
+   * shadows, and no `paint` or `contents`, is its shadows alone, which the
+   * presenter draws on the GPU — a glow its element would blur a pixel at a
+   * time — and runs their animations. None of them falls inside `rect`,
+   * with `rectRadius` corners, as an outer shadow is never drawn under the
+   * box that casts it; where they reach is worked out from them, through
+   * every keyframe, so `reach` need not say.
+   */
+  shadows?: SpriteShadow[];
+  /** The radius of `rect`'s corners, in device pixels, where its `shadows`
+   * stop. 0 when left out. */
+  rectRadius?: number;
   /** Compared with `===` from frame to frame; a change paints the part
    * again. Left out, it is painted once. */
   version?: unknown;

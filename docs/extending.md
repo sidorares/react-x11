@@ -1838,6 +1838,58 @@ older bridge nothing is asked, and the element draws everything. A bridge
 that lists `matrix` and not `matrix3d` among its `transformForms()` lifts
 the parts in the plane and leaves those out of it to their elements.
 
+#### A part that is its shadows
+
+A part may be **shadows** alone: CSS's outer `box-shadow`, which the
+render server draws on the GPU where your `paint` would blur a glow a pixel
+at a time. It has `shadows` in place of `paint`, its `rect` is the box that
+casts them — none of them falls inside it, with `rectRadius` corners, as an
+outer shadow is never drawn under its box — and each shadow is the shape it
+is the shadow of, with its corners' `radius`, an offset `x` and `y`, CSS's
+`blur` radius and a `color`, `[r, g, b, a]` in straight sRGB from 0 to 1.
+The first is on top, as CSS lists them; a spread is yours to fold into
+the shape.
+
+```js
+sprites() {
+  const card = this.cardRect(); // device pixels, window coordinates
+  const s = this.scale;
+  return [
+    {
+      key: 'card-glow',
+      rect: card,
+      rectRadius: 8 * s,
+      shadows: [
+        { rect: card, radius: 8 * s, blur: 200 * s, color: [0.09, 0.63, 0.79, 0.25] },
+        { rect: card, radius: 8 * s, y: 3 * s, blur: 2 * s, color: [0.38, 0.45, 0.47, 0.05] },
+      ],
+      animations: [
+        {
+          id: `glow-${this.hoverRun}`,
+          property: 'shadowBlur',
+          shadow: 0, // which of them
+          values: [0, 200 * s],
+          duration: 250,
+        },
+      ],
+    },
+  ];
+}
+```
+
+Their `animations` are of `'shadowBlur'`, `'shadowColor'` and
+`'shadowOffset'`, with `shadow` saying which: blurs and `[x, y]` offsets in
+device pixels, colours as above, and an `opacity` and a `transform` on the
+whole part as any part has. A transition between two lists of shadows is
+yours to pad, as CSS pads it, and to sample where Core Animation's straight
+interpolation of a colour would not be CSS's. Where they can reach is
+worked out from the shadows through every keyframe, and that is everywhere
+the part is asked about: a part that is its shadows stands over what is
+under its glow, so nothing painted after your element may reach into it.
+Leave the box itself in your bitmap and draw everything but its shadows
+there while the part is lifted. A part that is its shadows is never inside
+another's.
+
 ### Elements that own a real X window
 
 `drawn: false` is for a node backed by its own child X window rather than
