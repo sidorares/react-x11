@@ -1680,7 +1680,7 @@ test('the host adds, places and removes the pane with implicit animations off', 
     ),
     [
       ...quiet(['addSublayer', { root: 1 }, host.layer]),
-      // anchored from the start (`_gravityNow`), the next test's subject
+      // and its scale, which a frame shown at its size is shown at
       ...quiet([
         'setLayerProps',
         host.layer,
@@ -1689,8 +1689,6 @@ test('the host adds, places and removes the pane with implicit animations off', 
           zPosition: 1e7,
           hidden: false,
           contentsScale: 2,
-          contentsGravity: 'topLeft',
-          masksToBounds: true,
         },
       ]),
       ...place([10, 10, 280, 160]),
@@ -1699,14 +1697,35 @@ test('the host adds, places and removes the pane with implicit animations off', 
   );
 });
 
-test('a pane that keeps up has its last frame anchored while it grows, and one that falls behind has it stretched', () => {
+/**
+ * How the fake bridge's layer shows its frame, by the contents rects last
+ * set (`_edgeProps`): `stretched` when both are the whole, or else what the
+ * crop keeps and which edges are carried over.
+ */
+function edgesOf(native) {
+  const sets = native.calls.filter(
+    ([name, , props]) => name === 'setLayerProps' && 'contentsCenter' in props,
+  );
+  return sets.map(([, , { contentsRect, contentsCenter }]) => ({
+    crop: contentsRect,
+    edge: contentsCenter,
+  }));
+}
+
+/** The last pixel of `n` as a contents centre's span on its axis. */
+const sliver = (n) => [(n - 0.5) / n, 0.01 / n];
+
+test('a pane that keeps up has its last frame shown at its size while it grows, its last column and row carried over the rest, and cropped while it shrinks', () => {
   // The host gives the pane's layer its new size as the window lays out,
   // and the frame of that size comes a pane frame later. Core Animation's
   // default stretched the frame the layer had to the new bounds in the
   // meantime: a page's left column scaled a little at every step of a
-  // window dragged wider, and then drawn back at its size. A pane whose
-  // frames of a new size come within the live-resize budget has its frame
-  // anchored at the top left instead; past the budget, stretched.
+  // window dragged wider, and then drawn back at its size. Anchored by
+  // gravity, it showed the `<Frame>`'s background in the strip the frame
+  // did not cover — a dark band at the page's right edge at every step of
+  // a fast drag. The frame is shown at its size now, its last pixel
+  // carried over what it does not cover: a page's edge is mostly its
+  // background, and its last column continues even a gradient exactly.
   let t = 0;
   setAnimationClock(() => t);
   try {
@@ -1715,58 +1734,138 @@ test('a pane that keeps up has its last frame anchored while it grows, and one t
       { _native: native, _resizeWait: 50 },
       { _layer: { root: 1 }, scale: 2 },
     );
-    const gravities = () =>
-      native.calls
-        .filter(
-          ([name, , props]) =>
-            name === 'setLayerProps' && props.contentsGravity,
-        )
-        .map(([, , props]) => [props.contentsGravity, props.masksToBounds]);
+    host.setRect({ x: 0, y: 0, width: 400, height: 200 });
+    host.present(1, { width: 400, height: 200 });
+    assert.deepEqual(edgesOf(native), [], 'a frame the layer’s size: nothing');
+    // wider: the last column across, the frame's height as it is
+    t = 10;
+    host.setRect({ x: 0, y: 0, width: 440, height: 200 });
+    const [x, w] = sliver(400);
+    assert.deepEqual(edgesOf(native).at(-1), {
+      crop: null,
+      edge: [x, 0, w, 1],
+    });
+    // the frame of that size: the whole again, set with it
+    t = 25;
+    host.present(2, { width: 440, height: 200 });
+    assert.deepEqual(edgesOf(native).at(-1), { crop: null, edge: null });
+    // taller: the last row down
+    t = 30;
+    host.setRect({ x: 0, y: 0, width: 440, height: 240 });
+    const [y, h] = sliver(200);
+    assert.deepEqual(edgesOf(native).at(-1), {
+      crop: null,
+      edge: [0, y, 1, h],
+    });
+    // both: the last column, the last row, and the corner pixel between
+    t = 40;
+    host.setRect({ x: 0, y: 0, width: 460, height: 260 });
+    const [x2, w2] = sliver(440);
+    assert.deepEqual(edgesOf(native).at(-1), {
+      crop: null,
+      edge: [x2, y, w2, h],
+    });
+    t = 55;
+    host.present(3, { width: 460, height: 260 });
+    // narrower and shorter: the part that fits, at its size, nothing
+    // stretched
+    t = 60;
+    host.setRect({ x: 0, y: 0, width: 400, height: 208 });
+    assert.deepEqual(edgesOf(native).at(-1), {
+      crop: [0, 0, 400 / 460, 208 / 260],
+      edge: null,
+    });
+    // wider and shorter: cropped to the height, the last column of what is
+    // shown carried across — the centre is in the shown part's own square
+    t = 70;
+    host.setRect({ x: 0, y: 0, width: 500, height: 208 });
+    const [x3, w3] = sliver(460);
+    assert.deepEqual(edgesOf(native).at(-1), {
+      crop: [0, 0, 1, 208 / 260],
+      edge: [x3, 0, w3, 1],
+    });
+    host.destroy();
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
+});
+
+test('a frame and the rects that show it are set in one transaction', () => {
+  // Set apart, a frame of a new size is shown by the rects worked out for
+  // the last one for a refresh: cropped, or carried over, by the wrong
+  // amount.
+  let t = 0;
+  setAnimationClock(() => t);
+  try {
+    const native = fakeBridge();
+    const host = new CocoaPaneHost(
+      { _native: native, _resizeWait: 50 },
+      { _layer: { root: 1 }, scale: 2 },
+    );
+    host.setRect({ x: 0, y: 0, width: 400, height: 200 });
+    host.present(1, { width: 400, height: 200 });
+    t = 10;
+    host.setRect({ x: 0, y: 0, width: 440, height: 200 });
+    t = 20;
+    const from = native.calls.length;
+    host.present(2, { width: 440, height: 200 });
+    assert.deepEqual(native.calls.slice(from), [
+      ['txBegin', { disableActions: true }],
+      ['flip', 2],
+      [
+        'setLayerProps',
+        host.layer,
+        { contentsRect: null, contentsCenter: null },
+      ],
+      ['txCommit'],
+    ]);
+    host.destroy();
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
+});
+
+test('a pane that falls behind has its last frame stretched, and a budget of 0 stretches always', () => {
+  let t = 0;
+  setAnimationClock(() => t);
+  try {
+    const native = fakeBridge();
+    const host = new CocoaPaneHost(
+      { _native: native, _resizeWait: 50 },
+      { _layer: { root: 1 }, scale: 2 },
+    );
+    const look = () =>
+      edgesOf(native).at(-1)?.edge ? 'at its size' : 'stretched';
     host.setRect({ x: 0, y: 0, width: 360, height: 200 });
-    assert.deepEqual(
-      gravities(),
-      [['topLeft', true]],
-      'anchored to begin with',
-    );
-    // and shown at its size: a frame anchored is shown at its pixels over
-    // `contentsScale` points, and a page at 2x came out twice its size at
-    // the default of 1
-    assert.equal(
-      native.calls.find(([, , props]) => props?.contentsGravity)[2]
-        .contentsScale,
-      2,
-    );
+    host.present(1, { width: 360, height: 200 });
     // asked for 400 wide at 10, and a frame of it 20ms later: keeping up
     t = 10;
     host.setRect({ x: 0, y: 0, width: 400, height: 200 });
+    assert.equal(look(), 'at its size');
     t = 30;
-    host.present(7, { width: 401, height: 200 });
-    assert.equal(gravities().length, 1, 'still anchored');
+    host.present(2, { width: 401, height: 200 });
     // 440 asked at 40 and nothing of it by 200: behind, so stretched, on
     // the layer's next size
     t = 40;
     host.setRect({ x: 0, y: 0, width: 440, height: 200 });
+    assert.equal(look(), 'at its size');
     t = 200;
     host.setRect({ x: 0, y: 0, width: 480, height: 200 });
-    assert.deepEqual(
-      gravities().at(-1),
-      ['resize', false],
-      'stretched once behind',
-    );
+    assert.equal(look(), 'stretched', 'stretched once behind');
     // and a frame of the last size straight after: keeping up again
     t = 210;
-    host.present(8, { width: 480, height: 200 });
-    assert.deepEqual(gravities().at(-1), ['topLeft', true], 'anchored again');
+    host.present(3, { width: 480, height: 200 });
+    t = 215;
+    host.setRect({ x: 0, y: 0, width: 484, height: 200 });
+    assert.equal(look(), 'at its size', 'at its size again');
     // behind once more — and then a resize of its own, after a pause, which
-    // starts out anchored: the long layout was the last gesture's
-    t = 220;
-    host.setRect({ x: 0, y: 0, width: 520, height: 200 });
+    // starts out at its size: the long layout was the last gesture's
     t = 400;
-    host.setRect({ x: 0, y: 0, width: 560, height: 200 });
-    assert.deepEqual(gravities().at(-1), ['resize', false], 'behind');
+    host.setRect({ x: 0, y: 0, width: 520, height: 200 });
+    assert.equal(look(), 'stretched', 'behind');
     t = 2000;
-    host.setRect({ x: 0, y: 0, width: 600, height: 200 });
-    assert.deepEqual(gravities().at(-1), ['topLeft', true], 'a new gesture');
+    host.setRect({ x: 0, y: 0, width: 560, height: 200 });
+    assert.equal(look(), 'at its size', 'a new gesture');
     host.destroy();
 
     // a budget of 0 waits for no frame: stretched always, as before, and
@@ -1777,26 +1876,24 @@ test('a pane that keeps up has its last frame anchored while it grows, and one t
       { _layer: { root: 1 }, scale: 2 },
     );
     plain.setRect({ x: 0, y: 0, width: 360, height: 200 });
+    plain.present(4, { width: 360, height: 200 });
     plain.setRect({ x: 0, y: 0, width: 400, height: 200 });
-    plain.present(9, { width: 400, height: 200 });
-    assert.ok(
-      !always.calls.some(([, , props]) => props?.contentsGravity),
-      'no gravity set',
-    );
+    plain.present(5, { width: 400, height: 200 });
+    assert.deepEqual(edgesOf(always), [], 'no rects set');
     plain.destroy();
   } finally {
     setAnimationClock(() => Date.now());
   }
 });
 
-test('a pane that keeps up through a fast drag stays anchored, though the sizes it is never sent wait longer than the budget', () => {
+test('a pane that keeps up through a fast drag stays at its size, though the sizes it is never sent wait longer than the budget', () => {
   // `<Frame>` sends a pane the newest size once it has painted the last,
   // so the sizes a drag passes through meanwhile are never sent, and wait
   // until a frame of a later one lands. Measured on the Zen Garden's about
   // page in the browser example, dragged a step every 8 ms: a frame every
   // 27 ms, each of the size it was sent 31 ms before, and a size 52 ms old
   // waiting at every step — the layer was stretched at every step and
-  // anchored at every frame, thirty times a second.
+  // shown at its size at every frame, thirty times a second.
   let t = 0;
   setAnimationClock(() => t);
   try {
@@ -1805,16 +1902,25 @@ test('a pane that keeps up through a fast drag stays anchored, though the sizes 
       { _native: native, _resizeWait: 50 },
       { _layer: { root: 1 }, scale: 2 },
     );
-    const gravities = () =>
-      native.calls
-        .filter(
-          ([name, , props]) =>
-            name === 'setLayerProps' && props.contentsGravity,
-        )
-        .map(([, , props]) => props.contentsGravity);
+    // every set of the rects, with whether the layer was its frame's size
+    const shown = [];
+    const setLayerProps = native.setLayerProps;
+    native.setLayerProps = (layer, props) => {
+      if ('contentsCenter' in props) {
+        const gap =
+          host._rect.width !== host._frame.width ||
+          host._rect.height !== host._frame.height;
+        shown.push({
+          gap,
+          whole: !props.contentsCenter && !props.contentsRect,
+        });
+      }
+      return setLayerProps(layer, props);
+    };
     const asked = [];
     let width = 2000;
     host.setRect({ x: 0, y: 0, width, height: 1400 });
+    host.present(1, { width, height: 1400 });
     asked.push({ at: t, width });
     for (t = 8; t <= 2000; t += 8) {
       width -= 8;
@@ -1826,14 +1932,19 @@ test('a pane that keeps up through a fast drag stays anchored, though the sizes 
         host.present(1, { width: sent.width, height: 1400 });
       }
     }
-    assert.deepEqual(gravities(), ['topLeft'], 'anchored, and only that');
+    assert.ok(shown.length > 100, 'the rects follow the drag');
+    assert.deepEqual(
+      shown.filter((s) => s.gap && s.whole),
+      [],
+      'never stretched over a gap',
+    );
     host.destroy();
   } finally {
     setAnimationClock(() => Date.now());
   }
 });
 
-test('one late frame stretches nothing, two do, and a pane is anchored again on a frame well inside the budget', () => {
+test('one late frame stretches nothing, two do, and a pane is shown at its size again on a frame well inside the budget', () => {
   let t = 0;
   setAnimationClock(() => t);
   try {
@@ -1842,46 +1953,41 @@ test('one late frame stretches nothing, two do, and a pane is anchored again on 
       { _native: native, _resizeWait: 50 },
       { _layer: { root: 1 }, scale: 2 },
     );
-    const gravity = () =>
-      native.calls
-        .filter(
-          ([name, , props]) =>
-            name === 'setLayerProps' && props.contentsGravity,
-        )
-        .at(-1)[2].contentsGravity;
     let width = 400;
-    // a size asked now, and its frame `took` ms later; the next size is
-    // asked as that frame lands, so no size waits on a pane that stopped
+    host.setRect({ x: 0, y: 0, width, height: 200 });
+    host.present(1, { width, height: 200 });
+    // a size asked now, and how the last frame is shown in it — which the
+    // frames before it decided; then its own frame `took` ms later. The
+    // next size is asked as that frame lands, so no size waits on a pane
+    // that stopped.
     const step = (took) => {
       width += 4;
       host.setRect({ x: 0, y: 0, width, height: 200 });
+      const look = edgesOf(native).at(-1).edge ? 'at its size' : 'stretched';
       t += took;
       host.present(1, { width, height: 200 });
+      return look;
     };
-    host.setRect({ x: 0, y: 0, width, height: 200 });
     step(20);
-    assert.equal(gravity(), 'topLeft');
-    step(60);
-    assert.equal(gravity(), 'topLeft', 'a frame held up once');
-    step(20);
+    assert.equal(step(60), 'at its size');
+    assert.equal(step(20), 'at its size', 'a frame held up once');
     step(60);
     step(60);
-    assert.equal(gravity(), 'resize', 'and twice in a row');
-    step(45);
-    assert.equal(gravity(), 'resize', 'within the budget, but near it');
-    step(30);
-    assert.equal(gravity(), 'topLeft', 'well inside it');
+    assert.equal(step(45), 'stretched', 'and twice in a row');
+    assert.equal(step(30), 'stretched', 'within the budget, but near it');
+    assert.equal(step(20), 'at its size', 'well inside it');
     host.destroy();
   } finally {
     setAnimationClock(() => Date.now());
   }
 });
 
-test('over the real bridge, the gravity a pane is anchored with is one the bridge reads', (t) => {
-  // `contentsGravity` is @windowkit/appkit 0.25.0's (windowkit/appkit#113).
-  // A bridge before it took the props and left the key unread, so the
-  // frame was stretched as ever; one that reads it turns down a name that
-  // is no gravity, which is how this tells the two apart.
+test('over the real bridge, the rects a frame is shown by are ones the bridge reads', (t) => {
+  // `contentsRect` and `contentsCenter` are @windowkit/appkit 0.27.0's
+  // (windowkit/appkit#117). A bridge before them took the props and left
+  // the keys unread, so the frame was stretched as ever; one that reads
+  // them turns down a rect that is not four numbers, which is how this
+  // tells the two apart.
   let bridge = null;
   if (process.platform === 'darwin') {
     try {
@@ -1896,13 +2002,13 @@ test('over the real bridge, the gravity a pane is anchored with is one the bridg
   }
   const layer = bridge.createLayer();
   bridge.setLayerProps(layer, {
-    contentsGravity: 'topLeft',
-    masksToBounds: true,
+    contentsRect: [0, 0, 1, 0.75],
+    contentsCenter: [0.995, 0, 0.0001, 1],
     contentsScale: 2,
   });
-  bridge.setLayerProps(layer, { contentsGravity: 'resize' });
+  bridge.setLayerProps(layer, { contentsRect: null, contentsCenter: null });
   assert.throws(
-    () => bridge.setLayerProps(layer, { contentsGravity: 'upperLeft' }),
+    () => bridge.setLayerProps(layer, { contentsCenter: [0, 0, 1] }),
     TypeError,
   );
 });
