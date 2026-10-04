@@ -8,12 +8,13 @@
 // pane mode over another — joined by the loopback transport the frame tests
 // run panes through, so what crosses is a structured clone, as over the
 // fork. The two fakes share one table of IOSurfaces, by id, as two
-// processes share the kernel's.
+// processes share the kernel's (`surfaceTable`).
 import assert from 'node:assert';
 import { afterEach, test } from 'node:test';
 import React from 'react';
 
 import { CocoaApp } from '../src/cocoa/app.js';
+import { HostedPlayer } from '../src/cocoa/paneplayer.js';
 import { setCompositingForTests } from '../src/compositing.js';
 import { Frame } from '../src/frame/index.js';
 import { createRoot } from '../src/index.js';
@@ -35,10 +36,51 @@ const PLAYER_VERBS = new Set([
   'releasePlayer',
 ]);
 
+/**
+ * The kernel's table of IOSurfaces, which both processes make shared
+ * buffers in and look them up from by id. A surface is found while
+ * something holds it — the bridge that made it, or a lookup's mapping of
+ * it — and with `recycleIds` a freed id goes to the next surface made, in
+ * either process, the lowest first: what the system does, as measured for
+ * the pane's own ring (test/cocoa-frames.test.js).
+ */
+function surfaceTable({ recycleIds = false } = {}) {
+  const byId = new Map();
+  const freeIds = [];
+  return {
+    /** `surface`, made by the process `tag` names: its id. */
+    add(surface, tag) {
+      freeIds.sort((a, b) => a - b);
+      // ids are the kernel's, so two processes' never collide
+      const id =
+        recycleIds && freeIds.length
+          ? freeIds.shift()
+          : tag * 100000 + surface.id;
+      surface.iosurfaceId = id;
+      surface.holds = 1;
+      byId.set(id, surface);
+      return id;
+    },
+    lookup(id) {
+      const surface = byId.get(id);
+      if (surface) surface.holds += 1;
+      return surface;
+    },
+    /** One hold on `surface` let go: the last frees its id. */
+    drop(surface) {
+      surface.holds -= 1;
+      if (surface.holds > 0) return;
+      byId.delete(surface.iosurfaceId);
+      freeIds.push(surface.iosurfaceId);
+    },
+  };
+}
+
 /** Enough of @windowkit/appkit for a window, shared surfaces and a player,
  * recording every call. `iosurfaces` is the table both processes look a
- * shared buffer up in; a surface's `pixels` is a stand-in for what is in
- * it. With `players: false` the bridge has none of the player verbs. */
+ * shared buffer up in (`surfaceTable`); a surface's `pixels` is a stand-in
+ * for what is in it, and `looked` every surface a lookup found. With
+ * `players: false` the bridge has none of the player verbs. */
 function fakeBridge(iosurfaces, { players = true, tag = 1 } = {}) {
   const calls = [];
   let seq = 0;
@@ -54,6 +96,7 @@ function fakeBridge(iosurfaces, { players = true, tag = 1 } = {}) {
   const base = {
     calls,
     live,
+    looked: [],
     of: (name) => calls.filter((c) => c[0] === name).map((c) => c.slice(1)),
     setBackendEventCallback(cb) {
       base.emit = cb;
@@ -84,20 +127,26 @@ function fakeBridge(iosurfaces, { players = true, tag = 1 } = {}) {
     createSurfaceIOSurface(width, height, scale, shared) {
       const handle = surface(width, height, scale);
       handle.shared = Boolean(shared);
-      // ids are the kernel's, so two processes' never collide
-      const iosurfaceId = tag * 100000 + handle.id;
-      iosurfaces.set(iosurfaceId, handle);
+      const iosurfaceId = iosurfaces.add(handle, tag);
       return { handle, iosurfaceId };
     },
     surfaceFromIOSurfaceID(id) {
-      const handle = iosurfaces.get(id);
+      const handle = iosurfaces.lookup(id);
       if (!handle) throw new Error('IOSurfaceLookup: no surface with that id');
+      base.looked.push(handle);
       // another mapping of the same memory
       return {
         handle: { lookedUp: id, of: handle },
         width: handle.width,
         height: handle.height,
       };
+    },
+    releaseSurface(handle) {
+      // idempotent, as the bridge's is
+      if (handle.released) return;
+      handle.released = true;
+      const held = handle.of ?? handle;
+      if (held.iosurfaceId != null) iosurfaces.drop(held);
     },
     blitSurface(src, sx, sy, w, hh, dst) {
       dst.pixels = (src.of ?? src).pixels;
@@ -202,8 +251,11 @@ function find(node, test) {
 }
 
 /** A host window with a <Frame> showing the fixture, both apps running. */
-async function mount(paneProps = {}, { hostPlays = true } = {}) {
-  const iosurfaces = new Map();
+async function mount(
+  paneProps = {},
+  { hostPlays = true, recycleIds = false } = {},
+) {
+  const iosurfaces = surfaceTable({ recycleIds });
   const hostNative = fakeBridge(iosurfaces, { players: hostPlays, tag: 1 });
   const host = appOver(hostNative);
   // a pane's bridge has the verbs too: the question is whether a pane may
@@ -378,6 +430,126 @@ test('paused, the frame a seek lands on is sent and drawn', async () => {
     'the frame the seek landed on',
   );
   assert.strictEqual(m.video().paused, true);
+});
+
+test('a frame a new size crossed is looked up as the buffer it named, not one of the next ring', async () => {
+  // A frame names its buffer by IOSurface id, and the pane looks it up when
+  // it reads the message. A stream that switches renditions has the host
+  // make a ring of the new size, and the system gives a freed id to the
+  // next surface made — here that ring, made in the call that freed the
+  // old one. Freed at once, the buffer a paused frame named was a buffer of
+  // the next ring by the time the pane looked: unwritten, and drawn until
+  // the next seek. So the host keeps it until the pane has looked it up.
+  const m = await mount({}, { recycleIds: true });
+  await until(m.apps, () => m.hostNative.live.size === 1, 'the host’s player');
+  const [id] = m.player();
+  m.emit({ type: 'player-metadata', id, width: 64, height: 36, duration: 2 });
+  await settle(...m.apps);
+  // paused: the frame a seek landed on goes out, and before the pane reads
+  // it the stream's next frame is another size, and the ring follows it
+  m.hostNative.playerFrame(id, 64, 36);
+  m.emit({ type: 'player-time', id, currentTime: 1 });
+  m.hostNative.playerFrame(id, 128, 72);
+  m.emit({ type: 'player-time', id, currentTime: 1 });
+  m.emit({ type: 'player-time', id, currentTime: 1 });
+  const rings = m.hostNative.of('createSurfaceIOSurface');
+  assert.deepStrictEqual(rings.at(-1).slice(0, 2), [128, 72], 'a new ring');
+  await until(
+    m.apps,
+    () => m.paneNative.looked.length > 0,
+    'the pane to look the frame up',
+  );
+  await settle(...m.apps);
+  const found = m.paneNative.looked[0];
+  assert.deepStrictEqual(
+    [found.width, found.height, found.pixels],
+    [64, 36, 'frame-1'],
+    'the buffer the frame named, not a buffer of the next ring',
+  );
+  assert.strictEqual(m.video()._surface._surfaceHandle.pixels, 'frame-1');
+  // and once the pane has looked it up, the host lets it go
+  await until(m.apps, () => found.holds === 1, 'the host to free it');
+  assert.ok(m.hostNative.of('releaseSurface').some(([s]) => s === found));
+});
+
+test('a buffer looked up at another size than its frame is neither kept nor copied', async () => {
+  // Whatever the host keeps, an id can still find some other surface — one
+  // a pane that stopped answering had freed for it, one of another
+  // process's — and a copy out of it is a picture of something else.
+  const m = await mount({}, { recycleIds: true });
+  await until(m.apps, () => m.hostNative.live.size === 1, 'the host’s player');
+  const [id] = m.player();
+  m.emit({ type: 'player-metadata', id, width: 64, height: 36, duration: 2 });
+  m.hostNative.playerFrame(id, 64, 36);
+  m.emit({ type: 'player-time', id, currentTime: 1 });
+  await until(
+    m.apps,
+    () => m.video()._surface?._surfaceHandle?.pixels === 'frame-1',
+    'the first frame',
+  );
+  const player = [...m.pane._players.values()][0];
+  const other = m.hostNative.createSurfaceIOSurface(32, 18, 1, true);
+  other.handle.pixels = 'someone else';
+  const looked = m.paneNative.looked.length;
+  player._frame({
+    surface: other.iosurfaceId,
+    width: 64,
+    height: 36,
+    time: 2,
+    seq: 99,
+  });
+  assert.strictEqual(m.paneNative.looked.length, looked + 1, 'it looked');
+  assert.ok(!player._buffers.has(other.iosurfaceId), 'and kept nothing');
+  assert.strictEqual(other.handle.holds, 1, 'nor held it');
+  m.emit({ type: 'player-time', id, currentTime: 2 });
+  await settle(...m.apps);
+  assert.strictEqual(m.video()._surface._surfaceHandle.pixels, 'frame-1');
+});
+
+test('a pane that stops answering has the host keep no more than a ring of retired buffers', () => {
+  const native = fakeBridge(surfaceTable());
+  const app = appOver(native);
+  const sent = [];
+  const hosted = new HostedPlayer(app, (msg) => sent.push(msg), {
+    player: 'pane-player-1',
+    src: CLIP,
+    options: {},
+  });
+  const { id } = hosted.player;
+  // paused, a frame at each of six sizes, and not one of them answered
+  for (let i = 1; i <= 6; i += 1) {
+    native.playerFrame(id, 16 * i, 9 * i);
+    native.emit({
+      type: 'player-metadata',
+      id,
+      width: 16 * i,
+      height: 9 * i,
+      duration: 2,
+    });
+    assert.ok(hosted._retired.length <= 3, `${hosted._retired.length} kept`);
+  }
+  const frames = sent.filter((m) => m.type === 'pane-player-frame');
+  assert.deepStrictEqual(
+    frames.map((m) => m.seq),
+    [1, 2, 3, 4, 5, 6],
+  );
+  // the newest three of the five retired rings' frames: the oldest went
+  // first, the one the pane is likeliest to have looked up
+  assert.deepStrictEqual(
+    hosted._retired.map((b) => b.namedSeq),
+    [3, 4, 5],
+  );
+  const made = native.of('createSurfaceIOSurface').length;
+  assert.strictEqual(native.of('releaseSurface').length, made - 3 - 3);
+  // an answer that comes after all frees what it covers
+  hosted.handle({ op: 'seen', seq: 4 });
+  assert.deepStrictEqual(
+    hosted._retired.map((b) => b.namedSeq),
+    [5],
+  );
+  hosted.release();
+  assert.strictEqual(native.of('releaseSurface').length, made, 'the rest');
+  assert.deepStrictEqual(hosted._retired, []);
 });
 
 test('the pane’s ref steers the host’s player, and letting it go releases it', async () => {
