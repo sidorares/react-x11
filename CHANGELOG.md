@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.41.1](https://github.com/sidorares/react-x11/compare/v2.41.0...v2.41.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **cocoa:** a pane whose frames keep up stays anchored through a fast drag, where the sizes it was never sent counted as late and its layer was stretched at every step of the drag and anchored again at every frame ([#881](https://github.com/sidorares/react-x11/issues/881)) ([e9b591c](https://github.com/sidorares/react-x11/commit/e9b591c8f838f3fc93486b35df721063b4e01291))
+* **deps:** ntk ^8.23.0, so an empty &lt;textarea&gt; under direction: 'rtl' has its caret at the right edge of its box, where ntk set an empty line left-to-right whatever the direction ([#873](https://github.com/sidorares/react-x11/issues/873)) ([5a7ad11](https://github.com/sidorares/react-x11/commit/5a7ad11d52cf426716e23249a72087c2caf2ed13))
+* **win32:** @windowkit/win32 ^0.0.9, the bridge with a cursor, GDI face names, font widths, letter spacing, OpenType features, x-heights and DirectWrite's justification ([#879](https://github.com/sidorares/react-x11/issues/879)) ([fee5eb8](https://github.com/sidorares/react-x11/commit/fee5eb8d25ccf1bc35438a2249a985d7f230180e))
+
+
+### Performance Improvements
+
+* **win32:** a justified paragraph is justified by DirectWrite, a capped one laid out once and only as far as its cap, and a layout's min-content width asked for when it is read — Zen Garden 001's resize frames from 59.7ms to 15.3ms at the median, 005's from 99.5ms to 58.6ms ([#878](https://github.com/sidorares/react-x11/issues/878)) ([54901e9](https://github.com/sidorares/react-x11/commit/54901e92eae62d0a90166721db2a6928fc03e8f1))
+
 ## [2.41.0](https://github.com/sidorares/react-x11/compare/v2.40.0...v2.41.0) (2026-10-04)
 
 
