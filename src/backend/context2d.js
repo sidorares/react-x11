@@ -27,6 +27,13 @@ import { cssColorStraight } from 'ntk/color';
 
 import { normalizeRadii, planShadowTiles } from 'ntk/shadow-tiles';
 
+import {
+  filterColour,
+  filterPixels,
+  filterStops,
+  filters,
+  parseCanvasFilter,
+} from './filter.js';
 import { shadowTilesFor } from './shadowtiles.js';
 
 const BLACK = [0, 0, 0, 1];
@@ -105,6 +112,37 @@ function uploadImage(native, image) {
   native.ctxPutImageData(handle, toBuffer(image.data), width, height, 0, 0);
   imageUploads.set(image, { native, handle });
   return handle;
+}
+
+/** `drawImage`'s arguments as the eight numbers of its longest form, the
+ *  source rect and then the destination, whichever form they came in. */
+function imageRects(size, args) {
+  let sx = 0;
+  let sy = 0;
+  let sw = size.width;
+  let sh = size.height;
+  let dx;
+  let dy;
+  let dw;
+  let dh;
+  if (args.length >= 8) {
+    [sx, sy, sw, sh, dx, dy, dw, dh] = args;
+  } else if (args.length >= 4) {
+    [dx, dy, dw, dh] = args;
+  } else {
+    [dx, dy] = args;
+    dw = sw;
+    dh = sh;
+  }
+  return [sx, sy, sw, sh, dx, dy, dw, dh];
+}
+
+/** Free a bitmap of the context's own making now, on a bridge that can;
+ *  an older one frees it with the handle's finalizer. */
+function release(native, handle) {
+  if (typeof native.releaseSurface === 'function') {
+    native.releaseSurface(handle);
+  }
 }
 
 /** Free an Image's bitmap now, if it has one; drawing it again uploads it
@@ -463,6 +501,10 @@ export class BackendContext2D {
       // how an image drawn scaled or turned is resampled
       smoothing: true,
       smoothingQuality: 'medium',
+      // canvas's `filter` as it was set, and what it comes to
+      // (src/backend/filter.js): null for none
+      filter: 'none',
+      filterInk: null,
     };
     // What this bridge can do, asked once. Both verbs arrived together in
     // @windowkit/appkit 0.7.0, and anything older is a bridge that draws
@@ -477,6 +519,12 @@ export class BackendContext2D {
     this._smoothing =
       'ctxSetImageSmoothing' in native &&
       typeof native.ctxSetImageSmoothing === 'function';
+    // and what a filter is applied to pixels with: reading a surface and
+    // writing one, which every Cocoa bridge has had since 0.4 — asked all
+    // the same, so a bridge without them keeps `filter` at none
+    this._filters = ['createSurface', 'ctxGetImageData', 'ctxPutImageData']
+      .map((name) => name in native && typeof native[name] === 'function')
+      .every(Boolean);
     this._onDirty = null;
     // the recorded path, and whether the native one still matches it (a
     // chunked stroke leaves only its last chunk behind)
@@ -702,6 +750,44 @@ export class BackendContext2D {
     const surface = this._s();
     this._state.smoothingQuality = value;
     this._native.ctxSetImageSmoothing(surface, smoothingOf(this._state));
+  }
+
+  /**
+   * Canvas's `filter`: a CSS `<filter-value-list>` applied to everything
+   * drawn after it, which `save` and `restore` keep. This context applies
+   * the colour functions — `grayscale()`, `sepia()`, `saturate()`,
+   * `hue-rotate()`, `invert()`, `brightness()`, `contrast()` — and
+   * `opacity()` (src/backend/filter.js): a fill, a stroke, a gradient, a
+   * glyph run and a symbol in the colours the filter makes of theirs; an
+   * image, a surface and a text layout that carries colours of its own
+   * through their pixels. A list with `blur()`, `drop-shadow()` or a
+   * `url()` in it, or what is no list, does not stick, nor does any on a
+   * bridge that cannot read a surface's pixels back: a caller knows
+   * whether an assignment took by reading it back, as with
+   * `globalCompositeOperation`. The value reads back as it was written.
+   */
+  get filter() {
+    return this._state.filter;
+  }
+
+  set filter(value) {
+    if (!this._filters) return;
+    const ink = parseCanvasFilter(value);
+    if (ink === undefined) return;
+    this._state.filter = ink === null ? 'none' : String(value).trim();
+    this._state.filterInk = filters(ink) ? ink : null;
+  }
+
+  /** A straight `[r, g, b, a]` as the filter in force draws it. */
+  _ink(rgba) {
+    const ink = this._state.filterInk;
+    return ink ? filterColour(rgba, ink) : rgba;
+  }
+
+  /** A gradient's flat stops as the filter in force draws them. */
+  _stops(flat) {
+    const ink = this._state.filterInk;
+    return ink ? filterStops(flat, ink) : flat;
   }
 
   /**
@@ -1250,12 +1336,12 @@ export class BackendContext2D {
   }
 
   _applyFill() {
-    const [r, g, b, a] = parseColor(this._state.fillStyle);
+    const [r, g, b, a] = this._ink(parseColor(this._state.fillStyle));
     this._native.ctxSetFillColor(this._s(), r, g, b, a);
   }
 
   _applyStroke() {
-    const [r, g, b, a] = parseColor(this._state.strokeStyle);
+    const [r, g, b, a] = this._ink(parseColor(this._state.strokeStyle));
     this._native.ctxSetStrokeColor(this._s(), r, g, b, a);
   }
 
@@ -1367,7 +1453,8 @@ export class BackendContext2D {
     this._path();
     const style = this._state.fillStyle;
     if (style instanceof LinearGradient) {
-      const { coords, flat } = style._normalized();
+      const { coords, flat: stops } = style._normalized();
+      const flat = this._stops(stops);
       this._native.ctxFillLinearGradient(
         this._s(),
         coords[0],
@@ -1446,10 +1533,16 @@ export class BackendContext2D {
     if (!plan) return false;
     const clip = st.clip === NON_RECT ? null : st.clip;
     if (clip && !meets(plan.bounds, clip)) return true;
-    const tile = shadowTilesFor(this._native).get(
-      plan,
-      parseColor(st.shadowColor),
-    );
+    // the shadow of what a filter's `opacity()` fades is faded with it;
+    // its colour is the shadow's own, cast after the filter (canvas)
+    const [sr, sg, sb, sa] = parseColor(st.shadowColor);
+    const fade = st.filterInk?.alpha ?? 1;
+    const tile = shadowTilesFor(this._native).get(plan, [
+      sr,
+      sg,
+      sb,
+      sa * fade,
+    ]);
     if (tile == null) return false;
     const s = this._s();
     const n = this._native;
@@ -1596,7 +1689,8 @@ export class BackendContext2D {
   _fillRectNow(x, y, w, h) {
     const style = this._state.fillStyle;
     if (style instanceof LinearGradient) {
-      const { coords, flat } = style._normalized();
+      const { coords, flat: stops } = style._normalized();
+      const flat = this._stops(stops);
       this._native.ctxFillLinearGradient(
         this._s(),
         coords[0],
@@ -1661,22 +1755,11 @@ export class BackendContext2D {
     const src = this._sourceHandle(image);
     if (!src) return;
     const size = this._native.surfaceSize(src);
-    let sx = 0;
-    let sy = 0;
-    let sw = size.width;
-    let sh = size.height;
-    let dx;
-    let dy;
-    let dw;
-    let dh;
-    if (args.length >= 8) {
-      [sx, sy, sw, sh, dx, dy, dw, dh] = args;
-    } else if (args.length >= 4) {
-      [dx, dy, dw, dh] = args;
-    } else {
-      [dx, dy] = args;
-      dw = sw;
-      dh = sh;
+    const [sx, sy, sw, sh, dx, dy, dw, dh] = imageRects(size, args);
+    const ink = this._state.filterInk;
+    if (ink) {
+      this._drawFiltered(src, size, [sx, sy, sw, sh, dx, dy, dw, dh], ink);
+      return;
     }
     if (this._blit(src, sx, sy, sw, sh, dx, dy, dw, dh)) {
       // a row memcpy
@@ -1709,6 +1792,44 @@ export class BackendContext2D {
       );
     }
     this._dirty();
+  }
+
+  /**
+   * `drawImage` under a filter: the whole pixels of the source the source
+   * rect covers, read from the bridge as they are, run through the filter,
+   * put on a bitmap of their own, and that drawn as the source would have
+   * been — the filter set aside for the draw, which a blit, a fade and the
+   * resampling an `imageSmoothingQuality` sets all take as before.
+   */
+  _drawFiltered(src, size, [sx, sy, sw, sh, dx, dy, dw, dh], ink) {
+    const x0 = Math.max(0, Math.floor(sx));
+    const y0 = Math.max(0, Math.floor(sy));
+    const w = Math.min(size.width, Math.ceil(sx + sw)) - x0;
+    const h = Math.min(size.height, Math.ceil(sy + sh)) - y0;
+    if (!(w > 0 && h > 0)) return;
+    const n = this._native;
+    const pixels = n.ctxGetImageData(src, x0, y0, w, h);
+    filterPixels(pixels, pixels, ink);
+    const filtered = n.createSurface(w, h, 1);
+    const st = this._state;
+    try {
+      n.ctxPutImageData(filtered, pixels, w, h, 0, 0);
+      st.filterInk = null;
+      this.drawImage(
+        { _surfaceHandle: filtered },
+        sx - x0,
+        sy - y0,
+        sw,
+        sh,
+        dx,
+        dy,
+        dw,
+        dh,
+      );
+    } finally {
+      st.filterInk = ink;
+      release(n, filtered);
+    }
   }
 
   /**
@@ -1975,7 +2096,7 @@ export class BackendContext2D {
       }
     }
     if (batches.size === 0) return;
-    const [r, g, b, a] = this._inkOf(src);
+    const [r, g, b, a] = this._ink(this._inkOf(src));
     const surface = this._s();
     this._native.ctxSetFillColor(surface, r, g, b, a);
     const runs = [];
@@ -2014,10 +2135,15 @@ export class BackendContext2D {
   // --- text (minimal: enough for <canvas onDraw> users) --------------------
 
   _drawLayout(layout, x, y) {
+    if (!layout._contextInk && this._state.filterInk) {
+      this._drawLayoutFiltered(layout, x, y, this._state.filterInk);
+      return;
+    }
     if (layout._contextInk) {
       const style = this._state.fillStyle;
       if (style instanceof LinearGradient) {
-        const { coords, flat } = style._normalized();
+        const { coords, flat: stops } = style._normalized();
+        const flat = this._stops(stops);
         this._native.drawLayoutGradient(
           this._s(),
           layout._handle,
@@ -2036,6 +2162,68 @@ export class BackendContext2D {
     }
     this._native.drawLayout(this._s(), layout._handle, x, y);
     this._dirty();
+  }
+
+  /**
+   * A layout that carries colours of its own, under a filter: the bridge
+   * sets its glyphs in them, so it is drawn on a bitmap of its own the size
+   * of where it lands on the surface — its box through the transform, and
+   * half its height more each way for ink past the box — through the same
+   * transform, and the bitmap is run through the filter and drawn where it
+   * came from.
+   */
+  _drawLayoutFiltered(layout, x, y, ink) {
+    const st = this._state;
+    const [a, b, c, d, e, f] = st.ctm;
+    const pad = (layout.height || 0) / 2;
+    const left = x - pad;
+    const top = y - pad;
+    const right = x + (layout.width || 0) + pad;
+    const bottom = y + (layout.height || 0) + pad;
+    let X0 = Infinity;
+    let Y0 = Infinity;
+    let X1 = -Infinity;
+    let Y1 = -Infinity;
+    for (const [px, py] of [
+      [left, top],
+      [right, top],
+      [left, bottom],
+      [right, bottom],
+    ]) {
+      const qx = a * px + c * py + e;
+      const qy = b * px + d * py + f;
+      X0 = Math.min(X0, qx);
+      Y0 = Math.min(Y0, qy);
+      X1 = Math.max(X1, qx);
+      Y1 = Math.max(Y1, qy);
+    }
+    const size = this._native.surfaceSize(this._s());
+    X0 = Math.max(0, Math.floor(X0));
+    Y0 = Math.max(0, Math.floor(Y0));
+    X1 = Math.min(size.width, Math.ceil(X1));
+    Y1 = Math.min(size.height, Math.ceil(Y1));
+    const w = X1 - X0;
+    const h = Y1 - Y0;
+    if (!(w > 0 && h > 0)) return;
+    const n = this._native;
+    const own = n.createSurface(w, h, 1);
+    try {
+      n.ctxTransform(own, a, b, c, d, e - X0, f - Y0);
+      n.drawLayout(own, layout._handle, x, y);
+      const pixels = n.ctxGetImageData(own, 0, 0, w, h);
+      filterPixels(pixels, pixels, ink);
+      n.ctxPutImageData(own, pixels, w, h, 0, 0);
+      this.save();
+      try {
+        this._state.filterInk = null;
+        this.setTransform(1, 0, 0, 1, 0, 0);
+        this.drawImage({ _surfaceHandle: own }, X0, Y0);
+      } finally {
+        this.restore();
+      }
+    } finally {
+      release(n, own);
+    }
   }
 
   measureText(text) {
