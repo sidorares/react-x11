@@ -22,6 +22,74 @@ import { rangeBands } from './text.js';
 import { CARET_WIDTH, CARET_RESERVE, TextInputNode } from './textinput.js';
 import { TextAreaKeys } from './textkeys.js';
 
+/** A hard line break at the end of the value — the breaks ntk's TextLayout
+ * and CoreText both end a line at. */
+const FINAL_BREAK = /[\n\r\u2028\u2029]$/;
+
+/**
+ * The layout of a value that ends in a line break, with the empty line the
+ * break opens: the line Return at the end of a textarea puts the caret on.
+ *
+ * Neither engine sets it. ntk's TextLayout and CoreText both end a paragraph
+ * at its last break, which is right for a `<text>` — CSS draws no line after
+ * a final newline either — and wrong for an editor, where that line is
+ * where the next letter goes. Without it the caret after Return was drawn at
+ * the end of the line above, Up from there skipped a line, Down never
+ * reached it, and the scroll that follows the caret stopped a line short.
+ *
+ * The line is the one the engine sets for an empty paragraph with a break
+ * after it — `lineBreak()`, a lone `\n` laid out in the value's style and
+ * options — moved down under the last line, so its height, baseline and
+ * place across the box (`textAlign`, the base direction), and the caret
+ * drawn on it, are that engine's: typing the next letter moves the caret
+ * along the line and nothing else. A lone break rather than no text, because
+ * ntk resolves an empty string's direction from paragraphs it does not have,
+ * and puts an RTL one against the left edge. An engine that already sets the
+ * line — its last line starts where the text ends — is left alone.
+ */
+export function withFinalLine(layout, text, lineBreak) {
+  const lines = layout.lines;
+  const last = lines?.[lines.length - 1];
+  if (!FINAL_BREAK.test(text) || !last || last.start >= text.length) {
+    return layout;
+  }
+  const lone = lineBreak();
+  const model = lone.lines?.[0];
+  if (!model) return layout;
+  const dy = last.y + last.height - model.y;
+  const line = {
+    x: model.x,
+    y: model.y + dy,
+    width: 0,
+    height: model.height,
+    baseline: model.baseline + dy,
+    ascent: model.ascent,
+    descent: model.descent,
+    start: text.length,
+    end: text.length,
+    runs: [],
+  };
+  const index = lines.length;
+  const end = Array.from(text).length;
+  const caret = lone.caretPosition(0);
+  return Object.create(layout, {
+    lines: { value: [...lines, line] },
+    height: { value: Math.max(layout.height, line.y + line.height) },
+    caretPosition: {
+      value: (cp) =>
+        cp >= end
+          ? { x: caret.x, y: caret.y + dy, height: caret.height, line: index }
+          : layout.caretPosition(cp),
+    },
+    indexAt: {
+      value: (x, y) => (y >= line.y ? end : layout.indexAt(x, y)),
+    },
+    // the engine draws, and measures the coverage of, the text it laid out
+    draw: { value: (ctx, x, y) => layout.draw(ctx, x, y) },
+    coverage: { value: (options) => layout.coverage?.(options) ?? null },
+  });
+}
+
 /**
  * <textarea>: multi-line editable text on the same editing core as
  * <textinput>. Word-wraps at the content width (ntk TextLayout), Enter
@@ -145,11 +213,13 @@ export class TextAreaNode extends TextInputNode {
     const key = `${width}|${color}|${shown}|${s.family}|${s.size}|${s.weight}|${s.style}|${direction}|${align}|${s.letterSpacing}|${JSON.stringify(s.features ?? null)}`;
     if (this._valueLayoutKey !== key) {
       this._valueLayoutKey = key;
-      this._valueLayoutCache = fonts.layout([{ text: shown, ...s, color }], s, {
-        maxWidth: container,
-        align,
-        direction,
-      });
+      const options = { maxWidth: container, align, direction };
+      const layout = fonts.layout([{ text: shown, ...s, color }], s, options);
+      this._valueLayoutCache = isEmpty
+        ? layout
+        : withFinalLine(layout, shown, () =>
+            fonts.layout([{ text: '\n', ...s, color }], s, options),
+          );
     }
     return this._valueLayoutCache;
   }
