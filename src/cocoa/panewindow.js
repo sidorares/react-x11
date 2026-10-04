@@ -66,6 +66,8 @@ export class CocoaPaneWindow {
     this._dirty = false;
     this._flushDamage = 'full';
     this._seq = 0;
+    // a size from the host not yet presented (`pane-sized`)
+    this._owesSized = false;
     this._presentedAt = -Infinity;
     // the window's own frame clock (`CocoaApp._frameDue`), at the app's
     // interval: a pane has no display of its own to pace by
@@ -112,6 +114,10 @@ export class CocoaPaneWindow {
     const moved =
       screen != null && (screen.x !== this.x || screen.y !== this.y);
     const resized = w !== this.width || h !== this.height;
+    // The host sends the next rect when this one is painted (`pane-sized`,
+    // src/frame/index.js): one that changes no size is painted already.
+    if (resized) this._owesSized = true;
+    else this._post({ type: 'pane-sized' });
     if (!moved && !resized) return;
     if (moved) {
       this.x = screen.x;
@@ -595,6 +601,11 @@ export class CocoaPaneWindow {
       width: this.width,
       height: this.height,
     });
+    // and the size the host last sent is on screen (`pane-sized`)
+    if (this._owesSized) {
+      this._owesSized = false;
+      this._post({ type: 'pane-sized' });
+    }
   }
 
   snapshot() {
