@@ -1789,6 +1789,94 @@ test('a pane that keeps up has its last frame anchored while it grows, and one t
   }
 });
 
+test('a pane that keeps up through a fast drag stays anchored, though the sizes it is never sent wait longer than the budget', () => {
+  // `<Frame>` sends a pane the newest size once it has painted the last,
+  // so the sizes a drag passes through meanwhile are never sent, and wait
+  // until a frame of a later one lands. Measured on the Zen Garden's about
+  // page in the browser example, dragged a step every 8 ms: a frame every
+  // 27 ms, each of the size it was sent 31 ms before, and a size 52 ms old
+  // waiting at every step — the layer was stretched at every step and
+  // anchored at every frame, thirty times a second.
+  let t = 0;
+  setAnimationClock(() => t);
+  try {
+    const native = fakeBridge();
+    const host = new CocoaPaneHost(
+      { _native: native, _resizeWait: 50 },
+      { _layer: { root: 1 }, scale: 2 },
+    );
+    const gravities = () =>
+      native.calls
+        .filter(
+          ([name, , props]) =>
+            name === 'setLayerProps' && props.contentsGravity,
+        )
+        .map(([, , props]) => props.contentsGravity);
+    const asked = [];
+    let width = 2000;
+    host.setRect({ x: 0, y: 0, width, height: 1400 });
+    asked.push({ at: t, width });
+    for (t = 8; t <= 2000; t += 8) {
+      width -= 8;
+      host.setRect({ x: 0, y: 0, width, height: 1400 });
+      asked.push({ at: t, width });
+      // a frame every 27 ms, of the size asked 31 ms before it lands
+      if (t % 27 < 8 && t >= 31) {
+        const sent = asked.findLast((a) => a.at <= t - 31);
+        host.present(1, { width: sent.width, height: 1400 });
+      }
+    }
+    assert.deepEqual(gravities(), ['topLeft'], 'anchored, and only that');
+    host.destroy();
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
+});
+
+test('one late frame stretches nothing, two do, and a pane is anchored again on a frame well inside the budget', () => {
+  let t = 0;
+  setAnimationClock(() => t);
+  try {
+    const native = fakeBridge();
+    const host = new CocoaPaneHost(
+      { _native: native, _resizeWait: 50 },
+      { _layer: { root: 1 }, scale: 2 },
+    );
+    const gravity = () =>
+      native.calls
+        .filter(
+          ([name, , props]) =>
+            name === 'setLayerProps' && props.contentsGravity,
+        )
+        .at(-1)[2].contentsGravity;
+    let width = 400;
+    // a size asked now, and its frame `took` ms later; the next size is
+    // asked as that frame lands, so no size waits on a pane that stopped
+    const step = (took) => {
+      width += 4;
+      host.setRect({ x: 0, y: 0, width, height: 200 });
+      t += took;
+      host.present(1, { width, height: 200 });
+    };
+    host.setRect({ x: 0, y: 0, width, height: 200 });
+    step(20);
+    assert.equal(gravity(), 'topLeft');
+    step(60);
+    assert.equal(gravity(), 'topLeft', 'a frame held up once');
+    step(20);
+    step(60);
+    step(60);
+    assert.equal(gravity(), 'resize', 'and twice in a row');
+    step(45);
+    assert.equal(gravity(), 'resize', 'within the budget, but near it');
+    step(30);
+    assert.equal(gravity(), 'topLeft', 'well inside it');
+    host.destroy();
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
+});
+
 test('over the real bridge, the gravity a pane is anchored with is one the bridge reads', (t) => {
   // `contentsGravity` is @windowkit/appkit 0.25.0's (windowkit/appkit#113).
   // A bridge before it took the props and left the key unread, so the

@@ -31,6 +31,12 @@ const ASKED_KEPT = 16;
  *  drag itself. */
 const GESTURE_GAP_MS = 500;
 
+/** How far inside the budget a frame of a pane that fell behind has to
+ *  come for its frames to be anchored again (`_answered`): a pane whose
+ *  frames come near the budget keeps one look rather than taking the
+ *  other at every frame. */
+const KEPT_UP = 0.75;
+
 /** One shared surface on glass: a sublayer of a window's root layer, its
  * contents the IOSurface the pane last presented into it. */
 class PaneLayer {
@@ -54,6 +60,10 @@ class PaneLayer {
     this._asked = [];
     this._askedAt = null;
     this._behind = false;
+    // when a frame last answered a size, and how many frames in a row came
+    // later than the budget (`_answered`)
+    this._answeredAt = -Infinity;
+    this._late = 0;
   }
 
   /**
@@ -73,13 +83,28 @@ class PaneLayer {
    * size may take before the old one is shown in its place: 0 stretches
    * always, as before. A bridge that predates `contentsGravity` ignores it,
    * and stretches.
+   *
+   * Behind is a pane whose frames come later than the budget, not one with
+   * a size waiting that long. `<Frame>` sends a pane the newest size once
+   * it has painted the last, so the sizes a drag passes through while a
+   * frame is being painted are never sent, and never answered: a size
+   * waits until a frame of a later one lands, two pane frames at most. A
+   * page that painted in 27 ms answered every size it was sent in 31, and
+   * still had one 52 ms old at every step of the drag — so its layer was
+   * stretched at every step and anchored again at every frame, the page
+   * scaling and coming back thirty times a second. Here a size waiting
+   * longer than the budget counts only when no frame has answered any
+   * size in that time, which is a pane that stopped, and a frame that
+   * lands decides the rest (`_answered`).
    */
   _gravityNow() {
     const budget = this.app._resizeWait ?? RESIZE_WAIT_MS;
     if (!(budget > 0)) return 'resize';
-    // a size asked longer ago than the budget, and no frame of it yet
+    // a size asked longer ago than the budget, and no frame of any since
     const oldest = this._asked[0];
-    if (oldest && now() - oldest.at > budget) this._behind = true;
+    if (oldest && now() - Math.max(oldest.at, this._answeredAt) > budget) {
+      this._behind = true;
+    }
     return this._behind ? 'resize' : 'topLeft';
   }
 
@@ -106,20 +131,35 @@ class PaneLayer {
     return { contentsScale: scale };
   }
 
-  /** A frame of `width` by `height` device px landed: what it answers of
-   *  the sizes asked, and how long it took. */
+  /**
+   * A frame of `width` by `height` device px landed: what it answers of
+   * the sizes asked, and how long it took. Two frames in a row later than
+   * the budget put the pane behind, and one well inside it — `KEPT_UP` of
+   * it — brings it back: a frame the collector held up stretches nothing,
+   * and a pane whose frames come near the budget is not stretched and
+   * anchored by turns.
+   */
   _answered(width, height) {
     const asked = this._asked;
     // the pane rounds the logical size it was sent back to device pixels
     const slack = Math.max(2, this.wnd.scale ?? 1);
-    const at = asked.findIndex(
+    // the last time it was asked: a drag back and forth asks a size twice
+    const at = asked.findLastIndex(
       (a) =>
         Math.abs(a.width - width) <= slack &&
         Math.abs(a.height - height) <= slack,
     );
     if (at < 0) return;
-    this._behind =
-      now() - asked[at].at > (this.app._resizeWait ?? RESIZE_WAIT_MS);
+    const budget = this.app._resizeWait ?? RESIZE_WAIT_MS;
+    const took = now() - asked[at].at;
+    this._answeredAt = now();
+    if (took > budget) {
+      this._late += 1;
+      if (this._late >= 2) this._behind = true;
+    } else {
+      this._late = 0;
+      if (took <= budget * KEPT_UP) this._behind = false;
+    }
     asked.splice(0, at + 1);
   }
 
@@ -144,6 +184,7 @@ class PaneLayer {
       if (at - (this._askedAt ?? -Infinity) >= GESTURE_GAP_MS) {
         this._asked = [];
         this._behind = false;
+        this._late = 0;
       }
       this._askedAt = at;
       if (this._asked.length === ASKED_KEPT) this._asked.shift();

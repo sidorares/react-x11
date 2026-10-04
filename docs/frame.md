@@ -313,9 +313,14 @@ live-resize budget, `createRoot({ cocoa: { resizeWait } })` (50 ms by
 default), has its last frame anchored at the top left at its size instead,
 the window under it showing for a pane frame where the new frame will
 reach. One that falls behind it is stretched, which is the better picture
-of a long wait. Each gesture starts out anchored, and `resizeWait: 0`
-stretches always, as before. A bridge before `@windowkit/appkit` 0.25
-stretches always too.
+of a long wait. Behind is judged by the frames that land: two in a row
+later than the budget, or none at all for longer than it, and a frame well
+inside it anchors the next again. A size the pane is never sent, because a
+newer one replaced it while a frame was being painted, is no frame late,
+and a fast drag of a page that keeps up stays anchored rather than taking
+one look at every step and the other at every frame. Each gesture starts
+out anchored, and `resizeWait: 0` stretches always, as before. A bridge
+before `@windowkit/appkit` 0.25 stretches always too.
 
 **A pane's frames are named by id, and the id outlives nothing.** On Cocoa
 a present carries the IOSurface's id, and the host looks it up when it
