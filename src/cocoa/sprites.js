@@ -39,6 +39,17 @@
 // clip with round corners that a square ancestor cuts again is a box of its
 // own inside a box of the square one's.
 //
+// Or a part is its **shadows** alone (`shadows`): CSS's outer box-shadow,
+// which its element would blur a pixel at a time and the render server
+// draws on the GPU. Each is a layer that casts it — the shape, its corners
+// rounded, moved clear of what shows and its shadow offset back by as much,
+// so that no spread shows the shape itself — in a box that shows everything
+// but the part's own rect, as an outer shadow is never drawn under the box
+// that casts it. Core Animation's `shadowRadius` is the Gaussian's
+// deviation, which CSS makes half the blur radius: a glow of 200 CSS pixels
+// is a radius of 100 points, and measured against `<Html>`'s own shadow a
+// level apart. Their blur, colour and offset animate there too.
+//
 // A part may be inside another of its element's (`parent`): a spinner in a
 // card that fades. Its layer is lifted inside the parent's, so it fades,
 // turns and is cut with it, and the parent's raster leaves it out — the
@@ -134,18 +145,53 @@ const isCurve = (t) =>
     t[2] >= 0 &&
     t[2] <= 1);
 
+const isColor = (c) => Array.isArray(c) && c.length === 4 && c.every(finite);
+
+const isPair = (p) => Array.isArray(p) && p.length === 2 && p.every(finite);
+
+const isBlur = (v) => finite(v) && v >= 0;
+
+// what each animated property's keyframes are
+const VALUE_OF = {
+  opacity: finite,
+  transform: isMatrix,
+  shadowBlur: isBlur,
+  shadowColor: isColor,
+  shadowOffset: isPair,
+};
+
+const SHADOW_PROPERTIES = new Set([
+  'shadowBlur',
+  'shadowColor',
+  'shadowOffset',
+]);
+
+const isShadow = (sh) =>
+  sh != null &&
+  isRect(sh.rect) &&
+  isColor(sh.color) &&
+  (sh.radius === undefined || isBlur(sh.radius)) &&
+  (sh.x === undefined || finite(sh.x)) &&
+  (sh.y === undefined || finite(sh.y)) &&
+  (sh.blur === undefined || isBlur(sh.blur));
+
+/** Is `sprite` its shadows alone? */
+const castsOnly = (sprite) => Array.isArray(sprite.shadows);
+
 /** Is `a` an animation the bridge will take as it is — so that a bad one
  *  is refused here rather than thrown from inside a frame? */
 function isAnimation(a) {
   if (a == null || typeof a.id !== 'string') return false;
-  if (a.property !== 'opacity' && a.property !== 'transform') return false;
+  const value = Object.hasOwn(VALUE_OF, a.property)
+    ? VALUE_OF[a.property]
+    : null;
+  if (!value) return false;
   if (!finite(a.duration) || !(a.duration > 0)) return false;
   const values = a.values;
   if (!Array.isArray(values) || values.length < 2) return false;
   // an element hands the same keyframes over from frame to frame: they
   // are read once
   if (CHECKED.get(values) !== a.property) {
-    const value = a.property === 'opacity' ? finite : isMatrix;
     if (!values.every(value)) return false;
     CHECKED.set(values, a.property);
   }
@@ -180,11 +226,20 @@ function isAnimation(a) {
 function isSprite(sprite) {
   if (sprite == null || typeof sprite.key !== 'string') return false;
   if (!isRect(sprite.rect)) return false;
-  if (
+  const shadows = sprite.shadows;
+  if (shadows !== undefined) {
+    // its shadows alone: nothing painted, nothing shown
+    if (sprite.paint !== undefined || sprite.contents != null) return false;
+    if (!Array.isArray(shadows) || shadows.length === 0) return false;
+    if (!shadows.every(isShadow)) return false;
+  } else if (
     sprite.contents != null
       ? sprite.paint !== undefined
       : typeof sprite.paint !== 'function'
   ) {
+    return false;
+  }
+  if (sprite.rectRadius !== undefined && !isBlur(sprite.rectRadius)) {
     return false;
   }
   if (sprite.reach !== undefined && !isRect(sprite.reach)) return false;
@@ -216,6 +271,14 @@ function isSprite(sprite) {
   if (animations !== undefined) {
     if (!Array.isArray(animations) || !animations.every(isAnimation)) {
       return false;
+    }
+    // a shadow's animation is of one of the part's shadows
+    for (const a of animations) {
+      if (!SHADOW_PROPERTIES.has(a.property)) continue;
+      const i = a.shadow ?? 0;
+      if (!Number.isInteger(i) || i < 0 || !(i < (shadows?.length ?? 0))) {
+        return false;
+      }
     }
   }
   return true;
@@ -281,6 +344,63 @@ function unionRect(a, b) {
 }
 
 /**
+ * How far past its rect a shadow blurred by `blur` shows: three of its
+ * deviations, half the blur each (CSS Backgrounds 3, 7.1.1), past which the
+ * tail is a fraction of a level; and a pixel more for the antialiased edge
+ * of the shape.
+ */
+const shadowReach = (blur) => Math.ceil(1.5 * blur) + 1;
+
+// where a shadow part's shadows can reach, by its shadows and keyframes
+const SHADOW_REACH = new WeakMap();
+
+/**
+ * What a part draws, untransformed: its `reach`, or its `rect` — and for a
+ * part that is its shadows, everywhere they can be through every keyframe
+ * of their blur and offset, with its own `reach` if it gives one.
+ */
+function reachOf(sprite) {
+  if (!castsOnly(sprite)) return sprite.reach ?? sprite.rect;
+  const shadows = sprite.shadows;
+  const animations = sprite.animations ?? [];
+  const kept = SHADOW_REACH.get(shadows);
+  if (kept && kept.animations === animations && kept.reach === sprite.reach) {
+    return kept.box;
+  }
+  let box = sprite.reach ?? null;
+  for (let i = 0; i < shadows.length; i++) {
+    const sh = shadows[i];
+    let blur = sh.blur ?? 0;
+    let x0 = sh.x ?? 0;
+    let x1 = x0;
+    let y0 = sh.y ?? 0;
+    let y1 = y0;
+    for (const a of animations) {
+      if ((a.shadow ?? 0) !== i) continue;
+      if (a.property === 'shadowBlur') {
+        for (const v of a.values) blur = Math.max(blur, v);
+      } else if (a.property === 'shadowOffset') {
+        for (const [x, y] of a.values) {
+          x0 = Math.min(x0, x);
+          x1 = Math.max(x1, x);
+          y0 = Math.min(y0, y);
+          y1 = Math.max(y1, y);
+        }
+      }
+    }
+    const pad = shadowReach(blur);
+    box = unionRect(box, {
+      x: sh.rect.x + x0 - pad,
+      y: sh.rect.y + y0 - pad,
+      width: sh.rect.width + x1 - x0 + 2 * pad,
+      height: sh.rect.height + y1 - y0 + 2 * pad,
+    });
+  }
+  SHADOW_REACH.set(shadows, { animations, reach: sprite.reach, box });
+  return box;
+}
+
+/**
  * Everywhere `sprite` can draw while its animations run: its reach through
  * its own transform and every transform it is animated through, out to
  * whole pixels and the antialiasing a raster is padded for — or null, where
@@ -291,7 +411,7 @@ function unionRect(a, b) {
  * curve overshoots, offers a `reach` that covers what is between them.
  */
 function extentOf(sprite) {
-  const reach = sprite.reach ?? sprite.rect;
+  const reach = reachOf(sprite);
   const origin = originOf(sprite);
   const m0 = sprite.transform ?? IDENTITY;
   // About its origin, where it can be is the same for a part that only
@@ -347,7 +467,7 @@ function extentOf(sprite) {
  *  that the hole it leaves and the layer meet. */
 function rasterRectOf(sprite) {
   if (sprite.contents != null) return sprite.rect;
-  const reach = sprite.reach ?? sprite.rect;
+  const reach = reachOf(sprite);
   const x = Math.floor(reach.x) - RASTER_PAD;
   const y = Math.floor(reach.y) - RASTER_PAD;
   return {
@@ -404,6 +524,11 @@ export class SpriteLayers {
     this.solid = Boolean(forms?.includes?.('matrix3d'));
     // and a video's frames on a layer need its video surfaces
     this.videos = canLiftVideo(this.native);
+    // and a part that is its shadows, a box masked by a shape: every
+    // bridge that lifts anything has both, but a fake one may not
+    this.shadows =
+      typeof this.native.createShapeLayer === 'function' &&
+      typeof this.native.setShapeProps === 'function';
     this.hosts = new Map(); // element -> Map(key -> state)
     this._warned = new WeakSet();
   }
@@ -479,18 +604,27 @@ export class SpriteLayers {
         let parent = null;
         if (sprite.parent !== undefined) {
           parent = now.get(sprite.parent) ?? null;
-          if (!parent || parent.contents !== null || sprite.contents != null) {
+          if (
+            !parent ||
+            parent.contents !== null ||
+            parent.shadow ||
+            sprite.contents != null
+          ) {
             continue;
           }
         }
         const contents = sprite.contents ?? null;
         // a source this bridge cannot show: the element draws it
         if (contents !== null && !this._canShow(contents)) continue;
+        // shadows this bridge cannot mask: the element draws them
+        const casts = castsOnly(sprite);
+        if (casts && (!this.shadows || parent)) continue;
         const raster = rasterRectOf(sprite);
         // a raster's limit; a source's surface is its own size, whatever
-        // the layer is scaled to
+        // the layer is scaled to, and shadows have none
         if (
           contents === null &&
+          !casts &&
           (raster.width > MAX_SIDE || raster.height > MAX_SIDE)
         ) {
           continue;
@@ -530,7 +664,7 @@ export class SpriteLayers {
         // for a source, and past the budget of raster kept for such parts.
         if (!shown) {
           if (contents !== null) continue;
-          const px = raster.width * raster.height;
+          const px = casts ? 0 : raster.width * raster.height;
           if (hidden + px > HIDDEN_BUDGET) continue;
           hidden += px;
         }
@@ -544,7 +678,8 @@ export class SpriteLayers {
           (Boolean(state.clip) !== Boolean(cut.clip) ||
             Boolean(state.outer) !== Boolean(cut.outer) ||
             state.contents !== contents ||
-            state.parent !== parent)
+            state.parent !== parent ||
+            Boolean(state.shadow) !== casts)
         ) {
           this._drop(state, root);
           state = null;
@@ -558,6 +693,7 @@ export class SpriteLayers {
             contents,
             parent,
             Boolean(cut.outer),
+            casts,
           );
         }
         state.sprite = sprite;
@@ -661,7 +797,15 @@ export class SpriteLayers {
     return isVideoFrames(contents) && this.videos;
   }
 
-  _lift(host, key, clipped, contents = null, parent = null, outered = false) {
+  _lift(
+    host,
+    key,
+    clipped,
+    contents = null,
+    parent = null,
+    outered = false,
+    casts = false,
+  ) {
     const layer = this.native.createLayer();
     // a part cut to a clip is in a box of the clip's size that masks to it,
     // and the box is what stands among the layers above the bitmap — or
@@ -714,6 +858,8 @@ export class SpriteLayers {
       order: null,
       // what shows itself on the layer, for a part with a source
       contents,
+      // the box the casters of a part that is its shadows are in
+      shadow: casts ? this._shadowBox(layer) : null,
       lift:
         contents === null
           ? null
@@ -756,6 +902,7 @@ export class SpriteLayers {
     // source paints nothing: it shows itself.
     if (
       !state.lift &&
+      !state.shadow &&
       (state.painted === UNPAINTED ||
         sprite.version !== state.painted ||
         state.rect?.width !== rect.width ||
@@ -862,12 +1009,105 @@ export class SpriteLayers {
     state.props = next;
     // a source that fills the layer with a layer of its own
     state.lift?.layout?.(next.bounds);
+    // shadows, cast in the layer's coordinates
+    if (state.shadow) this._syncShadows(state, sprite, rect);
     // after the model went out, in the same transaction
     this._syncAnimations(state, sprite);
     // the parts inside it, in the element's order, over its raster
     for (let i = 0; i < state.kids.length; i++) {
       this.sync(state.kids[i], i + 1);
     }
+  }
+
+  /** The box a shadow part's casters are in, on its layer, and the mask
+   *  that shows everything in it but the part's own rect. */
+  _shadowBox(layer) {
+    const box = this.native.createLayer();
+    const mask = this.native.createShapeLayer();
+    this.native.addSublayer(layer, box);
+    this.native.setLayerProps(box, { mask });
+    return { box, mask, casters: [], shape: '', props: [] };
+  }
+
+  /**
+   * A shadow part's casters, as its shadows say, in the layer's points:
+   * each the shadow's shape, rounded, moved left past the layer's edge —
+   * out of the box's mask, which only shows inside the layer — and its
+   * shadow offset back by as much, so the shape itself never shows,
+   * whatever its spread; blurred by a radius half the CSS blur, which is
+   * the deviation of the Gaussian CSS blurs by (calibrated against
+   * `<Html>`'s own: a level apart). The first shadow is on top: added last.
+   */
+  _syncShadows(state, sprite, rect) {
+    const s = this.scale;
+    const sh = state.shadow;
+    const shadows = sprite.shadows;
+    const w = rect.width / s;
+    const h = rect.height / s;
+    // the box, and its mask: all of the layer but the part's rect
+    const hole = sprite.rect;
+    const hw = hole.width / s;
+    const hh = hole.height / s;
+    const hr = Math.min((sprite.rectRadius ?? 0) / s, hw / 2, hh / 2);
+    const shape = [
+      ['rect', 0, 0, w, h],
+      ['roundRect', (hole.x - rect.x) / s, (hole.y - rect.y) / s, hw, hh, hr],
+    ];
+    const key = JSON.stringify(shape);
+    if (sh.shape !== key) {
+      this.native.setLayerProps(sh.box, { frame: [0, 0, w, h] });
+      this.native.setLayerProps(sh.mask, { frame: [0, 0, w, h] });
+      this.native.setShapeProps(sh.mask, {
+        path: shape,
+        fillRule: 'evenodd',
+        fillColor: [0, 0, 0, 1],
+      });
+      sh.shape = key;
+    }
+    // one caster a shadow, the first added last
+    if (sh.casters.length !== shadows.length) {
+      for (const caster of sh.casters) this.native.removeFromSuperlayer(caster);
+      sh.casters = shadows.map(() => this.native.createLayer());
+      for (let i = shadows.length - 1; i >= 0; i--) {
+        this.native.addSublayer(sh.box, sh.casters[i]);
+      }
+      sh.props = [];
+    }
+    for (let i = 0; i < shadows.length; i++) {
+      const shadow = shadows[i];
+      const r = shadow.rect;
+      const cw = r.width / s;
+      const ch = r.height / s;
+      const aside = this._aside(rect, r);
+      const next = {
+        frame: [(r.x - rect.x) / s - aside, (r.y - rect.y) / s, cw, ch],
+        backgroundColor: [0, 0, 0, 1],
+        cornerRadius: Math.min((shadow.radius ?? 0) / s, cw / 2, ch / 2),
+        shadowColor: shadow.color,
+        shadowOpacity: 1,
+        shadowRadius: (shadow.blur ?? 0) / (2 * s),
+        shadowOffset: [aside + (shadow.x ?? 0) / s, (shadow.y ?? 0) / s],
+      };
+      const was = sh.props[i] ?? {};
+      const out = {};
+      let any = false;
+      for (const k of Object.keys(next)) {
+        const v = next[k];
+        if (Array.isArray(v) ? !sameMatrix(was[k], v) : was[k] !== v) {
+          out[k] = v;
+          any = true;
+        }
+      }
+      if (any) this.native.setLayerProps(sh.casters[i], out);
+      sh.props[i] = next;
+    }
+  }
+
+  /** How far, in points, a caster of a shape at `r` in a layer at `rect`
+   *  moves left to be clear of the layer: its right edge a point past the
+   *  layer's left. */
+  _aside(rect, r) {
+    return (r.x + r.width - rect.x) / this.scale + 1;
   }
 
   _paint(state, sprite, rect) {
@@ -909,7 +1149,7 @@ export class SpriteLayers {
     const listed = (id) => wanted.some((a) => a.id === id);
     for (const [id, run] of state.runs) {
       if (listed(id)) continue;
-      this.native.removeAnimation(state.layer, run.caKey);
+      this.native.removeAnimation(run.layer, run.caKey);
       this._ends().delete(run.caId);
       state.runs.delete(id);
     }
@@ -919,11 +1159,26 @@ export class SpriteLayers {
       if (state.runs.has(a.id) || state.done.has(a.id)) continue;
       const caId = `rxs${++spriteSeq}`;
       const caKey = `sprite:${caId}`;
+      // a shadow's goes on its caster, in the caster's terms
+      let layer = state.layer;
+      let keyPath = a.property;
+      let values = a.values;
+      if (a.property === 'transform') {
+        values = a.values.map((m) => inPoints(m, s));
+      } else if (SHADOW_PROPERTIES.has(a.property)) {
+        const i = a.shadow ?? 0;
+        layer = state.shadow?.casters[i];
+        if (!layer) continue;
+        if (a.property === 'shadowBlur') {
+          keyPath = 'shadowRadius';
+          values = a.values.map((v) => v / (2 * s));
+        } else if (a.property === 'shadowOffset') {
+          const aside = this._aside(state.rect, sprite.shadows[i].rect);
+          values = a.values.map(([x, y]) => [aside + x / s, y / s]);
+        }
+      }
       const opts = {
-        values:
-          a.property === 'transform'
-            ? a.values.map((m) => inPoints(m, s))
-            : a.values,
+        values,
         duration: a.duration / 1000,
         id: caId,
       };
@@ -935,7 +1190,7 @@ export class SpriteLayers {
       // from the frame that asked: ahead, or already that far in
       if (a.delay) opts.delay = a.delay / 1000;
       try {
-        this.native.addAnimation(state.layer, a.property, opts, caKey);
+        this.native.addAnimation(layer, keyPath, opts, caKey);
       } catch (err) {
         this._warn(
           state.host,
@@ -943,7 +1198,7 @@ export class SpriteLayers {
         );
         continue;
       }
-      state.runs.set(a.id, { caId, caKey, held: Boolean(a.hold) });
+      state.runs.set(a.id, { caId, caKey, layer, held: Boolean(a.hold) });
       this._ends().set(caId, (ev) => this._ended(state, a.id, caId, ev));
     }
   }

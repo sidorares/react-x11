@@ -987,3 +987,228 @@ test('where nothing lifts parts — the mock backend, as X11 — an element is n
   assert.equal(node.asked, 0);
   assert.deepEqual(node.liftedCalls, []);
 });
+
+/** A part that is its shadows, as an element offers one: a glow and a
+ *  hard red ring four pixels out, round A with corners of 8. */
+function glow(more = {}) {
+  return {
+    key: 'glow',
+    rect: A,
+    rectRadius: 8,
+    shadows: [
+      { rect: A, radius: 8, y: 6, blur: 20, color: [0, 0, 0, 0.5] },
+      {
+        rect: { x: 36, y: 36, width: 88, height: 48 },
+        radius: 12,
+        color: [1, 0, 0, 1],
+      },
+    ],
+    ...more,
+  };
+}
+
+/** What the element draws where the part is not lifted: its shadows, a
+ *  fill for each. */
+const glowDrawn = part('glow', { x: 9, y: 15, width: 142, height: 102 });
+
+test('a part that is its shadows goes on a layer with nothing painted on it: a caster a shadow, the first on top, in a box that shows all of the layer but the part’s rect', async (t) => {
+  withStage(t);
+  const m = await mountCocoa(stage());
+  const node = findStage(m.node);
+  show(node, [glowDrawn], [glow()]);
+  m.frame();
+  const state = stateOf(m, node, 'glow');
+  assert.ok(state, 'lifted');
+  assert.deepEqual(node.liftedCalls, [['glow']]);
+  assert.deepEqual(node.paints.at(-1), [], 'the element does not draw it');
+  // the layer is everywhere the shadows reach: the glow's three
+  // deviations and a pixel round its shape six down, out to whole pixels
+  // and padded
+  assert.deepEqual(state.rect, { x: 7, y: 13, width: 146, height: 106 });
+  assert.equal(
+    m.native.of('surfaceToLayer').filter(([, l]) => l === state.layer).length,
+    0,
+    'nothing painted on it',
+  );
+  const { box, mask, casters } = state.shadow;
+  assert.equal(box.parent, state.layer);
+  assert.equal(box.props.mask, mask);
+  assert.deepEqual(box.props.frame, [0, 0, 73, 53]);
+  // the box shows the layer less the part's rect, in points
+  assert.deepEqual(mask.shape, {
+    path: [
+      ['rect', 0, 0, 73, 53],
+      ['roundRect', 16.5, 13.5, 40, 20, 4],
+    ],
+    fillRule: 'evenodd',
+    fillColor: [0, 0, 0, 1],
+  });
+  // the first shadow is added last, on top
+  assert.deepEqual(box.sublayers, [casters[1], casters[0]]);
+  // each shape moved left of the layer by as much as its shadow is moved
+  // back: none of it shows, whatever its spread
+  assert.deepEqual(casters[0].props, {
+    frame: [16.5 - 57.5, 13.5, 40, 20],
+    backgroundColor: [0, 0, 0, 1],
+    cornerRadius: 4,
+    shadowColor: [0, 0, 0, 0.5],
+    shadowOpacity: 1,
+    shadowRadius: 5,
+    shadowOffset: [57.5, 3],
+  });
+  assert.deepEqual(casters[1].props, {
+    frame: [14.5 - 59.5, 11.5, 44, 24],
+    backgroundColor: [0, 0, 0, 1],
+    cornerRadius: 6,
+    shadowColor: [1, 0, 0, 1],
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    shadowOffset: [59.5, 0],
+  });
+
+  // a shadow that changes changes its caster, and only it
+  const props = m.native.of('setLayerProps').length;
+  const moved = glow();
+  moved.shadows[1] = { ...moved.shadows[1], color: [0, 0, 1, 1] };
+  reoffer(node, [moved]);
+  m.frame();
+  const sent = m.native.of('setLayerProps').slice(props);
+  assert.deepEqual(sent, [[casters[1], { shadowColor: [0, 0, 1, 1] }]]);
+});
+
+test("a shadow's blur, colour and offset run on its caster in the caster's terms, and a transform on the part's layer", async (t) => {
+  withStage(t);
+  const m = await mountCocoa(stage());
+  const node = findStage(m.node);
+  const lit = glow({
+    animations: [
+      {
+        id: 'blur',
+        property: 'shadowBlur',
+        values: [20, 40],
+        duration: 250,
+      },
+      {
+        id: 'offset',
+        property: 'shadowOffset',
+        values: [
+          [0, 6],
+          [10, -4],
+        ],
+        duration: 250,
+      },
+      {
+        id: 'ink',
+        property: 'shadowColor',
+        shadow: 1,
+        values: [
+          [1, 0, 0, 1],
+          [0, 0, 1, 0.5],
+        ],
+        duration: 250,
+      },
+      {
+        id: 'grow',
+        property: 'transform',
+        values: [
+          [1, 0, 0, 1, 0, 0],
+          [1.01, 0, 0, 1.01, 0, -2],
+        ],
+        duration: 250,
+      },
+    ],
+  });
+  show(node, [glowDrawn], [lit]);
+  m.frame();
+  const state = stateOf(m, node, 'glow');
+  assert.ok(state, 'lifted');
+  // as far as its blur and offset take it in any keyframe: 61 round the
+  // shape, from 4 up to 10 across and 6 down
+  assert.deepEqual(state.rect, { x: -23, y: -27, width: 216, height: 176 });
+  const { casters } = state.shadow;
+  const sent = new Map(
+    m.native
+      .of('addAnimation')
+      .map(([layer, keyPath, opts]) => [keyPath, { layer, opts }]),
+  );
+  assert.equal(sent.get('shadowRadius').layer, casters[0]);
+  assert.deepEqual(sent.get('shadowRadius').opts.values, [5, 10]);
+  // moved back by as much as its caster is moved aside
+  const aside = (40 + 80 + 23) / 2 + 1;
+  assert.equal(sent.get('shadowOffset').layer, casters[0]);
+  assert.deepEqual(sent.get('shadowOffset').opts.values, [
+    [aside, 3],
+    [aside + 5, -2],
+  ]);
+  assert.equal(sent.get('shadowColor').layer, casters[1]);
+  assert.deepEqual(sent.get('shadowColor').opts.values, [
+    [1, 0, 0, 1],
+    [0, 0, 1, 0.5],
+  ]);
+  assert.equal(sent.get('transform').layer, state.layer);
+  assert.equal(sent.get('shadowRadius').opts.duration, 0.25);
+  // an animation the element stops listing comes off the layer it is on
+  reoffer(node, [glow({ animations: lit.animations.slice(1) })]);
+  m.frame();
+  const removed = m.native.of('removeAnimation');
+  assert.equal(removed.length, 1);
+  assert.equal(removed[0][0], casters[0]);
+});
+
+test('a part that is its shadows is asked about everywhere they reach, not only its rect', async (t) => {
+  // a box later in the tree over the glow's far edge, and nowhere near A:
+  // device 140 to 160 across, where the glow reaches to 151
+  const over = h('box', {
+    key: 'over',
+    style: at(70, 30, 10, 10, { backgroundColor: '#00ff00' }),
+  });
+  withStage(t);
+  const m = await mountCocoa([stage(), over]);
+  const node = findStage(m.node);
+  show(node, [glowDrawn], [glow()]);
+  m.frame();
+  assert.ok(stateOf(m, node, 'glow') === undefined, 'not lifted');
+  assert.deepEqual(node.paints.at(-1), ['glow'], 'the element draws it');
+});
+
+test('a part that is its shadows and paints too, a shadow animation of none of them, and a bridge with no shape layer, leave the shadows to the element', async (t) => {
+  withStage(t);
+  const m = await mountCocoa(stage());
+  const node = findStage(m.node);
+  const warn = t.mock.method(console, 'warn', () => {});
+  show(node, [glowDrawn], [glow({ paint() {} })]);
+  m.frame();
+  assert.ok(stateOf(m, node, 'glow') === undefined, 'shadows and a paint');
+  show(
+    node,
+    [glowDrawn],
+    [
+      glow({
+        animations: [
+          {
+            id: 'x',
+            property: 'shadowBlur',
+            shadow: 2,
+            values: [0, 1],
+            duration: 100,
+          },
+        ],
+      }),
+    ],
+  );
+  m.frame();
+  assert.ok(stateOf(m, node, 'glow') === undefined, 'a third shadow');
+  assert.ok(warn.mock.callCount() >= 1, 'said so');
+  await cleanupCocoa();
+
+  const plain = new Proxy(fakeCocoaBridge(), {
+    get: (target, k) => (k === 'createShapeLayer' ? undefined : target[k]),
+  });
+  const n = await mountCocoa(stage(), { native: plain });
+  const other = findStage(n.node);
+  show(other, [glowDrawn], [glow()]);
+  n.frame();
+  assert.equal(n.promotion.sprites.shadows, false);
+  assert.ok(stateOf(n, other, 'glow') === undefined, 'no shape layer');
+  assert.deepEqual(other.paints.at(-1), ['glow'], 'the element draws it');
+});
