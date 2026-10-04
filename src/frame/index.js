@@ -624,7 +624,7 @@ function PaneHostView({
         host.windowCursor?.(msg);
       } else if (msg?.type === 'pane-present') {
         host.setRect(node.abs);
-        host.present(msg.id);
+        host.present(msg.id, msg);
       } else if (msg?.type === 'pane-cursor') {
         // The pane names its cursor as an element that draws names one for
         // a point: this box is the node the host's pointer is over, so the

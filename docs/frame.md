@@ -303,6 +303,20 @@ over a bridge with no player says nothing in the hello, and the pane
 refuses `src` as X11 does. A pane that exits takes its players, and their
 sound, with it.
 
+**A pane resized.** On Cocoa the host gives the pane's layer its new size as
+the window lays out, and the pane's frame of that size comes a pane frame
+later. Core Animation's default stretched the frame the layer had to the new
+bounds in between, so a page in a pane had its left column drawn scaled a
+little at every step of a window dragged wider, and then drawn back at its
+size. A pane whose frames of a new size come within the window's
+live-resize budget, `createRoot({ cocoa: { resizeWait } })` (50 ms by
+default), has its last frame anchored at the top left at its size instead,
+the window under it showing for a pane frame where the new frame will
+reach. One that falls behind it is stretched, which is the better picture
+of a long wait. Each gesture starts out anchored, and `resizeWait: 0`
+stretches always, as before. A bridge before `@windowkit/appkit` 0.25
+stretches always too.
+
 `backgroundColor` in the frame's `style` is what shows before the pane's
 first frame and after one dies — the same server-painted rectangle
 `<foreign>` documents.

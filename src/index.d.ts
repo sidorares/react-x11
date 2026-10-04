@@ -290,7 +290,10 @@ export interface RootOptions {
    * `resizeWait` is how long, in ms, AppKit may hold a live-resize tick for
    * the app's frame at the new size under `react-x11/cocoa-main`, where
    * the frame is painted on another thread (50 by default; 0 lets the edge
-   * move without waiting).
+   * move without waiting). A `<Frame>` pane's frames of a new size are held
+   * to it as well: within it, the pane's last frame stays at its size while
+   * the next comes, and past it, it is stretched to the pane's new size, as
+   * every one is at 0.
    * `screenPoll` is how often the screen layout is re-read while a
    * {@link useScreens} subscriber is mounted, in ms — 500 by default, 0 for
    * never. macOS has no event for a display plugged in, unplugged or

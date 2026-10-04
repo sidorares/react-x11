@@ -12,8 +12,24 @@
 // And the players its `<video src>`s ask for, which a process with no
 // AppKit would never hear from: each is a player here, its events and its
 // frames sent back (`HostedPlayer`, src/cocoa/paneplayer.js).
+import { now } from '../nodes/animation.js';
 import { HostedPlayer } from './paneplayer.js';
 import { withoutActions } from './quiet.js';
+
+/** The live-resize handshake's budget when the app names none
+ *  (`RESIZE_WAIT_MS`, src/cocoa/app.js). */
+const RESIZE_WAIT_MS = 50;
+
+/** How many sizes asked of the pane are remembered until a frame of one
+ *  answers them (`_asked`): a drag asks one a frame. */
+const ASKED_KEPT = 16;
+
+/** How long after the last size asked a new one starts a gesture of its
+ *  own, which finds the pane keeping up until it shows otherwise: a pane
+ *  whose layout at a width it was not dragged to took long — a long page
+ *  laid out whole, as the first step of a drag is — keeps up with the
+ *  drag itself. */
+const GESTURE_GAP_MS = 500;
 
 /** One shared surface on glass: a sublayer of a window's root layer, its
  * contents the IOSurface the pane last presented into it. */
@@ -29,6 +45,82 @@ class PaneLayer {
     });
     this.destroyed = false;
     this._rect = null;
+    // How the frame the layer holds sits in it while one of the size the
+    // layer was just given is on its way (`_gravityNow`): the gravity set,
+    // Core Animation's own until one is, the sizes asked of the pane with
+    // when each was asked, and whether the pane has fallen behind them.
+    this._gravity = 'resize';
+    this._contentsScale = null;
+    this._asked = [];
+    this._askedAt = null;
+    this._behind = false;
+  }
+
+  /**
+   * The gravity a pane's last frame sits in its layer by, until a frame of
+   * the layer's new size lands. The host gives the layer its new size the
+   * moment the window lays out, and the pane's frame of that size comes a
+   * pane frame later: Core Animation's default, `resize`, stretches the
+   * frame it has to the new bounds meanwhile, and a page's left column was
+   * drawn scaled a little at every step of a window dragged wider, and then
+   * at its size again. A pane that keeps up has its frame anchored at the
+   * top left instead, at its size, what it does not cover yet showing the
+   * window under it for a pane frame; one that falls behind the budget is
+   * stretched, which is the better picture for the long wait — a pane
+   * repainting at three frames a second shows a squeezed page, not a page
+   * and a growing strip. The budget is the window's live-resize handshake's
+   * (`createRoot({ cocoa: { resizeWait } })`), how long a frame of a new
+   * size may take before the old one is shown in its place: 0 stretches
+   * always, as before. A bridge that predates `contentsGravity` ignores it,
+   * and stretches.
+   */
+  _gravityNow() {
+    const budget = this.app._resizeWait ?? RESIZE_WAIT_MS;
+    if (!(budget > 0)) return 'resize';
+    // a size asked longer ago than the budget, and no frame of it yet
+    const oldest = this._asked[0];
+    if (oldest && now() - oldest.at > budget) this._behind = true;
+    return this._behind ? 'resize' : 'topLeft';
+  }
+
+  /** The props that set the gravity, where it changed. */
+  _gravityProps() {
+    const gravity = this._gravityNow();
+    if (gravity === this._gravity) return null;
+    this._gravity = gravity;
+    // a frame anchored and larger than the layer would hang out of it
+    return { contentsGravity: gravity, masksToBounds: gravity !== 'resize' };
+  }
+
+  /**
+   * The props that say how many of the pane's pixels make a point of the
+   * layer, where that changed: the window's scale, which the pane draws
+   * at. A frame stretched to the bounds never asked, and one anchored at
+   * its size is shown at it — pixels over `contentsScale` points, so at
+   * the default of 1 a page at 2x came out twice its size.
+   */
+  _scaleProps() {
+    const scale = this.wnd.scale ?? 1;
+    if (scale === this._contentsScale) return null;
+    this._contentsScale = scale;
+    return { contentsScale: scale };
+  }
+
+  /** A frame of `width` by `height` device px landed: what it answers of
+   *  the sizes asked, and how long it took. */
+  _answered(width, height) {
+    const asked = this._asked;
+    // the pane rounds the logical size it was sent back to device pixels
+    const slack = Math.max(2, this.wnd.scale ?? 1);
+    const at = asked.findIndex(
+      (a) =>
+        Math.abs(a.width - width) <= slack &&
+        Math.abs(a.height - height) <= slack,
+    );
+    if (at < 0) return;
+    this._behind =
+      now() - asked[at].at > (this.app._resizeWait ?? RESIZE_WAIT_MS);
+    asked.splice(0, at + 1);
   }
 
   /** Geometry in device px, the node's abs — points at the layer. */
@@ -46,6 +138,17 @@ class PaneLayer {
       return;
     }
     this._rect = { ...rect };
+    // a size the pane is asked for, answered by the first frame of it
+    if (prev && (prev.width !== rect.width || prev.height !== rect.height)) {
+      const at = now();
+      if (at - (this._askedAt ?? -Infinity) >= GESTURE_GAP_MS) {
+        this._asked = [];
+        this._behind = false;
+      }
+      this._askedAt = at;
+      if (this._asked.length === ASKED_KEPT) this._asked.shift();
+      this._asked.push({ width: rect.width, height: rect.height, at });
+    }
     // Actions off: the layer is ours, not a presenter's, so no frame's
     // transaction covers it, and a bare set tweens the pane into place at
     // mount and after every resize — the trap CocoaGLArea._setLayerProps
@@ -57,6 +160,8 @@ class PaneLayer {
         frame: [rect.x / s, rect.y / s, rect.width / s, rect.height / s],
         zPosition: 1e7,
         hidden: false,
+        ...this._scaleProps(),
+        ...this._gravityProps(),
       });
     } finally {
       native.txCommit();
@@ -78,13 +183,24 @@ class PaneLayer {
    * already holds a reference to. Nothing else here throws; any other
    * error is the bug it says it is.
    */
-  present(iosurfaceId) {
+  present(iosurfaceId, size = null) {
     if (this.destroyed) return false;
     try {
       this._native.setLayerContentsIOSurface(this.layer, iosurfaceId);
     } catch (err) {
       if (!/IOSurfaceLookup/.test(err?.message ?? '')) throw err;
       return false;
+    }
+    // how long the pane took to a frame of a size it was asked for, which
+    // is what the gravity follows (`_gravityNow`)
+    if (size) {
+      this._answered(size.width, size.height);
+      const gravity = this._gravityProps();
+      if (gravity) {
+        withoutActions(this._native, () =>
+          this._native.setLayerProps(this.layer, gravity),
+        );
+      }
     }
     return true;
   }
