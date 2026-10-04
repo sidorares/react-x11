@@ -97,8 +97,10 @@ function fakeBridge({ screens, recycleIds = false } = {}) {
     surfaces.delete(handle.iosurfaceId);
     freeIds.push(handle.iosurfaceId);
   };
-  /** A draw into `handle`, recorded when the WindowServer holds it. */
+  /** A draw into `handle`: where it went, and whether the WindowServer
+   *  held it. */
   const drawn = (name, handle) => {
+    native.drawnInto.push(handle?.id);
     if (native.held.has(handle?.id)) native.heldDraws.push([name, handle.id]);
   };
   const native = {
@@ -113,6 +115,8 @@ function fakeBridge({ screens, recycleIds = false } = {}) {
     held: new Set(),
     holdRetired: false,
     heldDraws: [],
+    // the surface every draw went into, in order
+    drawnInto: [],
     surfaceIsInUse: (handle) => native.held.has(handle.id),
     shown: (wnd) => onGlass.get(wnd._layer.root),
     listScreens: () =>
@@ -1153,13 +1157,10 @@ test('closing the app drops the timer a frame was owed', async () => {
 // --- a pane -------------------------------------------------------------------------
 
 test('a pane answers a burst of geometry with one frame, not one per message', async () => {
-  const { app, wnd, flushes, presents, deliver } = await mountPane(
+  const { app, wnd, flushes, presents, deliver, answer } = await mountPane(
     box({ flexGrow: 1, backgroundColor: '#3498db' }),
   );
   assert.equal(flushes.count, 1, 'the mount frame');
-  // The gate on, at any interval: what is under test is that a present
-  // counts as in flight at all, not for how long.
-  app._frameInterval = 1e9;
   // A pane that was busy painting finds the host's messages queued behind
   // it — one resize tick per 16ms of the drag — and Node hands them over
   // back to back. The first, after a quiet interval, is answered on the
@@ -1167,9 +1168,10 @@ test('a pane answers a burst of geometry with one frame, not one per message', a
   deliver({ type: 'pane-rect', width: 104, height: 82, scale: 2 });
   assert.equal(flushes.count, 2, 'answered on the spot');
   assert.equal(presents().length, 1, 'and presented');
-  assert.equal(wnd.frameInFlight(), true, 'which is now in flight');
+  assert.equal(wnd.frameInFlight(), true, 'which is in flight until answered');
   // …and the rest of the burst finds that present in flight: each one
-  // resizes the window and asks for a frame, none of them paints
+  // resizes the window and asks for a frame, none of them paints. The
+  // host's answer is behind them in the channel.
   for (let i = 2; i <= 8; i += 1) {
     deliver({ type: 'pane-rect', width: 100 + i * 4, height: 80 + i * 2 });
   }
@@ -1177,7 +1179,6 @@ test('a pane answers a burst of geometry with one frame, not one per message', a
   assert.equal(flushes.count, 2, 'without a frame per message');
   assert.equal(presents().length, 1);
   // the pump: one paced frame, at that size
-  app._rafLast = -Infinity;
   app._tickFrames();
   app._presentAll();
   assert.equal(flushes.count, 3, 'one catch-up frame');
@@ -1185,6 +1186,13 @@ test('a pane answers a burst of geometry with one frame, not one per message', a
   const last = presents().at(-1);
   assert.equal(presents().length, 2);
   assert.deepEqual([last.width, last.height], [264, 192]);
+  // Answered, and inside a frame interval, the frame may not be on glass
+  // yet: the host flips the layer on its pump and Core Animation shows it
+  // at the refresh after. The gate on, at any interval: what is under test
+  // is that it counts at all.
+  app._frameInterval = 1e9;
+  answer();
+  assert.equal(wnd.frameInFlight(), true, 'answered, and still a refresh off');
   // the interval passes: the next lone message is answered on the spot again
   wnd._presentedAt = -Infinity;
   deliver({ type: 'pane-rect', width: 140, height: 100 });
@@ -1269,6 +1277,9 @@ test('a present a resize crossed is looked up as the buffer it named, not the su
   const freed = (handle) =>
     native.of('releaseSurface').some(([, id]) => id === handle.id);
   deliver({ type: 'pane-rect', width: 100, height: 80, scale: 1 });
+  // the mount frame is unanswered, so the rect's frame is the clock's
+  app._tickFrames();
+  app._presentAll();
   const fresh = presents().at(-1);
   assert.deepEqual([fresh.width, fresh.height], [100, 80]);
   const freedAtRect = native.of('releaseSurface').length;
@@ -1340,6 +1351,10 @@ test('a host that stops answering has the pane keep no more than a ring of retir
   app._presentAll();
   for (let i = 1; i <= 6; i += 1) {
     deliver({ type: 'pane-rect', width: 100 + i * 4, height: 80 + i * 2 });
+    // nothing answered, so every frame is the clock's — and a new size
+    // draws into a new ring, which nothing holds back
+    app._tickFrames();
+    app._presentAll();
     assert.ok(wnd._retired.length <= 3, `${wnd._retired.length} kept`);
   }
   assert.equal(wnd._retired.length, 3, 'the presents of the last three');
@@ -1360,6 +1375,199 @@ test('a host that stops answering has the pane keep no more than a ring of retir
   wnd.destroy();
   assert.equal(native.of('releaseSurface').length, made, 'the rest with it');
   assert.deepEqual(wnd._retired, []);
+});
+
+/**
+ * A pane whose tree repaints a little at the size it has, a frame at a time
+ * on the clock: `paint()` changes it, runs the frame and presents it. The
+ * host is a test's to play — `shown(seq)` is its word that it has looked
+ * the presents to `seq` up, and the turn the channel hands it over in.
+ */
+async function mountRepaintingPane() {
+  let setColor;
+  function Pane() {
+    const [color, set] = React.useState('#ff0000');
+    setColor = set;
+    return h(
+      'box',
+      { style: { flexGrow: 1 } },
+      box({ width: 10, height: 10, backgroundColor: color }),
+    );
+  }
+  const pane = await mountPane(h(Pane));
+  const { native, app, wnd, presents, deliver } = pane;
+  app._presentAll();
+  let hue = 0;
+  return {
+    ...pane,
+    /** A change, its frame on the clock, and its present: the surfaces
+     *  that frame drew into. */
+    async paint() {
+      setColor(`#00${(hue++ % 256).toString(16).padStart(2, '0')}00`);
+      for (let i = 0; i < 5; i += 1) await tick();
+      const from = native.drawnInto.length;
+      // due, at whatever interval the test has the clock at
+      wnd._rafLast = -Infinity;
+      app._tickFrames();
+      app._presentAll();
+      return [...new Set(native.drawnInto.slice(from))];
+    },
+    async shown(seq) {
+      deliver({ type: 'pane-shown', seq });
+      await tick();
+    },
+    /** The ring's buffers, by the seq of the present that last named each. */
+    bySeq: () =>
+      new Map(wnd._ring.map((s) => [s.presentedSeq ?? 0, s.handle.id])),
+    last: () => presents().at(-1),
+  };
+}
+
+test('a pane draws only into a buffer the host is done with, and holds a frame that would find none', async () => {
+  // Triple buffering promises the pane a buffer two presents behind what
+  // the host shows — if the host keeps up. One that falls two presents
+  // behind (a breakpoint's layout, a window resize, any long frame of its
+  // own) left none: the next frame drew into the buffer on the layer, or
+  // into one a present still in the channel named, which the host then
+  // looked up and showed half drawn. In the browser example on a Mac,
+  // scrolling a notch a refresh while the host was busy 60ms in every 150,
+  // 114 to 117 frames of 375 drew into such a buffer.
+  const pane = await mountRepaintingPane();
+  const { native, wnd, flushes, presents, paint, shown, bySeq, last } = pane;
+  await shown(1);
+  // one present on its way is what the third buffer is for
+  assert.deepEqual(
+    await paint(),
+    [bySeq().get(2)],
+    'drawn into one of its own',
+  );
+  assert.equal(wnd.frameHeld(), false);
+  assert.deepEqual(await paint(), [bySeq().get(3)]);
+  // two on their way: the host shows 1 and has yet to look up 2 and 3
+  assert.equal(wnd.frameHeld(), true, 'no buffer is free');
+  assert.equal(wnd.frameInFlight(), true);
+  const painted = flushes.count;
+  const presented = presents().length;
+  assert.deepEqual(await paint(), [], 'nothing drawn');
+  assert.equal(flushes.count, painted, 'the frame is held');
+  assert.equal(presents().length, presented);
+  // the host looks up 2: the buffer of 1 left the layer, and the held frame
+  // goes on the answer, into it, from the frame presented last
+  const free = bySeq().get(1);
+  const from = native.drawnInto.length;
+  const copies = native.of('copy').length;
+  await shown(2);
+  assert.equal(flushes.count, painted + 1, 'the held frame, on the answer');
+  assert.equal(presents().length, presented + 1);
+  assert.deepEqual([...new Set(native.drawnInto.slice(from))], [free]);
+  assert.deepEqual(
+    native.of('copy').slice(copies),
+    [['copy', 'all', bySeq().get(3), free]],
+    'caught up from the frame presented last',
+  );
+  assert.equal(
+    last().id,
+    wnd._ring.find((s) => s.handle.id === free).iosurfaceId,
+  );
+});
+
+test('of the buffers the host is done with, a pane takes one the WindowServer has let go of', async () => {
+  const { native, paint, shown, bySeq } = await mountRepaintingPane();
+  await paint();
+  await paint();
+  await shown(3);
+  // 1 and 2 have left the layer; the WindowServer still reads 1, as it
+  // does for a refresh or two after the layer has another
+  const [one, two] = [bySeq().get(1), bySeq().get(2)];
+  native.held.add(one);
+  assert.deepEqual(await paint(), [two], 'the one let go of');
+  assert.deepEqual(native.heldDraws, []);
+  await shown(4);
+  // both read, and the clock at 0, so nothing waits on the WindowServer:
+  // the one off the layer longest, not the one the screen showed before
+  // the host's latest answer
+  native.held.add(bySeq().get(3));
+  assert.deepEqual(await paint(), [one]);
+});
+
+test('a pane frame waits a frame interval at most for the WindowServer to let go of a buffer the host has stopped showing', async () => {
+  // The host's answer says it has looked a present up, not that the
+  // screen shows it: a host back from a long frame of its own answers a
+  // run of presents at once, and its UI thread commits them later. In the
+  // browser example on a Mac, with the host busy 60ms in every 150, the
+  // frame after each stall drew into the buffer the screen still showed —
+  // 18 to 23 frames of 285 — where the WindowServer, asked, said it still
+  // read it.
+  const { native, app, wnd, flushes, paint, shown, bySeq } =
+    await mountRepaintingPane();
+  await shown(1);
+  await paint();
+  await paint();
+  assert.equal(wnd.frameHeld(), true, 'two presents on their way');
+  app._frameInterval = 1000;
+  const [one, two] = [bySeq().get(1), bySeq().get(2)];
+  // the stall ends: the screen still shows 1, and 2 went by in the batch
+  native.held.add(one);
+  native.held.add(two);
+  await shown(3);
+  const painted = flushes.count;
+  assert.deepEqual(await paint(), [], 'nothing drawn while both are read');
+  assert.equal(flushes.count, painted);
+  // and an input finds the same, though its present is answered and went
+  // out before the stall
+  wnd._presentedAt = -Infinity;
+  assert.equal(wnd.frameInFlight(), true, 'nor on an input');
+  // the WindowServer lets go of 2, which nothing announces: the pane asks
+  native.held.delete(two);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(flushes.count, painted + 1, 'the frame, once it has');
+  assert.deepEqual(native.heldDraws, []);
+  assert.equal(native.drawnInto.at(-1), two);
+  // and one that never does holds a frame no longer than an interval
+  await shown(4);
+  native.held.add(bySeq().get(3));
+  wnd._shownAt -= 2000;
+  assert.equal(wnd.frameHeld(), false);
+  assert.deepEqual(await paint(), [one], 'the one off the layer longest');
+});
+
+test('a host that stops answering holds a pane frame no longer than a host answers in', async () => {
+  const { wnd, flushes, paint, shown, bySeq } = await mountRepaintingPane();
+  await shown(1);
+  await paint();
+  await paint();
+  assert.equal(wnd.frameHeld(), true);
+  // and the answer never comes
+  wnd._presentedAt = performance.now() - 250;
+  assert.equal(wnd.frameHeld(), false, 'the hold lets go');
+  assert.equal(wnd.frameInFlight(), false, 'and so does the input gate');
+  const painted = flushes.count;
+  // into the buffer the host has yet to look up, not the one on the layer:
+  // a host that comes back looks up everything queued in one turn
+  const queued = bySeq().get(2);
+  assert.deepEqual(await paint(), [queued]);
+  assert.equal(flushes.count, painted + 1);
+});
+
+test('a pane frame the WindowServer held past the interval takes the buffer a run of answers passed over, not the one the screen showed before it', async () => {
+  // A host back from a long frame answers the presents it queued in one
+  // turn. The buffer it showed before them is on glass until its UI thread
+  // commits the last of them; one the run passed over never was.
+  const { native, app, wnd, paint, deliver, shown, bySeq } =
+    await mountRepaintingPane();
+  await shown(1);
+  await paint();
+  await paint();
+  app._frameInterval = 1000;
+  const [one, two] = [bySeq().get(1), bySeq().get(2)];
+  native.held.add(one);
+  native.held.add(two);
+  deliver({ type: 'pane-shown', seq: 2 });
+  deliver({ type: 'pane-shown', seq: 3 });
+  await tick();
+  // and the WindowServer holds on to both for longer than a frame
+  wnd._shownAt -= 2000;
+  assert.deepEqual(await paint(), [two]);
 });
 
 test('a pane frame after a full one starts from it, not from the frame its buffer last held', async () => {

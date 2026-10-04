@@ -1074,7 +1074,8 @@ command line asking for it. It needs a bridge with `runMain()`,
 - **The fence.** A flip is a command the UI thread applies later, so the
   buffer it takes off glass is still on glass when the call returns.
   `CocoaWindow.frameInFlight()` — the X11 contract's fence, which the pump
-  never needed — holds the window's next frame until `surface-released`
+  never needed, and whose `frameHeld()` half is what the frame clock asks
+  (`CocoaApp._tickFrames`) — holds the window's next frame until `surface-released`
   names that buffer, and no frame draws into that buffer before then, one
   that did not wait included. A new size is never in flight: it paints
   into a new chain that nothing shows. A release that never comes lets the
@@ -2655,7 +2656,9 @@ renderer's own and are listed at the end.
   stretched to the layer's new frame. A pane hears nothing back from the
   host, so a present now counts as in flight for one frame interval; the
   same burst is one frame at the size it ended on, plus the one the first
-  message was answered with. `test/cocoa-frames.test.js`.
+  message was answered with. `test/cocoa-frames.test.js`. Since #870 the
+  host answers each present, and the gate is that answer as well
+  (§"Measured: a pane's presents, answered").
 - **The wheel is gated to the display too** (`CocoaApp._routeWheel`,
   `CocoaWindow._flippedRecently`). The wheel's early flush painted and
   flipped for every scroll event, and a trackpad lands two in one pump
@@ -2949,6 +2952,68 @@ its wrapped layout are now one shaping. `test/cocoa-kept-typesetters.test.js`
 holds the keys, the eviction and the unpacking over a fake bridge, and,
 where the bridge keeps typesetters, that every layout made from one is the
 layout made from the spans.
+
+## Measured: a pane's presents, answered
+
+Written 2026-10-04 against react-x11 2.40.0 with #870 and #875 and
+`@windowkit/appkit` 0.25.0, on the M1 Pro's 120Hz panel at scale 2, with the
+browser example in `@react-x11/components` on a Wikipedia article. A preload
+logged, in the pane, the first write into each ring buffer after a present —
+the seq the buffer was last presented under, the newest `pane-shown` heard,
+and `surfaceIsInUse` — and in the host every lookup, so each write could be
+held against the moment the host looked its buffer up. The scenarios: the
+window dragged 4 px every 16 ms; and the pane scrolling itself a notch every
+8 ms, or every 4 for a burst — input the host's thread has no part in, as
+momentum or a page's own animation is — with the host idle, or busy 60 ms in
+every 150. Two runs of each, master and branch interleaved.
+
+| per 3 s of scrolling                                       | before       | after       |
+| ---------------------------------------------------------- | ------------ | ----------- |
+| busy host: frames drawn into a buffer it looked up after   | 93–98 of 376 | 0           |
+| busy host: frames drawn into the buffer on the layer       | 19           | 0           |
+| any host: frames drawn into a buffer the WindowServer read | 155–177      | 0–2         |
+| busy host: input to the host's lookup, p50 / p99           | 7.9 / 64 ms  | 8.5 / 64 ms |
+| idle host: presents a second, input to present p50         | 119, 5.9 ms  | 119, 6.6 ms |
+| burst: presents a second, input to present p50             | 118, 6.0 ms  | 118, 6.6 ms |
+
+Three findings decided the design (`CocoaPaneWindow.frameHeld`, `_takeBack`,
+`frameInFlight`):
+
+- **The host two presents behind is ordinary.** A host busy with its own
+  frame stops answering, and triple buffering assumed it never would: the
+  pane drew into the buffer on the layer, or into one a present still in
+  the channel named, which the host then showed half drawn. A frame now
+  takes a buffer only once the host has answered a present after the last
+  one that named it, and waits on the clock for the answer when there is
+  none, 250 ms at most.
+- **An answer is a lookup, not a frame on glass.** The buffer the layer let
+  go of stays in use for 8 ms after the pane hears the answer at the median,
+  13–22 at the 90th percentile; and a host back from a stall answers a run
+  of presents at once while its UI thread commits later. Taken on the answer
+  alone, the frame after each stall drew into the buffer the screen still
+  showed, 18–23 frames of 285. So a frame takes a buffer the WindowServer
+  has let go of as well, asked every millisecond for a frame interval at
+  most. The catch-up copy moved from the present to the frame's first draw
+  for the same reason — at the present the buffer two behind was still read
+  in nearly half the frames of a scroll — and that is the 0.6 ms the table
+  shows: the copy is on the input's path now. Doing it at the present when a
+  free buffer is already there is the obvious follow-up.
+- **The input gate keeps its frame interval.** Gating on the answer alone
+  answered an input 4 ms sooner at the median, and drew a frame per input
+  past the display's rate: 245 a second at 250 inputs a second, 355 at 1000,
+  the pane busy 58% of the time against 33%, and the frames that outran the
+  WindowServer drew into buffers it still read. Nothing the pane can ask
+  says when a frame is on glass — a buffer reads in use from the host's
+  lookup, not from the refresh — and a gate on the clock's own grid in
+  place of the interval held every input to the paced frame just the same.
+
+A drag is faster for the second: master copied the whole frame into the
+next buffer at every present, and the next frame of a drag is a new size on
+a new ring, so the copy was thrown away every time — 126 copies in 126
+presents, against 55 in 174 now. Frames during the drag, the mean of six
+interleaved pairs: 52 a second before, 59 after.
+`test/cocoa-frames.test.js` holds each rule over the fake bridge, and each
+fails its own test when taken out.
 
 ## Testing
 

@@ -1218,11 +1218,12 @@ export class CocoaApp {
     const surfaces = [];
     for (const entry of queue) {
       // A window whose last flip has not reached its layer yet (threaded
-      // mode's fence, `CocoaWindow.frameInFlight`) waits before
-      // its clock is asked, or the clock would count a frame that did not
-      // run. The release is an event, and the batch it arrives in ticks
+      // mode's fence, `CocoaWindow.frameHeld`), or a pane with no buffer the
+      // host is done with (`CocoaPaneWindow.frameHeld`), waits before its
+      // clock is asked, or the clock would count a frame that did not run.
+      // The release is an event — a batch, a `pane-shown` — and it ticks
       // again.
-      if (entry.wnd?.frameInFlight?.()) {
+      if (entry.wnd?.frameHeld?.()) {
         this._rafQueue.push(entry);
         continue;
       }
