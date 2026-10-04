@@ -705,8 +705,23 @@ test('an RTL field puts its value, and its placeholder, against the right edge',
 });
 
 test('an empty RTL field blinks its caret at the right edge of the content box', async () => {
-  for (const direction of ['ltr', 'rtl']) {
-    const { field, ctx } = await fieldWindow(direction, { defaultValue: '' });
+  // Both fields: `<textinput>` places its one line itself, and `<textarea>`
+  // hands ntk a container to align its lines in, where an empty value used to
+  // be set as a left-to-right line whatever the direction — ntk found no
+  // paragraph in an empty text to take the base level from, so the field
+  // holding a line break had its caret on the right and the empty one on the
+  // left.
+  for (const [kind, direction] of [
+    ['textinput', 'ltr'],
+    ['textinput', 'rtl'],
+    ['textarea', 'ltr'],
+    ['textarea', 'rtl'],
+  ]) {
+    const { field, ctx } = await fieldWindow(
+      direction,
+      { defaultValue: '' },
+      kind,
+    );
     const content = field.contentBox();
     // The caret is a rectangle drawn *rightwards* from the boundary it marks,
     // so an RTL field has to keep its own width free at the flush edge or the
@@ -714,11 +729,11 @@ test('an empty RTL field blinks its caret at the right edge of the content box',
     const right = content.x + content.width;
     const caret = field.textCaretRect(0);
     if (direction === 'ltr') {
-      assert.strictEqual(caret.x, content.x, 'ltr: at the left edge');
+      assert.strictEqual(caret.x, content.x, `${kind} ltr: at the left edge`);
     } else {
       assert.ok(
         caret.x < right && caret.x >= right - 3,
-        `rtl: within a caret of the right edge, got ${caret.x} against ${right}`,
+        `${kind} rtl: within a caret of the right edge, got ${caret.x} against ${right}`,
       );
     }
 
@@ -740,8 +755,15 @@ test('an empty RTL field blinks its caret at the right edge of the content box',
       ...band,
       x: direction === 'rtl' ? content.x : content.x + band.width,
     });
-    assert.ok(near > 0, `${direction}: the caret is drawn on the start side`);
-    assert.strictEqual(far, 0, `${direction}: and nothing is on the other`);
+    assert.ok(
+      near > 0,
+      `${kind} ${direction}: the caret is drawn on the start side`,
+    );
+    assert.strictEqual(
+      far,
+      0,
+      `${kind} ${direction}: and nothing is on the other`,
+    );
     await cleanup();
   }
 });

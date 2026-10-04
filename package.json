@@ -104,7 +104,7 @@
     "ical.js": "^2.2.1",
     "image-in-browser": "^3.6.0",
     "linebreak": "^1.1.0",
-    "ntk": "^8.17.8",
+    "ntk": "^8.23.0",
     "react-reconciler": "^0.34.0",
     "yoga-layout": "^3.2.1"
   },

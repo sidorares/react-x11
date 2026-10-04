@@ -5,13 +5,14 @@
 // An app that makes its own surfaces answers `createSurface(options)` — the
 // Cocoa app over a CG bitmap (src/cocoa/surface.js), the Windows app over a
 // Direct2D bitmap, the Wayland app over a GL render target
-// (src/wayland/surface.js) — and an X connection has no such method and gets
-// ntk's pixmap, from ntk's root, which only an X connection loads
-// (src/ntkroot.js). The result is whichever implementation answered, not an
-// instance of this class: the contract is the shape — `width`/`height`,
-// `getContext('2d')`, `render`, `clear`, `copyWithin`, `destroy`, and
-// `ctx.drawImage(surface, …)` — (docs/extending.md "Scrolling the pixels, not
-// just the offset"), and nothing needs `instanceof`.
+// (src/wayland/surface.js), and ntk's own app over an X connection with its
+// pixmap (ntk >= 8.21). An app without the method — an older ntk deduped
+// into the tree — gets that pixmap from ntk's root, which only an X
+// connection loads (src/ntkroot.js). The result is whichever implementation
+// answered, not an instance of this class: the contract is the shape —
+// `width`/`height`, `getContext('2d')`, `render`, `clear`, `copyWithin`,
+// `destroy`, and `ctx.drawImage(surface, …)` — (docs/extending.md "Scrolling
+// the pixels, not just the offset"), and nothing needs `instanceof`.
 //
 // Part of that shape is that a context may be **held**: ntk tells a caller
 // doing many draws to take `getContext('2d')` once rather than one per frame,

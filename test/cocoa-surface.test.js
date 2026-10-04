@@ -393,14 +393,20 @@ test("react-x11/ntk's Surface asks the app first: a Cocoa app answers its own", 
   assert.deepEqual(asked, [{ width: 1, height: 1 }]);
 });
 
-test("react-x11/ntk's Surface falls through to ntk's pixmap on an X connection", async () => {
+test("react-x11/ntk's Surface is ntk's pixmap on an X connection, whoever makes it", async () => {
   const { app } = await renderX11(h('box', null));
-  assert.equal(typeof app.createSurface, 'undefined', 'ntk has no such seam');
-  const surface = new Surface(app, { width: 8, height: 8 });
-  assert.ok(surface instanceof ntk.Surface);
-  assert.equal(surface.width, 8);
-  assert.equal(typeof surface.picture(app).id, 'number');
-  surface.destroy();
+  // ntk's app answers the seam itself since 8.21, with its own pixmap; an
+  // app without it — an older ntk deduped into the tree — falls through to
+  // the pixmap from ntk's root. The same surface either way.
+  assert.equal(typeof app.createSurface, 'function', 'ntk makes its own');
+  const older = Object.create(app, { createSurface: { value: undefined } });
+  for (const owner of [app, older]) {
+    const surface = new Surface(owner, { width: 8, height: 8 });
+    assert.ok(surface instanceof ntk.Surface);
+    assert.equal(surface.width, 8);
+    assert.equal(typeof surface.picture(owner).id, 'number');
+    surface.destroy();
+  }
 });
 
 // --- over the real bridge -----------------------------------------------------
