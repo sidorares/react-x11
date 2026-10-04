@@ -407,20 +407,68 @@ class Win32TextLayout {
    * where CoreText cannot and the Cocoa engine breaks at `linebreak`'s
    * opportunities itself. */
   get minWidth() {
+    // asked of the bridge the first time, where it left it out of the
+    // metrics: the line breaker over the whole text again, which a layout
+    // made to be drawn is never asked for
+    if (this._metrics.minWidth === undefined) {
+      this._metrics.minWidth =
+        this._handle != null && this._native.layoutMinWidth
+          ? (this._native.layoutMinWidth(this._handle) ?? 0)
+          : 0;
+    }
     return this._metrics.minWidth;
   }
 
+  /**
+   * Keep the first `cap` lines of what was laid out: they are all this
+   * layout reports, answers for and draws (`_keptEnd`, `_keptHeight`). A
+   * capped paragraph is laid out past its cap to find where the cap falls,
+   * and keeping that layout's first lines is the same picture as laying the
+   * kept text out again, for one native layout where it took two.
+   */
+  _keep(cap) {
+    const lines = this._metrics.lines.slice(0, cap);
+    const last = lines[lines.length - 1];
+    if (!last) return;
+    let width = 0;
+    for (const line of lines)
+      width = Math.max(width, Math.ceil(line.width - 1e-3));
+    this._metrics = {
+      ...this._metrics,
+      lines,
+      width,
+      height: Math.ceil(last.y + last.height),
+      minWidth: undefined,
+    };
+    this._keptEnd = last.end;
+    this._keptHeight = last.y + last.height;
+  }
+
   draw(ctx, x, y) {
+    if (this._keptHeight === undefined) {
+      ctx._drawLayout(this, x, y);
+      return;
+    }
+    // the lines past the cap are in the layout, and stay out of the picture
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x - 1e4, y, 2e4 + this._metrics.width, this._keptHeight);
+    ctx.clip();
     ctx._drawLayout(this, x, y);
+    ctx.restore();
   }
 
   indexAt(x, y) {
     const unit = this._native.layoutIndexAt(this._handle, x, y);
-    return this._cpOf(unit);
+    return this._cpOf(Math.min(unit, this._keptEnd ?? unit));
   }
 
   caretPosition(cp) {
-    return this._native.layoutCaret(this._handle, this._cuOf(cp));
+    const unit = this._cuOf(cp);
+    return this._native.layoutCaret(
+      this._handle,
+      Math.min(unit, this._keptEnd ?? unit),
+    );
   }
 
   /**
@@ -567,6 +615,20 @@ export class Win32FontManager {
     // family|weight|italic|size -> the bridge's handle, or null when there is
     // no such face
     this._handles = new Map();
+    // what this bridge's layouts take, asked once (`textFeatures`, from
+    // @windowkit/win32 0.0.9): an older one answers nothing and takes neither
+    this._features = native.textFeatures?.() ?? {};
+  }
+
+  /**
+   * Which of ntk's `justify` modes `layout` takes. DirectWrite justifies
+   * every line but a paragraph's last, which is `justify: true`, and has no
+   * way to justify a last line: `'rest'` says so, and a caller justifies the
+   * other two itself. <Html>, which spaced every justified line through
+   * letter spacing on this engine, lays a justified paragraph out once.
+   */
+  get justifies() {
+    return this._features.justify === true ? 'rest' : false;
   }
 
   /**
@@ -759,7 +821,9 @@ export class Win32FontManager {
       return this._laidOut(sources, base, { ...options, maxWidth: least });
     }
     let laid = sources;
-    let layout = this._laidOut(laid, base, options);
+    let layout =
+      this._prefixLaidOut(sources, base, options, cap) ??
+      this._laidOut(laid, base, options);
     // With no width the bridge lays a paragraph out in a box a million
     // pixels wide, and aligns it there: a centred line's `x` was half a
     // million, an RTL one's a million, and <Html> measured a centred
@@ -776,7 +840,11 @@ export class Win32FontManager {
       layout = this._laidOut(laid, base, { ...options, maxWidth: widest });
     }
     layout.truncated = layout.lines.length > cap;
-    if (layout.truncated) {
+    if (layout.truncated && !elides) {
+      // what was laid out, a prefix or the whole, keeps its first lines
+      laid = spansTo(sources, layout._text.length);
+      layout._keep(cap);
+    } else if (layout.truncated) {
       const last = layout.lines[cap - 1];
       const text = layout._text;
       layout.destroy();
@@ -798,6 +866,43 @@ export class Win32FontManager {
     }
     layout._hangRuns(sources, laid, this._runOf(base));
     return layout;
+  }
+
+  /**
+   * A capped paragraph laid out only as far as the cap needs: a prefix of
+   * its text that breaks into more lines than `cap`, or null where the
+   * whole text is no longer than a prefix would be. The first lines of a
+   * prefix are the whole text's first lines wherever it reaches past them —
+   * a line's break waits only on the word after it, which then starts a
+   * line of the prefix — and the prefix ends at a break, its last word
+   * whole. <Html> lays a paragraph beside a float out a line at a time,
+   * each `maxLines: 1` over the rest of the paragraph; laid out whole, each
+   * line cost the whole rest of it, twice, and a paragraph cost the square
+   * of its length.
+   */
+  _prefixLaidOut(sources, base, options, cap) {
+    const { maxWidth } = options;
+    if (!(cap < Infinity) || !(maxWidth > 0) || !Number.isFinite(maxWidth)) {
+      return null;
+    }
+    const text = sources.map((span) => String(span.text)).join('');
+    let size = Infinity;
+    for (const span of sources)
+      size = Math.min(size, sizeOf(span.size ?? base.size));
+    // a third of an em a character is narrower than nearly any text is set
+    // in, so a prefix that long nearly always reaches past the lines wanted;
+    // where it does not, one twice as long is tried
+    let take = Math.ceil(maxWidth / (Math.max(1, size) * 0.3)) * cap + 16;
+    while (take < text.length) {
+      let end = take;
+      while (end < text.length && !BREAKING_SPACE.test(text[end])) end++;
+      if (end >= text.length) return null;
+      const layout = this._laidOut(spansTo(sources, end), base, options);
+      if (layout.lines.length > cap) return layout;
+      layout.destroy();
+      take *= 2;
+    }
+    return null;
   }
 
   /**
@@ -899,11 +1004,17 @@ export class Win32FontManager {
         align: options.align,
         lineHeight: options.lineHeight,
         rtl: options.direction === 'rtl',
+        // the one mode DirectWrite has (`justifies`); 'last' and 'all' are
+        // the caller's
+        justify: options.justify === true || undefined,
       },
       ranges,
     );
 
-    const raw = this._native.layoutMetrics(handle);
+    const raw = this._native.layoutMetrics(
+      handle,
+      this._features.lazyMinWidth ? { minWidth: false } : undefined,
+    );
     if (DEBUG) {
       // The family is in here because the one way this goes quietly wrong is
       // `resolveStack` not recognising a name and answering `sans-serif`: the

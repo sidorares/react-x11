@@ -493,3 +493,110 @@ describe('win32 fonts: coverage', () => {
     assert.equal(asked, 0, 'a released handle is never handed to the bridge');
   });
 });
+
+describe('win32 fonts: as little native work as a layout needs', () => {
+  const featured = (features) => {
+    const bridge = createFakeBridge();
+    bridge.textFeatures = () => features;
+    return bridge;
+  };
+
+  it("justifies the one mode DirectWrite has, where the bridge says it can, and says 'rest'", () => {
+    // DirectWrite justifies every line but a paragraph's last; <Html>
+    // spaced every justified line itself on this engine, three layouts a
+    // paragraph, and asks the engine for the mode it says it has
+    assert.equal(new Win32FontManager(createFakeBridge()).justifies, false);
+    const bridge = featured({ justify: true });
+    const fonts = new Win32FontManager(bridge);
+    assert.equal(fonts.justifies, 'rest');
+    fonts.layout('aaa bbb ccc', {}, { maxWidth: 64, justify: true });
+    fonts.layout('aaa bbb ccc', {}, { maxWidth: 64, justify: 'all' });
+    const asked = bridge.calls
+      .filter((c) => c[0] === 'layoutCreate')
+      .map((c) => c[2].justify);
+    assert.deepEqual(asked, [true, undefined]);
+  });
+
+  it('asks for the min-content width only when it is read', () => {
+    const bridge = featured({ lazyMinWidth: true });
+    const metrics = bridge.layoutMetrics;
+    const told = [];
+    bridge.layoutMetrics = (handle, options) => {
+      told.push(options);
+      const out = metrics(handle);
+      if (options?.minWidth === false) delete out.minWidth;
+      return out;
+    };
+    let asked = 0;
+    bridge.layoutMinWidth = () => {
+      asked++;
+      return 40;
+    };
+    const layout = new Win32FontManager(bridge).layout(
+      'hello world',
+      {},
+      { maxWidth: 200 },
+    );
+    assert.deepEqual(told, [{ minWidth: false }]);
+    assert.equal(asked, 0, 'not for a layout that is only drawn');
+    assert.equal(layout.minWidth, 40);
+    assert.equal(layout.minWidth, 40);
+    assert.equal(asked, 1, 'once');
+  });
+
+  it('lays a capped paragraph out only as far as its cap, and once', () => {
+    // <Html> lays a paragraph beside a float out a line at a time, each line
+    // `maxLines: 1` over the rest of the paragraph: laid out whole, and then
+    // again cut, each line cost the rest of the paragraph twice
+    const bridge = createFakeBridge();
+    const text = 'word '.repeat(400);
+    const layout = new Win32FontManager(bridge).layout(
+      text,
+      {},
+      { maxWidth: 64, maxLines: 1 },
+    );
+    const made = bridge.calls.filter((c) => c[0] === 'layoutCreate');
+    assert.equal(made.length, 1, 'one native layout');
+    assert.ok(made[0][1].length < text.length / 4, 'of a prefix of the text');
+    assert.equal(layout.lines.length, 1);
+    assert.equal(layout.truncated, true);
+    assert.ok(layout.width <= 64);
+    assert.equal(layout.height, 16);
+  });
+
+  it('draws only the lines it keeps of what it laid out', () => {
+    const layout = manager().layout(
+      'aaa bbb ccc ddd eee',
+      {},
+      {
+        maxWidth: 64,
+        maxLines: 2,
+      },
+    );
+    const seen = [];
+    layout.draw(
+      {
+        save: () => seen.push('save'),
+        beginPath: () => {},
+        rect: (x, y, w, h) => seen.push(['rect', y, h]),
+        clip: () => seen.push('clip'),
+        _drawLayout: () => seen.push('draw'),
+        restore: () => seen.push('restore'),
+      },
+      10,
+      20,
+    );
+    assert.deepEqual(seen, [
+      'save',
+      ['rect', 20, 32],
+      'clip',
+      'draw',
+      'restore',
+    ]);
+    assert.equal(
+      layout.indexAt(1000, 1000) <= 16,
+      true,
+      'nothing past the cut',
+    );
+  });
+});
