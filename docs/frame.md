@@ -334,6 +334,31 @@ the host keeps a buffer of a ring it retired — a stream that switched
 renditions — until the frame naming it is answered. A lookup that finds a
 surface of another size than its frame says is not copied out of at all.
 
+**A pane draws only into a buffer the host is done with.** The ring holds
+three buffers so that one present can be on its way while the next frame
+draws: one on the layer, one named in the channel, one free. A host two
+presents behind — busy with a long frame of its own, a breakpoint's layout,
+a window resize — left the next frame nothing but the buffer on the layer or
+the one a present still in the channel named, and the frame drew into it
+anyway: the host then showed a frame half drawn. So a frame takes a buffer
+only once the host has answered a present after the last one that named it,
+and waits on the clock for the next answer when there is none. An answer
+says the host has looked the present up, not that the screen shows it, and
+a host back from a long frame has the buffer it showed throughout still on
+glass until its UI thread commits: so of the buffers the host is done with,
+a frame takes one the WindowServer has let go of too, and waits for one, a
+frame interval at most after the answer. A host that has not answered for
+250 ms no longer holds the pane up.
+
+The same answer gates the frame an input gets on the spot
+(`flushPendingFrames`): a pane paints on an input only once its last present
+is answered and a frame interval has passed since it went, and otherwise the
+next frame on the clock answers it. The interval costs an input a few
+milliseconds at the display's rate, and is what keeps a pane at one frame a
+refresh: without it, input faster than the display had a frame each — 245 a
+second on a 120Hz panel, at 250 inputs a second — and the frames that went
+faster than the WindowServer let go of buffers drew into ones it still read.
+
 `backgroundColor` in the frame's `style` is what shows before the pane's
 first frame and after one dies — the same server-painted rectangle
 `<foreign>` documents.
