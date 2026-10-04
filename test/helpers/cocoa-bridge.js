@@ -21,6 +21,8 @@ export function fakeCocoaBridge({ screens } = {}) {
   const released = new Set();
   const players = new Map();
   const fonts = new Map();
+  // layout handle -> the text and lines it was laid out as
+  const layouts = new WeakMap();
   let seq = 0;
   let backendCb = null;
   let presentation = null;
@@ -264,36 +266,71 @@ export function fakeCocoaBridge({ screens } = {}) {
         ? null
         : { width: pointSize * 1.25, height: pointSize },
     ctxDrawSymbol: (surface, name) => name !== 'no.such.symbol',
-    // one line, 8px a code point, the ascent and descent of the metrics
-    // above: enough for a `<text>` to measure, lay out and be painted — and,
-    // with the line's one left-to-right run, to paint a selection over
+    // a line per hard break and no wrapping, 8px a code point, the ascent
+    // and descent of the metrics above: enough for a `<text>` to measure,
+    // lay out and be painted — with each line's one left-to-right run, to
+    // paint a selection over — and for a `<textarea>` to find a caret's line
+    // and the index at a point, the way CoreText answers both
     createLayout({ spans }) {
       const text = spans.map((span) => span.text).join('');
       const size = spans[0]?.size ?? 14;
-      const width = [...text].length * 8;
       const height = Math.round(size * 1.1);
+      const parts = text.split('\n');
+      let start = 0;
+      const lines = parts.map((part, i) => {
+        const width = [...part].length * 8;
+        // a line's range takes its break, as a CTLine's does
+        const end = start + part.length + (i < parts.length - 1 ? 1 : 0);
+        const line = {
+          start,
+          end,
+          x: 0,
+          y: i * height,
+          width,
+          height,
+          baseline: size * 0.8,
+          ascent: size * 0.8,
+          descent: size * 0.2,
+          runs: [{ x: 0, width, start, end, rtl: false }],
+        };
+        start = end;
+        return line;
+      });
+      const handle = { layout: ++seq };
+      layouts.set(handle, { text, lines, height });
       return {
-        handle: { layout: ++seq },
-        width,
-        height,
-        lines: [
-          {
-            start: 0,
-            end: text.length,
-            x: 0,
-            y: 0,
-            width,
-            height,
-            baseline: size * 0.8,
-            ascent: size * 0.8,
-            descent: size * 0.2,
-            runs: [{ x: 0, width, start: 0, end: text.length, rtl: false }],
-          },
-        ],
+        handle,
+        width: Math.max(...lines.map((line) => line.width)),
+        height: height * lines.length,
+        lines,
       };
     },
-    layoutIndexAt: () => 0,
-    layoutCaret: () => ({ x: 0, y: 0, height: 14 }),
+    /** the UTF-16 index nearest (x, y): the line under y, the column at x */
+    layoutIndexAt(handle, x, y) {
+      const laid = layouts.get(handle);
+      if (!laid) return 0;
+      const { text, lines, height } = laid;
+      const li = Math.max(
+        0,
+        Math.min(lines.length - 1, Math.floor(y / height)),
+      );
+      const line = lines[li];
+      const last = li === lines.length - 1 ? line.end : line.end - 1;
+      const points = [...text.slice(line.start, last)];
+      const column = Math.max(0, Math.min(points.length, Math.round(x / 8)));
+      return line.start + points.slice(0, column).join('').length;
+    },
+    /** the caret at a UTF-16 index: on the line whose range holds it */
+    layoutCaret(handle, cu) {
+      const laid = layouts.get(handle);
+      if (!laid) return { x: 0, y: 0, height: 14, line: 0 };
+      const { text, lines } = laid;
+      let li = lines.findIndex((line) => cu >= line.start && cu < line.end);
+      if (li < 0) li = lines.length - 1;
+      const line = lines[li];
+      const x = [...text.slice(line.start, cu)].length * 8;
+      return { x, y: line.y, height: line.height, line: li };
+    },
     fontShapeText(f, text) {
       const cps = [...text].map((ch) => ch.codePointAt(0));
       return {
