@@ -77,21 +77,30 @@ class PaneLayer {
   }
 
   /**
-   * Whether a pane's last frame is shown at its size in its layer until a
-   * frame of the layer's new size lands, or stretched to it. The host gives
-   * the layer its new size the moment the window lays out, and the pane's
-   * frame of that size comes a pane frame later: Core Animation stretches
-   * the frame it has to the new bounds meanwhile, and a page's left column
-   * was drawn scaled a little at every step of a window dragged wider, and
-   * then at its size again. A pane that keeps up has its frame shown at its
-   * size instead, its edge carried over what it does not cover yet
-   * (`_edgeProps`); one that falls behind the budget is stretched, which is
-   * the better picture for the long wait — a pane repainting at three
-   * frames a second shows a squeezed page, not a page and a smeared strip.
-   * The budget is the window's live-resize handshake's
-   * (`createRoot({ cocoa: { resizeWait } })`), how long a frame of a new
-   * size may take before the old one is shown in its place: 0 stretches
-   * always, as before.
+   * Whether a pane's last frame is shown at its size across its layer until
+   * a frame of the layer's new size lands, or stretched across it. The host
+   * gives the layer its new size the moment the window lays out, and the
+   * pane's frame of that size comes a pane frame later: Core Animation
+   * stretches the frame it has to the new bounds meanwhile, and a page's
+   * left column was drawn scaled a little at every step of a window dragged
+   * wider, and then at its size again. A pane that keeps up has its frame
+   * shown at its size instead, its edge carried over what it does not cover
+   * yet (`_edgeProps`); one that falls behind the budget is stretched
+   * across, which is the better picture for the long wait — a pane
+   * repainting at three frames a second shows a squeezed page, not a page
+   * and a smeared strip. The budget is the window's live-resize
+   * handshake's (`createRoot({ cocoa: { resizeWait } })`), how long a frame
+   * of a new size may take before the old one is shown in its place: 0
+   * stretches always, both ways, as before.
+   *
+   * Down the layer the frame is at its size whatever this says. A width
+   * moves where a page's lines break, and what comes is a page laid out
+   * again, which a squeezed one is nearer to than one cut off with a strip
+   * beside it. A height moves nothing a page lays out — its lines are as
+   * wide as they were, its blocks where they were — so what comes is the
+   * frame as it is with more of the page under it, and a frame stretched
+   * down was the page drawn too tall at every refresh of the wait, where
+   * at its size only the strip under it is not yet the page's.
    *
    * Behind is a pane whose frames come later than the budget, not one with
    * a size waiting that long. `<Frame>` sends a pane the newest size once
@@ -125,8 +134,11 @@ class PaneLayer {
    * carried over the rest (`contentsCenter`, the part of the contents that
    * stretches while everything else keeps its size) — the last column
    * across a window dragged wider, the last row down one dragged taller,
-   * and the corner pixel into the corner. Both rects are the whole when
-   * the frame is stretched, and when it is the layer's size.
+   * and the corner pixel into the corner. Across a pane that fell behind
+   * the frame is stretched, and down it is still at its size
+   * (`_anchoredNow`): the whole of each row stretched to the new width,
+   * cropped or with its last row carried down. Both rects are the whole
+   * when the frame is the layer's size, and at a budget of 0.
    *
    * Anchored by gravity alone, the strip the frame did not cover showed
    * whatever was under the pane, which is the `<Frame>`'s background: in
@@ -147,15 +159,19 @@ class PaneLayer {
     const rect = this._rect;
     let crop = null;
     let edge = null;
-    if (frame && rect && this._anchoredNow()) {
-      const w = Math.min(frame.width, rect.width);
+    const budget = this.app._resizeWait ?? RESIZE_WAIT_MS;
+    if (frame && rect && budget > 0) {
+      // across at its size while the pane keeps up, and down always; an
+      // axis stretched is shown whole, the frame's every column across
+      const across = this._anchoredNow();
+      const w = across ? Math.min(frame.width, rect.width) : frame.width;
       const h = Math.min(frame.height, rect.height);
       if (w < frame.width || h < frame.height) {
         crop = [0, 0, w / frame.width, h / frame.height];
       }
-      // in the shown part's own unit square; an axis that did not grow is
-      // all centre, stretched by one
-      const wider = rect.width > w;
+      // in the shown part's own unit square; an axis that did not grow, or
+      // is stretched, is all centre
+      const wider = across && rect.width > w;
       const taller = rect.height > h;
       if (wider || taller) {
         edge = [

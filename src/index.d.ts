@@ -292,8 +292,9 @@ export interface RootOptions {
    * the frame is painted on another thread (50 by default; 0 lets the edge
    * move without waiting). A `<Frame>` pane's frames of a new size are held
    * to it as well: within it, the pane's last frame stays at its size while
-   * the next comes, and past it, it is stretched to the pane's new size, as
-   * every one is at 0.
+   * the next comes, and past it, it is stretched across to the pane's new
+   * width and stays at its size down it; at 0 every one is stretched both
+   * ways.
    * `screenPoll` is how often the screen layout is re-read while a
    * {@link useScreens} subscriber is mounted, in ms — 500 by default, 0 for
    * never. macOS has no event for a display plugged in, unplugged or

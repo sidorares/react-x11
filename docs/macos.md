@@ -1091,7 +1091,8 @@ command line asking for it. It needs a bridge with `runMain()`,
   a new size come within it, its layer shows the last one at its size,
   cropped where the layer shrank and its last column and row carried over
   where it grew (`contentsRect`, `contentsCenter`), rather than stretching
-  it, and past it, stretches (docs/frame.md §"Sizing, stacking, input").
+  it, and past it, stretches it across and still not down
+  (docs/frame.md §"Sizing, stacking, input").
 - **The screen layout is pulled.** `listScreens()` is always current — the
   bridge republishes its copy on
   `NSApplicationDidChangeScreenParametersNotification`, and in pump mode
