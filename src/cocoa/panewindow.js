@@ -50,6 +50,8 @@ export class CocoaPaneWindow {
     // polls it through the pane's ref, so both spellings answer
     this.id = this.windowId;
     this.windowNumber = this.windowId;
+    // the host's word, which the pane has no AppKit to hear (`setLive`)
+    this.liveResizing = false;
     this.scale = app.scale ?? 2;
     // Device pixels, as every window's attributes are (`windowAttributes`
     // multiplies the props through once): the size the pane is born at,
@@ -112,6 +114,20 @@ export class CocoaPaneWindow {
    * a host that does not say. A move alone is a `resize` that `moved`, the
    * event a window's own move is, so what is anchored here follows it.
    */
+  /**
+   * Whether the window the pane is in is being resized live, as the host
+   * says (`pane-rect`, `pane-live`, src/frame/index.js): what a window's
+   * `liveResizing` is in a process of its own, where AppKit brackets the
+   * drag of its edge. Core defers a content floor's measurement while it
+   * is (src/nodes/window/size.js), and catches it up the frame after it
+   * ends; and it is announced as a window announces its own.
+   */
+  setLive(live) {
+    if (this.destroyed || this.liveResizing === live) return;
+    this.liveResizing = live;
+    this.emit('liveresize', { live });
+  }
+
   setPaneSize(width, height, scale, screen) {
     if (this.destroyed) return;
     if (scale) this.scale = scale;

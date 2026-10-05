@@ -1014,8 +1014,11 @@ export class CocoaApp {
         wnd?._shown?.(msg.seq);
       } else if (msg?.type === 'pane-rect') {
         pane.setPaneSize(msg.width, msg.height, msg.scale, msg.screen);
+        if (typeof msg.live === 'boolean') pane.setLive(msg.live);
         this._flushPaneOutbox();
         this._afterInput();
+      } else if (msg?.type === 'pane-live') {
+        pane.setLive(msg.live === true);
       } else if (msg?.type === 'pane-menu-answer') {
         const answer = this._paneMenus?.get(msg.menu);
         this._paneMenus?.delete(msg.menu);
@@ -1687,6 +1690,9 @@ export class CocoaApp {
     const wnd = this._window(ev);
     if (!wnd || wnd.destroyed) return;
     wnd.liveResizing = ev.phase === 'begin';
+    // and what lives in the window without being it hears: a `<Frame>`'s
+    // pane, which has no window of its own to be resized live
+    wnd.emit('liveresize', { live: wnd.liveResizing });
   }
 
   /**

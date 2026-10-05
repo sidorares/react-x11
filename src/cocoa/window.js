@@ -278,6 +278,12 @@ export class CocoaWindow {
     let list = this._handlers.get(name);
     if (!list) this._handlers.set(name, (list = []));
     list.push(fn);
+    // and the way to stop listening, for a listener that goes before the
+    // window does (`<Frame>`'s, for `liveresize`)
+    return () => {
+      const at = list.indexOf(fn);
+      if (at >= 0) list.splice(at, 1);
+    };
   }
 
   emit(name, ev) {
