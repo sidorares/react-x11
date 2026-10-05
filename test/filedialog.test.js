@@ -38,6 +38,7 @@ import {
   fireEvent,
   renderX11,
   screen,
+  waitFor,
 } from '../src/testing/index.js';
 import { fakePortal } from './helpers/fake-portal.js';
 import {
@@ -487,12 +488,12 @@ describe('the built-in dialog', () => {
       }),
       { wrap: false, fonts: FONTS },
     );
-    await settle();
-
-    const names = screen
-      .queryAllByText(/^(sub\/|a\.txt|b\.md|photo\.png|\.hidden)$/)
-      .map((n) => n.props.children);
-    assert.deepEqual(names.sort(), ['a.txt', 'b.md', 'sub/']);
+    await listed(() => {
+      const names = screen
+        .queryAllByText(/^(sub\/|a\.txt|b\.md|photo\.png|\.hidden)$/)
+        .map((n) => n.props.children);
+      assert.deepEqual(names.sort(), ['a.txt', 'b.md', 'sub/']);
+    });
 
     fireEvent.click(screen.getByText('a.txt'));
     await settle();
@@ -508,14 +509,14 @@ describe('the built-in dialog', () => {
       React.createElement(FileDialog, { startFolder: dir, onDone: () => {} }),
       { wrap: false, fonts: FONTS },
     );
-    await settle();
+    await listed(() => screen.getByText('sub/'));
 
     // Enter has always worked; the double click is the gesture everyone
     // reaches for first, and it did nothing.
     fireEvent.doubleClick(screen.getByText('sub/'));
-    await settle();
-
-    assert.equal(screen.queryAllByText('inner.txt').length, 1, 'we went in');
+    await listed(() =>
+      assert.equal(screen.queryAllByText('inner.txt').length, 1, 'we went in'),
+    );
     assert.equal(screen.queryAllByText('a.txt').length, 0, 'and left');
   });
 
@@ -525,7 +526,7 @@ describe('the built-in dialog', () => {
       React.createElement(FileDialog, { startFolder: dir, onDone: () => {} }),
       { wrap: false, fonts: FONTS },
     );
-    await settle();
+    await listed(() => screen.getByText('sub/'));
 
     // A directory is drawn in the accent, and the selected row is *filled*
     // with it: both palettes derive one from the other, so the two used to be
@@ -577,7 +578,7 @@ describe('the built-in dialog', () => {
       React.createElement(FileDialog, { startFolder: dir, onDone: () => {} }),
       { wrap: false, fonts: FONTS },
     );
-    await settle();
+    await listed(() => screen.getByText('a.txt'));
     assert.equal(screen.queryAllByText('.hidden').length, 0);
     fireEvent.click(screen.getByText('Show hidden'));
     await settle();
@@ -612,8 +613,9 @@ describe('the built-in dialog', () => {
       }),
       { wrap: false, fonts: FONTS },
     );
-    await settle();
-    assert.equal(screen.queryAllByText(/^Cannot read /).length, 1);
+    await listed(() =>
+      assert.equal(screen.queryAllByText(/^Cannot read /).length, 1),
+    );
   });
 
   test('folder mode lists only directories and defaults to where you are', async () => {
@@ -629,9 +631,8 @@ describe('the built-in dialog', () => {
       }),
       { wrap: false, fonts: FONTS },
     );
-    await settle();
+    await listed(() => assert.equal(screen.queryAllByText('sub/').length, 1));
     assert.equal(screen.queryAllByText('a.txt').length, 0);
-    assert.equal(screen.queryAllByText('sub/').length, 1);
     // Nothing selected means "this directory", which is what the path bar
     // shows — the alternative is a disabled button and a puzzled user.
     fireEvent.click(screen.getByText('Select'));
@@ -852,9 +853,30 @@ describe('the ladder', () => {
   });
 });
 
-/** Let effects, the frame clock and one directory read all land. */
+/**
+ * Let effects and the frame clock land: enough for anything the dialog
+ * answers without reading a directory. What a read shows is waited for
+ * instead, with `listed()`.
+ */
 async function settle() {
   await act(async () => {
     await new Promise((r) => setTimeout(r, 60));
   });
+}
+
+/**
+ * Wait until `check` passes on what a directory read shows. The dialog reads
+ * its folder when it mounts and again whenever it changes folder, and that
+ * is fs work no fixed wait bounds: on a loaded CI runner, the listing a
+ * double click asked for arrived after `settle()`'s 60 ms.
+ *
+ * The `act()` is for the click that tends to come next: `waitFor` can return
+ * between the commit that lists a row and the frame that lays it out, and a
+ * click needs the row's rect. And a name a test expects to be *missing* is
+ * checked after waiting for one that is there, because a folder not yet read
+ * lists nothing either.
+ */
+async function listed(check) {
+  await waitFor(check);
+  await act();
 }
