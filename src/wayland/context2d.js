@@ -65,6 +65,8 @@ const MODE_TEXTURE = 1;
 const MODE_GLYPH = 2;
 const MODE_RRECT = 3;
 const MODE_GRADIENT = 4;
+/** A texture read through a projection: `vParams` is (s/w, t/w, 1/w). */
+const MODE_PROJECTIVE = 5;
 
 /**
  * The stencil buffer, shared between two uses: bit 7 is the clip (set where
@@ -114,7 +116,9 @@ const FRAG = `
 precision mediump float;
 varying vec2 vUV;
 varying vec4 vColor;
-varying vec4 vParams;
+// highp: in MODE_PROJECTIVE these are texture coordinates over w, divided
+// per fragment, and half floats would put a large texture a pixel out
+varying highp vec4 vParams;
 uniform int uMode;
 uniform int uSwizzle;
 uniform sampler2D uTex;
@@ -156,6 +160,10 @@ void main() {
     else if (w < 0.0) a = 1.0 - smoothstep(w, -w, d);
     else a = 1.0 - smoothstep(-0.5, 0.5, d);
     gl_FragColor = vColor * a;
+  } else if (uMode == 5) {
+    // Interpolated across the quad in the plane of the screen, s/w, t/w and
+    // 1/w are each exact, and so is their quotient: a texture in perspective.
+    gl_FragColor = vColor * sampleTex(vParams.xy / vParams.z);
   } else {
     // Gradients are evaluated per fragment from its device position, so any
     // shape — a cover quad over a path included — can be filled with one.
@@ -1451,6 +1459,56 @@ export class WaylandContext2D {
   }
 
   /**
+   * Draw `img` through a projection, as one quad: its pixel (u, v) lands
+   * where the 3×3 `m` — row-major, `[a, b, c, d, e, f, g, h, i]` — takes it,
+   * ((a·u + b·v + c) / w, (d·u + e·v + f) / w) with w = g·u + h·v + i, and
+   * the current transform takes that. Clipped and faded by `globalAlpha` as
+   * `drawImage` is. Each corner carries its texture coordinates over its w,
+   * which are exact anywhere across the quad, and the fragment divides them
+   * back: the image in perspective, where a quad's own interpolation would
+   * fold it along its diagonal. That fold is what RENDER on glamor draws for
+   * a projective picture transform, and why X11 has no such call.
+   *
+   * Draws nothing and answers false where a corner has w ≤ 0, behind the
+   * viewer: the caller draws the part in front another way.
+   */
+  drawImageProjected(img, m) {
+    this._claim();
+    const src = this._textureFor(img);
+    if (!src) return false;
+    const [a, b, c, d, e, f, g, h, i] = m;
+    const W = src.w;
+    const H = src.h;
+    const ctm = this._m;
+    const pos = new Array(8);
+    const params = new Array(16);
+    const us = [0, W, W, 0];
+    const vs = [0, 0, H, H];
+    for (let k = 0; k < 4; k++) {
+      const u = us[k];
+      const v = vs[k];
+      const w = g * u + h * v + i;
+      if (!(w > 1e-9)) return false;
+      const x = (a * u + b * v + c) / w;
+      const y = (d * u + e * v + f) / w;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+      pos[k * 2] = applyX(ctm, x, y);
+      pos[k * 2 + 1] = applyY(ctm, x, y);
+      const s = u / W;
+      // a render target's row 0 is the bottom of what was drawn into it
+      const t = src.flipY ? 1 - v / H : v / H;
+      params[k * 4] = s / w;
+      params[k * 4 + 1] = t / w;
+      params[k * 4 + 2] = 1 / w;
+      params[k * 4 + 3] = 0;
+    }
+    this._setMode(MODE_PROJECTIVE, src.tex, src.swizzle);
+    const alpha = this.globalAlpha;
+    this._quad(pos, ZERO8, [alpha, alpha, alpha, alpha], params);
+    return true;
+  }
+
+  /**
    * Write pixels, ignoring the transform and the clip (the canvas rule).
    * `dirtyX/Y/Width/Height` select part of the data, as the spec has it.
    */
@@ -1926,7 +1984,8 @@ export class WaylandContext2D {
     }
   }
 
-  /** Two triangles from four corners, in order TL, TR, BR, BL. */
+  /** Two triangles from four corners, in order TL, TR, BR, BL. `params` is
+   * one vec4 for every corner, or sixteen numbers, a vec4 a corner. */
   _quad(pos, uv, color, params) {
     // Buffering is taking the device, not a step before it: the quad is GL
     // work that has been decided on and not yet issued, and the handover in
@@ -1935,9 +1994,11 @@ export class WaylandContext2D {
     this._claim();
     if (this._n + 6 > MAX_VERTS) this._flush();
     const v = this._verts;
+    const each = params.length === 16 ? 4 : 0;
     let o = this._n * STRIDE;
     for (let k = 0; k < 6; k++) {
       const i = TRI[k];
+      const p = i * each;
       v[o++] = pos[i * 2];
       v[o++] = pos[i * 2 + 1];
       v[o++] = uv[i * 2];
@@ -1946,10 +2007,10 @@ export class WaylandContext2D {
       v[o++] = color[1];
       v[o++] = color[2];
       v[o++] = color[3];
-      v[o++] = params[0];
-      v[o++] = params[1];
-      v[o++] = params[2];
-      v[o++] = params[3];
+      v[o++] = params[p];
+      v[o++] = params[p + 1];
+      v[o++] = params[p + 2];
+      v[o++] = params[p + 3];
     }
     this._n += 6;
     this.shapeStats.quads++;
@@ -2081,6 +2142,7 @@ export class WaylandContext2D {
 
 const UV_UNIT = Object.freeze([0, 0, 1, 0, 1, 1, 0, 1]);
 const ZERO4 = Object.freeze([0, 0, 0, 0]);
+const ZERO8 = Object.freeze([0, 0, 0, 0, 0, 0, 0, 0]);
 
 // ---- geometry helpers ------------------------------------------------------------
 

@@ -1356,7 +1356,12 @@ async function main() {
   void sctx;
   // where a group faded on a surface is the cheap way to fade one
   const cheap: boolean | undefined = sctx.fadesSurfacesCheaply;
+  const projected: boolean | undefined = sctx.drawImageProjected?.(
+    null,
+    [1, 0, 0, 0, 1, 0, 0.001, 0, 1],
+  );
   void cheap;
+  void projected;
   surface.render((c: Context2D) => void c).clear();
   const survived: boolean = surface.copyWithin(
     { x: 0, y: 0, width: surface.width, height: surface.height },

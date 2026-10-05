@@ -176,6 +176,22 @@ Box shadows are a feathered SDF (`ctx.fillShadow`, which `boxpaint.js` now
 prefers when a context has it) rather than a CPU blur through the paint
 cache.
 
+**An image in perspective is one quad.** `drawImageProjected(image, m)`
+draws an image through a 3×3 projection — a plane turned out of the page,
+as CSS `rotateY()` in a `perspective` turns one — with each corner's texture
+coordinates over its w and the fragment dividing them back, which is exact
+across the quad. A context that can only draw through an affine matrix has
+to cut such a plane into tiles, each drawn through the matrix nearest the
+projection over it and clipped to it, and here every tile is a batch of its
+own because the clip is a scissor: `<Html>` drew Zen Garden 219's sidebar
+as 258 of them a frame, at 11 frames a second on a virgl VM, where seven
+tiles ran at 25. X11 has no such call on purpose: RENDER takes a projective
+picture transform, but glamor — Xwayland's, and most Xorg desktops' —
+divides at the corners and folds the image along its diagonal, and pixman
+runs out of 16.16 precision on a plane of any size. The method answers
+false and draws nothing where a corner is behind the viewer, for the caller
+to draw the part in front some other way.
+
 **The ack is deferred to the frame that adopts it.** `xdg_surface.configure`
 is acknowledged immediately before the commit of a frame painted at the
 configured size, not on arrival — acking early tells the compositor the
