@@ -751,6 +751,20 @@ export declare class Node {
    */
   viewportFixedRects(): Rect[] | null;
   /**
+   * What this element draws under the viewport of the scroll pane it is in
+   * moved by (dx, dy) device pixels, and what the viewport shows is to stay
+   * where it is on screen: the pane's offsets move by as much, in the
+   * layout pass running now, after it measures what it holds and before it
+   * places it (CSS Scroll Anchoring 1) — a document laid out again at
+   * another width, whose text above the fold broke into more lines or
+   * fewer. Asked of the nearest scroll pane; shifts in one pass add up.
+   * Ask from the layout pass (`measureContent`); asked outside one, the
+   * shift waits for the next and asks for it. A `scrollTo` made since the
+   * last pass drops it, a `scrollIntoView` lands after it, and the result
+   * is clamped as any scroll. Returns whether a pane took it.
+   */
+  anchorScrollBy(dx: number, dy: number): boolean;
+  /**
    * How far this element's own drawing reaches past its box, in device
    * pixels on every side — 0, the default, for an element that stays inside
    * it. Core claims and culls the element by its box grown by this, as it

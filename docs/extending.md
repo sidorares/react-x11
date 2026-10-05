@@ -1222,6 +1222,42 @@ the nearest scroll pane asks: a pane further out moves the inner one with
 its content, and what is fixed to it with it. The answer is read on each
 scroll the pane blits, after layout, and nowhere else.
 
+#### Keeping what the viewport shows while your content moves
+
+A document laid out again at another width breaks its text above the fold
+into more lines or fewer, so the paragraph at the top of the viewport moves
+down the document or up it by the difference, and a pane that keeps its
+offset shows the reader whatever is at that offset now: a window dragged
+narrower scrolled them away from where they were reading. A browser keeps
+the paragraph where it was on screen instead, and moves the offset by as
+much (CSS Scroll Anchoring 1). `anchorScrollBy(dx, dy)` is how an element
+asks its scroll pane for that: its content moved by (dx, dy) device pixels
+under the viewport, in the layout pass running now, and the nearest scroll
+pane moves its offsets by as much, after it measures what it holds and
+before it places it, so the frame that lays the content out again shows it
+where it was.
+
+```js
+class DocumentNode extends Node {
+  measureContent({ width }) {
+    // what is at the top of the viewport, before and after
+    const anchor = this._blockAtViewportTop();
+    const was = anchor?.top;
+    this._layOut(width);
+    if (anchor) this.anchorScrollBy(0, anchor.top - was);
+    return { width, height: this._height };
+  }
+}
+```
+
+Ask it from the layout pass — `measureContent`, or what it calls — where
+the pane places what it holds after; shifts asked in one pass add up, and
+one asked outside a pass waits for the next and asks for it. A `scrollTo`
+the application made since the last pass drops it, since the shift was
+measured against the offsets before that scroll; a `scrollIntoView` lands
+after it; and the result is clamped to what the pane holds, as any scroll
+is. It returns false where nothing scrolls the element.
+
 ### Drawing a scene into one node
 
 _Issue #301._ A frame repaints **rects, not windows**: claims coalesce into

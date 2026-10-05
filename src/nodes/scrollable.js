@@ -330,6 +330,10 @@ export const Scrollable = (Base) =>
       // the viewport grew, under it. A browser fires `scroll` for each, so
       // `onScroll` hears of them too, once the pass is over.
       const from = { x: this.scrollX, y: this.scrollY };
+      // What the content asked to keep in place lands before them all
+      // (`anchorScrollBy`): it moved under the viewport in this pass, and
+      // a scroll anyone asks for is from where it shows what it did
+      this._applyAnchorShift();
       // A scrollTo held for this pass lands first, so a node asked into view
       // in the same frame is brought in from where that scroll put the pane:
       // the order the two have on a laid-out pane, where scrollTo applies at
@@ -607,6 +611,10 @@ export const Scrollable = (Base) =>
       }
       this.scrollX = next.x;
       this.scrollY = next.y;
+      // a scroll asked for since the last pass is where the pane goes: a
+      // shift the content asks for in the next was measured against the
+      // offsets before it (`_applyAnchorShift`)
+      this._scrolledSincePass = true;
       if (moved) this.props.onScroll?.(this._scrollEvent());
       // A scroll reflows this viewport's contents and nothing else, and the
       // viewport clips them, so the damage is this node's own rect. It is a
@@ -705,6 +713,47 @@ export const Scrollable = (Base) =>
       if (!this._scrollToTarget) return false;
       if (root) (root._heldScrolls ??= new Set()).add(this);
       return true;
+    }
+
+    /**
+     * The pane's half of `Node.anchorScrollBy`: a shift of the offsets the
+     * content asked for, added up until the pass applies it
+     * (`_applyAnchorShift`). The pass measures the content again, since
+     * what moved under the viewport moved by being laid out; one asked
+     * outside a pass asks for one.
+     */
+    _anchorScrollBy(dx, dy) {
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) return false;
+      if (dx === 0 && dy === 0) return true;
+      const shift = (this._anchorShift ??= { x: 0, y: 0 });
+      shift.x += dx;
+      shift.y += dy;
+      this._scrollMeasureDirty = true;
+      const root = this.root;
+      if (root && !root._inFlush) root.invalidate(true, this, 'scroll');
+      return true;
+    }
+
+    /**
+     * Apply the shift the content asked for (`_anchorScrollBy`), before
+     * anything else the pass moves the offsets by: on each axis it scrolls,
+     * the clamp after takes it into the extent just measured. Its
+     * `onScroll` and its claim of the viewport are the pass's, as for a
+     * held `scrollTo`. A scroll the application asked for since the last
+     * pass drops it: the shift was measured against the offsets before
+     * that scroll, which is where the application wants the pane now.
+     */
+    _applyAnchorShift() {
+      const shift = this._anchorShift;
+      const scrolled = this._scrolledSincePass === true;
+      this._scrolledSincePass = false;
+      if (!shift) return;
+      this._anchorShift = null;
+      if (scrolled) return;
+      // `scrollX` is a distance from the start in either direction, and
+      // content that moved towards the end is followed the same way
+      this.scrollX += this.direction === 'rtl' ? -shift.x : shift.x;
+      this.scrollY += shift.y;
     }
 
     /**
