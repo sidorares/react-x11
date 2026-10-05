@@ -330,7 +330,14 @@ size again. A size the pane is never sent, because a newer one replaced it
 while a frame was being painted, is no frame late, and a fast drag of a
 page that keeps up stays at its size rather than taking one look at every
 step and the other at every frame. Each gesture starts out at its size, and
-`resizeWait: 0` stretches always, both ways, as before.
+`resizeWait: 0` stretches always, both ways, as before. And the pane hears that the window is being resized
+live — AppKit's drag of its edge, from its begin to its end, which a pane
+running no AppKit has no window to hear — with every size and on its own
+where only that changes (`pane-rect`'s `live`, `pane-live`): its window's
+`liveResizing` is the host's, so core defers measuring its content floors
+for the drag's length and catches up once it ends, as a window of its own
+does, and an element can put off what it would rather do once the drag is
+over.
 
 **A pane's frames are named by id, and the id outlives nothing.** On Cocoa
 a present carries the IOSurface's id, and the host looks it up when it

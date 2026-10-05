@@ -574,6 +574,20 @@ function PaneHostView({
     let acks = false;
     let inFlight = false;
     let waiting = null;
+    // And whether the window is being resized live — AppKit's drag of its
+    // edge, from its begin to its end (`liveResizing`) — which the pane
+    // has no window to hear. Core defers measuring a content floor for a
+    // drag's length and catches it up after it (src/nodes/window/size.js),
+    // and an element puts off what it would rather do once the drag ends:
+    // a pane measured its floors at every step, a document a pixel wide
+    // among them, and laid a document out whole at every rest of the drag.
+    // With every rect, and on its own where only that changed — the end
+    // of a drag comes after its last size.
+    const hostWindow = node.root?.window;
+    const liveNow = () => hostWindow?.liveResizing === true;
+    const offLive = hostWindow?.on?.('liveresize', (ev) =>
+      s.trySend?.({ type: 'pane-live', live: ev?.live === true }),
+    );
     const transmit = (rect) => {
       sent = rect;
       s.trySend?.({
@@ -581,6 +595,7 @@ function PaneHostView({
         width: rect.width,
         height: rect.height,
         scale: rect.scale,
+        live: liveNow(),
         ...(rect.screen && { screen: rect.screen }),
       });
       if (!acks) return;
@@ -685,6 +700,7 @@ function PaneHostView({
       waiting = null;
       offAnchor?.();
       offFocus?.();
+      if (typeof offLive === 'function') offLive();
       node.defaultCursor = undefined;
       node.root?.events?.refreshCursor();
       node.absolutize = origAbsolutize;

@@ -265,8 +265,10 @@ describe('<Frame>: the size of a composited pane', () => {
     app.createPaneHost = () => ({ setRect() {}, present() {}, destroy() {} });
     const listeners = [];
     const rects = [];
+    const sent = [];
     const transport = () => ({
       send(msg) {
+        sent.push(msg);
         if (msg?.type === 'pane-rect') rects.push(msg.width);
       },
       onMessage: (cb) => {
@@ -293,7 +295,7 @@ describe('<Frame>: the size of a composited pane', () => {
     const fromPane = (msg) => {
       for (const cb of [...listeners]) cb(msg);
     };
-    return { root, rects, resize, fromPane };
+    return { root, rects, resize, fromPane, sent, wnd: app.windows[0] };
   }
 
   it('a pane that never says it has painted a size is sent every one', async () => {
@@ -315,6 +317,24 @@ describe('<Frame>: the size of a composited pane', () => {
     assert.deepEqual(rects, [200, 140, 100], 'then the newest, past 120');
     fromPane({ type: 'pane-sized' });
     assert.deepEqual(rects, [200, 140, 100], 'and nothing when none waits');
+    await root.unmount();
+  });
+
+  it('a pane hears its window is resized live, with every size and on its own when only that changes', async () => {
+    // A pane has no window of its own for AppKit to bracket a drag of: it
+    // is told, so core defers its content floors for the drag's length and
+    // an element can put off what it would do once the drag ends
+    const { root, resize, sent, wnd } = await mountPane();
+    const live = () => sent.filter((m) => m.type === 'pane-live');
+    assert.equal(sent.find((m) => m.type === 'pane-rect').live, false);
+    wnd.liveResizing = true;
+    wnd.emit('liveresize', { live: true });
+    assert.deepEqual(live(), [{ type: 'pane-live', live: true }]);
+    await resize(180);
+    assert.equal(sent.findLast((m) => m.type === 'pane-rect').live, true);
+    wnd.liveResizing = false;
+    wnd.emit('liveresize', { live: false });
+    assert.deepEqual(live().at(-1), { type: 'pane-live', live: false });
     await root.unmount();
   });
 

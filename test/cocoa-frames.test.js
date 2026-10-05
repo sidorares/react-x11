@@ -49,7 +49,9 @@ import { CocoaApp, screenLayout } from '../src/cocoa/app.js';
 import { loadNative } from '../src/cocoa/native.js';
 import { CocoaPaneHost } from '../src/cocoa/panehost.js';
 import { setCompositingForTests } from '../src/compositing.js';
+import { registerElement, unregisterElement } from '../src/host.js';
 import { createRoot } from '../src/index.js';
+import { Node } from '../src/node.js';
 import { setAnimationClock } from '../src/nodes/animation.js';
 import { setScaleForTests } from '../src/scale.js';
 import { setScreensForTests } from '../src/screens.js';
@@ -377,6 +379,67 @@ const box = (style) => h('box', { style });
 const flips = (native) => native.of('flip').length;
 
 // --- a live resize --------------------------------------------------------------
+
+/** A leaf that says how wide it would like to be, and notes every width it
+ *  is asked about. */
+class AskedLeafNode extends Node {
+  constructor(props, app) {
+    super('askedleaf', props, app);
+  }
+
+  measureContent(constraints) {
+    this.props.asked?.push(constraints.width);
+    return { width: 60, height: 20 };
+  }
+}
+registerElement('askedleaf', {
+  create: (props, app) => new AskedLeafNode(props, app),
+});
+process.on('exit', () => unregisterElement('askedleaf'));
+
+test("a pane's window is resized live as the host says, and its content floors wait for the drag to end", async () => {
+  // A pane runs no AppKit, so nothing brackets a drag of the window it is
+  // in but the host's word (`pane-rect`, `pane-live`): core measures no
+  // content floor while the drag lasts, and catches up once it ends, as
+  // it does in a window of its own (src/nodes/window/size.js). A pane
+  // measured its floors at every step of the drag.
+  const asked = [];
+  const { wnd, deliver, app } = await mountPane(
+    h(
+      'box',
+      { style: { flexDirection: 'row', flexGrow: 1 } },
+      h('askedleaf', { asked }),
+      box({ flexGrow: 1 }),
+    ),
+  );
+  const heard = [];
+  wnd.on('liveresize', (ev) => heard.push(ev.live));
+  const settle = async () => {
+    for (let i = 0; i < 4; i += 1) {
+      app._tickFrames();
+      await tick();
+    }
+  };
+  // a step of no drag measures the floors at the new size
+  asked.length = 0;
+  deliver({ type: 'pane-rect', width: 120, height: 80, live: false });
+  await settle();
+  assert.ok(asked.length > 0, 'measured at a size of no drag');
+  deliver({ type: 'pane-rect', width: 116, height: 80, live: true });
+  assert.equal(wnd.liveResizing, true, 'from the size it came with');
+  await settle();
+  asked.length = 0;
+  for (let i = 2; i <= 4; i += 1) {
+    deliver({ type: 'pane-rect', width: 120 - i * 4, height: 80, live: true });
+    await settle();
+  }
+  assert.deepEqual(asked, [], 'no floor measured while the drag lasts');
+  deliver({ type: 'pane-live', live: false });
+  assert.equal(wnd.liveResizing, false);
+  await settle();
+  assert.ok(asked.length > 0, 'and caught up once it ends');
+  assert.deepEqual(heard, [true, false], 'announced as a window does');
+});
 
 test('a resize tick is one full frame, and its microtasks add none', async () => {
   const { native, app, wnd, flushes } = await mount(
