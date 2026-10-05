@@ -139,12 +139,12 @@ startup; answers only to `1`.
 
 ## `REACT_X11_NO_UNREAD_WIDTHS=1`
 
-Measures every box's min-content width in the pass over the whole tree, the
-way it was measured before the pass read only the widths a floor is written
-from. Without it, a leaf that nothing reads the width of — a paragraph down
-a column in a document, where no row's floor depends on it — is not set a
-word to a line to find one, which on 600 KB of Markdown was a second of the
-first frame. For measuring the two against each other, and as first aid if
+Measures every box's min-content width in the width passes — over the whole
+tree, and over a box measured alone — the way it was measured before a pass
+read only the widths a floor is written from. Without it, a leaf that nothing
+reads the width of — a paragraph down a column in a document, where no row's
+floor depends on it — is not set a word to a line to find one, which on
+600 KB of Markdown was a second of the first frame. For measuring the two against each other, and as first aid if
 something in a row ever comes out narrower than its content after the first
 frame. Read once at startup; answers only to `1`.
 

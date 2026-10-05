@@ -533,10 +533,12 @@ export function setMeasuringShrink(node, axis, out) {
  * It is still laid out, though, and a leaf's answer could reach something
  * that is read through its size. So it is marked only where it cannot:
  *
- * - every box from the root down to it is as wide as something other than
- *   its content — the root offered no room, a width it names, a column
- *   stretching it — so the width the leaf answers is one yoga replaces, and
- *   nothing above it is sized from it;
+ * - every box from `node` down to it is as wide as something other than
+ *   its content — `node` the width the pass gives it (no room, for the
+ *   window; its column's, for a spine root; its own, for a box that sizes
+ *   itself), and below it a width it names or a column stretching it — so
+ *   the width the leaf answers is one yoga replaces, and nothing above it
+ *   is sized from it;
  * - no box is handed a share of space the leaf's height changed, which is
  *   how a height could become somebody's width — an aspect ratio, a column
  *   that wraps, an image sized to the height it is given. Every column from
@@ -656,15 +658,28 @@ function stretchedAlong(node, axis) {
  * names are numbers — a height, a basis (a height, down a column), a floor or
  * a ceiling; and `'unknown'` for a share of something (a percentage), which
  * a pass with no height on offer resolves as it likes.
+ *
+ * A floor of nothing bounds nothing: a box as tall as its content is at
+ * least that tall already, so its height is its content's. It is how a box
+ * says it may shrink, and a browser's page has one on every box from the
+ * window down to its scroller, so that a page taller than the window
+ * scrolls. Read as a height of the box's own, it stopped the walk at the
+ * first of them, where the scroller gives way: the whole document in the
+ * scroller was set a word to a line each time the tree was measured, 100
+ * to 250 ms of a frame for a long Wikipedia article, and nothing read any
+ * of it. And it took the box pinned to both edges of such a column for one
+ * whose height nothing in flow decides, which it is.
  */
 function heightOf(yoga) {
+  const floor = yoga.getMinHeight();
   let own = false;
   for (const value of [
     yoga.getHeight(),
     yoga.getFlexBasis(),
-    yoga.getMinHeight(),
+    floor.value === 0 ? null : floor,
     yoga.getMaxHeight(),
   ]) {
+    if (value === null) continue;
     if (value.unit === Yoga.UNIT_PERCENT) return 'unknown';
     if (value.unit === Yoga.UNIT_POINT) own = true;
   }

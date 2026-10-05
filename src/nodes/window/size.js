@@ -354,12 +354,28 @@ export class WindowSize {
     if (axis === 'width') {
       const shrunk = [];
       setMeasuringShrink(root, axis, shrunk);
+      // Nothing reads a root's own width — only heights travel up a spine
+      // (spine.js) — so what it holds is read only where a floor is written
+      // from it, as down the window's columns, and a leaf that is the root
+      // is laid out at the width its column offers, which is no answer of
+      // its own: a document in a scroller is a root when it changes.
+      const read = NO_UNREAD_WIDTHS || this._readEveryWidth;
+      const unread = [];
+      if (!read && root._measureFn) {
+        root._widthUnread = true;
+        unread.push(root);
+      } else if (!read) {
+        markUnreadLeaves(root, unread);
+      }
       this._scopedFloorPasses += 1;
-      yoga.calculateLayout(widths.widthPass, undefined, dir);
-      const span = contentSpan(root, axis, null, this);
-      root._floorW = declaresOwnMinimum(root, axis)
-        ? yoga.getComputedWidth()
-        : span;
+      try {
+        yoga.calculateLayout(widths.widthPass, undefined, dir);
+      } finally {
+        for (const leaf of unread) leaf._widthUnread = false;
+      }
+      const span = contentSpan(root, axis, null, this, read);
+      const own = declaresOwnMinimum(root, axis);
+      if (own || read) root._floorW = own ? yoga.getComputedWidth() : span;
       restoreShrink(shrunk);
       return;
     }
@@ -443,9 +459,18 @@ export class WindowSize {
     if (axis === 'width') {
       const shrunk = [];
       setMeasuringShrink(boundary, axis, shrunk);
+      // its own extent is its style's, so what it holds is read only where
+      // a floor is written from it, as down the window's columns
+      const read = NO_UNREAD_WIDTHS || this._readEveryWidth;
+      const unread = [];
+      if (!read) markUnreadLeaves(boundary, unread);
       this._scopedFloorPasses += 1;
-      yoga.calculateLayout(undefined, undefined, dir);
-      contentSpan(boundary, axis, null, this);
+      try {
+        yoga.calculateLayout(undefined, undefined, dir);
+      } finally {
+        for (const leaf of unread) leaf._widthUnread = false;
+      }
+      contentSpan(boundary, axis, null, this, read);
       restoreShrink(shrunk);
       return;
     }

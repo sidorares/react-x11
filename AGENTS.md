@@ -1644,25 +1644,33 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     where a cached pass is 0.05. A copy's computed values are the copy's:
     read a new node's margins from its style (`columnHeightSpan`), never
     from its real box, which has not been laid out yet.
-  - **the width pass over the whole tree reads only what a floor is written
-    from** (`markUnreadLeaves`): a row's items, the children of a node that
-    is read, and the root when the window's minimum is its content's. A
-    leaf none of that reaches is still laid out, so it is left unshaped
-    (`_widthUnread`: the measure wrapper answers a zero size) only where
-    its answer cannot reach anything read — every box above it as wide as
-    something other than its content (a named width, or a column
-    stretching it), and no column above it handing out a share of space its
-    height changed, which is how a height becomes a width through an aspect
-    ratio, a wrapping column or an image sized to its height: a column as
-    tall as its content holds no box pinned to both its edges, a column
-    with a height of its own holds nothing that grows or gives way in the
-    pass, and none wraps. What the leaf answers never outlives the pass:
-    the passes after it run in another config version. An extent nobody
-    read stays `undefined` and is measured the frame its parent turns into
-    a row. A layout host, a window with a `maxWidth` and
-    `REACT_X11_NO_UNREAD_WIDTHS=1` measure everything;
-    `test/content-floors.test.js` holds the two passes to the same boxes and
-    floors, with an arrangement per guard that fails without it.
+  - **a width pass reads only what a floor is written from**
+    (`markUnreadLeaves`), over the whole tree and over a box measured
+    alone: a row's items, the children of a node that is read, and the root
+    when the window's minimum is its content's. A box measured alone is
+    read by nothing — a spine root's own width is no floor (only heights
+    travel up a spine) and a box that sizes itself has its style's — so a
+    root that is a leaf, a document in a scroller, is laid out at its
+    column's width and not shaped. A leaf none of that reaches is still
+    laid out, so it is left unshaped (`_widthUnread`: the measure wrapper
+    answers a zero size) only where its answer cannot reach anything read
+    — every box above it as wide as something other than its content (a
+    named width, or a column stretching it), and no column above it
+    handing out a share of space its height changed, which is how a height
+    becomes a width through an aspect ratio, a wrapping column or an image
+    sized to its height: a column as tall as its content holds no box
+    pinned to both its edges, a column with a height of its own holds
+    nothing that grows or gives way in the pass, and none wraps. A floor of
+    0 is no height of a box's own: a box as tall as its content is that
+    tall already, and every box from a browser's window down to its
+    scroller names one, which stopped the walk above the whole page. What
+    the leaf answers never outlives the pass: the passes after it run in
+    another config version. An extent nobody read stays `undefined` and is
+    measured the frame its parent turns into a row. A layout host, a window
+    with a `maxWidth` and `REACT_X11_NO_UNREAD_WIDTHS=1` measure
+    everything; `test/content-floors.test.js` holds the two passes to the
+    same boxes and floors, with an arrangement per guard that fails without
+    it.
   - **the walk after a pass leaves alone what yoga did not reach**
     (`_followParent`): a child with a clear has-new-layout flag under a
     parent that did not move is where the last walk put it. Only on a frame
