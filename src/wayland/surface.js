@@ -25,6 +25,7 @@
 // back by hand either.
 
 import { WaylandContext2D } from './context2d.js';
+import { flushDevice } from './device.js';
 import { GLTarget } from './target.js';
 
 export class WaylandSurface {
@@ -130,6 +131,15 @@ export class WaylandSurface {
     if (this._destroyed) return;
     this._destroyed = true;
     this.app.makeCurrent();
+    // A draw that reads this surface may still be buffered in the context
+    // that made it — a window's quad, to be drawn in one call with the rest
+    // of its batch — and a texture deleted under a draw not yet issued is
+    // sampled as GLES samples a texture that is not there: opaque black. A
+    // surface painted for one paint, drawn, and destroyed in a `finally`
+    // drew as a black box (`<Html>`'s transformed boxes too large to keep).
+    // The owner is the only context holding anything (device.js), so
+    // flushing it issues every draw that could read this one.
+    flushDevice(this.target.gl);
     this._ctx?.destroy();
     this._ctx = null;
     this.target.destroy();

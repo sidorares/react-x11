@@ -70,7 +70,8 @@ export function releaseDevice(gl) {
  * The owner is the only context that can be holding anything (see above), so
  * flushing it is flushing the device. Call before *reading* a target's pixels
  * behind the contexts' backs — a framebuffer blit, a scroll copy — the way
- * `releaseDevice` is called after writing them.
+ * `releaseDevice` is called after writing them, and before deleting a target
+ * a buffered draw may still read (`WaylandSurface.destroy`).
  */
 export function flushDevice(gl) {
   const device = shared(gl) ? devices.get(gl) : null;

@@ -319,3 +319,48 @@ test('a released device is taken back before the next draw', { skip }, () => {
   assert.deepEqual(pixel(surface, 4, 28), [0, 0, 255, 255], 'after');
   surface.destroy();
 });
+
+test(
+  'a surface destroyed straight after it is drawn is drawn as it was',
+  { skip },
+  () => {
+    // The shape of a box an element paints on a surface for one paint: the
+    // surface drawn into the window, through a matrix, and destroyed in a
+    // `finally` before anything else is drawn. The window's quad is still
+    // in its vertex buffer then, and a texture deleted under it is sampled
+    // as GLES samples a texture that is not there: opaque black. Zen Garden
+    // 219's header drew as a black panel this way.
+    const app = fakeApp();
+    const win = new GLTarget(env.gpu.gl, {
+      width: 64,
+      height: 64,
+      stencil: true,
+    });
+    app.windowTarget = win;
+    const wctx = new WaylandContext2D(env.gpu.gl, {
+      fontManager: null,
+      target: win,
+    });
+    wctx.init();
+    wctx.begin(64, 64);
+    wctx.clearRect(0, 0, 64, 64);
+
+    const surface = new WaylandSurface(app, { width: 32, height: 32 });
+    const sctx = surface.getContext('2d');
+    sctx.fillStyle = '#ff0000';
+    sctx.fillRect(0, 0, 32, 32);
+
+    wctx.save();
+    wctx.transform(0.8, 0, 0, 0.8, 8, 8);
+    wctx.drawImage(surface, 0, 0);
+    wctx.restore();
+    surface.destroy();
+    wctx.end();
+
+    const at = (x, y) => Array.from(wctx.getImageData(x, y, 1, 1).data);
+    assert.deepEqual(at(16, 16), [255, 0, 0, 255], 'the surface, not black');
+    assert.equal(at(48, 48)[3], 0, 'nothing beyond it');
+    wctx.destroy();
+    win.destroy();
+  },
+);
