@@ -30,6 +30,12 @@ import { BackendContext2D } from '../backend/context2d.js';
 // the pane drawing.
 const ANSWER_TIMEOUT_MS = 250;
 
+// Where a ring's slot with no buffer made yet ranks among the buffers a
+// frame may take (`_takeBack`): after every one done with and let go of,
+// ranked by their present's sequence number, and before one the
+// WindowServer still reads, ranked from 2 ** 32 up.
+const EMPTY_SLOT = 2 ** 32 - 1;
+
 let nextPaneId = 1;
 
 export class CocoaPaneWindow {
@@ -261,6 +267,8 @@ export class CocoaPaneWindow {
     let done = false;
     for (let i = 0; i < this._ring.length; i += 1) {
       const s = this._ring[i];
+      // a slot with no buffer yet gets one, which nothing names
+      if (!s) return false;
       if (i === this._shownIndex || !this._done(s)) continue;
       if (!this._held(s)) return false;
       done = true;
@@ -354,6 +362,7 @@ export class CocoaPaneWindow {
     const release = this._native.releaseSurface;
     if (typeof release !== 'function') return;
     for (const s of ring) {
+      if (!s) continue;
       if (s.presentedSeq > this._shownSeq) this._retired.push(s);
       else release.call(this._native, s.handle);
     }
@@ -407,6 +416,20 @@ export class CocoaPaneWindow {
     for (const s of retired) release.call(this._native, s.handle);
   }
 
+  /**
+   * A buffer of the ring, `w` by `h` device px, made the first time a frame
+   * takes its slot rather than with the ring. A drag resizes the pane a
+   * tick at a time and gives each size one frame, so a ring made whole was
+   * three buffers made and cleared for the one drawn into: Zen Garden 101
+   * in the browser example spent 4.4 ms of every 12 ms frame of a drag in
+   * `_ensureSurface`. Cleared where nothing is copied over it.
+   */
+  _newBuffer(w, h, clear) {
+    const s = this._native.createSurfaceIOSurface(w, h, this.scale, true);
+    if (clear) this._native.ctxClearRect(s.handle, 0, 0, w, h);
+    return s;
+  }
+
   _ensureSurface() {
     const w = this.width;
     const h = this.height;
@@ -417,12 +440,10 @@ export class CocoaPaneWindow {
     ) {
       const hadSurface = Boolean(this._ring);
       this._releaseRing();
-      this._ring = [];
-      for (let i = 0; i < CocoaPaneWindow.RING; i += 1) {
-        const s = this._native.createSurfaceIOSurface(w, h, this.scale, true);
-        this._native.ctxClearRect(s.handle, 0, 0, w, h);
-        this._ring.push(s);
-      }
+      // the buffer this frame draws into, and the rest of the ring as a
+      // frame first takes it (`_takeBack`)
+      this._ring = new Array(CocoaPaneWindow.RING).fill(null);
+      this._ring[0] = this._newBuffer(w, h, true);
       this._drawIndex = 0;
       this._shownIndex = -1;
       this._native.surfaceLock(this._ring[0].handle);
@@ -478,6 +499,15 @@ export class CocoaPaneWindow {
     for (let i = 0; i < ring.length; i += 1) {
       const s = ring[i];
       if (s === last) continue;
+      // a slot no buffer has been made for yet: after one let go of, which
+      // costs nothing to take, and before any the WindowServer still reads
+      if (!s) {
+        if (EMPTY_SLOT < rank) {
+          rank = EMPTY_SLOT;
+          pick = i;
+        }
+        continue;
+      }
       // done and let go of, then done, then on its way, then on the layer:
       // the oldest of the best — but of the done, the one the screen showed
       // before the host's latest answers last
@@ -494,7 +524,13 @@ export class CocoaPaneWindow {
         pick = i;
       }
     }
-    const back = ring[pick];
+    // what the frame just presented is copied over whole, below, and only a
+    // slot with none to copy is cleared
+    const back = (ring[pick] ??= this._newBuffer(
+      this._surfaceSize.width,
+      this._surfaceSize.height,
+      !last,
+    ));
     this._drawIndex = pick;
     this._surface = back.handle;
     // a different native surface owns the graphics state now — the context

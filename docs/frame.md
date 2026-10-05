@@ -346,7 +346,11 @@ surface of another size than its frame says is not copied out of at all.
 
 **A pane draws only into a buffer the host is done with.** The ring holds
 three buffers so that one present can be on its way while the next frame
-draws: one on the layer, one named in the channel, one free. A host two
+draws: one on the layer, one named in the channel, one free. Each is made
+the first time a frame takes it, copied over from the frame before: a drag
+gives each size one frame, and a ring made whole at each was two buffers
+made and cleared for nothing, 4.4 ms of every 12 ms frame of a drag of Zen
+Garden 101 in the browser example on a Mac. A host two
 presents behind — busy with a long frame of its own, a breakpoint's layout,
 a window resize — left the next frame nothing but the buffer on the layer or
 the one a present still in the channel named, and the frame drew into it
