@@ -92,6 +92,9 @@ const SWIZZLE_STRAIGHT = 2; // straight RGBA (ImageData)
 /** floats per vertex: pos(2) uv(2) color(4) params(4) */
 const STRIDE = 12;
 const MAX_VERTS = 6 * 4096;
+/** What a context's vertex array starts at: a surface that draws a handful
+ *  of quads should not pay for the window's batch. */
+const FIRST_VERTS = 6 * 64;
 const TRI = [0, 1, 2, 0, 2, 3];
 
 const VERT = `
@@ -284,6 +287,44 @@ const textureReaper = new FinalizationRegistry(({ gl, tex, made }) => {
   }
 });
 
+/**
+ * What the contexts on one device share (device.js): the program and its
+ * locations, the GL buffer a batch goes up through, and the glyph atlas.
+ * Each was a context's own, so every offscreen surface compiled and linked
+ * the program, allocated a buffer as large as the window's batch and
+ * rasterised every glyph it drew into an empty atlas — a few milliseconds a
+ * surface, which <Html> made at every width of a resize. Counted by the
+ * contexts that hold it; the last one destroyed deletes it.
+ *
+ * Not the vertex array: the device's owner is the only context with quads
+ * buffered, but `releaseDevice` lets a context keep a batch across foreign
+ * GL with no owner at all, and another context's quads written into a
+ * shared array would land on top of it. Each context keeps its own, grown
+ * as it draws. The GL buffer is filled from it immediately before each draw,
+ * so sharing that is safe.
+ */
+function sharedOf(device, gl) {
+  if (device.shared) return device.shared;
+  const atlas = new GlyphAtlas(gl);
+  const shared = {
+    refs: 0,
+    program: null,
+    loc: null,
+    buffer: null,
+    atlas,
+    /** the contexts with glyph quads buffered against the atlas */
+    glyphHolders: new Set(),
+  };
+  // Quads already buffered against the atlas must be drawn before it lays
+  // itself out again under them — every context's, owner or not: drawing
+  // one claims the device and puts its own state back first.
+  atlas.onBeforeGrow = () => {
+    for (const ctx of [...shared.glyphHolders]) ctx._flush();
+  };
+  device.shared = shared;
+  return shared;
+}
+
 class Gradient {
   constructor(kind, a) {
     this.kind = kind; // 'linear' | 'radial'
@@ -397,18 +438,16 @@ export class WaylandContext2D {
     this.fontManager = fontManager;
     /** @see ./device.js — the state this context shares with its siblings */
     this._device = glDevice(gl);
+    this._shared = sharedOf(this._device, gl);
+    this._shared.refs++;
     this._makeCurrent = makeCurrent ?? null;
     // `TextLayout.draw` opens with `ctx.window.app.display.Render` and reads
     // one constant from it. Satisfy the shape rather than fork the layout.
     this.window = { app: { display: { Render: RENDER } } };
-    this.atlas = new GlyphAtlas(gl);
-    // Quads already buffered against the atlas must be drawn before the
-    // atlas re-lays itself out under them.
-    this.atlas.onBeforeGrow = () => this._flush();
-    // Path fills that go through the CPU rasteriser land here as A8 masks,
-    // drawn like glyphs; emptied every frame, since a mask is one draw.
-    this.masks = new GlyphAtlas(gl, { size: 256 });
-    this.masks.onBeforeGrow = () => this._flush();
+    /** the device's glyph atlas (`sharedOf`) */
+    this.atlas = this._shared.atlas;
+    /** this context's mask atlas, made the first time a fill needs one */
+    this._masks = null;
     this._maskSeq = 0;
     /** the non-rectangular clips in force, device space, outermost first */
     this._clipPath = null;
@@ -445,7 +484,7 @@ export class WaylandContext2D {
     this._width = 0;
     this._height = 0;
 
-    this._verts = new Float32Array(MAX_VERTS * STRIDE);
+    this._verts = new Float32Array(FIRST_VERTS * STRIDE);
     this._n = 0;
     this._mode = MODE_SOLID;
     this._texture = null;
@@ -462,12 +501,36 @@ export class WaylandContext2D {
     this._madeTextures = new Set();
   }
 
+  /**
+   * Path fills that go through the CPU rasteriser land here as A8 masks,
+   * drawn like glyphs; emptied every frame, since a mask is one draw. A
+   * mask's key is this context's own count (`_maskSeq`), so the atlas is
+   * this context's — and only made once a fill needs it.
+   */
+  get masks() {
+    if (!this._masks) {
+      this._masks = new GlyphAtlas(this.gl, { size: 256 });
+      this._masks.onBeforeGrow = () => this._flush();
+    }
+    return this._masks;
+  }
+
   // ---- lifecycle --------------------------------------------------------
 
-  /** Compile the program and allocate the vertex buffer. Context must be current. */
+  /** Take the device's program and buffer, compiling and allocating them
+   *  the first time. Context must be current. */
   init() {
-    const gl = this.gl;
     if (this._program) return;
+    const shared = this._shared;
+    if (!shared.program) this._build(shared);
+    this._program = shared.program;
+    this._loc = shared.loc;
+    this._buffer = shared.buffer;
+  }
+
+  /** Compile the program and allocate the vertex buffer the device shares. */
+  _build(shared) {
+    const gl = this.gl;
     const vs = compile(gl, gl.VERTEX_SHADER, VERT, 'vertex');
     let fs;
     try {
@@ -494,9 +557,9 @@ export class WaylandContext2D {
       gl.deleteProgram(p);
       throw new Error(`2d program failed to link: ${log}`);
     }
-    this._program = p;
+    shared.program = p;
     const u = (n) => gl.getUniformLocation(p, n);
-    this._loc = {
+    shared.loc = {
       aPos: gl.getAttribLocation(p, 'aPos'),
       aUV: gl.getAttribLocation(p, 'aUV'),
       aColor: gl.getAttribLocation(p, 'aColor'),
@@ -509,11 +572,16 @@ export class WaylandContext2D {
       uGradA: u('uGradA'),
       uGradB: u('uGradB'),
     };
-    this._buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
+    shared.buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, shared.buffer);
     // The addon's bufferData takes a TypedArray, not the byte-length
-    // overload WebGL also accepts. Allocated once; frames use bufferSubData.
-    gl.bufferData(gl.ARRAY_BUFFER, this._verts, gl.DYNAMIC_DRAW);
+    // overload WebGL also accepts. Allocated once a device, as large as a
+    // batch can be; frames use bufferSubData.
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array(MAX_VERTS * STRIDE),
+      gl.DYNAMIC_DRAW,
+    );
   }
 
   /** Where this context draws. A window's backing, or a surface's target. */
@@ -559,7 +627,7 @@ export class WaylandContext2D {
     this._clipPath = null;
     this._stencilling = false;
     this._maskSeq = 0;
-    this.masks.reset();
+    this._masks?.reset();
     this._applyState();
     // scratch for paths and clips: a frame starts with it clean
     const gl = this.gl;
@@ -1832,13 +1900,12 @@ export class WaylandContext2D {
       const size = run.size ?? font.size ?? 16;
       const color = this._color(run.color ?? this.fillStyle);
       if (color[3] === 0) continue;
-      const key = fontKey(font);
+      const table = this.atlas.table(`${fontKey(font)}|${size}`);
       const tex = this.atlas.bind();
       this._setMode(MODE_GLYPH, tex, SWIZZLE_RGBA);
+      this._shared.glyphHolders.add(this);
       for (const g of run.glyphs) {
-        const entry = this.atlas.get(`${key}|${size}|${g.id}`, () =>
-          font.rasterize(g.id, size),
-        );
+        const entry = this.atlas.glyph(table, font, g.id, size);
         if (entry.empty) continue;
         // `left`/`top` are the bitmap's offset from the glyph origin in the
         // rasteriser's **y-down** pixel space: a cap-height glyph has a
@@ -1847,31 +1914,20 @@ export class WaylandContext2D {
         const oy = Math.round(applyY(m, g.x, g.y)) + entry.top;
         // the atlas may have grown mid-run; rebind so the batch names the
         // new texture (the old quads were flushed by onBeforeGrow)
-        if (this.atlas.texture !== this._texture)
+        if (this.atlas.texture !== this._texture) {
           this._setMode(MODE_GLYPH, this.atlas.bind(), SWIZZLE_RGBA);
-        this._quad(
-          [
-            ox,
-            oy,
-            ox + entry.w,
-            oy,
-            ox + entry.w,
-            oy + entry.h,
-            ox,
-            oy + entry.h,
-          ],
-          [
-            entry.u0,
-            entry.v0,
-            entry.u1,
-            entry.v0,
-            entry.u1,
-            entry.v1,
-            entry.u0,
-            entry.v1,
-          ],
+          this._shared.glyphHolders.add(this);
+        }
+        this._quadRect(
+          ox,
+          oy,
+          ox + entry.w,
+          oy + entry.h,
+          entry.u0,
+          entry.v0,
+          entry.u1,
+          entry.v1,
           color,
-          ZERO4,
         );
         this.shapeStats.glyphs++;
       }
@@ -2032,7 +2088,7 @@ export class WaylandContext2D {
     // `_take` is the only thing that can get it issued before someone reads
     // the pixels it makes. A property compare in the common case.
     this._claim();
-    if (this._n + 6 > MAX_VERTS) this._flush();
+    this._room(6);
     const v = this._verts;
     const each = params.length === 16 ? 4 : 0;
     let o = this._n * STRIDE;
@@ -2059,7 +2115,7 @@ export class WaylandContext2D {
   /** One triangle, for the stencil pass. Colour and params are irrelevant. */
   _tri(x0, y0, x1, y1, x2, y2) {
     this._claim();
-    if (this._n + 3 > MAX_VERTS) this._flush();
+    this._room(3);
     const v = this._verts;
     let o = this._n * STRIDE;
     const pts = [x0, y0, x1, y1, x2, y2];
@@ -2071,11 +2127,61 @@ export class WaylandContext2D {
     this._n += 3;
   }
 
+  /**
+   * An axis-aligned quad, TL-TR-BR-BL, with no params: `_quad` for a glyph,
+   * written straight into the batch rather than through two arrays of
+   * corners made for it — a glyph's worth of garbage a glyph.
+   */
+  _quadRect(x0, y0, x1, y1, u0, v0, u1, v1, color) {
+    this._claim();
+    this._room(6);
+    const v = this._verts;
+    let o = this._n * STRIDE;
+    const r = color[0];
+    const g = color[1];
+    const b = color[2];
+    const a = color[3];
+    for (let k = 0; k < 6; k++) {
+      const i = TRI[k];
+      const right = i === 1 || i === 2;
+      const bottom = i >= 2;
+      v[o++] = right ? x1 : x0;
+      v[o++] = bottom ? y1 : y0;
+      v[o++] = right ? u1 : u0;
+      v[o++] = bottom ? v1 : v0;
+      v[o++] = r;
+      v[o++] = g;
+      v[o++] = b;
+      v[o++] = a;
+      v[o++] = 0;
+      v[o++] = 0;
+      v[o++] = 0;
+      v[o++] = 0;
+    }
+    this._n += 6;
+    this.shapeStats.quads++;
+  }
+
+  /** Room for `count` more vertices: the batch drawn where it is full, and
+   *  the array grown where it is smaller than a batch can be. */
+  _room(count) {
+    if (this._n + count > MAX_VERTS) this._flush();
+    const need = (this._n + count) * STRIDE;
+    if (need <= this._verts.length) return;
+    const grown = new Float32Array(
+      Math.min(MAX_VERTS * STRIDE, Math.max(need, this._verts.length * 2)),
+    );
+    grown.set(this._verts.subarray(0, this._n * STRIDE));
+    this._verts = grown;
+  }
+
   _flush() {
     // Before the early return, not after: `clearRect` and `putImageData`
     // flush, change the blend function and flush again, and the second
     // flush must not be the one that re-takes the device and puts the
     // blending back.
+    // drawn or empty, nothing of this context's is left against the atlas
+    this._shared.glyphHolders.delete(this);
     this._claim();
     if (this._n === 0) return;
     const gl = this.gl;
@@ -2112,7 +2218,8 @@ export class WaylandContext2D {
       // then it samples texels those glyphs never reached: garbled text,
       // kept until that region is next repainted.
       if (this._texture === this.atlas.texture) this.atlas.bind();
-      else if (this._texture === this.masks.texture) this.masks.bind();
+      else if (this._masks && this._texture === this._masks.texture)
+        this._masks.bind();
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this._texture);
       gl.uniform1i(this._loc.uTex, 0);
@@ -2186,13 +2293,22 @@ export class WaylandContext2D {
   destroy() {
     // Nothing of this context's is installed any more, and the device
     // record should not be the one thing still holding on to it.
+    if (this._destroyed) return;
+    this._destroyed = true;
     this._release();
     for (const tex of this._madeTextures) this.gl.deleteTexture(tex);
     this._madeTextures.clear();
-    this.atlas.destroy();
-    this.masks.destroy();
-    if (this._buffer) this.gl.deleteBuffer(this._buffer);
-    if (this._program) this.gl.deleteProgram(this._program);
+    this._masks?.destroy();
+    this._masks = null;
+    const shared = this._shared;
+    shared.glyphHolders.delete(this);
+    if (--shared.refs === 0) {
+      // the last context on the device: what it shared goes with it
+      shared.atlas.destroy();
+      if (shared.buffer) this.gl.deleteBuffer(shared.buffer);
+      if (shared.program) this.gl.deleteProgram(shared.program);
+      if (this._device.shared === shared) this._device.shared = null;
+    }
     this._buffer = null;
     this._program = null;
   }

@@ -280,6 +280,26 @@ test('a context deletes the shaders its program is linked from', () => {
   assert.equal(live.shader.size + live.program.size, 0, 'nor five more');
 });
 
+// The program is the device's: each offscreen surface's context compiled
+// and linked its own, a few milliseconds a surface.
+test('the contexts on one device share one program', () => {
+  const { gl, live } = recordingGl();
+  const contexts = [0, 1, 2].map(() => new WaylandContext2D(gl));
+  for (const ctx of contexts) ctx.init();
+  assert.equal(live.program.size, 1, 'one program for three contexts');
+  contexts[0].destroy();
+  contexts[1].destroy();
+  assert.equal(live.program.size, 1, 'kept while a context holds it');
+  contexts[2].destroy();
+  contexts[2].destroy(); // and a second destroy is not a second release
+  assert.equal(live.program.size, 0, 'and deleted with the last');
+  const again = new WaylandContext2D(gl);
+  again.init();
+  assert.equal(live.program.size, 1, 'a new context builds it again');
+  again.destroy();
+  assert.equal(live.shader.size + live.program.size, 0, 'leaving nothing');
+});
+
 test('a context that fails to build its program leaves nothing behind', () => {
   for (const fail of ['fragment', 'link']) {
     const { gl, live } = recordingGl({ fail });
