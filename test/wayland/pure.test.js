@@ -3,6 +3,8 @@
 // hit-testing. No compositor, no GPU.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import v8 from 'node:v8';
+import vm from 'node:vm';
 
 import {
   WaylandContext2D,
@@ -208,6 +210,137 @@ test('glDevice: one record per gl, and none to share without one', () => {
     assert.notEqual(device, glDevice(none), `${none}: shared with nothing`);
     releaseDevice(none); // and saying so of one is not an error
   }
+});
+
+/**
+ * A GLES that records the objects made and deleted, and answers every other
+ * entry point with nothing: enough for `init()` and `destroy()`, which touch
+ * no pixels. `fail` names the step that reports failure.
+ */
+function recordingGl({ fail } = {}) {
+  let next = 1;
+  const live = { shader: new Set(), program: new Set(), texture: new Set() };
+  const calls = {
+    createTexture() {
+      const t = { texture: next++ };
+      live.texture.add(t);
+      return t;
+    },
+    deleteTexture: (t) => live.texture.delete(t),
+    createShader(type) {
+      const sh = { shader: next++, type };
+      live.shader.add(sh);
+      return sh;
+    },
+    deleteShader: (sh) => live.shader.delete(sh),
+    createProgram() {
+      const p = { program: next++ };
+      live.program.add(p);
+      return p;
+    },
+    deleteProgram: (p) => live.program.delete(p),
+    getShaderParameter: (sh) =>
+      !(fail === 'fragment' && sh.type === 'FRAGMENT_SHADER'),
+    getProgramParameter: () => fail !== 'link',
+    getShaderInfoLog: () => 'no',
+    getProgramInfoLog: () => 'no',
+    getAttribLocation: () => 0,
+    getUniformLocation: () => ({}),
+    createBuffer: () => ({ buffer: next++ }),
+  };
+  const gl = new Proxy(calls, {
+    get: (target, name) =>
+      name in target
+        ? target[name]
+        : /^[A-Z_0-9]+$/.test(name)
+          ? name
+          : () => undefined,
+  });
+  return { gl, live };
+}
+
+// Deleting a program detaches its shaders and leaves them (GLES 3.0, 7.3),
+// so a context that never deleted the two it linked from left them behind —
+// a window's once, and an offscreen surface's every time one is made: a
+// resize that makes a surface a frame leaked two shader objects a frame.
+test('a context deletes the shaders its program is linked from', () => {
+  const { gl, live } = recordingGl();
+  const ctx = new WaylandContext2D(gl);
+  ctx.init();
+  assert.equal(live.shader.size, 0, 'no shader outlives the link');
+  assert.equal(live.program.size, 1, 'the program is kept');
+  ctx.destroy();
+  assert.equal(live.program.size, 0, 'and goes with the context');
+
+  for (let i = 0; i < 5; i++) {
+    const another = new WaylandContext2D(gl);
+    another.init();
+    another.destroy();
+  }
+  assert.equal(live.shader.size + live.program.size, 0, 'nor five more');
+});
+
+test('a context that fails to build its program leaves nothing behind', () => {
+  for (const fail of ['fragment', 'link']) {
+    const { gl, live } = recordingGl({ fail });
+    const ctx = new WaylandContext2D(gl);
+    assert.throws(
+      () => ctx.init(),
+      new RegExp(fail === 'link' ? 'link' : 'compile'),
+    );
+    assert.equal(live.shader.size, 0, `${fail}: no shader left`);
+    assert.equal(live.program.size, 0, `${fail}: no program left`);
+  }
+});
+
+// A gradient's texture and an image's are found by the object, in a
+// WeakMap, which cannot say when its key goes: the entry went with the key
+// and the texture stayed in the driver. A page that makes its gradients as
+// it paints made a texture a paint; a surface's context left behind
+// everything it had uploaded.
+test('a context deletes the textures it made when it is destroyed', () => {
+  const { gl, live } = recordingGl();
+  const ctx = new WaylandContext2D(gl);
+  ctx.begin(64, 64);
+  for (let i = 0; i < 20; i++) {
+    const grad = ctx.createLinearGradient(0, 0, 64, 0);
+    grad.addColorStop(0, '#ff0000');
+    grad.addColorStop(1, '#0000ff');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 64);
+  }
+  const image = ctx.createImageData(4, 4);
+  ctx.drawImage(image, 0, 0);
+  ctx.end();
+  assert.ok(live.texture.size >= 21, 'a texture a gradient, and the image');
+  ctx.destroy();
+  assert.equal(live.texture.size, 0, 'and none left behind');
+});
+
+test("a gradient's texture goes when the gradient does", async () => {
+  v8.setFlagsFromString('--expose-gc');
+  const gc = vm.runInNewContext('gc');
+  const { gl, live } = recordingGl();
+  const ctx = new WaylandContext2D(gl);
+  ctx.begin(64, 64);
+  const paint = () => {
+    const grad = ctx.createLinearGradient(0, 0, 64, 0);
+    grad.addColorStop(0, '#ff0000');
+    grad.addColorStop(1, '#0000ff');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 64);
+    ctx.fillStyle = '#000000';
+  };
+  for (let i = 0; i < 10; i++) paint();
+  ctx.end();
+  assert.equal(live.texture.size, 10, 'one a gradient');
+  // a finaliser runs a task or so after the collection that found its key
+  for (let turn = 0; turn < 50 && live.texture.size > 0; turn++) {
+    gc();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(live.texture.size, 0, 'and each went with its gradient');
+  ctx.destroy();
 });
 
 // The other half of the record: a context buffers its quads, so a target's

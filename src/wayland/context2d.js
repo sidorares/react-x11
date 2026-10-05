@@ -265,6 +265,25 @@ function parseColorUncached(value) {
  * use. Interpolated premultiplied, which is what keeps a fade to transparent
  * from passing through grey.
  */
+/**
+ * The textures made for a gradient or an image are found by the object, in
+ * a WeakMap — and a WeakMap cannot say when its key goes, so its entry went
+ * with the key and the texture stayed in the driver. A page that makes its
+ * gradients as it paints made a texture a paint, and every surface context
+ * left behind what it had uploaded. Each is registered here and deleted
+ * when its key is collected, unless the context that made it was destroyed
+ * first and deleted it then (`made` is that context's set, which is all the
+ * registration holds of it).
+ */
+const textureReaper = new FinalizationRegistry(({ gl, tex, made }) => {
+  if (!made.delete(tex)) return;
+  try {
+    gl.deleteTexture(tex);
+  } catch {
+    // the device went first
+  }
+});
+
 class Gradient {
   constructor(kind, a) {
     this.kind = kind; // 'linear' | 'radial'
@@ -439,6 +458,8 @@ export class WaylandContext2D {
     /** image object -> { tex, w, h } */
     this._textures = new WeakMap();
     this._gradTex = new WeakMap();
+    /** the textures the two maps above hold, for `destroy()` */
+    this._madeTextures = new Set();
   }
 
   // ---- lifecycle --------------------------------------------------------
@@ -448,13 +469,30 @@ export class WaylandContext2D {
     const gl = this.gl;
     if (this._program) return;
     const vs = compile(gl, gl.VERTEX_SHADER, VERT, 'vertex');
-    const fs = compile(gl, gl.FRAGMENT_SHADER, FRAG, 'fragment');
+    let fs;
+    try {
+      fs = compile(gl, gl.FRAGMENT_SHADER, FRAG, 'fragment');
+    } catch (err) {
+      gl.deleteShader(vs);
+      throw err;
+    }
     const p = gl.createProgram();
     gl.attachShader(p, vs);
     gl.attachShader(p, fs);
     gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      throw new Error(`2d program failed to link: ${gl.getProgramInfoLog(p)}`);
+    const linked = gl.getProgramParameter(p, gl.LINK_STATUS);
+    const log = linked ? '' : gl.getProgramInfoLog(p);
+    // The shader objects are ours to delete once the program is linked.
+    // Deleting a program detaches its shaders and leaves them (GLES 3.0,
+    // 7.3), so every context — a window's, and each offscreen surface's —
+    // left two behind, and a resize that makes a surface a frame left two a
+    // frame. Deleted while attached, they are flagged and go with the
+    // program.
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+    if (!linked) {
+      gl.deleteProgram(p);
+      throw new Error(`2d program failed to link: ${log}`);
     }
     this._program = p;
     const u = (n) => gl.getUniformLocation(p, n);
@@ -1059,6 +1097,7 @@ export class WaylandContext2D {
     const ramp = grad.ramp();
     if (!tex) {
       tex = gl.createTexture();
+      this._keepTexture(grad, tex);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -1631,8 +1670,9 @@ export class WaylandContext2D {
         ? data
         : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     if (!entry || entry.w !== w || entry.h !== h) {
-      if (entry) gl.deleteTexture(entry.tex);
+      if (entry) this._dropTexture(entry.tex);
       const tex = gl.createTexture();
+      this._keepTexture(img, tex);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -2127,10 +2167,28 @@ export class WaylandContext2D {
     };
   }
 
+  /** A texture made for `key`: deleted when `key` is collected, or when
+   *  this context is destroyed, whichever comes first. */
+  _keepTexture(key, tex) {
+    this._madeTextures.add(tex);
+    textureReaper.register(key, {
+      gl: this.gl,
+      tex,
+      made: this._madeTextures,
+    });
+  }
+
+  /** A texture made for a key that is being given another. */
+  _dropTexture(tex) {
+    if (this._madeTextures.delete(tex)) this.gl.deleteTexture(tex);
+  }
+
   destroy() {
     // Nothing of this context's is installed any more, and the device
     // record should not be the one thing still holding on to it.
     this._release();
+    for (const tex of this._madeTextures) this.gl.deleteTexture(tex);
+    this._madeTextures.clear();
     this.atlas.destroy();
     this.masks.destroy();
     if (this._buffer) this.gl.deleteBuffer(this._buffer);
@@ -2328,9 +2386,9 @@ function compile(gl, type, src, what) {
   gl.shaderSource(sh, src);
   gl.compileShader(sh);
   if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-    throw new Error(
-      `${what} shader failed to compile: ${gl.getShaderInfoLog(sh)}`,
-    );
+    const log = gl.getShaderInfoLog(sh);
+    gl.deleteShader(sh);
+    throw new Error(`${what} shader failed to compile: ${log}`);
   }
   return sh;
 }
