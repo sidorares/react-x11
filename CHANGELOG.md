@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.44.0](https://github.com/sidorares/react-x11/compare/v2.43.0...v2.44.0) (2026-10-05)
+
+
+### Features
+
+* **cocoa:** clipboard.write() puts every flavour on the pasteboard, so an image can be copied on macOS ([#892](https://github.com/sidorares/react-x11/issues/892)) ([94952ec](https://github.com/sidorares/react-x11/commit/94952ec25a36f49dad1a7486d4ca8a180f276e9c))
+
+
+### Performance Improvements
+
+* **deps:** ntk ^8.23.2, so a path clip's coverage is rasterized in the process and its mask kept across restores, where glamor read a pixmap back from the GPU for every clip, and rows cut to rounded rectangles cost Xwayland 1.2 ms a frame where they cost 53 ([#890](https://github.com/sidorares/react-x11/issues/890)) ([ce884ea](https://github.com/sidorares/react-x11/commit/ce884ea9fbd661cb4faf16455d29915dd5142107))
+
 ## [2.43.0](https://github.com/sidorares/react-x11/compare/v2.42.0...v2.43.0) (2026-10-05)
 
 
