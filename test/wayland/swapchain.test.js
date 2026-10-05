@@ -275,3 +275,93 @@ test('starvation: with every buffer held, swap answers false and recovers on rel
   assert.equal(await chain.swap('all'), true);
   assert.equal(chain.starved, false);
 });
+
+// A window dragged a few pixels at a time made the chain's buffers again at
+// every step, and imported each into the compositor. Where the window has a
+// viewport the buffers are made larger than it (`slack`), and a size that
+// fits them shows another part of them.
+function slackChain() {
+  const log = [];
+  const gbm = fakeGbm(2);
+  const dmabuf = fakeDmabuf(log);
+  const chain = new WaylandSwapchain({
+    surface: fakeSurface(log),
+    dmabuf,
+    gpu: fakeGpu(gbm),
+    dri,
+    format: 1,
+  });
+  return { chain, gbm, dmabuf, log };
+}
+
+test('with slack, a resize that fits the buffers keeps them', async () => {
+  const { chain, gbm, dmabuf, log } = slackChain();
+  chain.surfaceFor(1180, 790, { slack: true });
+  assert.deepEqual([gbm.width, gbm.height], [1280, 896], 'room to spare');
+  assert.deepEqual([chain.width, chain.height], [1180, 790], 'the part shown');
+  // the compositor done with every buffer it was shown
+  const releaseAll = () => {
+    for (const entry of chain.buffers.values()) entry.wlBuffer.emit('release');
+  };
+  for (let i = 0; i < 2; i++) await chain.swap('all');
+  const generation = gbm.generation;
+  for (let w = 1176; w >= 1000; w -= 4) {
+    releaseAll();
+    chain.surfaceFor(w, 790, { slack: true });
+    assert.equal(await chain.swap('all'), true, `presented at ${w}`);
+  }
+  assert.equal(gbm.generation, generation, 'no buffers made');
+  assert.equal(dmabuf.imports, 2, 'and none imported');
+  assert.deepEqual(chain.width, 1000);
+  const damaged = log.filter((l) => l[0] === 'damage').at(-1);
+  assert.deepEqual(
+    damaged.slice(1),
+    [0, 0, 1000, 790],
+    'the part shown damaged',
+  );
+});
+
+test('with slack, a size past the buffers makes them again, larger', () => {
+  const { chain, gbm } = slackChain();
+  chain.surfaceFor(300, 200, { slack: true });
+  assert.deepEqual([gbm.width, gbm.height], [384, 256]);
+  chain.surfaceFor(400, 200, { slack: true });
+  // a quarter more than asked, a bucket at a time: a drag wider makes a
+  // few sets of buffers, not one a bucket
+  assert.deepEqual([gbm.width, gbm.height], [512, 256]);
+  assert.deepEqual([chain.allocWidth, chain.allocHeight], [512, 256]);
+  assert.deepEqual([chain.width, chain.height], [400, 200]);
+});
+
+test('with slack, a window shrunk far is given smaller buffers', () => {
+  const { chain, gbm } = slackChain();
+  chain.surfaceFor(1180, 790, { slack: true });
+  chain.surfaceFor(600, 790, { slack: true });
+  assert.deepEqual([gbm.width, gbm.height], [1280, 896], 'half fits');
+  chain.surfaceFor(200, 790, { slack: true });
+  assert.deepEqual([gbm.width, gbm.height], [256, 896], 'a sixth does not');
+});
+
+test('with slack, a size held a while is given buffers its own size', () => {
+  const { chain, gbm } = slackChain();
+  chain.surfaceFor(300, 200, { slack: true });
+  chain.surfaceFor(400, 200, { slack: true });
+  chain.surfaceFor(300, 200, { slack: true });
+  assert.deepEqual([gbm.width, gbm.height], [512, 256], 'the drag left them');
+  for (let i = 0; i < 60; i++) chain.surfaceFor(300, 200, { slack: true });
+  assert.deepEqual(
+    [gbm.width, gbm.height],
+    [384, 256],
+    'cut back once it rests',
+  );
+});
+
+test('without slack, the buffers are the size shown', () => {
+  const { chain, gbm } = slackChain();
+  chain.surfaceFor(1180, 790);
+  assert.deepEqual([gbm.width, gbm.height], [1180, 790]);
+  const generation = gbm.generation;
+  chain.surfaceFor(1176, 790);
+  assert.deepEqual([gbm.width, gbm.height], [1176, 790]);
+  assert.equal(gbm.generation, generation + 1, 'made again');
+});
