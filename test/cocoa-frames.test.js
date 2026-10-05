@@ -1209,16 +1209,17 @@ test('a rect that changes the pane size retires the ring on the spot, and the la
   answer();
   const made = () => native.of('createSurfaceIOSurface').length;
   const released = () => native.of('releaseSurface');
-  assert.equal(made(), 3, 'the mount ring');
+  // a ring's buffers are made as frames take them: one for the mount frame
+  assert.equal(made(), 1, 'the mount ring');
   assert.equal(released().length, 0);
   const before = presents().at(-1).id;
   // the host window lands on a 1x display: same logical size, half the
   // pixels — the very rect a monitor move sends
   deliver({ type: 'pane-rect', width: 100, height: 80, scale: 1 });
-  assert.equal(made(), 6, 'a fresh ring');
-  assert.equal(released().length, 3, 'the old one freed at the rect');
+  assert.equal(made(), 2, 'a fresh ring');
+  assert.equal(released().length, 1, 'the old one freed at the rect');
   assert.deepEqual([wnd.width, wnd.height], [100, 80]);
-  const live = wnd._ring.map((s) => s.handle.id);
+  const live = wnd._ring.filter(Boolean).map((s) => s.handle.id);
   for (const [, id] of released()) {
     assert.ok(!live.includes(id), `released a live surface ${id}`);
   }
@@ -1228,15 +1229,16 @@ test('a rect that changes the pane size retires the ring on the spot, and the la
   assert.ok(live.includes(after.id));
   assert.deepEqual([after.width, after.height], [100, 80]);
   answer();
-  // five ticks of a drag: each retires the ring before it
+  // five ticks of a drag: each retires the ring before it, and makes one
+  // buffer of its own, for its one frame
   for (let i = 1; i <= 5; i += 1) {
     deliver({ type: 'pane-rect', width: 100 + i * 4, height: 80 + i * 2 });
     answer();
   }
-  assert.equal(made(), 21);
-  assert.equal(released().length, 18);
+  assert.equal(made(), 7);
+  assert.equal(released().length, 6);
   wnd.destroy();
-  assert.equal(released().length, 21, 'and the last ring goes with the window');
+  assert.equal(released().length, 7, 'and the last ring goes with the window');
   assert.equal(wnd._ring, null);
   assert.equal(wnd._surface, null);
 });
@@ -1248,7 +1250,7 @@ test('a pane bridge without releaseSurface leaves the retired ring to the finali
   delete native.releaseSurface; // the Proxy answers a no-op for it now
   deliver({ type: 'pane-rect', width: 120, height: 90, scale: 2 });
   assert.equal(native.of('releaseSurface').length, 0);
-  assert.equal(native.of('createSurfaceIOSurface').length, 6);
+  assert.equal(native.of('createSurfaceIOSurface').length, 2);
   wnd.destroy();
 });
 
@@ -1291,7 +1293,7 @@ test('a present a resize crossed is looked up as the buffer it named, not the su
     'the frame the present named, not a buffer of the next ring',
   );
   assert.ok(keptAtRect, 'kept until the host looked it up');
-  assert.equal(freedAtRect, 2, 'the other two went at the rect');
+  assert.equal(freedAtRect, 0, 'the ring had no other buffer to free');
   assert.ok(freed(named), 'and once looked up, it goes');
   assert.equal(wnd._retired.length, 0);
   host.present(fresh.id, fresh);
@@ -1365,7 +1367,8 @@ test('a host that stops answering has the pane keep no more than a ring of retir
     [...kept].sort((x, y) => x - y),
   );
   const made = native.of('createSurfaceIOSurface').length;
-  assert.equal(native.of('releaseSurface').length, made - 3 - 3);
+  const live = wnd._ring.filter(Boolean).length;
+  assert.equal(native.of('releaseSurface').length, made - 3 - live);
   // and an answer that comes after all frees what it covers
   deliver({ type: 'pane-shown', seq: kept[1] });
   assert.deepEqual(
@@ -1418,10 +1421,49 @@ async function mountRepaintingPane() {
     },
     /** The ring's buffers, by the seq of the present that last named each. */
     bySeq: () =>
-      new Map(wnd._ring.map((s) => [s.presentedSeq ?? 0, s.handle.id])),
+      new Map(
+        wnd._ring
+          .filter(Boolean)
+          .map((s) => [s.presentedSeq ?? 0, s.handle.id]),
+      ),
     last: () => presents().at(-1),
   };
 }
+
+test('a ring makes its buffers as frames take them: one for the frame of a new size, and the rest copied over from the frame before', async () => {
+  // A drag resizes a pane a tick at a time and gives each size one frame,
+  // so a ring made whole was three buffers made and cleared for the one
+  // drawn into: 4.4 ms of every 12 ms frame of a drag of Zen Garden 101 in
+  // the browser example on a Mac.
+  const { native, wnd, paint, shown } = await mountRepaintingPane();
+  const made = () => native.of('createSurfaceIOSurface').length;
+  // a clear of a whole buffer, as one is made
+  const whole = () =>
+    native
+      .of('ctxClearRect')
+      .filter(
+        ([, x, y, w, h]) =>
+          x === 0 &&
+          y === 0 &&
+          w === wnd._surfaceSize.width &&
+          h === wnd._surfaceSize.height,
+      ).length;
+  assert.equal(made(), 1, "the mount frame's");
+  assert.deepEqual(wnd._ring.slice(1), [null, null]);
+  const cleared = whole();
+  await shown(1);
+  const copies = native.of('copy').length;
+  await paint();
+  assert.equal(made(), 2, 'a second, for the frame after');
+  await paint();
+  assert.equal(made(), 3, 'and a third, with a present on its way');
+  assert.equal(native.of('copy').length, copies + 2, 'each copied over');
+  assert.equal(whole(), cleared, 'and neither cleared first');
+  await shown(3);
+  await paint();
+  assert.equal(made(), 3, 'then the ring is taken round');
+  wnd.destroy();
+});
 
 test('a pane draws only into a buffer the host is done with, and holds a frame that would find none', async () => {
   // Triple buffering promises the pane a buffer two presents behind what
