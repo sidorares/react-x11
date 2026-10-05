@@ -208,7 +208,7 @@ export function readPayload(native, types, carried = null) {
 
 /** A value as the pasteboard carries it: strings and bytes as they are,
  * anything else as JSON — the same rule the X transport applies. */
-const wire = (value) =>
+export const wire = (value) =>
   typeof value === 'string' ||
   Buffer.isBuffer(value) ||
   ArrayBuffer.isView(value) ||

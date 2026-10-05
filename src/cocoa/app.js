@@ -44,6 +44,7 @@ import { CocoaPlayer, canPlay } from './player.js';
 import { CocoaSurface } from './surface.js';
 import { CocoaSymbols } from './symbols.js';
 import { CocoaWindow, FRAME_SLACK_MS } from './window.js';
+import { utiFromMime, wire } from './dnd.js';
 import { decodeKey, modifierMask } from './keymap.js';
 import { loadNative } from './native.js';
 import { requestAppKit, threadedChannel } from './threaded.js';
@@ -409,13 +410,53 @@ export class CocoaApp {
     // (docs/clipboard.md, "Two clipboards").
     const isClipboard = (selection = 'CLIPBOARD') => selection === 'CLIPBOARD';
     this.clipboard = {
+      // A write is one pasteboard item with every flavour under its UTI —
+      // dnd.js's table, then the system's — the way a drag offers its
+      // payload. Text alone keeps pasteboardWriteText, the verb every
+      // bridge has; anything else needs pasteboardWrite (windowkit/appkit
+      // #119), and a bridge without it keeps the text and says, once, what
+      // it dropped — an image that silently never reaches the pasteboard
+      // looks like a Copy that did nothing.
       write: (data, { selection } = {}) => {
         if (!isClipboard(selection)) return Promise.resolve();
+        if (typeof data === 'string') {
+          native.pasteboardWriteText(data);
+          return Promise.resolve();
+        }
+        const item = {};
+        for (const [type, value] of Object.entries(data ?? {})) {
+          const uti = utiFromMime(type, native);
+          if (uti && value != null && !(uti in item)) item[uti] = wire(value);
+        }
+        const TEXT = 'public.utf8-plain-text';
+        const raw = item[TEXT];
         const text =
-          typeof data === 'string'
-            ? data
-            : (data?.UTF8_STRING ?? data?.STRING ?? '');
-        native.pasteboardWriteText(String(text));
+          raw == null
+            ? ''
+            : typeof raw === 'string'
+              ? raw
+              : Buffer.from(raw).toString('utf8');
+        const others = Object.keys(item).filter((uti) => uti !== TEXT);
+        if (others.length === 0) {
+          native.pasteboardWriteText(text);
+        } else if (typeof native.pasteboardWrite === 'function') {
+          native.pasteboardWrite(item);
+        } else {
+          if (
+            !this._warnedPasteboardFlavours &&
+            process.env.NODE_ENV !== 'production'
+          ) {
+            this._warnedPasteboardFlavours = true;
+            console.warn(
+              `react-x11: clipboard.write() kept only the text — this ` +
+                `@windowkit/appkit has no pasteboardWrite, so ` +
+                `${others.join(', ')} did not reach the pasteboard. ` +
+                'Update @windowkit/appkit to a release with pasteboardWrite ' +
+                '(windowkit/appkit#119).',
+            );
+          }
+          native.pasteboardWriteText(text);
+        }
         return Promise.resolve();
       },
       clear: (selection) => {
