@@ -1775,6 +1775,16 @@ const unreadTree = ({ bullet = 10, label = 40, grow = 20, turned = false }) =>
           box({ flexDirection: 'row' }, growing()),
         ),
       ),
+      // …and the same under a floor of nothing, which bounds nothing: the
+      // box is still as tall as its content
+      box(
+        { minHeight: 0 },
+        h('paragraph'),
+        box(
+          { position: 'absolute', top: 0, bottom: 0, left: 0, aspectRatio: 1 },
+          box({ flexDirection: 'row' }, growing()),
+        ),
+      ),
       box(
         { flexDirection: turned ? 'row' : 'column' },
         h('paragraph'),
@@ -1871,6 +1881,67 @@ test('a window that sizes itself from its content still measures every width', a
     );
     assert.ok(firstParagraph.current.setAtNothing > 0, 'shaped for the hint');
     await root.unmount();
+  });
+});
+
+/**
+ * A browser's page: every box from the window down to the page's scroller
+ * says `minHeight: 0`, so that a page taller than the window scrolls rather
+ * than making them all as tall as it is, and a status bubble hangs over the
+ * bottom of the page. `label` is content that changes in a row of the
+ * bubble's, so the tree is measured again.
+ */
+const pageTree = ({ label = 40 }) =>
+  box(
+    { flexGrow: 1, flexShrink: 1, minHeight: 0, position: 'relative' },
+    box(
+      { overflow: 'scroll', flexGrow: 1, flexShrink: 1, minHeight: 0 },
+      box(
+        { flexGrow: 1 },
+        box(
+          { position: 'relative', flexGrow: 1 },
+          h('paragraph', {
+            ref: firstParagraph,
+            style: { alignSelf: 'stretch', flexGrow: 1 },
+          }),
+          box(null, h('paragraph')),
+        ),
+      ),
+    ),
+    box(
+      { position: 'absolute', left: 0, bottom: 0, maxWidth: '70%' },
+      box({ flexDirection: 'row' }, h('label', { length: label })),
+    ),
+  );
+
+test('a minimum height of nothing leaves a page in its scroller unshaped', async () => {
+  // A minimum of 0 bounds nothing: a box as tall as its content is at least
+  // that already. Read as a height of the box's own, it stopped the walk at
+  // the first such box, under which the scroller gives way — and a whole
+  // document in a browser's pane was set a word to a line, for a width
+  // nobody reads, every time the tree was measured.
+  await withTestElements(async () => {
+    const windowProps = { width: 200, height: 300 };
+    const unread = await mount(null, windowProps);
+    const every = await mount(null, windowProps);
+    every.node._readEveryWidth = true;
+    await rerender(unread.app, unread.root, pageTree({}), windowProps);
+    const paragraph = firstParagraph.current;
+    await rerender(every.app, every.root, pageTree({}), windowProps);
+    assertSameFloors(unread.node, every.node, 'the page arriving');
+    assert.ok(!paragraph.setAtNothing, 'the page, unshaped');
+    for (const step of [{ label: 90 }, { label: 5 }]) {
+      await rerender(unread.app, unread.root, pageTree(step), windowProps);
+      await rerender(every.app, every.root, pageTree(step), windowProps);
+      assertSameFloors(
+        unread.node,
+        every.node,
+        `the frame after ${JSON.stringify(step)}`,
+      );
+    }
+    assert.ok(!paragraph.setAtNothing, 'and still, as the bubble changes');
+    await unread.root.unmount();
+    await every.root.unmount();
   });
 });
 
