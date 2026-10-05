@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.45.0](https://github.com/sidorares/react-x11/compare/v2.44.1...v2.45.0) (2026-10-05)
+
+
+### Features
+
+* **frame:** a pane hears that the window it is in is being resized live, so its content floors wait for the drag to end and an element can put off what it would rather do once the drag is over ([#901](https://github.com/sidorares/react-x11/issues/901)) ([39986f6](https://github.com/sidorares/react-x11/commit/39986f6d948d7022e19427455326a9caf5f5e660))
+* **scroll:** an element whose content moved under its scroll pane's viewport has the pane's offsets follow it in the same layout pass, so what the viewport showed stays where it is on screen ([#900](https://github.com/sidorares/react-x11/issues/900)) ([dc0692b](https://github.com/sidorares/react-x11/commit/dc0692b70a965ce8d8b551f88d9f427b5ddaad92))
+
+
+### Performance Improvements
+
+* **floors:** a floor of 0 is no height of a box's own to the width pass, so a page in a scroller under boxes that name one is not set a word to a line each time the tree is measured, and a drag of Wikipedia's X Window System article in the browser example shows 26 frames a second where it showed 14 ([#902](https://github.com/sidorares/react-x11/issues/902)) ([fa0c39b](https://github.com/sidorares/react-x11/commit/fa0c39b89ffd1d73370637dcb56ae558f3e302d4))
+
 ## [2.44.1](https://github.com/sidorares/react-x11/compare/v2.44.0...v2.44.1) (2026-10-05)
 
 
