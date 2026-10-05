@@ -371,3 +371,20 @@ test(
     target.destroy();
   },
 );
+
+// Deleting a program detaches its shaders and leaves them (GLES 3.0, 7.3):
+// the two a context's program was linked from were never deleted, so each
+// context — a window's, and every offscreen surface's — left two shader
+// objects in the driver. Flagged for deletion after the link, they go with
+// the program.
+test("a context's shaders go with it", { skip }, () => {
+  const { gl } = env.gpu;
+  const { ctx, target } = makeContext(env);
+  const shaders = gl.getAttachedShaders(ctx._program);
+  assert.equal(shaders.length, 2, 'linked from two');
+  ctx.destroy();
+  target.destroy();
+  for (const sh of shaders) {
+    assert.equal(gl.isShader(sh), false, 'and neither is left');
+  }
+});

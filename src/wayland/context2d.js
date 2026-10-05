@@ -448,13 +448,30 @@ export class WaylandContext2D {
     const gl = this.gl;
     if (this._program) return;
     const vs = compile(gl, gl.VERTEX_SHADER, VERT, 'vertex');
-    const fs = compile(gl, gl.FRAGMENT_SHADER, FRAG, 'fragment');
+    let fs;
+    try {
+      fs = compile(gl, gl.FRAGMENT_SHADER, FRAG, 'fragment');
+    } catch (err) {
+      gl.deleteShader(vs);
+      throw err;
+    }
     const p = gl.createProgram();
     gl.attachShader(p, vs);
     gl.attachShader(p, fs);
     gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      throw new Error(`2d program failed to link: ${gl.getProgramInfoLog(p)}`);
+    const linked = gl.getProgramParameter(p, gl.LINK_STATUS);
+    const log = linked ? '' : gl.getProgramInfoLog(p);
+    // The shader objects are ours to delete once the program is linked.
+    // Deleting a program detaches its shaders and leaves them (GLES 3.0,
+    // 7.3), so every context — a window's, and each offscreen surface's —
+    // left two behind, and a resize that makes a surface a frame left two a
+    // frame. Deleted while attached, they are flagged and go with the
+    // program.
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+    if (!linked) {
+      gl.deleteProgram(p);
+      throw new Error(`2d program failed to link: ${log}`);
     }
     this._program = p;
     const u = (n) => gl.getUniformLocation(p, n);
@@ -2328,9 +2345,9 @@ function compile(gl, type, src, what) {
   gl.shaderSource(sh, src);
   gl.compileShader(sh);
   if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-    throw new Error(
-      `${what} shader failed to compile: ${gl.getShaderInfoLog(sh)}`,
-    );
+    const log = gl.getShaderInfoLog(sh);
+    gl.deleteShader(sh);
+    throw new Error(`${what} shader failed to compile: ${log}`);
   }
   return sh;
 }

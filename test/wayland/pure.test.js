@@ -210,6 +210,81 @@ test('glDevice: one record per gl, and none to share without one', () => {
   }
 });
 
+/**
+ * A GLES that records the objects made and deleted, and answers every other
+ * entry point with nothing: enough for `init()` and `destroy()`, which touch
+ * no pixels. `fail` names the step that reports failure.
+ */
+function recordingGl({ fail } = {}) {
+  let next = 1;
+  const live = { shader: new Set(), program: new Set() };
+  const calls = {
+    createShader(type) {
+      const sh = { shader: next++, type };
+      live.shader.add(sh);
+      return sh;
+    },
+    deleteShader: (sh) => live.shader.delete(sh),
+    createProgram() {
+      const p = { program: next++ };
+      live.program.add(p);
+      return p;
+    },
+    deleteProgram: (p) => live.program.delete(p),
+    getShaderParameter: (sh) =>
+      !(fail === 'fragment' && sh.type === 'FRAGMENT_SHADER'),
+    getProgramParameter: () => fail !== 'link',
+    getShaderInfoLog: () => 'no',
+    getProgramInfoLog: () => 'no',
+    getAttribLocation: () => 0,
+    getUniformLocation: () => ({}),
+    createBuffer: () => ({ buffer: next++ }),
+  };
+  const gl = new Proxy(calls, {
+    get: (target, name) =>
+      name in target
+        ? target[name]
+        : /^[A-Z_0-9]+$/.test(name)
+          ? name
+          : () => undefined,
+  });
+  return { gl, live };
+}
+
+// Deleting a program detaches its shaders and leaves them (GLES 3.0, 7.3),
+// so a context that never deleted the two it linked from left them behind —
+// a window's once, and an offscreen surface's every time one is made: a
+// resize that makes a surface a frame leaked two shader objects a frame.
+test('a context deletes the shaders its program is linked from', () => {
+  const { gl, live } = recordingGl();
+  const ctx = new WaylandContext2D(gl);
+  ctx.init();
+  assert.equal(live.shader.size, 0, 'no shader outlives the link');
+  assert.equal(live.program.size, 1, 'the program is kept');
+  ctx.destroy();
+  assert.equal(live.program.size, 0, 'and goes with the context');
+
+  for (let i = 0; i < 5; i++) {
+    const another = new WaylandContext2D(gl);
+    another.init();
+    another.destroy();
+  }
+  assert.equal(live.shader.size + live.program.size, 0, 'nor five more');
+});
+
+test('a context that fails to build its program leaves nothing behind', () => {
+  for (const fail of ['fragment', 'link']) {
+    const { gl, live } = recordingGl({ fail });
+    const ctx = new WaylandContext2D(gl);
+    assert.throws(
+      () => ctx.init(),
+      new RegExp(fail === 'link' ? 'link' : 'compile'),
+    );
+    assert.equal(live.shader.size, 0, `${fail}: no shader left`);
+    assert.equal(live.program.size, 0, `${fail}: no program left`);
+  }
+});
+
 // The other half of the record: a context buffers its quads, so a target's
 // texture is only as current as the last flush. Anything about to *read*
 // those pixels flushes the device first — which is one context, because the
