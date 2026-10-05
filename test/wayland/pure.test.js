@@ -3,6 +3,8 @@
 // hit-testing. No compositor, no GPU.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import v8 from 'node:v8';
+import vm from 'node:vm';
 
 import {
   WaylandContext2D,
@@ -217,8 +219,14 @@ test('glDevice: one record per gl, and none to share without one', () => {
  */
 function recordingGl({ fail } = {}) {
   let next = 1;
-  const live = { shader: new Set(), program: new Set() };
+  const live = { shader: new Set(), program: new Set(), texture: new Set() };
   const calls = {
+    createTexture() {
+      const t = { texture: next++ };
+      live.texture.add(t);
+      return t;
+    },
+    deleteTexture: (t) => live.texture.delete(t),
     createShader(type) {
       const sh = { shader: next++, type };
       live.shader.add(sh);
@@ -283,6 +291,56 @@ test('a context that fails to build its program leaves nothing behind', () => {
     assert.equal(live.shader.size, 0, `${fail}: no shader left`);
     assert.equal(live.program.size, 0, `${fail}: no program left`);
   }
+});
+
+// A gradient's texture and an image's are found by the object, in a
+// WeakMap, which cannot say when its key goes: the entry went with the key
+// and the texture stayed in the driver. A page that makes its gradients as
+// it paints made a texture a paint; a surface's context left behind
+// everything it had uploaded.
+test('a context deletes the textures it made when it is destroyed', () => {
+  const { gl, live } = recordingGl();
+  const ctx = new WaylandContext2D(gl);
+  ctx.begin(64, 64);
+  for (let i = 0; i < 20; i++) {
+    const grad = ctx.createLinearGradient(0, 0, 64, 0);
+    grad.addColorStop(0, '#ff0000');
+    grad.addColorStop(1, '#0000ff');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 64);
+  }
+  const image = ctx.createImageData(4, 4);
+  ctx.drawImage(image, 0, 0);
+  ctx.end();
+  assert.ok(live.texture.size >= 21, 'a texture a gradient, and the image');
+  ctx.destroy();
+  assert.equal(live.texture.size, 0, 'and none left behind');
+});
+
+test("a gradient's texture goes when the gradient does", async () => {
+  v8.setFlagsFromString('--expose-gc');
+  const gc = vm.runInNewContext('gc');
+  const { gl, live } = recordingGl();
+  const ctx = new WaylandContext2D(gl);
+  ctx.begin(64, 64);
+  const paint = () => {
+    const grad = ctx.createLinearGradient(0, 0, 64, 0);
+    grad.addColorStop(0, '#ff0000');
+    grad.addColorStop(1, '#0000ff');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 64);
+    ctx.fillStyle = '#000000';
+  };
+  for (let i = 0; i < 10; i++) paint();
+  ctx.end();
+  assert.equal(live.texture.size, 10, 'one a gradient');
+  // a finaliser runs a task or so after the collection that found its key
+  for (let turn = 0; turn < 50 && live.texture.size > 0; turn++) {
+    gc();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(live.texture.size, 0, 'and each went with its gradient');
+  ctx.destroy();
 });
 
 // The other half of the record: a context buffers its quads, so a target's
