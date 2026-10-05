@@ -28,10 +28,12 @@ its own Copy item.
 > them — the text controls' Ctrl/⌘ C, X, V and their Edit menus — works with
 > them. [`PRIMARY`](#primary-is-x11-only) is X11-only rather than missing:
 > nothing on macOS is filled by selecting text, so there selecting copies
-> nothing. What is not there yet is the rest of this page: a
-> [multi-flavour payload](#writing) (`write()` takes the plain-text flavour
-> and drops the others, and `read({ target })` rejects anything but text),
-> and [`watch()`](#knowing-when-it-changes) (it resolves to a no-op
+> nothing. A [multi-flavour payload](#writing) is written whole — an
+> image, HTML, any type the system has a pasteboard type for, as one item —
+> when the bridge has `pasteboardWrite` (windowkit/appkit#119); an older
+> bridge keeps the text and says once, in development, what it dropped. What
+> is not there yet is reading anything but text (`read({ target })` rejects
+> it) and [`watch()`](#knowing-when-it-changes) (it resolves to a no-op
 > unsubscribe and never fires). Drag and drop is not affected — it carries
 > its full payload on both backends ([drag-and-drop.md](drag-and-drop.md)).
 

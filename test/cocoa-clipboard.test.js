@@ -295,3 +295,61 @@ describe('app.clipboard on cocoa', () => {
     assert.equal(await clipboard.read('text'), 'copied here');
   });
 });
+
+// --- more than text ----------------------------------------------------------
+
+describe('a write with more than text', () => {
+  // A copied image with a caption beside it: one pasteboard item, every
+  // flavour under its UTI, so an image editor takes the PNG and a text
+  // field the caption. pasteboardWriteText can carry only the caption.
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  async function mountProbe() {
+    let clipboard = null;
+    function Probe() {
+      clipboard = useClipboard();
+      return h('box');
+    }
+    const mounted = await mountCocoa(h(Probe));
+    return { ...mounted, clipboard: () => clipboard };
+  }
+
+  test('reaches the pasteboard whole, every flavour under its UTI', async () => {
+    const { native, clipboard } = await mountProbe();
+    pasteboardOn(native, ELSEWHERE);
+
+    await clipboard().write({ 'image/png': PNG, 'text/plain': 'a picture' });
+    assert.deepEqual(native.of('pasteboardWrite'), [
+      [{ 'public.png': PNG, 'public.utf8-plain-text': 'a picture' }],
+    ]);
+    assert.deepEqual(native.of('pasteboardWriteText'), []);
+  });
+
+  test('text alone keeps pasteboardWriteText, the verb every bridge has', async () => {
+    const { native, clipboard } = await mountProbe();
+    const pb = pasteboardOn(native, ELSEWHERE);
+
+    await clipboard().write({
+      UTF8_STRING: 'just words',
+      STRING: 'just words',
+    });
+    assert.deepEqual(native.of('pasteboardWriteText'), [['just words']]);
+    assert.deepEqual(native.of('pasteboardWrite'), []);
+    assert.equal(pb.text, 'just words');
+  });
+
+  test('a bridge without pasteboardWrite keeps the text and says, once, what it dropped', async (t) => {
+    const { native, clipboard } = await mountProbe();
+    const pb = pasteboardOn(native, ELSEWHERE);
+    native.pasteboardWrite = undefined; // an appkit from before the verb
+    const warn = t.mock.method(console, 'warn', () => {});
+
+    await clipboard().write({ 'image/png': PNG, 'text/plain': 'a picture' });
+    await clipboard().write({ 'image/png': PNG, 'text/plain': 'a picture' });
+    assert.equal(pb.text, 'a picture', 'the caption still lands');
+    assert.equal(warn.mock.callCount(), 1, 'said once, not per copy');
+    const said = String(warn.mock.calls[0].arguments[0]);
+    assert.match(said, /public\.png/);
+    assert.match(said, /pasteboardWrite/);
+  });
+});
