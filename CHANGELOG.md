@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.44.1](https://github.com/sidorares/react-x11/compare/v2.44.0...v2.44.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **cocoa:** a pane that falls behind its resizes has its last frame stretched across only, and down it stays at its size, so a window dragged taller shows the page as it is with a strip under it, where it showed the page drawn too tall until the next frame ([#898](https://github.com/sidorares/react-x11/issues/898)) ([863c55f](https://github.com/sidorares/react-x11/commit/863c55f4c2c46537066519c5d656148b0a168328))
+* **deps:** @windowkit/appkit ^0.27.0, so a pane that keeps up with its resizes has its last frame shown at its size on a Mac, where 2.42.0's range admitted no bridge that reads contentsRect and contentsCenter and the frame was stretched at every step of a drag ([#897](https://github.com/sidorares/react-x11/issues/897)) ([07ec31a](https://github.com/sidorares/react-x11/commit/07ec31aa39a1ca3c11e992a7f661512040d3c56c))
+* **wayland:** a 2d context frees the two shaders its program is linked from and the textures it makes for gradients and images, where each stayed in the driver — a texture a paint where gradients are made as the page paints ([#893](https://github.com/sidorares/react-x11/issues/893)) ([d958e8c](https://github.com/sidorares/react-x11/commit/d958e8c5266c44b416c6138d9286cb1ed58b1fa3))
+
+
+### Performance Improvements
+
+* **cocoa:** a pane makes each buffer of its ring the first time a frame takes it, so a frame of a drag makes and clears one IOSurface where it made and cleared three, and a frame of Zen Garden 101's drag in the browser example takes 9 ms on a Mac where it took 12 ([#899](https://github.com/sidorares/react-x11/issues/899)) ([2ad4073](https://github.com/sidorares/react-x11/commit/2ad4073b8efc49d3e1d5fc274b61d857d22ef85e))
+* **wayland:** the 2d contexts on one device share the program, its vertex buffer and the glyph atlas, and a glyph is looked up by number and drawn without garbage, so an offscreen surface costs 0.7 ms where it cost 6.6 and a frame of text a third of what it did ([#895](https://github.com/sidorares/react-x11/issues/895)) ([92eb954](https://github.com/sidorares/react-x11/commit/92eb954a70f0503c7c1f8643f8a7c6fcbba63f1e))
+
 ## [2.44.0](https://github.com/sidorares/react-x11/compare/v2.43.0...v2.44.0) (2026-10-05)
 
 
