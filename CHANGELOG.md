@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.43.0](https://github.com/sidorares/react-x11/compare/v2.42.0...v2.43.0) (2026-10-05)
+
+
+### Features
+
+* **wayland:** drawImageProjected draws an image through a 3x3 projection in one quad, its texture coordinates interpolated in perspective on the GPU, so a plane turned out of the page is one draw where it was hundreds of clipped tiles ([#888](https://github.com/sidorares/react-x11/issues/888)) ([4353202](https://github.com/sidorares/react-x11/commit/4353202e39d3a02076386702ea8fbaf96a1e0931))
+
+
+### Bug Fixes
+
+* **wayland:** a surface destroyed straight after it is drawn is drawn as it was, where the draw still in the window's batch sampled its deleted texture and drew an opaque black box ([#887](https://github.com/sidorares/react-x11/issues/887)) ([f9c7c72](https://github.com/sidorares/react-x11/commit/f9c7c72af2209f9ee5cded2e03aa44e2b3e91ef8))
+
 ## [2.42.0](https://github.com/sidorares/react-x11/compare/v2.41.1...v2.42.0) (2026-10-04)
 
 
