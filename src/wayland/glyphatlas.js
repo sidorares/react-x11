@@ -34,6 +34,8 @@ export class GlyphAtlas {
     this.size = size;
     /** key -> { x, y, w, h, left, top, u0, v0, u1, v1 } */
     this.entries = new Map();
+    /** a face at a size -> (glyph id -> entry), for `glyph()` */
+    this._tables = new Map();
     this._shelfY = PAD;
     this._shelfH = 0;
     this._shelfX = PAD;
@@ -58,17 +60,47 @@ export class GlyphAtlas {
   get(key, raster) {
     const hit = this.entries.get(key);
     if (hit) return hit;
+    const entry = this._insert(raster());
+    if (entry.kept) this.entries.set(key, entry);
+    return entry;
+  }
 
-    const g = raster();
+  /**
+   * The entries of one face at one size, by glyph id. A run of text looks
+   * its table up once, by the string that names the face and the size, and
+   * each glyph in it by number (`glyph()`): a string key built and hashed a
+   * glyph was most of what drawing text cost once the glyphs were in.
+   *
+   * A table is emptied in place when the atlas grows or resets, so one held
+   * across a `glyph()` that grew the atlas finds its glyphs missing rather
+   * than placed where they no longer are.
+   */
+  table(key) {
+    let table = this._tables.get(key);
+    if (!table) this._tables.set(key, (table = new Map()));
+    return table;
+  }
+
+  /** One glyph of a `table()`, rasterised by `font` on a miss. */
+  glyph(table, font, id, size) {
+    const hit = table.get(id);
+    if (hit) return hit;
+    const entry = this._insert(font.rasterize(id, size));
+    if (entry.kept) table.set(id, entry);
+    return entry;
+  }
+
+  /** Place a rasterised glyph, or say it has no ink. `kept` is whether the
+   *  answer is worth remembering: a glyph the atlas had no room for is not,
+   *  so the next frame asks again. */
+  _insert(g) {
     // A space has no ink. Cache the absence so the miss is paid once.
     if (!g || g.width <= 0 || g.height <= 0) {
-      const empty = { empty: true, left: g?.left ?? 0, top: g?.top ?? 0 };
-      this.entries.set(key, empty);
-      return empty;
+      return { empty: true, kept: true, left: g?.left ?? 0, top: g?.top ?? 0 };
     }
 
     const spot = this._place(g.width, g.height);
-    if (!spot) return { empty: true, left: g.left, top: g.top };
+    if (!spot) return { empty: true, kept: false, left: g.left, top: g.top };
 
     for (let row = 0; row < g.height; row++) {
       const src = row * g.width;
@@ -78,8 +110,9 @@ export class GlyphAtlas {
     this._markDirty(spot.x, spot.y, g.width, g.height);
 
     const inv = 1 / this.size;
-    const entry = {
+    return {
       empty: false,
+      kept: true,
       x: spot.x,
       y: spot.y,
       w: g.width,
@@ -91,8 +124,6 @@ export class GlyphAtlas {
       u1: (spot.x + g.width) * inv,
       v1: (spot.y + g.height) * inv,
     };
-    this.entries.set(key, entry);
-    return entry;
   }
 
   _markDirty(x, y, w, h) {
@@ -139,6 +170,7 @@ export class GlyphAtlas {
     this.size *= 2;
     this._pixels = new Uint8Array(this.size * this.size);
     this.entries.clear();
+    for (const table of this._tables.values()) table.clear();
     this._shelfX = PAD;
     this._shelfY = PAD;
     this._shelfH = 0;
@@ -158,8 +190,9 @@ export class GlyphAtlas {
    * the CPU copy until new entries overwrite them; nothing names them.
    */
   reset() {
-    if (this.entries.size === 0) return;
+    if (this.entries.size === 0 && this._tables.size === 0) return;
     this.entries.clear();
+    for (const table of this._tables.values()) table.clear();
     this._shelfX = PAD;
     this._shelfY = PAD;
     this._shelfH = 0;
@@ -233,5 +266,6 @@ export class GlyphAtlas {
     if (this.texture) this.gl.deleteTexture(this.texture);
     this.texture = null;
     this.entries.clear();
+    for (const table of this._tables.values()) table.clear();
   }
 }

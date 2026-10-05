@@ -11,6 +11,7 @@ import { createRequire } from 'node:module';
 import { test } from 'node:test';
 
 import { WaylandContext2D } from '../../src/wayland/context2d.js';
+import { releaseDevice } from '../../src/wayland/device.js';
 import { GLTarget } from '../../src/wayland/target.js';
 
 const require = createRequire(import.meta.url);
@@ -387,4 +388,139 @@ test("a context's shaders go with it", { skip }, () => {
   for (const sh of shaders) {
     assert.equal(gl.isShader(sh), false, 'and neither is left');
   }
+});
+
+/** A font of squares of one coverage, counting what it rasterised. */
+function squares(px, coverage = 255) {
+  const font = {
+    key: `test-squares-${px}-${coverage}`,
+    rasterised: 0,
+    rasterize: () => {
+      font.rasterised++;
+      return {
+        width: px,
+        height: px,
+        left: 0,
+        top: -px,
+        data: new Uint8Array(px * px).fill(coverage),
+      };
+    },
+  };
+  return font;
+}
+
+// The glyph atlas is the device's, not the context's: every offscreen
+// surface's context began with an empty one and rasterised every glyph it
+// drew again, which <Html> paid at each width of a resize.
+test('two contexts on one device rasterise a glyph once', { skip }, () => {
+  const a = makeContext(env);
+  const b = makeContext(env);
+  assert.equal(a.ctx.atlas, b.ctx.atlas, 'one atlas');
+  const font = squares(8);
+  const run = {
+    font,
+    size: 8,
+    color: '#ffffff',
+    glyphs: [1, 2, 3].map((id, i) => ({ id, x: 4 + i * 12, y: 20 })),
+  };
+  for (const { ctx } of [a, b]) {
+    fresh(ctx);
+    ctx.drawTextRuns([run]);
+    ctx.end();
+    assert.deepEqual(pixel(ctx, 30, 16), [255, 255, 255, 255], 'drawn');
+  }
+  assert.equal(font.rasterised, 3, 'each glyph once, for both');
+  for (const { ctx, target } of [a, b]) {
+    ctx.destroy();
+    target.destroy();
+  }
+});
+
+// A context may keep a batch across foreign GL with no owner at all
+// (`releaseDevice`): a <glarea>'s frame comes between its draws and its
+// `restoreGLState`. If another context grows the shared atlas meanwhile,
+// the kept glyph quads name a texture that is gone — so the atlas draws
+// every context's glyph batch before it grows, owner or not.
+test(
+  'a glyph batch kept across foreign GL is drawn before another context grows the atlas',
+  { skip },
+  () => {
+    const a = makeContext(env);
+    const size = 512;
+    const btarget = new GLTarget(env.gpu.gl, { width: size, height: size });
+    const b = new WaylandContext2D(env.gpu.gl, {
+      fontManager: null,
+      target: btarget,
+    });
+    b.init();
+    const small = squares(10);
+    fresh(a.ctx);
+    a.ctx.drawTextRuns([
+      {
+        font: small,
+        size: 10,
+        color: '#ffffff',
+        glyphs: [{ id: 1, x: 10, y: 30 }],
+      },
+    ]);
+    // foreign GL drew, and said so
+    releaseDevice(env.gpu.gl);
+    const atlasSize = b.atlas.size;
+    // Another coverage than the kept glyph's. The driver may hand the
+    // deleted atlas texture's name to the new one, and then a stale quad
+    // samples one of these where its glyph was — so a solid white run here
+    // would hide the stale quad behind a white square of its own.
+    const big = squares(30, 100);
+    const glyphs = [];
+    for (let i = 0; i < 400; i++) {
+      glyphs.push({
+        id: i + 1,
+        x: (i % 20) * 25,
+        y: Math.floor(i / 20) * 25 + 30,
+      });
+    }
+    b.begin(size, size);
+    b.clearRect(0, 0, size, size);
+    b.drawTextRuns([{ font: big, size: 30, glyphs, color: '#ffffff' }]);
+    b.end();
+    assert.ok(b.atlas.size > atlasSize, 'the atlas grew');
+    a.ctx.restoreGLState();
+    a.ctx.end();
+    assert.deepEqual(
+      pixel(a.ctx, 14, 25),
+      [255, 255, 255, 255],
+      'the kept glyph',
+    );
+    assert.deepEqual(
+      pixel(b, 490, 490),
+      [255, 255, 255, 100],
+      'the last of the run, at its coverage',
+    );
+    a.ctx.destroy();
+    a.target.destroy();
+    b.destroy();
+    btarget.destroy();
+  },
+);
+
+// A context's vertex array starts small and grows as it draws, where it
+// was as large as a batch can be for every surface, however little it drew.
+test('a context draws more quads than it first had room for', { skip }, () => {
+  const { ctx, target } = makeContext(env);
+  fresh(ctx);
+  ctx.fillStyle = '#ffffff';
+  for (let y = 0; y < SIZE; y += 2) {
+    for (let x = 0; x < SIZE; x += 2) ctx.fillRect(x, y, 1, 1);
+  }
+  ctx.end();
+  for (const [x, y] of [
+    [0, 0],
+    [32, 32],
+    [SIZE - 2, SIZE - 2],
+  ]) {
+    assert.deepEqual(pixel(ctx, x, y), [255, 255, 255, 255], `at ${x},${y}`);
+  }
+  assert.equal(pixel(ctx, 1, 1)[3], 0, 'and nothing between');
+  ctx.destroy();
+  target.destroy();
 });
