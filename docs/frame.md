@@ -318,14 +318,19 @@ background, so the strip continues it, a gradient included, where the
 `<Frame>`'s own background showed through before. Where the edge crosses
 content, a bottom row through a line of text, that content runs down the
 strip in thin lines for the frame it lasts. One that falls behind the
-budget is stretched, which is the better picture of a long wait. Behind is
+budget is stretched across, which is the better picture of a long wait: a
+width moves where a page's lines break, and a squeezed page is nearer to the
+page laid out again than one cut off with a strip beside it. Down the pane
+it stays at its size, cropped or its last row carried down, since a height
+moves nothing a page lays out, and stretched down it was the page drawn too
+tall for as long as the wait lasted. Behind is
 judged by the frames that land: two in a row later than the budget, or none
 at all for longer than it, and a frame well inside it shows the next at its
 size again. A size the pane is never sent, because a newer one replaced it
 while a frame was being painted, is no frame late, and a fast drag of a
 page that keeps up stays at its size rather than taking one look at every
 step and the other at every frame. Each gesture starts out at its size, and
-`resizeWait: 0` stretches always, as before.
+`resizeWait: 0` stretches always, both ways, as before.
 
 **A pane's frames are named by id, and the id outlives nothing.** On Cocoa
 a present carries the IOSurface's id, and the host looks it up when it

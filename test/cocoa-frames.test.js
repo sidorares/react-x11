@@ -1928,6 +1928,62 @@ test('a pane that falls behind has its last frame stretched, and a budget of 0 s
   }
 });
 
+test('a pane that falls behind is stretched across, and down it stays at its size', () => {
+  // A width moves where a page's lines break, so a squeezed page is the
+  // nearer picture of what comes; a height moves nothing a page lays out,
+  // so what comes is the frame as it is, with more of the page under it,
+  // and a frame stretched down was the page drawn too tall for the wait.
+  let t = 0;
+  setAnimationClock(() => t);
+  try {
+    const native = fakeBridge();
+    const host = new CocoaPaneHost(
+      { _native: native, _resizeWait: 50 },
+      { _layer: { root: 1 }, scale: 2 },
+    );
+    host.setRect({ x: 0, y: 0, width: 400, height: 200 });
+    host.present(1, { width: 400, height: 200 });
+    // 440 asked at 10, and nothing of it by 100: behind
+    t = 10;
+    host.setRect({ x: 0, y: 0, width: 440, height: 200 });
+    // wider and taller: every column across, the last row down
+    t = 100;
+    host.setRect({ x: 0, y: 0, width: 480, height: 240 });
+    const [y, h] = sliver(200);
+    assert.deepEqual(edgesOf(native).at(-1), {
+      crop: null,
+      edge: [0, y, 1, h],
+    });
+    // narrower and shorter: squeezed across, and cropped down
+    t = 110;
+    host.setRect({ x: 0, y: 0, width: 360, height: 180 });
+    assert.deepEqual(edgesOf(native).at(-1), {
+      crop: [0, 0, 1, 180 / 200],
+      edge: null,
+    });
+    // only the width moved: stretched, and nothing to set
+    t = 120;
+    host.setRect({ x: 0, y: 0, width: 440, height: 200 });
+    assert.deepEqual(edgesOf(native).at(-1), { crop: null, edge: null });
+    host.destroy();
+
+    // a budget of 0 stretches both ways still, and sets nothing
+    const always = fakeBridge();
+    const plain = new CocoaPaneHost(
+      { _native: always, _resizeWait: 0 },
+      { _layer: { root: 1 }, scale: 2 },
+    );
+    plain.setRect({ x: 0, y: 0, width: 360, height: 200 });
+    plain.present(2, { width: 360, height: 200 });
+    plain.setRect({ x: 0, y: 0, width: 400, height: 260 });
+    plain.setRect({ x: 0, y: 0, width: 380, height: 150 });
+    assert.deepEqual(edgesOf(always), [], 'no rects set');
+    plain.destroy();
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
+});
+
 test('a pane that keeps up through a fast drag stays at its size, though the sizes it is never sent wait longer than the budget', () => {
   // `<Frame>` sends a pane the newest size once it has painted the last,
   // so the sizes a drag passes through meanwhile are never sent, and wait
