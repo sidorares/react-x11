@@ -220,6 +220,24 @@ export interface Context2D {
     dw: number,
     dh: number,
   ): void;
+  /**
+   * Draw an image through a projection, in one draw: its pixel (u, v) lands
+   * where the 3×3 `matrix` — row-major, `[a, b, c, d, e, f, g, h, i]` — takes
+   * it, ((a·u + b·v + c) / w, (d·u + e·v + f) / w) with
+   * w = g·u + h·v + i, and the current transform takes that; clipped and
+   * faded by `globalAlpha` as `drawImage` is. A plane turned out of the page
+   * — CSS `rotateY()` in a `perspective` — is one draw where it would be
+   * hundreds of tiles each drawn through the affine matrix nearest it.
+   * Answers false, drawing nothing, where a corner of the image has w ≤ 0,
+   * behind the viewer.
+   *
+   * The Wayland context only. A GPU interpolates texture coordinates in
+   * perspective; XRender on glamor divides at the corners and folds the
+   * image along its diagonal, and CoreGraphics and Direct2D draw an image
+   * through an affine matrix alone. Test for it with `'drawImageProjected'
+   * in ctx`, and tile where it is absent.
+   */
+  drawImageProjected?(image: unknown, matrix: readonly number[]): boolean;
   createLinearGradient(
     x0: number,
     y0: number,
