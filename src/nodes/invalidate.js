@@ -138,6 +138,36 @@ export class NodeInvalidate {
   }
 
   /**
+   * What this element draws under the viewport of the scroll pane it is
+   * in moved by (dx, dy) device pixels, and what the viewport shows is to
+   * stay where it is on screen: the pane's offsets move by as much, in the
+   * layout pass running now, after it measures what it holds and before it
+   * places it (CSS Scroll Anchoring 1). A document laid out again at
+   * another width is the case: its text above the fold breaks into more
+   * lines or fewer, and the paragraph at the top of the viewport moves
+   * down or up the document by the difference — which, unanswered, scrolls
+   * the reader a page away from where they were.
+   *
+   * Asked of the nearest scroll pane, the one whose viewport the element
+   * is seen through; shifts asked of it in one pass add up. Ask from the
+   * layout pass — `measureContent`, or what it calls — where the pane
+   * places its content after; asked outside one, the shift waits for the
+   * next pass, and asks for it. A `scrollTo` the application made since
+   * the last pass drops it, since the shift was measured against the
+   * offsets before that scroll; a `scrollIntoView` lands after it; and the
+   * pane clamps the result to what it holds, as any scroll. Returns
+   * whether a pane took it: false where nothing scrolls the element.
+   */
+  anchorScrollBy(dx, dy) {
+    for (let n = this.parent; n; n = n.parent) {
+      if (typeof n._anchorScrollBy === 'function' && n.isScroller()) {
+        return n._anchorScrollBy(dx, dy);
+      }
+    }
+    return false;
+  }
+
+  /**
    * How far this element's own drawing reaches past its box — device
    * pixels, on every side — or 0, the default, for one that stays inside
    * it. Core claims and culls the element, and sizes a fade's surface, by
