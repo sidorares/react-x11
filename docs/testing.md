@@ -394,8 +394,8 @@ await toPNG(ctx, '/tmp/shot.png', { width: 320, height: 240 });
 A pixel proves the tree, the layout, the clip, the paint order, the colour
 parsing and the wire encoding at once — and it is the only assertion that
 catches the class of bug where everything commits correctly and nothing
-reaches the screen. Two details it demands: the readback is **BGRA**, which
-the helpers handle, and antialiasing means every comparison takes a
+reaches the screen. Two details it demands: the readback is straight
+**RGBA**, as on a canvas, and antialiasing means every comparison takes a
 **tolerance**.
 
 `toPNG` is also how a pull request gets a screenshot rendered by its own
