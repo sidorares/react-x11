@@ -915,3 +915,58 @@ test('a child moving into view past a clipped corner: what it brings in is repai
   assert.equal(native.of('scrollSurface').length, 1, 'moved on the pane');
   assert.deepEqual(rectSet(passes), ['20,20 51x8', '20,28 10x31']);
 });
+
+test('the layer follows its subtree off the screen and back', async () => {
+  // The Cocoa surface is composited by the WindowServer rather than painted
+  // by the window, so a hidden subtree reaches it through nothing else: this
+  // is the whole of what keeps it off the screen.
+  const { native, app } = fakeCocoaApp();
+  const runtime = fakeGLRuntime();
+  app._cocoaGL = runtime;
+  app._cocoaGLPromise = Promise.resolve(runtime);
+  const root = await createRoot({ app });
+  roots.push(root);
+  const areaRef = React.createRef();
+  const scene = (hidden) =>
+    h(
+      'window',
+      { width: 200, height: 120 },
+      h(
+        'box',
+        {
+          style: {
+            flexGrow: 1,
+            padding: 10,
+            display: hidden ? 'none' : 'flex',
+          },
+        },
+        h(
+          'box',
+          { style: { flexGrow: 1 } },
+          h('glarea', { key: 'gl', ref: areaRef, style: { flexGrow: 1 } }),
+        ),
+      ),
+    );
+
+  root.render(scene(false));
+  await tick();
+  const node = areaRef.current;
+  for (let i = 0; i < 10 && !node.window; i++) await tick();
+  assert.ok(node.window, 'the surface was created');
+  const { layer } = node.window;
+  assert.equal(layer.props.hidden, false, 'shown to begin with');
+
+  root.render(scene(true));
+  await tick();
+  assert.equal(layer.props.hidden, true, 'hidden with the subtree above it');
+
+  // every setState writes the layer's whole prop set, so the geometry a
+  // hidden surface is still given must not put it back on the screen
+  node.window.setState({ x: 0, y: 0, width: 40, height: 40 });
+  assert.equal(layer.props.hidden, true, 'and stays hidden through a setState');
+
+  root.render(scene(false));
+  await tick();
+  assert.equal(layer.props.hidden, false, 'shown again when it comes back');
+  assert.ok(native, 'the bridge saw the whole exchange');
+});

@@ -860,10 +860,29 @@ export class Node {
     // window rather than for this subtree — the set is the handful of nodes
     // that declare an `animation`, and each one answers for itself.
     if (this.root?._loopNodes?.size) this.root._refreshLoops();
+    // Same funnel, same reason, one layer down: a surface — a `<glarea>`'s GL
+    // child, an embedded client's window — is a real window of the display
+    // system stacked above everything this window paints, not pixels in its
+    // 2d context. Hiding a subtree takes away its layout and its paint, and
+    // reaches a surface inside it through neither: it would stay on screen,
+    // over whatever is shown in its place, which is what a tab that keeps its
+    // screens mounted does every time it switches.
+    this._syncSurfaces();
     const events = this._focusManager();
     if (!events) return;
     if (visible) events.subtreeRevealed(this);
     else events.subtreeHidden(this);
+  }
+
+  /**
+   * Ask every surface in this subtree — this node included — whether it is
+   * still on screen, and map or unmap it to match. Walked rather than kept
+   * in a registry because the subtree whose visibility just changed is
+   * exactly the scope, and all but two elements answer nothing.
+   */
+  _syncSurfaces() {
+    this._syncSurfaceVisibility?.();
+    for (const child of this.children) child._syncSurfaces?.();
   }
 
   /**

@@ -324,6 +324,9 @@ export class GlAreaNode extends Node {
     // same zPosition. The window's hit test reads the list in that order
     // (`EventManager._surfaceAt`).
     this._joinSurfaces();
+    // A surface created inside a subtree that is already hidden — a tab
+    // mounted behind the one on screen — must not come up over it.
+    this._syncSurfaceVisibility();
     this.gl = wnd.getContext('opengl', config);
     // A buffer freed by the display is a frame that can be drawn again — for
     // a frame that was waiting for one. The Cocoa surface and the CGL
@@ -725,8 +728,15 @@ export class GlAreaNode extends Node {
     this.requestFrame();
   }
 
-  setHidden(hidden) {
-    super.setHidden(hidden);
+  /**
+   * The surface is a window of the display system, so it goes when the
+   * subtree does — `display: 'none'` anywhere above it, or React's own
+   * `hidden` for `<Activity>`/`<Suspense>`, on this node or on an ancestor.
+   * `Node._syncSurfaces` calls this for every route; the panes the children
+   * are drawn on follow the same answer.
+   */
+  _syncSurfaceVisibility() {
+    const hidden = this._hiddenInTree();
     if (hidden) this.window?.unmap?.();
     else this.window?.map?.();
     this._overlay?.setHidden(hidden);
