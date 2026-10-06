@@ -559,32 +559,50 @@ function restoreFrameClock() {
 }
 
 /**
- * Retry `fn` until it stops throwing, flushing between attempts.
+ * Retry `fn` until it stops throwing, flushing between attempts, and resolve
+ * with what it returned once that is on screen.
  *
  * The tool for anything whose arrival is not a single deterministic step:
  * an async rich-content reflow, an image decode, a timer, or a repaint whose
- * cause travelled through the X connection and back. Each attempt is
- * preceded by an `act()`, so waiting also *advances* — this is not a sleep
- * with a condition on it.
+ * cause travelled through the X connection and back. Each retry is preceded
+ * by an `act()`, so waiting also *advances* — this is not a sleep with a
+ * condition on it.
  *
  * ```js
  * await waitFor(async () => {
  *   assert.notDeepStrictEqual(await pixelAt(ctx, x, y), before);
  * });
+ * const row = await waitFor(() => screen.getByText('notes.txt'));
+ * await userEvent.click(row);
  * ```
+ *
+ * **The attempt that passes is followed by an `act()` too.** What it found
+ * can have arrived in the sleep before it — an fs read, a timer — and that
+ * commits outside act, on React's own scheduler, while the frame that lays
+ * it out runs on the window's clock, which need not have ticked since.
+ * Without it, a node it returned could have no rect yet, and the click after
+ * it would throw `has no laid-out rect yet` (#904). It follows whichever
+ * attempt passed, the first included, since the commit can land before
+ * `waitFor` is called. And it has to come after the attempt: an `act()`
+ * before each one leaves the same gap in its own closing round trip, after
+ * the frame it ran.
  */
 export async function waitFor(fn, { timeout = 2000, interval = 10 } = {}) {
   const deadline = Date.now() + timeout;
   let last;
   for (;;) {
+    let found;
     try {
-      return await fn();
+      found = await fn();
     } catch (err) {
       last = err;
+      if (Date.now() >= deadline) throw last;
+      await act();
+      await new Promise((resolve) => setTimeout(resolve, interval));
+      continue;
     }
-    if (Date.now() >= deadline) throw last;
     await act();
-    await new Promise((resolve) => setTimeout(resolve, interval));
+    return found;
   }
 }
 

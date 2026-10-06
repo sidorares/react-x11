@@ -477,6 +477,102 @@ async function toPNGBuffer(ctx) {
   return toPNG(ctx, null, { width: 80, height: 40 });
 }
 
+// **What `waitFor` and `findBy*` resolve with is laid out.** A row that
+// arrives on its own schedule — an fs read, a socket, here a timer — commits
+// outside any act(), on React's own scheduler, and the frame that lays it
+// out runs on the window's clock after that. An attempt in between found the
+// row before it had a rect, so the click that came next threw "has no
+// laid-out rect yet": with its directory read held back 0-40 ms, 6 of 82
+// waits for a `<FileDialog>`'s listing came back that way (#904).
+describe('what waitFor and findBy* resolve with is laid out', () => {
+  // A listing fed from outside React, which says when React has committed
+  // what it was handed
+  function lateListing() {
+    let setRows = null;
+    const committed = [];
+    function Listing({ onPick }) {
+      const [rows, set] = React.useState([]);
+      React.useEffect(() => {
+        setRows = set;
+      }, []);
+      // inside the commit, so a test resumed from here is ahead of any frame
+      React.useLayoutEffect(() => {
+        for (const resolve of committed.splice(0)) resolve();
+      }, [rows]);
+      return h(
+        'box',
+        { style: { flexGrow: 1, padding: 8, gap: 4 } },
+        rows.map((name) =>
+          h(
+            'box',
+            { key: name, onClick: () => onPick(name) },
+            h('text', null, name),
+          ),
+        ),
+      );
+    }
+    return {
+      Listing,
+      /** Hand it `rows` in `ms`, from a timer; resolves once committed. */
+      deliverIn: (ms, rows) =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            committed.push(resolve);
+            setRows(rows);
+          }, ms);
+        }),
+    };
+  }
+
+  async function mount(options = {}) {
+    const feed = lateListing();
+    const picked = [];
+    await renderX11(h(feed.Listing, { onPick: (name) => picked.push(name) }), {
+      fonts,
+      ...options,
+    });
+    return { feed, picked };
+  }
+
+  test('when the row lands between two attempts', async () => {
+    // Two frames a second: a display slower than waitFor polls — a remote
+    // one, a runner under load — so no frame lays the row out by luck
+    // between its commit and the attempt that finds it
+    const { feed, picked } = await mount({ frameRate: 2 });
+    feed.deliverIn(20, ['late row']);
+    // and a long interval, so the row lands in the sleep between two
+    // attempts rather than in the act() before it, which would lay it out
+    const row = await waitFor(() => screen.getByText('late row'), {
+      interval: 50,
+    });
+    assert.ok(row.abs.width > 0, 'waitFor resolved with a row not laid out');
+    await userEvent.click(row);
+    assert.deepStrictEqual(picked, ['late row']);
+  });
+
+  test('when it committed before the first attempt', async () => {
+    const { feed, picked } = await mount();
+    // The test resumes inside the task that committed the row, ahead of the
+    // frame that commit asked for, so the first attempt finds it unlaid —
+    // with no slow clock needed. An app's read that finished while the test
+    // was busy elsewhere is the same state.
+    await feed.deliverIn(5, ['late row']);
+    const row = await waitFor(() => screen.getByText('late row'));
+    assert.ok(row.abs.width > 0, 'waitFor resolved with a row not laid out');
+    await userEvent.click(row);
+    assert.deepStrictEqual(picked, ['late row']);
+  });
+
+  test('findBy* is getBy* under waitFor, so it holds there too', async () => {
+    const { feed, picked } = await mount({ frameRate: 2 });
+    feed.deliverIn(20, ['late row']);
+    const row = await screen.findByText('late row', { interval: 50 });
+    assert.ok(row.abs.width > 0, 'findByText resolved with a row not laid out');
+    await userEvent.click(row);
+    assert.deepStrictEqual(picked, ['late row']);
+  });
+});
+
 test("the 'mock' backend needs no server, and says so if you inject", async () => {
   const { app, server, getByText } = await renderX11(
     h('box', { style: { flexGrow: 1 } }, h('text', null, 'headless')),

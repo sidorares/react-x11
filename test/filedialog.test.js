@@ -870,13 +870,11 @@ async function settle() {
  * is fs work no fixed wait bounds: on a loaded CI runner, the listing a
  * double click asked for arrived after `settle()`'s 60 ms.
  *
- * The `act()` is for the click that tends to come next: `waitFor` can return
- * between the commit that lists a row and the frame that lays it out, and a
- * click needs the row's rect. And a name a test expects to be *missing* is
- * checked after waiting for one that is there, because a folder not yet read
- * lists nothing either.
+ * `waitFor` resolves once the frame that lays the listing out has run, so the
+ * click that tends to come next has the row's rect to land on. And a name a
+ * test expects to be *missing* is checked after waiting for one that is
+ * there, because a folder not yet read lists nothing either.
  */
 async function listed(check) {
   await waitFor(check);
-  await act();
 }
