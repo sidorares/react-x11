@@ -573,6 +573,133 @@ describe('what waitFor and findBy* resolve with is laid out', () => {
   });
 });
 
+// **A pointer event at a node with no rect says why it has none.** A node
+// layout has not reached yet is fixed by `await act()`, and only that one: a
+// node laid out at 0×0, one under `display: 'none'` or hidden by React, a
+// span with no box of its own and one that has unmounted keep no rect
+// through any number of frames. Each of those used to be told to run one.
+describe('a pointer event at a node with no rect says why', () => {
+  // A <window> of the test's own, so `root.render` can commit an update with
+  // no frame after it: React commits synchronously, and layout runs on the
+  // window's clock. A commit from outside act() leaves the same state.
+  const inWindow = (...children) =>
+    h(
+      'window',
+      { width: 200, height: 100 },
+      h('box', { style: { flexGrow: 1 } }, ...children),
+    );
+  const sized = (name, width, height) =>
+    h('box', { 'data-testname': name, style: { width, height } });
+  const NOT_YET =
+    /<box> has no laid-out rect yet\. Layout runs on the frame clock, so `await act\(\)` before pointing at it\./;
+
+  test('one no frame has laid out yet is told to await act()', async () => {
+    const { root } = await renderX11(inWindow());
+    root.render(inWindow(sized('late', 40, 20)));
+    const late = screen.getByTestName('late');
+    assert.throws(() => fireEvent.click(late), NOT_YET);
+    await act();
+    assert.ok(late.abs.width > 0, 'act() laid it out');
+    assert.doesNotThrow(() => fireEvent.click(late));
+  });
+
+  test('one laid out at 0×0 is told that a frame will not help', async () => {
+    const { root } = await renderX11(inWindow(sized('empty', 0, 0)));
+    const empty = screen.getByTestName('empty');
+    const ZERO =
+      /<box data-testname="empty"> was laid out at 0×0, so there is nothing on screen to point at\. Layout has run since it last changed, so `await act\(\)` will not give it a size: give it one/;
+    assert.throws(() => fireEvent.click(empty), ZERO);
+    await act();
+    assert.throws(() => fireEvent.click(empty), ZERO, 'nor does a frame');
+    // …until it is given a size, which layout owes it until the next frame
+    root.render(inWindow(sized('empty', 40, 20)));
+    assert.throws(() => fireEvent.click(empty), NOT_YET);
+    await act();
+    assert.doesNotThrow(() => fireEvent.click(empty));
+  });
+
+  test("one under display: 'none' is told which node hides it", async () => {
+    await renderX11(
+      h(
+        'box',
+        { style: { flexGrow: 1 } },
+        h('box', {
+          'data-testname': 'hidden',
+          style: { display: 'none', width: 40, height: 20 },
+        }),
+        // a hidden <box> places none of its children, so this one has never
+        // been laid out, and no frame will lay it out
+        h(
+          'box',
+          { 'data-testname': 'panel', style: { display: 'none' } },
+          sized('inside', 40, 20),
+        ),
+      ),
+    );
+    await act();
+    assert.throws(
+      () => fireEvent.click(screen.getByTestName('hidden')),
+      /<box data-testname="hidden"> has `display: 'none'`, so layout gives it no rect and there is nothing on screen to point at; `await act\(\)` will not change that\. Show it before pointing at it\./,
+    );
+    assert.throws(
+      () => fireEvent.click(screen.getByTestName('inside')),
+      /<box data-testname="inside"> is inside <box data-testname="panel">, which has `display: 'none'`, so layout gives it no rect.* Show that before pointing at anything inside it\./,
+    );
+  });
+
+  test('one React has hidden says so, in an <Activity> or a <Suspense>', async () => {
+    await renderX11(
+      h(
+        React.Activity,
+        { mode: 'hidden' },
+        h(
+          'box',
+          { 'data-testname': 'tab', style: { width: 40, height: 20 } },
+          sized('field', 20, 10),
+        ),
+      ),
+    );
+    assert.throws(
+      () => fireEvent.click(screen.getByTestName('tab')),
+      /<box data-testname="tab"> is hidden by React, in an `<Activity mode="hidden">` or a `<Suspense>` showing its fallback, so layout gives it no rect/,
+    );
+    assert.throws(
+      () => fireEvent.click(screen.getByTestName('field')),
+      /<box data-testname="field"> is inside <box data-testname="tab">, which React has hidden/,
+    );
+  });
+
+  test('a span has no box of its own, and an unmounted node is nowhere', async () => {
+    const { root } = await renderX11(
+      inWindow(
+        h(
+          'text',
+          null,
+          'Hello ',
+          h(
+            'text',
+            { 'data-testname': 'span', style: { color: '#c0392b' } },
+            'world',
+          ),
+        ),
+      ),
+      { fonts },
+    );
+    assert.throws(
+      () => fireEvent.click(screen.getByTestName('span')),
+      /<text data-testname="span"> "world" has no box of its own: it is laid out as part of <text> "Hello world", so there is no rect to point at\. Point at that instead/,
+    );
+    // mounted and gone again before a frame laid it out
+    root.render(inWindow(sized('gone', 40, 20)));
+    const gone = screen.getByTestName('gone');
+    root.render(inWindow());
+    assert.throws(
+      () => fireEvent.click(gone),
+      /<box data-testname="gone"> has unmounted, so it is nowhere on screen to point at\./,
+    );
+  });
+});
+
 test("the 'mock' backend needs no server, and says so if you inject", async () => {
   const { app, server, getByText } = await renderX11(
     h('box', { style: { flexGrow: 1 } }, h('text', null, 'headless')),
