@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.45.2](https://github.com/sidorares/react-x11/compare/v2.45.1...v2.45.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **testing:** a pointer event at a node with no rect says why, and only a node no frame has laid out yet is told to await act, where one laid out at 0×0, hidden or unmounted was told the same ([#908](https://github.com/sidorares/react-x11/issues/908)) ([2310e66](https://github.com/sidorares/react-x11/commit/2310e6664c8dbba2b64c04a4acc3ace02009a677))
+* **testing:** a pointer event at an unmounted or hidden node throws whatever rect it kept, where it landed on whatever is at that rect now, and mouseUp and mouseLeave aim at nothing ([#911](https://github.com/sidorares/react-x11/issues/911)) ([2ecd40f](https://github.com/sidorares/react-x11/commit/2ecd40faafc5e116eb9484d117349a081ac6655b))
+* **testing:** settle resolves on a connection that has gone, so act, waitFor and cleanup no longer reject after app.close or hang after the server drops the client ([#909](https://github.com/sidorares/react-x11/issues/909)) ([ebcc52b](https://github.com/sidorares/react-x11/commit/ebcc52b4c89ac1f2852fcd659336b1650c877591))
+
 ## [2.45.1](https://github.com/sidorares/react-x11/compare/v2.45.0...v2.45.1) (2026-10-06)
 
 
