@@ -1873,8 +1873,8 @@ one by hand against `$DISPLAY` before believing a protocol path.
 - When a PR contains changes that can be detected by eye (rendering,
   widgets, layout), include screenshots **rendered by the PR's own code**
   in the PR description. Headless recipe: render into node-x11's
-  in-process X server, read back with `getImageData` (BGRA byte order),
-  save with `pngjs`.
+  in-process X server, read back with `getImageData` (straight RGBA, as on
+  a canvas), save with `pngjs`.
 - **Do not commit PR-illustration images to the repo.** Upload them as PR
   attachments instead — GitHub's user-attachments storage, the same one
   used when pasting or drag-&-dropping an image into the PR description.
