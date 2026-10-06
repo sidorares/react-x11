@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.45.1](https://github.com/sidorares/react-x11/compare/v2.45.0...v2.45.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **glarea:** a surface follows the subtree that holds it off the screen, and the cocoa layer gains the unmap its map never had ([#905](https://github.com/sidorares/react-x11/issues/905)) ([397e4ed](https://github.com/sidorares/react-x11/commit/397e4ed178e99c105a770466dfbf7265cecf893e))
+* **testing:** waitFor and findBy* run the frame after the attempt that passes, so a node they resolve with has its rect and a click on it lands, where one that arrived between two attempts could throw "has no laid-out rect yet" ([#906](https://github.com/sidorares/react-x11/issues/906)) ([9d159de](https://github.com/sidorares/react-x11/commit/9d159dedc1f8d60888df7e834cd5118fe600967f))
+
 ## [2.45.0](https://github.com/sidorares/react-x11/compare/v2.44.1...v2.45.0) (2026-10-05)
 
 
