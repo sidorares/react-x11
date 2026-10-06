@@ -488,18 +488,21 @@ export class ForeignNode extends Node {
     wnd.setBackgroundPixel(pixel);
   }
 
-  setHidden(hidden) {
-    super.setHidden(hidden);
+  /** The client's window is a window of the display system over this one,
+   *  so it follows the whole subtree's visibility — see
+   *  `GlAreaNode._syncSurfaceVisibility`, which answers the same call. */
+  _syncSurfaceVisibility() {
     this._syncMapped();
   }
 
-  /** The container follows `hidden`; the client follows the container,
-   * because an inferior of an unmapped window is not viewable however
-   * mapped it is itself. */
+  /** The container follows whether this subtree is on screen — this node's
+   * own `hidden` flag, or anything above it that took the subtree away; the
+   * client follows the container, because an inferior of an unmapped window
+   * is not viewable however mapped it is itself. */
   _syncMapped() {
     const wnd = this.socket?.window;
     if (!wnd) return;
-    if (this.hidden) wnd.unmap?.();
+    if (this._hiddenInTree()) wnd.unmap?.();
     else wnd.map?.();
   }
 

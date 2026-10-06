@@ -854,3 +854,128 @@ test('a <glarea> paces its frames by the window it is in, or by its own frameRat
     await app.close();
   }
 });
+
+// A surface is a window of the display system stacked over everything the
+// owning window paints, so hiding the subtree it is in has to take it with
+// them: a tab bar that keeps its screens mounted and shows one at a time
+// otherwise leaves the GL surface over whatever the user switched to. The
+// surface sits two levels under the box that hides, because the node React
+// or the style hides is rarely the surface itself.
+const IS_UNMAPPED = 0;
+const IS_VIEWABLE = 2;
+
+const mapStateOf = async (app, area) =>
+  (await getAttributes(app, area.window.id)).mapState;
+
+test("a surface in a subtree hidden by display: 'none' is unmapped", async () => {
+  const { app, xErrors } = await createGlApp();
+  const x11Root = await createRoot({ app });
+  const areaRef = React.createRef();
+  const scene = (hidden) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(
+        'box',
+        { style: { flexGrow: 1, display: hidden ? 'none' : 'flex' } },
+        h(
+          'box',
+          { style: { flexGrow: 1 } },
+          h('glarea', {
+            key: 'gl',
+            ref: areaRef,
+            onDraw: () => {},
+            style: { flexGrow: 1 },
+          }),
+        ),
+      ),
+    );
+  try {
+    await render(scene(false), x11Root);
+    const area = areaRef.current;
+    await waitFor(() => area.window != null, 'the surface');
+    await settle(app);
+    assert.equal(
+      await mapStateOf(app, area),
+      IS_VIEWABLE,
+      'mapped to begin with',
+    );
+
+    await render(scene(true), x11Root);
+    await settle(app);
+    assert.equal(
+      await mapStateOf(app, area),
+      IS_UNMAPPED,
+      'unmapped while the subtree above it is hidden',
+    );
+
+    await render(scene(false), x11Root);
+    await settle(app);
+    assert.equal(
+      await mapStateOf(app, area),
+      IS_VIEWABLE,
+      'and mapped again when the subtree comes back',
+    );
+    assert.equal(xErrors.length, 0, xErrors.map((e) => e.message).join(', '));
+  } finally {
+    await x11Root.unmount();
+    await app.close();
+  }
+});
+
+test('a surface under a hidden <Activity> is unmapped with it', async () => {
+  // The other route to the same state: React's own hidden flag, set on the
+  // boundary's host nodes rather than on the surface.
+  const { app } = await createGlApp();
+  const x11Root = await createRoot({ app });
+  const areaRef = React.createRef();
+  const scene = (mode) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(
+        React.Activity,
+        { mode },
+        h(
+          'box',
+          { style: { flexGrow: 1 } },
+          h('glarea', {
+            key: 'gl',
+            ref: areaRef,
+            onDraw: () => {},
+            style: { flexGrow: 1 },
+          }),
+        ),
+      ),
+    );
+  try {
+    await render(scene('visible'), x11Root);
+    const area = areaRef.current;
+    await waitFor(() => area.window != null, 'the surface');
+    await settle(app);
+    assert.equal(
+      await mapStateOf(app, area),
+      IS_VIEWABLE,
+      'mapped while visible',
+    );
+
+    await render(scene('hidden'), x11Root);
+    await settle(app);
+    assert.equal(
+      await mapStateOf(app, area),
+      IS_UNMAPPED,
+      'unmapped while the activity is hidden',
+    );
+
+    await render(scene('visible'), x11Root);
+    await settle(app);
+    assert.equal(
+      await mapStateOf(app, area),
+      IS_VIEWABLE,
+      'and mapped again when it comes back',
+    );
+  } finally {
+    await x11Root.unmount();
+    await app.close();
+  }
+});

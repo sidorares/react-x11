@@ -11,7 +11,7 @@
 // What GlAreaNode needs from us is the child-"window" contract it already
 // speaks (src/glnodes.js): `createWindow({ parent, … })` answering an
 // object with `getContext('opengl', config)`, `setState(rect)`, `map()`,
-// `destroy()`, `requestAnimationFrame`. On X11 that child is a real X
+// `unmap()`, `destroy()`, `requestAnimationFrame`. On X11 that child is a real X
 // window stacked above the parent's drawing; here it is a sublayer of the
 // window's root layer with a high zPosition — the same "GL sits above the
 // 2D" semantics, by the same mechanism the platform gives us. The layer
@@ -153,6 +153,9 @@ export class CocoaGLArea {
       return layer;
     });
     this.rect = null;
+    // Ours to keep, because every `setState` writes the layer's whole prop
+    // set: a geometry change on a hidden surface must not show it again.
+    this._hidden = false;
     this.setState({
       x: options.x ?? 0,
       y: options.y ?? 0,
@@ -178,7 +181,7 @@ export class CocoaGLArea {
       // mirroring the layer is the flip, applied where the compositor is
       // already transforming instead of in anyone's shader.
       transform: { scaleY: -1 },
-      hidden: false,
+      hidden: this._hidden,
     });
     this._context?._resized(rect.width, rect.height);
   }
@@ -200,7 +203,20 @@ export class CocoaGLArea {
   }
 
   map() {
+    this._hidden = false;
     if (!this.destroyed) this._setLayerProps({ hidden: false });
+  }
+
+  /**
+   * The other half of `map()`, which this surface went without: a layer is
+   * composited by the WindowServer rather than painted by the window, so a
+   * subtree going off the screen leaves it on screen over what replaced it.
+   * X11 and Wayland unmap the surface's window for this; here the layer's
+   * own `hidden` carries it.
+   */
+  unmap() {
+    this._hidden = true;
+    if (!this.destroyed) this._setLayerProps({ hidden: true });
   }
 
   /**
