@@ -56,21 +56,82 @@ const DEFAULT_SCREEN = { width: 1280, height: 800 };
  * cheapest request with a reply, and its reply cannot arrive before every
  * request queued ahead of it has been processed — which is what makes it a
  * barrier rather than a sleep.
+ *
+ * **On a connection that is going, it resolves at once.** Nothing there will
+ * be answered, and a test that ends its connection still has `act()`,
+ * `waitFor` and `cleanup()` to get through — the last from an `afterEach`.
+ * node-x11 reports the two ways a connection goes very differently:
+ *
+ * - **The app closed it.** From the moment `close()` begins, every request
+ *   throws `client is in closing state` — synchronously, which inside the
+ *   promise below is a rejection.
+ * - **The server ended it** — it exited, or killed the client. All node-x11
+ *   says is an `end` event: it goes on taking requests and never answers
+ *   them, or anything that was in flight, so the round trip waits forever.
+ *   That is the route a test of `onDisconnect` has to take: over the
+ *   in-process stream pair, a client that closed its own connection never
+ *   hears it end.
  */
 export function settle(app, roundTrips = 2) {
   const X = app?.X;
   if (typeof X?.GetInputFocus !== 'function') return Promise.resolve();
+  // renderX11 settles as it mounts, so its connection is watched before a
+  // test can end it
+  const watch = watchEnd(X);
   let chain = Promise.resolve();
   for (let i = 0; i < roundTrips; i++) {
     chain = chain.then(
       () =>
         new Promise((resolve) => {
-          // resolve either way: a closing connection must not hang a test
-          X.GetInputFocus(() => resolve());
+          if (connectionGone(X)) return resolve();
+          const done = () => {
+            watch.waiting.delete(done);
+            resolve();
+          };
+          watch.waiting.add(done);
+          try {
+            X.GetInputFocus(done);
+          } catch {
+            // refused by a rule the check above does not know: whatever the
+            // reason, a request that never went out has nothing to drain
+            done();
+          }
         }),
     );
   }
   return chain;
+}
+
+// Each connection settle() has met: whether the server has ended it, and the
+// round trips waiting on it, which the end has to answer since no reply will.
+const watched = new WeakMap();
+
+function watchEnd(X) {
+  let watch = watched.get(X);
+  if (!watch) {
+    watch = { ended: false, waiting: new Set() };
+    watched.set(X, watch);
+    X.once?.('end', () => {
+      watch.ended = true;
+      for (const done of watch.waiting) done();
+    });
+  }
+  return watch;
+}
+
+/**
+ * Whether a request on this connection would go unanswered: the app began
+ * closing it, or its stream has ended — the test ntk makes before releasing
+ * anything (`connectionGone`, ntk's lib/cleanup.js) — or the server ended
+ * it, which only the `end` event says.
+ */
+function connectionGone(X) {
+  return Boolean(
+    X?._closing ||
+    X?.stream?.destroyed ||
+    X?.stream?.writableEnded ||
+    watched.get(X)?.ended,
+  );
 }
 
 async function createXServerApp({ screen, fonts }) {
@@ -340,7 +401,15 @@ export async function act(fn, only = null) {
   for (const entry of entries) await settle(entry.app);
 }
 
-/** Run the frame the scheduler would have run, for every window in a root. */
+/**
+ * Run the frame the scheduler would have run, for every window in a root.
+ *
+ * Not skipped on a connection that has gone. The harm a frame can do there
+ * is to throw, which it would only once the app is closing, and the frame
+ * declines on such a connection before it sends a thing (`_flushFrame`); on
+ * one the server ended, its requests are taken and go nowhere. A check here
+ * would be a second copy of the frame's own.
+ */
 function flushFrames(entry) {
   for (const node of windowNodesOf(entry.windowNode)) {
     if (!node.window) continue;
@@ -359,12 +428,17 @@ async function unmountEntry(entry) {
   // before the unmount, so the teardown's own hook traffic is not recorded
   entry.at?.uninstall();
   try {
-    entry.root.unmount?.();
+    // awaited, or the catch is never reached: unmount is async
+    await entry.root.unmount?.();
   } catch {
     // a root whose connection already died: nothing left to unmount
   }
   await settle(entry.app);
-  if (entry.ownsApp) {
+  // A connection that is already going is not closed again. close() begins
+  // with a round trip, which one the test closed refuses by throwing, and
+  // which one whose stream has ended — the server's doing, or a dispose —
+  // never answers, hanging the teardown
+  if (entry.ownsApp && !connectionGone(entry.app.X)) {
     try {
       await entry.app.close?.();
     } catch {

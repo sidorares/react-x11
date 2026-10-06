@@ -343,7 +343,11 @@ export function cleanup(): Promise<void>;
  */
 export function setAppearance(values: PinnedAppearance): Promise<void>;
 
-/** Drain in-flight requests on a connection. */
+/**
+ * Drain in-flight requests on a connection. On one that has gone — closed by
+ * the app, or ended by the server — it resolves at once, since nothing there
+ * will be answered.
+ */
 export function settle(app: NtkApp, roundTrips?: number): Promise<void>;
 
 /**
