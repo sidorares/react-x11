@@ -67,12 +67,23 @@ export function roleOf(node) {
 }
 
 /** A node the way an error names it: its kind, its `data-testname` and the
- * start of its text — what a test author can find it by. */
+ * start of its text — what a test author can find it by. A `<popup>` is a
+ * window to the renderer, and is named as the element it was written as.
+ * The text is read whether or not the node is still mounted, unlike
+ * `textOf`'s: one that has unmounted presents nothing now, and is named by
+ * what it said. A mounted node holds no unmounted child, so for one of those
+ * the two read the same. */
 export function describeNode(node) {
-  const text = textOf(node).trim();
+  let text = '';
+  (function read(n) {
+    if (typeof n.text === 'string') text += n.text;
+    for (const child of n.children ?? []) read(child);
+  })(node);
+  text = text.trim();
   const name = node.props?.['data-testname'];
+  const tag = node.isPopup ? 'popup' : node.kind;
   return (
-    `<${node.kind}${name ? ` data-testname="${name}"` : ''}>` +
+    `<${tag}${name ? ` data-testname="${name}"` : ''}>` +
     (text ? ` ${JSON.stringify(text.slice(0, 40))}` : '')
   );
 }

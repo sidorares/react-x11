@@ -23,15 +23,23 @@ function rootWindow(node) {
   return node?.isWindow ? node : (node?.root ?? null);
 }
 
+const NOT_IN_A_WINDOW =
+  'react-x11/test: the target is not inside a realized window — did you ' +
+  'await renderX11(), or has it unmounted?';
+
 /** A node's centre in **screen** coordinates, which is what injection takes. */
 export function screenPointOf(node, { dx = 0, dy = 0 } = {}) {
   const win = rootWindow(node);
-  if (!win?.window) {
-    throw new Error(
-      'react-x11/test: the target is not inside a realized window — did you ' +
-        'await renderX11(), or has it unmounted?',
-    );
+  // Asked before the rect, which neither kind of node gives up: one that
+  // has unmounted, or that something hides, keeps the rect it was last laid
+  // out at, and what is at that spot now is whatever was behind it. The hit
+  // test passes over a hidden node, and an unmounted one is in no tree, so
+  // a pointer aimed there could only reach something else, and nothing
+  // would say so.
+  if (node?.destroyed || hiddenBy(node)) {
+    throw new Error(noRectMessage(node, win));
   }
+  if (!win?.window) throw new Error(NOT_IN_A_WINDOW);
   const origin = win.window._screenOrigin ?? {
     x: win.window.x ?? 0,
     y: win.window.y ?? 0,
@@ -61,9 +69,14 @@ export function screenPointOf(node, { dx = 0, dy = 0 } = {}) {
  * placed at 0×0. Asked in this order:
  *
  * - it has unmounted;
- * - it is hidden, by its own `display: 'none'` or an ancestor's, or by
- *   React. That comes before asking whether layout reached it, because a
- *   `<box>` with `display: 'none'` never places its children at all;
+ * - it is hidden: by its own `display: 'none'` or an ancestor's, by React,
+ *   or in a window kept unmapped by `hidden` or by React. That comes before
+ *   asking whether layout reached it, because a `<box>` with
+ *   `display: 'none'` never places its children at all.
+ *
+ *   These first two are asked whatever the node's rect: `screenPointOf`
+ *   comes here for them before it looks, since the rect such a node keeps
+ *   is where it was, not where anything is;
  * - it has no box of its own: a span, an SVG shape;
  * - layout has not placed it yet (`_placed`), or the window owes a pass
  *   (`needsLayout`) that may still give it a size. A pending frame is no
@@ -81,16 +94,20 @@ function noRectMessage(node, win) {
   const hider = hiddenBy(node);
   if (hider) {
     const self = hider === node;
+    const has = self ? 'has' : 'which has';
     const how =
-      hider.style?.display === 'none'
-        ? `${self ? 'has' : 'which has'} \`display: 'none'\``
-        : `${self ? 'is hidden by React' : 'which React has hidden'}, in an ` +
-          '`<Activity mode="hidden">` or a `<Suspense>` showing its fallback';
+      hider.isWindow && hider.props.hidden
+        ? `${has} \`hidden\``
+        : hider.style?.display === 'none'
+          ? `${has} \`display: 'none'\``
+          : `${self ? 'is hidden by React' : 'which React has hidden'}, in ` +
+            'an `<Activity mode="hidden">` or a `<Suspense>` showing its ' +
+            'fallback';
     return (
       `react-x11/test: ${name} ` +
       (self ? how : `is inside ${describeNode(hider)}, ${how}`) +
-      ', so layout gives it no rect and there is nothing on screen to point ' +
-      'at; `await act()` will not change that. ' +
+      ', so there is nothing on screen to point at, and `await act()` will ' +
+      'not change that. ' +
       (self
         ? 'Show it before pointing at it.'
         : 'Show that before pointing at anything inside it.')
@@ -123,17 +140,23 @@ function noRectMessage(node, win) {
 }
 
 /** The node that takes `node` off the screen — itself or the nearest
- * ancestor in its window with `display: 'none'`, or hidden by React — or
- * null when nothing does. */
+ * ancestor with `display: 'none'` or hidden by React, up to and including
+ * its window, which a `hidden` prop or React keeps unmapped — or null when
+ * nothing does. The same walk as the renderer's `_hiddenInTree`. */
 function hiddenBy(node) {
-  for (let n = node; n && !n.isWindow; n = n.parent) {
+  for (let n = node; n; n = n.parent) {
     if (n.hidden || n.style?.display === 'none') return n;
+    if (n.isWindow) break;
   }
   return null;
 }
 
 function serverOf(node) {
-  const server = rootWindow(node)?.app?._reactX11TestServer;
+  // what a target that is no node at all — a `queryBy*` that found nothing —
+  // is told by `screenPointOf`, for the calls that never ask it
+  const win = rootWindow(node);
+  if (!win) throw new Error(NOT_IN_A_WINDOW);
+  const server = win.app?._reactX11TestServer;
   if (!server) {
     throw new Error(
       'react-x11/test: fireEvent needs the in-process X server, so it needs a ' +
@@ -218,10 +241,13 @@ export const fireEvent = {
     fireEvent.mouseMove(node, options);
   },
 
-  /** Move the pointer off the node, which is what produces a leave. */
-  mouseLeave(node, options = {}) {
-    const { server } = screenPointOf(node, options);
-    server.injectPointerMove(0, 0);
+  /**
+   * Move the pointer off the node, to the screen's origin, which is what
+   * produces a leave. Nothing is aimed at, so the node may since have been
+   * hidden or unmounted: it only names the connection.
+   */
+  mouseLeave(node) {
+    serverOf(node).injectPointerMove(0, 0);
   },
 
   mouseDown(node, options = {}) {
@@ -233,9 +259,13 @@ export const fireEvent = {
     for (const kc of modifiers.reverse()) server.injectKey(kc, false);
   },
 
+  /**
+   * Release the button wherever the pointer is — a `mouseMove` first puts
+   * it somewhere else. The node only names the connection, so it may be one
+   * the press hid or unmounted: the gesture can still end.
+   */
   mouseUp(node, options = {}) {
-    const { server } = screenPointOf(node, options);
-    server.injectButton(options.button ?? 1, false);
+    serverOf(node).injectButton(options.button ?? 1, false);
   },
 
   /** Press and release — the renderer synthesises the click from the pair. */
