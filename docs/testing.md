@@ -264,12 +264,25 @@ however many frames run, and the error says what to do instead:
 - laid out at 0×0: give it a size, or point at an ancestor or a child that
   has one. When the size is content still arriving, such as an image that
   is loading, `waitFor` it;
-- `display: 'none'`, on the node or on an ancestor, or hidden by React in an
-  `<Activity mode="hidden">` or a `<Suspense>` showing its fallback: show it
-  first;
+- `display: 'none'`, on the node or on an ancestor, hidden by React in an
+  `<Activity mode="hidden">` or a `<Suspense>` showing its fallback, or in a
+  `<window hidden>` or a `<popup hidden>`: show it first;
 - a nested `<text>` or an SVG shape, laid out as part of its paragraph or its
   `<svg>`: point at that, with `{ dx, dy }`;
 - unmounted: query for whatever replaced it.
+
+A hidden or unmounted node throws even where it still has a rect. It keeps
+the one it was last laid out at, and what is there now is whatever was
+behind it: a button in a tab that was hidden sits exactly where the shown
+tab's button is, and a click aimed at it would land on that one.
+
+`mouseUp` and `mouseLeave`, and so `userEvent.unhover`, aim at nothing, so
+the node they are handed only names the connection and can be one the press
+or the hover took away. A release lets go wherever the pointer is, so move
+it first to release somewhere else. A leave moves the pointer to the
+screen's origin — which under `renderX11`, with no window manager to place
+the window, is the window's own top-left corner, so a node there is not
+left.
 
 ## What a screen reader would hear
 

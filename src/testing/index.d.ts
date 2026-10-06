@@ -465,8 +465,14 @@ export interface KeyOptions {
 export const fireEvent: {
   mouseMove(node: DrawnNode, options?: PointerOptions): void;
   mouseEnter(node: DrawnNode, options?: PointerOptions): void;
+  /** Move the pointer to the screen's origin, which is a leave. Aims at
+   *  nothing: `node` only names the connection, and may since have been
+   *  hidden or unmounted. */
   mouseLeave(node: DrawnNode, options?: PointerOptions): void;
   mouseDown(node: DrawnNode, options?: PointerOptions): void;
+  /** Release `button` wherever the pointer is — move it first to release
+   *  somewhere else. Aims at nothing: `node` only names the connection, and
+   *  may be one the press hid or unmounted. */
   mouseUp(node: DrawnNode, options?: PointerOptions): void;
   click(node: DrawnNode, options?: PointerOptions): void;
   doubleClick(node: DrawnNode, options?: PointerOptions): void;
@@ -495,6 +501,7 @@ export const userEvent: {
   click(node: DrawnNode, options?: PointerOptions): Promise<void>;
   doubleClick(node: DrawnNode, options?: PointerOptions): Promise<void>;
   hover(node: DrawnNode, options?: PointerOptions): Promise<void>;
+  /** `fireEvent.mouseLeave`, flushed: aims at nothing. */
   unhover(node: DrawnNode, options?: PointerOptions): Promise<void>;
   /** A scroll in notches; `smooth` takes fractions of one, as a touchpad
    *  measures them. */
@@ -523,8 +530,9 @@ export const userEvent: {
 
 /**
  * A node's centre in screen coordinates. Throws, saying why, for a node
- * with no rect: not laid out yet, laid out at 0×0, hidden, laid out as part
- * of another node, or unmounted.
+ * with no rect: not laid out yet, laid out at 0×0, or laid out as part of
+ * another node — and for one that is hidden or has unmounted, whatever rect
+ * it kept, which is where it was and not where anything is.
  */
 export function screenPointOf(
   node: DrawnNode,

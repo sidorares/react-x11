@@ -21,6 +21,7 @@ import {
   within,
   fireEvent,
   userEvent,
+  screenPointOf,
   pixelAt,
   expectPixel,
   settle,
@@ -640,11 +641,11 @@ describe('a pointer event at a node with no rect says why', () => {
     await act();
     assert.throws(
       () => fireEvent.click(screen.getByTestName('hidden')),
-      /<box data-testname="hidden"> has `display: 'none'`, so layout gives it no rect and there is nothing on screen to point at; `await act\(\)` will not change that\. Show it before pointing at it\./,
+      /<box data-testname="hidden"> has `display: 'none'`, so there is nothing on screen to point at, and `await act\(\)` will not change that\. Show it before pointing at it\./,
     );
     assert.throws(
       () => fireEvent.click(screen.getByTestName('inside')),
-      /<box data-testname="inside"> is inside <box data-testname="panel">, which has `display: 'none'`, so layout gives it no rect.* Show that before pointing at anything inside it\./,
+      /<box data-testname="inside"> is inside <box data-testname="panel">, which has `display: 'none'`, so there is nothing on screen to point at.* Show that before pointing at anything inside it\./,
     );
   });
 
@@ -662,7 +663,7 @@ describe('a pointer event at a node with no rect says why', () => {
     );
     assert.throws(
       () => fireEvent.click(screen.getByTestName('tab')),
-      /<box data-testname="tab"> is hidden by React, in an `<Activity mode="hidden">` or a `<Suspense>` showing its fallback, so layout gives it no rect/,
+      /<box data-testname="tab"> is hidden by React, in an `<Activity mode="hidden">` or a `<Suspense>` showing its fallback, so there is nothing on screen to point at/,
     );
     assert.throws(
       () => fireEvent.click(screen.getByTestName('field')),
@@ -698,6 +699,242 @@ describe('a pointer event at a node with no rect says why', () => {
       () => fireEvent.click(gone),
       /<box data-testname="gone"> has unmounted, so it is nowhere on screen to point at\./,
     );
+  });
+});
+
+// **A node that has unmounted, or that something hides, keeps the rect it
+// had**, and what is at that spot now is whatever was behind it. A pointer
+// event aimed there reached that instead, and nothing said so: a click on a
+// tab's hidden button landed on the button of the tab shown in its place.
+// Those two are asked before the rect, and refused the way a node with no
+// rect is, in the same words.
+describe('a pointer event at a node gone or hidden is refused, whatever rect it kept', () => {
+  // Two panels in one place, the way tabs that keep their panels mounted
+  // are built: the button in the one hidden keeps its rect, which is now
+  // where the button in the one shown is.
+  const tabs = (shown, clicks) =>
+    h(
+      'window',
+      { width: 200, height: 100 },
+      h(
+        'box',
+        { style: { flexGrow: 1 } },
+        ['first', 'second'].map((name) =>
+          h(
+            'box',
+            {
+              key: name,
+              'data-testname': `${name} panel`,
+              style: { display: name === shown ? 'flex' : 'none', padding: 8 },
+            },
+            h('box', {
+              'data-testname': `${name} button`,
+              style: { width: 60, height: 30 },
+              onClick: () => clicks.push(name),
+            }),
+          ),
+        ),
+      ),
+    );
+
+  test('one inside a box hidden since it was laid out', async () => {
+    const clicks = [];
+    const { root } = await renderX11(tabs('first', clicks));
+    const first = screen.getByTestName('first button');
+    const second = screen.getByTestName('second button');
+    root.render(tabs('second', clicks));
+    await act();
+    // a box with `display: 'none'` never walks its children again
+    assert.deepStrictEqual(
+      { ...first.abs },
+      { ...second.abs },
+      'premise: the hidden button kept its rect, where the shown one is',
+    );
+    assert.throws(
+      () => fireEvent.click(first),
+      /<box data-testname="first button"> is inside <box data-testname="first panel">, which has `display: 'none'`, so there is nothing on screen to point at, and `await act\(\)` will not change that\. Show that before pointing at anything inside it\./,
+    );
+    await act();
+    assert.deepStrictEqual(clicks, [], 'nothing was clicked in its place');
+    await userEvent.click(second);
+    assert.deepStrictEqual(
+      clicks,
+      ['second'],
+      'premise: that one takes clicks',
+    );
+  });
+
+  test("one whose own display: 'none' no frame has laid out yet", async () => {
+    const { root } = await renderX11(tabs('first', []));
+    const panel = screen.getByTestName('first panel');
+    root.render(tabs('second', []));
+    assert.ok(panel.abs.width > 0, 'premise: it still has the rect it had');
+    assert.throws(
+      () => fireEvent.click(panel),
+      /<box data-testname="first panel"> has `display: 'none'`, so there is nothing on screen to point at/,
+    );
+  });
+
+  test('one that has unmounted, and one whose whole tree has', async () => {
+    const clicks = [];
+    const one = (name, label) =>
+      h(
+        'window',
+        { width: 200, height: 100 },
+        h(
+          'box',
+          { style: { flexGrow: 1, padding: 8 } },
+          h(
+            'box',
+            {
+              key: name,
+              'data-testname': name,
+              style: { width: 60, height: 30 },
+              onClick: () => clicks.push(name),
+            },
+            h('text', null, label),
+          ),
+        ),
+      );
+    const { root, unmount } = await renderX11(one('old', 'Save'), { fonts });
+    const old = screen.getByTestName('old');
+    // a new key: the old box unmounts, and its replacement mounts in its place
+    root.render(one('new', 'Saved'));
+    await act();
+    const replacement = screen.getByTestName('new');
+    assert.deepStrictEqual(
+      { ...old.abs },
+      { ...replacement.abs },
+      'premise: the old box kept its rect, where its replacement is',
+    );
+    // named by what it said, which it no longer presents
+    const GONE = (name, text) =>
+      new RegExp(
+        `<box data-testname="${name}"> "${text}" has unmounted, so it is nowhere on screen to point at\\. If something replaced it, query for that instead\\.`,
+      );
+    assert.throws(() => fireEvent.click(old), GONE('old', 'Save'));
+    await act();
+    assert.deepStrictEqual(clicks, [], 'what replaced it was not clicked');
+    // the whole tree, its window with it: the node is still what is named
+    await unmount();
+    assert.throws(() => fireEvent.click(replacement), GONE('new', 'Saved'));
+  });
+
+  test('one in a window kept unmapped, by `hidden` or by React', async () => {
+    const clicks = [];
+    const menu = (hidden, mode = 'visible') =>
+      h(
+        'window',
+        { width: 200, height: 100 },
+        h(
+          'box',
+          { style: { flexGrow: 1 } },
+          h(
+            React.Activity,
+            { mode },
+            h(
+              'popup',
+              {
+                'data-testname': 'menu',
+                x: 20,
+                y: 20,
+                width: 80,
+                height: 40,
+                hidden,
+              },
+              h('box', {
+                'data-testname': 'item',
+                style: { flexGrow: 1 },
+                onClick: () => clicks.push('item'),
+              }),
+            ),
+          ),
+        ),
+      );
+    const { root } = await renderX11(menu(false));
+    const item = screen.getByTestName('item');
+    await userEvent.click(item);
+    assert.deepStrictEqual(clicks, ['item'], 'premise: shown, it takes clicks');
+    // laid out and realized, and not on screen: its rect is real, and the
+    // server has nothing there to deliver to
+    root.render(menu(true));
+    await act();
+    assert.throws(
+      () => fireEvent.click(item),
+      /<box data-testname="item"> is inside <popup data-testname="menu">, which has `hidden`, so there is nothing on screen to point at/,
+    );
+    assert.throws(
+      () => fireEvent.click(screen.getByTestName('menu')),
+      /<popup data-testname="menu"> has `hidden`, so there is nothing on screen to point at, and `await act\(\)` will not change that\. Show it before pointing at it\./,
+    );
+    root.render(menu(false, 'hidden'));
+    await act();
+    assert.throws(
+      () => fireEvent.click(item),
+      /<box data-testname="item"> is inside <popup data-testname="menu">, which React has hidden, in an `<Activity mode="hidden">`/,
+    );
+    await act();
+    assert.deepStrictEqual(clicks, ['item'], 'nothing was clicked through it');
+  });
+});
+
+// **A release and a leave aim at nothing.** `mouseUp` lets go wherever the
+// pointer is and `mouseLeave` takes the pointer away, so the node is only
+// the connection, and neither refuses one that has gone or been hidden
+// since — which is often what the press or the hover did.
+describe('mouseUp and mouseLeave aim at nothing', () => {
+  test('a press that unmounts its node can still be released', async () => {
+    const heard = [];
+    function Once() {
+      const [pressed, setPressed] = React.useState(false);
+      return h(
+        'box',
+        { style: { flexGrow: 1 }, onMouseUp: () => heard.push('up') },
+        pressed
+          ? null
+          : h('box', {
+              'data-testname': 'once',
+              style: { width: 60, height: 30 },
+              onMouseDown: () => setPressed(true),
+            }),
+      );
+    }
+    await renderX11(h(Once));
+    const once = screen.getByTestName('once');
+    fireEvent.mouseDown(once);
+    await act();
+    assert.ok(screen.queryByTestName('once') === null, 'premise: it unmounted');
+    fireEvent.mouseUp(once);
+    await act();
+    assert.deepStrictEqual(heard, ['up'], 'released over what is there now');
+    // what no node at all is told, as the pointer events that aim tell it
+    assert.throws(
+      () => fireEvent.mouseUp(screen.queryByTestName('once')),
+      /the target is not inside a realized window — did you await renderX11\(\), or has it unmounted\?/,
+    );
+  });
+
+  test('a node hidden since it was hovered can still be unhovered', async () => {
+    function Shy() {
+      const [seen, setSeen] = React.useState(false);
+      return h(
+        'box',
+        { style: { flexGrow: 1, padding: 20 } },
+        h('box', {
+          'data-testname': 'shy',
+          style: { width: 60, height: 30, display: seen ? 'none' : 'flex' },
+          onMouseEnter: () => setSeen(true),
+        }),
+      );
+    }
+    await renderX11(h(Shy));
+    const shy = screen.getByTestName('shy');
+    await userEvent.hover(shy);
+    // asked of what a pointer event would aim at, which injects nothing
+    await waitFor(() =>
+      assert.throws(() => screenPointOf(shy), /has `display: 'none'`/),
+    );
+    await userEvent.unhover(shy);
   });
 });
 
