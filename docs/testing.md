@@ -87,8 +87,10 @@ and it needs somewhere to land.
 ## Queries
 
 `getBy*` (exactly one, or throw), `queryBy*` (one or null — the way to
-assert absence), `getAllBy*`, and `findBy*` (retried until it appears).
-Four of each: `ByText`, `ByRole`, `ByTestName`, `ByPlaceholder`.
+assert absence), `getAllBy*`, and `findBy*` — `getBy*` under
+[`waitFor`](#act-and-the-three-clocks), with its options, so it retries until
+the node appears and resolves once it is laid out. Four of each: `ByText`,
+`ByRole`, `ByTestName`, `ByPlaceholder`.
 
 ```js
 getByText(/guestbook/); // substring, case-insensitive
@@ -312,6 +314,19 @@ stays flaky on pixel assertions:
 so waiting also _advances_. Reach for it whenever the thing you are asserting
 arrives through more than one of those stages (a `Button`'s hover is React
 state, so its repaint is an event, a re-render and a frame).
+
+It `act`s once more after the attempt that passes, so what it resolves with
+is on screen. That matters for a node. What an attempt finds can have arrived
+in the pause before it — an fs read, a timer — and that commits outside
+`act`, on React's own scheduler, while the frame that lays it out runs on the
+third clock, which need not have ticked since. Without that last `act`, a
+row found that way could have no rect yet, and the click after it would throw
+`has no laid-out rect yet`.
+
+```js
+const row = await waitFor(() => screen.getByText('notes.txt'));
+await userEvent.click(row); // laid out: waitFor ran the frame
+```
 
 ## Pixels
 

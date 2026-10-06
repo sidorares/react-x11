@@ -163,7 +163,9 @@ async function suite() {
   const _pinned: boolean = useSystemAppearance().source === 'test';
 
   await act(() => {});
-  await waitFor(() => getByRole('button'));
+  // resolves with what the callback returned, laid out, so a click lands
+  const found = await waitFor(() => getByRole('button'));
+  await userEvent.click(found);
   await rerender(<box />);
   await unmount();
   await cleanup();

@@ -12,12 +12,12 @@
 //   getBy*    exactly one, or throw
 //   queryBy*  one or null, never throws — the way to assert absence
 //   getAllBy* one or more, or throw
-//   findBy*   getBy*, retried until it appears or the timeout expires
+//   findBy*   getBy* under waitFor: retried until it appears or the timeout
+//             expires, and laid out by the time it resolves
 
 import { queryAllByComponent, componentInventory } from './components.js';
+import { waitFor } from './harness.js';
 import { roleNameOf } from '../a11y.js';
-
-const DEFAULT_TIMEOUT = 1000;
 
 /** Depth-first, in paint order, including `<popup>` subtrees. */
 function walk(node, visit) {
@@ -95,20 +95,6 @@ function one(root, found, what, printTree = inventory) {
     `react-x11/test: found ${found.length} elements for ${what}, expected one:\n` +
       found.map((n) => `  ${describe(n)}`).join('\n'),
   );
-}
-
-async function retry(fn, { timeout = DEFAULT_TIMEOUT, interval = 20 } = {}) {
-  const deadline = Date.now() + timeout;
-  let last;
-  for (;;) {
-    try {
-      return fn();
-    } catch (err) {
-      last = err;
-      if (Date.now() >= deadline) throw last;
-      await new Promise((r) => setTimeout(r, interval));
-    }
-  }
 }
 
 /**
@@ -199,9 +185,12 @@ export function within(root) {
       if (found.length > 1) return one(root, found, label(args[0]));
       return found[0] ?? null;
     };
+    // Through waitFor rather than a loop of its own: what this resolves with
+    // has to be laid out, or a click on it throws, and waitFor is what runs
+    // the frame before resolving
     q[`find${suffix}`] = (...args) => {
       const options = args.length > 1 ? args[args.length - 1] : undefined;
-      return retry(() => q[`get${suffix}`](...args), options);
+      return waitFor(() => q[`get${suffix}`](...args), options);
     };
   }
   return q;

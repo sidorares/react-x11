@@ -174,6 +174,13 @@ export interface A11ySpy {
   uninstall(): void;
 }
 
+/**
+ * Testing Library's four families over the retained node tree: `getBy*`
+ * (exactly one, or throw), `queryBy*` (one or null), `getAllBy*` (one or
+ * more), and `findBy*` — `getBy*` under {@link waitFor}, with its options and
+ * defaults, so it retries until the node appears and resolves once a frame
+ * has laid it out.
+ */
 export interface Queries {
   getByText(text: string | RegExp, options?: TextMatchOptions): DrawnNode;
   getAllByText(text: string | RegExp, options?: TextMatchOptions): DrawnNode[];
@@ -339,7 +346,16 @@ export function setAppearance(values: PinnedAppearance): Promise<void>;
 /** Drain in-flight requests on a connection. */
 export function settle(app: NtkApp, roundTrips?: number): Promise<void>;
 
-/** Retry until it stops throwing, `act`-ing between attempts. */
+/**
+ * Retry until it stops throwing, `act`-ing between attempts — and once more
+ * after the attempt that passed, so what it resolves with is on screen: a
+ * node it found has been laid out, and a click on it lands.
+ *
+ * ```ts
+ * const row = await waitFor(() => screen.getByText('notes.txt'));
+ * await userEvent.click(row);
+ * ```
+ */
 export function waitFor<T>(
   fn: () => T | Promise<T>,
   options?: WaitOptions,
