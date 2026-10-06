@@ -328,6 +328,31 @@ const row = await waitFor(() => screen.getByText('notes.txt'));
 await userEvent.click(row); // laid out: waitFor ran the frame
 ```
 
+## When the connection ends
+
+`act()`, `waitFor` and `cleanup()` each drain the connection with a round
+trip, and a connection that has gone has nothing left to drain, so there they
+resolve without one. A test can close its app, dispose of it or have the
+server drop it, and still get through its own teardown.
+
+What an app does when its display goes away — `createRoot`'s
+[`onDisconnect`](README.md) — is tested by ending the connection from the
+server's side, the way `xkill` does. An option `renderX11` does not know is
+handed to `createRoot`:
+
+```js
+const seen = [];
+const { app, window } = await renderX11(<App />, {
+  onDisconnect: (reason) => seen.push(reason),
+});
+app.X.KillClient(window.id);
+await act();
+assert.deepEqual(seen, ['closed']);
+```
+
+`app.close()` is not the same test. Over the in-process server, a client that
+closed its own connection never hears it end, so `onDisconnect` never fires.
+
 ## Pixels
 
 ```js

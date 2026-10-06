@@ -23,6 +23,7 @@ import {
   userEvent,
   pixelAt,
   expectPixel,
+  settle,
   waitFor,
   waitForPixel,
   countPixels,
@@ -608,6 +609,87 @@ test('cleanup closes every server, so a suite does not leak them', async () => {
   // a closed connection refuses new work rather than hanging
   assert.strictEqual(a.windowNode.destroyed, true);
   assert.strictEqual(b.windowNode.destroyed, true);
+});
+
+// **A test can end its connection and still finish.** `act()`, `waitFor` and
+// `cleanup()` all drain the connection with a round trip, and the last runs
+// from an afterEach — so a test that ended it, the way a test of
+// `onDisconnect` has to, failed in its teardown: a round trip on a connection
+// the app closed rejected with "client is in closing state", and one on a
+// connection the server ended waited for a reply that never came.
+describe('a connection that has gone', () => {
+  // a step that hangs fails here, by name, rather than at the suite's
+  // timeout a minute later
+  function settles(promise, step) {
+    let timer;
+    const late = new Promise((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`${step} hung`)), 5000);
+    });
+    return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+  }
+
+  async function finish(api) {
+    await settles(act(), 'act()');
+    await settles(
+      waitFor(() => true),
+      'waitFor(), which acts after the attempt that passes',
+    );
+    let attempts = 0;
+    await settles(
+      waitFor(() => assert.ok(++attempts > 1)),
+      'waitFor(), which acts between attempts',
+    );
+    await settles(cleanup(), 'cleanup()');
+    assert.strictEqual(api.windowNode.destroyed, true, 'cleanup unmounted');
+  }
+
+  test('closed by the test', async () => {
+    const api = await renderX11(h('box', { style: { flexGrow: 1 } }));
+    await api.app.close();
+    await finish(api);
+  });
+
+  test('closing, its close still in flight', async () => {
+    const api = await renderX11(h('box', { style: { flexGrow: 1 } }));
+    const closed = api.app.close();
+    // in the task that began the close, so its round trip is not back yet
+    // and the stream is still open
+    await settles(settle(api.app), 'settle()');
+    await finish(api);
+    await closed;
+  });
+
+  test('disposed of, which ends the stream without closing', async () => {
+    const api = await renderX11(h('box', { style: { flexGrow: 1 } }));
+    api.app[Symbol.dispose]();
+    await finish(api);
+  });
+
+  test('ended by the server, the disconnect an app is told of', async () => {
+    const seen = [];
+    const api = await renderX11(h('box', { style: { flexGrow: 1 } }), {
+      onDisconnect: (reason) => seen.push(reason),
+    });
+    // what xkill does: the server drops the client that owns the window, and
+    // answers nothing that client had in flight
+    api.app.X.KillClient(api.window.id);
+    // as docs/testing.md has it: the end has been heard once act() returns
+    await settles(act(), 'act()');
+    assert.deepStrictEqual(seen, ['closed'], 'the connection really ended');
+    await finish(api);
+  });
+
+  test('settle() resolves on a connection that refuses the round trip', async () => {
+    // for a reason settle() does not check for, which it need not know
+    const refusing = {
+      X: {
+        GetInputFocus() {
+          throw new Error('refused');
+        },
+      },
+    };
+    await settles(settle(refusing), 'settle()');
+  });
 });
 
 test('a drag and drop gesture is drivable through the published surface', async () => {
