@@ -15,6 +15,7 @@
 // async and `fireEvent` is not.
 
 import { act } from './harness.js';
+import { describeNode } from './queries.js';
 import { keysymOf, MOD, XK_RETURN } from '../keysyms.js';
 
 /** The window node that owns a drawn node (a node, or a window itself). */
@@ -44,16 +45,91 @@ export function screenPointOf(node, { dx = 0, dy = 0 } = {}) {
   }
   const abs = node.abs;
   if (!abs || (abs.width === 0 && abs.height === 0)) {
-    throw new Error(
-      `react-x11/test: <${node.kind}> has no laid-out rect yet. Layout runs ` +
-        'on the frame clock, so `await act()` before pointing at it.',
-    );
+    throw new Error(noRectMessage(node, win));
   }
   return {
     x: Math.round(origin.x + abs.x + abs.width / 2 + dx),
     y: Math.round(origin.y + abs.y + abs.height / 2 + dy),
     server: serverOf(node),
   };
+}
+
+/**
+ * Why a node has no rect to aim at, worded as what to do about it. Only one
+ * answer is a matter of waiting, and its advice, `await act()`, is wrong for
+ * every other: no frame gives a size to a node that layout has already
+ * placed at 0×0. Asked in this order:
+ *
+ * - it has unmounted;
+ * - it is hidden, by its own `display: 'none'` or an ancestor's, or by
+ *   React. That comes before asking whether layout reached it, because a
+ *   `<box>` with `display: 'none'` never places its children at all;
+ * - it has no box of its own: a span, an SVG shape;
+ * - layout has not placed it yet (`_placed`), or the window owes a pass
+ *   (`needsLayout`) that may still give it a size. A pending frame is no
+ *   witness: a paced window holds one with nothing scheduled;
+ * - layout placed it, at 0×0.
+ */
+function noRectMessage(node, win) {
+  const name = describeNode(node);
+  if (node.destroyed) {
+    return (
+      `react-x11/test: ${name} has unmounted, so it is nowhere on screen to ` +
+      'point at. If something replaced it, query for that instead.'
+    );
+  }
+  const hider = hiddenBy(node);
+  if (hider) {
+    const self = hider === node;
+    const how =
+      hider.style?.display === 'none'
+        ? `${self ? 'has' : 'which has'} \`display: 'none'\``
+        : `${self ? 'is hidden by React' : 'which React has hidden'}, in an ` +
+          '`<Activity mode="hidden">` or a `<Suspense>` showing its fallback';
+    return (
+      `react-x11/test: ${name} ` +
+      (self ? how : `is inside ${describeNode(hider)}, ${how}`) +
+      ', so layout gives it no rect and there is nothing on screen to point ' +
+      'at; `await act()` will not change that. ' +
+      (self
+        ? 'Show it before pointing at it.'
+        : 'Show that before pointing at anything inside it.')
+    );
+  }
+  if (!node.yoga) {
+    let owner = node.parent;
+    while (owner && !owner.yoga) owner = owner.parent;
+    return (
+      `react-x11/test: ${name} has no box of its own: it is laid out as part ` +
+      `of ${owner ? describeNode(owner) : 'its parent'}, so there is no ` +
+      'rect to point at. Point at that instead, with `{ dx, dy }` to reach ' +
+      'a spot inside it.'
+    );
+  }
+  if (!node._placed || win.needsLayout) {
+    return (
+      `react-x11/test: <${node.kind}> has no laid-out rect yet. Layout runs ` +
+      'on the frame clock, so `await act()` before pointing at it.'
+    );
+  }
+  return (
+    `react-x11/test: ${name} was laid out at 0×0, so there is nothing on ` +
+    'screen to point at. Layout has run since it last changed, so ' +
+    '`await act()` will not give it a size: give it one, with `width` and ' +
+    '`height`, `flexGrow` or content to size it, or point at an ancestor ' +
+    'or a child that has one. If its size comes from content still on its ' +
+    'way, such as an image that is loading, wait for that with `waitFor`.'
+  );
+}
+
+/** The node that takes `node` off the screen — itself or the nearest
+ * ancestor in its window with `display: 'none'`, or hidden by React — or
+ * null when nothing does. */
+function hiddenBy(node) {
+  for (let n = node; n && !n.isWindow; n = n.parent) {
+    if (n.hidden || n.style?.display === 'none') return n;
+  }
+  return null;
 }
 
 function serverOf(node) {

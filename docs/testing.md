@@ -256,6 +256,21 @@ payload by reference. A drop from _another application_ needs a second X
 connection playing the foreign source — see
 [drag-and-drop.md](drag-and-drop.md).
 
+**A pointer event aims at a node's rect**, at its centre moved by
+`{ dx, dy }`, so a node with no rect throws and says why. Only a node no
+frame has laid out yet is told to `await act()`. The rest keep no rect
+however many frames run, and the error says what to do instead:
+
+- laid out at 0×0: give it a size, or point at an ancestor or a child that
+  has one. When the size is content still arriving, such as an image that
+  is loading, `waitFor` it;
+- `display: 'none'`, on the node or on an ancestor, or hidden by React in an
+  `<Activity mode="hidden">` or a `<Suspense>` showing its fallback: show it
+  first;
+- a nested `<text>` or an SVG shape, laid out as part of its paragraph or its
+  `<svg>`: point at that, with `{ dx, dy }`;
+- unmounted: query for whatever replaced it.
+
 ## What a screen reader would hear
 
 `renderX11(element, { a11y: true })` adds `at` to the result: the

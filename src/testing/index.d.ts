@@ -517,7 +517,11 @@ export const userEvent: {
   }): Promise<void>;
 };
 
-/** A node's centre in screen coordinates. */
+/**
+ * A node's centre in screen coordinates. Throws, saying why, for a node
+ * with no rect: not laid out yet, laid out at 0×0, hidden, laid out as part
+ * of another node, or unmounted.
+ */
 export function screenPointOf(
   node: DrawnNode,
   options?: { dx?: number; dy?: number },

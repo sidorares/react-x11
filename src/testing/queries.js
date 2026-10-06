@@ -66,7 +66,9 @@ export function roleOf(node) {
   return roleNameOf(node) ?? node.kind;
 }
 
-function describe(node) {
+/** A node the way an error names it: its kind, its `data-testname` and the
+ * start of its text — what a test author can find it by. */
+export function describeNode(node) {
   const text = textOf(node).trim();
   const name = node.props?.['data-testname'];
   return (
@@ -79,7 +81,7 @@ function inventory(root, limit = 12) {
   const lines = [];
   walk(root, (n) => {
     if (n.kind === 'textchunk' || n.kind === 'textspan') return;
-    if (lines.length < limit) lines.push(`  ${describe(n)}`);
+    if (lines.length < limit) lines.push(`  ${describeNode(n)}`);
   });
   return lines.join('\n');
 }
@@ -93,7 +95,7 @@ function one(root, found, what, printTree = inventory) {
   }
   throw new Error(
     `react-x11/test: found ${found.length} elements for ${what}, expected one:\n` +
-      found.map((n) => `  ${describe(n)}`).join('\n'),
+      found.map((n) => `  ${describeNode(n)}`).join('\n'),
   );
 }
 
