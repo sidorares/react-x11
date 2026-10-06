@@ -433,36 +433,24 @@ do this for you (it wants a Buffer and receives a window object; see the
 [register](../ecosystem.md#render-time)), but the pipeline underneath it is
 four lines.
 
-Two impedance notes at the seam. `ctx.getImageData(x, y, w, h, cb)` is
-callback-style and yields an image whose `.data` is **BGRA**, so swap
-channels and set alpha to 255. And pixel readback races the paint: poll a
-known pixel before taking the comparison frame.
+Two impedance notes at the seam. `ctx.getImageData(x, y, w, h)` resolves to a
+canvas `ImageData`, and pixelmatch wants the bytes, not the object: hand it
+`.data`, which is already straight RGBA in a `Uint8ClampedArray`, opaque
+pixels at alpha 255, so there is nothing to swap or fix up. And pixel
+readback races the paint: poll a known pixel before taking the comparison
+frame.
 
 ```jsx
+import fs from 'node:fs';
 import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
 
-const readRGBA = (ctx, w, h) =>
-  new Promise((res, rej) =>
-    ctx.getImageData(0, 0, w, h, (err, image) => {
-      if (err) return rej(err);
-      const out = new Uint8Array(w * h * 4);
-      for (let i = 0; i < out.length; i += 4) {
-        // BGRA -> RGBA
-        out[i] = image.data[i + 2];
-        out[i + 1] = image.data[i + 1];
-        out[i + 2] = image.data[i];
-        out[i + 3] = 255;
-      }
-      res(out);
-    }),
-  );
-
-const before = await readRGBA(wnd.getContext('2d'), 320, 240);
-// ...re-render with the changed prop, wait for the repaint...
-const after = await readRGBA(wnd.getContext('2d'), 320, 240);
-
+const ctx = wnd.getContext('2d');
 const diff = new PNG({ width: 320, height: 240 });
+
+const before = (await ctx.getImageData(0, 0, 320, 240)).data;
+// ...re-render with the changed prop, wait for the repaint...
+const after = (await ctx.getImageData(0, 0, 320, 240)).data;
 const changed = pixelmatch(before, after, diff.data, 320, 240, {
   threshold: 0.1,
 });
