@@ -10,9 +10,16 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import React from 'react';
+
+import { createRoot } from '../../src/index.js';
+import { scaleOf, setScaleForTests } from '../../src/scale.js';
+import { Win32App } from '../../src/win32/app.js';
 import { Win32PaneHost } from '../../src/win32/panehost.js';
 import { Win32PaneWindow } from '../../src/win32/panewindow.js';
 import { createFakeApp, createFakeBridge } from './fake-bridge.js';
+
+const h = React.createElement;
 
 /** A node stand-in that records the region each frame asked it to paint. */
 function fakeNode() {
@@ -289,5 +296,77 @@ describe('win32 pane: the host', () => {
       bridge.calls.filter(([n]) => n === 'paneSetRect').length,
       before,
     );
+  });
+});
+
+describe("win32 pane: the host window's scale", () => {
+  // A pane process reads the screens when it starts, and the host read them
+  // when it did. The fake bridge's screen reads 1x; the host says 2x, the
+  // way a host that started before the desk changed scale does.
+
+  /** A real pane app, seeded the way createWin32App seeds one, and the
+   *  channel the host talks to it over. */
+  function paneApp() {
+    const app = new Win32App(createFakeBridge(), { pane: true });
+    setScaleForTests(app, app.scale, 'win32');
+    let deliver = null;
+    const channel = {
+      send() {},
+      onMessage: (cb) => {
+        deliver = cb;
+      },
+    };
+    const rect = (msg) => deliver({ type: 'pane-rect', ...msg });
+    return { app, channel, rect };
+  }
+
+  /** The window the pane bootstrap mounts, with a box 120 wide in it, and
+   *  the frame that lays it out. */
+  async function mount(app) {
+    const root = await createRoot({ app });
+    root.render(
+      h(
+        'window',
+        { embeddable: true, width: 300, height: 200 },
+        h('box', { style: { width: 120, height: 20 } }),
+      ),
+    );
+    const wnd = [...app._windows.values()][0];
+    const lay = () => {
+      const node = wnd._reactX11Node;
+      node._scheduled = false;
+      node.flush();
+      return node.children[0].abs;
+    };
+    return { root, wnd, lay };
+  }
+
+  it('lays out at the scale the hello names, whatever its own screen read', async () => {
+    const { app, channel, rect } = paneApp();
+    assert.equal(app.scale, 1, "the pane process's own screen");
+    app.attachPaneChannel(channel, { displayScale: 2 });
+    assert.equal(scaleOf(app), 2);
+    const { root, wnd, lay } = await mount(app);
+    assert.deepEqual(
+      [wnd.width, wnd.height],
+      [600, 400],
+      'its buffer born the size it is shown at, before the first pane-rect',
+    );
+    rect({ width: 300, height: 200, scale: 2, displayScale: 2 });
+    assert.equal(lay().width, 240);
+    await root.unmount();
+  });
+
+  it('takes a pane-rect that comes before its window, and follows one that names another scale', async () => {
+    const { app, channel, rect } = paneApp();
+    app.attachPaneChannel(channel, {});
+    rect({ width: 300, height: 200, scale: 2, displayScale: 2 });
+    assert.equal(scaleOf(app), 2, 'with no window to size yet');
+    const { root, wnd, lay } = await mount(app);
+    assert.equal(lay().width, 240);
+    rect({ width: 300, height: 200, scale: 1, displayScale: 1 });
+    assert.equal(lay().width, 120, 'laid out again at 1x');
+    assert.deepEqual([wnd.width, wnd.height], [300, 200]);
+    await root.unmount();
   });
 });

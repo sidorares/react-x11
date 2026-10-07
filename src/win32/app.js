@@ -418,9 +418,12 @@ export class Win32App {
    * The pane process's end of the frame channel: geometry and input in,
    * presents and the cursor out. Feature-detected by the pane bootstrap
    * (src/frame/childmain.js), and a no-op in a process that is not a pane.
+   * `displayScale` is the scale the host's window is drawn at, taken before
+   * the pane's first render (`adoptPaneScale`).
    */
-  attachPaneChannel(channel) {
+  attachPaneChannel(channel, { displayScale } = {}) {
     if (!this._paneMode) return;
+    this.adoptPaneScale(displayScale);
     this._paneSend = (msg) => {
       try {
         channel.send(msg);
@@ -429,6 +432,8 @@ export class Win32App {
       }
     };
     channel.onMessage((msg) => {
+      // the app's, so heard with no window to size yet as well
+      if (msg?.type === 'pane-rect') this.adoptPaneScale(msg.displayScale);
       const wnd = [...this._windows.values()][0];
       if (!wnd) return;
       if (msg?.type === 'pane-rect') {
@@ -437,6 +442,36 @@ export class Win32App {
         wnd.emit(msg.name, msg.ev);
       }
     });
+  }
+
+  /**
+   * The scale of the window a pane is shown in, as the host says it — in
+   * the hello and in every pane-rect — made this process's. Returns whether
+   * it moved.
+   *
+   * A pane process reads the screens when it starts, and the host read
+   * them when it did. Across a change of the desk between the two — a
+   * display's scaling changed, a laptop docked — the answers differ, and a
+   * pane forked after it was laid out at its own scale in a buffer the host
+   * sized at the host's: every length in it off by the ratio of the two,
+   * and every click it was sent landing that far off too. The host's window
+   * is a pane's display, and its scale is the one the tree multiplies by.
+   * The pane's buffer keeps the scale its pane-rect gives it
+   * (`Win32PaneWindow.setPaneSize`): that one is the frame's, a
+   * `<box scale>` around the `<Frame>` included. A tree already laid out
+   * is restyled in the new unit.
+   */
+  adoptPaneScale(scale) {
+    if (!this._paneMode || !(scale > 0) || !Number.isFinite(scale)) {
+      return false;
+    }
+    if (scale === this.scale) return false;
+    this.scale = scale;
+    setScaleForTests(this, scale, 'frame');
+    for (const wnd of this._windows.values()) {
+      if (!wnd.destroyed) wnd._reactX11Node?._rescaleSubtree();
+    }
+    return true;
   }
 
   close() {
