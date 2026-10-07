@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.45.3](https://github.com/sidorares/react-x11/compare/v2.45.2...v2.45.3) (2026-10-07)
+
+
+### Bug Fixes
+
+* **cocoa:** a worker that stops before reaching its import of react-x11 prints why and ends the process with its code, where the process waited for ever with nothing printed ([#916](https://github.com/sidorares/react-x11/issues/916)) ([579128f](https://github.com/sidorares/react-x11/commit/579128ff97b69d29f67507f0e4670e2ffc9ed23d))
+* **frame:** a pane is laid out at the scale of the host window it is shown in, so a page forked after the desk went to a 1x mirror set is drawn at the size of the tabs beside it, where it came out half size inside a host still at 2x ([#917](https://github.com/sidorares/react-x11/issues/917)) ([25daaaf](https://github.com/sidorares/react-x11/commit/25daaaf334513fdc166d49e1e4d0d94ce523fadd))
+* **frame:** Tab goes through a pane as through any subtree, into it at its first stop or its last and back out to the host past the other end, where the host sent Tab on and cycled its own focus as well, so Tab went between one of the pane's stops and one of the host's, and on X11 never left the pane ([#920](https://github.com/sidorares/react-x11/issues/920)) ([1e0abe0](https://github.com/sidorares/react-x11/commit/1e0abe0a1d264cb7d5c929791a3aafe642a2f27a))
+* **testing:** act dispatches the pointer move a window holds for its next frame, so the second of two hovers in a row is in the tree when userEvent.hover resolves ([#914](https://github.com/sidorares/react-x11/issues/914)) ([f9efd3a](https://github.com/sidorares/react-x11/commit/f9efd3a613f68256d7f949847826585d38e5f13e))
+* **win32:** a pane is laid out at the scale of the host window it is shown in, so a page forked after the display's scaling changed is drawn at the size of everything beside it, where it came out at the scale its own process read ([#918](https://github.com/sidorares/react-x11/issues/918)) ([4eec5d4](https://github.com/sidorares/react-x11/commit/4eec5d4288fc4d6b4fca62777ee3ca0ba41a11cd))
+
 ## [2.45.2](https://github.com/sidorares/react-x11/compare/v2.45.1...v2.45.2) (2026-10-06)
 
 
