@@ -29,18 +29,113 @@ import {
   bindRelaunchState,
   forwardSignals,
   installStdio,
-  onWorkerEnd,
   openThreadedChannel,
-  printUncaught,
   RELAUNCH,
   routeExit,
-  signalEnded,
 } from './threaded.js';
 
 // Set once the worker is set up, process-wide: the explicit launcher and
 // the package's own import can both reach `bootstrapWorker`, and from two
 // copies of the package the bridge would refuse the second `connect`.
-const BOOTED = Symbol.for('react-x11.cocoa.workerBooted');
+const BOOTED_KEY = 'react-x11.cocoa.workerBooted';
+const BOOTED = Symbol.for(BOOTED_KEY);
+
+// Printed above an error that ended the worker before its import of
+// react-x11 had run there: thrown by code the main thread had run without
+// a complaint a moment before, which is all the developer has to go on.
+const STOPPED_EARLY =
+  'react-x11: the app stopped on its worker thread before reaching its ' +
+  'import of react-x11 there. On macOS react-x11 runs the app on a worker ' +
+  'thread, starting the entry over on it, so what the entry imports ahead ' +
+  'of react-x11 runs twice: on the main thread, then on the worker, where ' +
+  'a call only a main thread may make — process.chdir(), say — throws. ' +
+  'Make such a call on the main thread only (isMainThread, from ' +
+  'node:worker_threads); what it changes holds for the whole process, the ' +
+  'worker included. Or keep the app on the main thread with ' +
+  'REACT_X11_THREADED=0. See docs/macos.md, "What changes for an app".';
+
+/**
+ * What a worker `relaunch` starts runs before the app's entry, as the source
+ * of a function of `(process, global)`: what the worker needs from its first
+ * line, since the main thread is parked and hears nothing else from it.
+ *
+ * Its end, written into the shared state after the app's last exit
+ * listener. The main thread ends the process on it, so an app's
+ * `process.on('exit')` handler must have finished by then, as it has in a
+ * process of its own. Kept last by re-adding it whenever the app adds one:
+ * Node runs a worker's exit listeners through `process.emit` and Bun calls
+ * them directly (measured), so wrapping the emit would cover only Node.
+ *
+ * Its uncaught error, printed by itself. Node hands a worker's uncaught
+ * error to its parent as an event, and the parent here never runs its event
+ * loop again to hear it. Only when nothing handles the error: an app's own
+ * `uncaughtException` handler means it is not uncaught. Straight to fd 2,
+ * because the worker's own stderr forwards through the parked thread too
+ * until `bootstrapWorker` replaces it; a pipe the main thread made
+ * non-blocking answers EAGAIN when full, and the write waits it out.
+ *
+ * Both used to be set up by `bootstrapWorker`, when the entry reached its
+ * import of react-x11. A worker that died before then — a module imported
+ * ahead of react-x11 calling `process.chdir()`, which only a main thread
+ * may — wrote nothing into the shared state and printed nothing, and the
+ * process waited in `Atomics.wait` for ever.
+ *
+ * A string, not a function's `toString()`: a build step rewrites a function
+ * — a bundler's name helper, a coverage counter — into references the
+ * worker cannot resolve, and a throw here hangs the process the way this
+ * exists to prevent.
+ */
+export const WORKER_START = `(function (process, global) {
+  'use strict';
+  const { workerData } = process.getBuiltinModule('node:worker_threads');
+  const { writeSync } = process.getBuiltinModule('node:fs');
+  const { inspect } = process.getBuiltinModule('node:util');
+  const state = new Int32Array(workerData.reactX11State);
+
+  const write = (text) => {
+    const bytes = Buffer.from(text);
+    for (let off = 0; off < bytes.length; ) {
+      try {
+        off += writeSync(2, bytes, off);
+      } catch (err) {
+        if (err.code !== 'EAGAIN') return;
+      }
+    }
+  };
+  process.on('uncaughtExceptionMonitor', (err) => {
+    if (process.listenerCount('uncaughtException') > 0) return;
+    const why = global[Symbol.for(${JSON.stringify(BOOTED_KEY)})]
+      ? ''
+      : ${JSON.stringify(`${STOPPED_EARLY}\n`)};
+    write(why + inspect(err) + '\\n');
+  });
+
+  const add = process.on;
+  const end = (code) => {
+    const n = Number.parseInt(code ?? process.exitCode ?? 0, 10) || 0;
+    Atomics.store(state, 1, n);
+    Atomics.store(state, 0, ${RELAUNCH.ENDED});
+    Atomics.notify(state, 0);
+  };
+  add.call(process, 'exit', end);
+  for (const name of [
+    'on',
+    'addListener',
+    'once',
+    'prependListener',
+    'prependOnceListener',
+  ]) {
+    const method = process[name];
+    process[name] = function (event, listener) {
+      const out = method.call(this, event, listener);
+      if (event === 'exit' && listener !== end) {
+        process.removeListener('exit', end);
+        add.call(process, 'exit', end);
+      }
+      return out;
+    };
+  }
+})`;
 
 // How long the main thread waits, once AppKit's run is over, for the
 // worker's own exit handlers to finish — they run to the end in a process
@@ -157,12 +252,13 @@ export function relaunchOnImport(moduleUrl) {
 }
 
 /**
- * The worker's side, set up the moment it imports react-x11: after it the
- * app cannot tell it is on a worker, short of asking — its logs reach the
- * terminal, `process.exit` ends the process, a crash is printed, and a
- * Ctrl-C reaches its `process.on('SIGINT')` (src/cocoa/threaded.js). What
- * the app imports before react-x11 runs before this, so a module that logs
- * as it loads should come after it.
+ * The worker's side, set up the moment it imports react-x11, on top of
+ * `WORKER_START`, which has said how the worker ends and printed what
+ * crashed it since its first line: after it the app cannot tell it is on a
+ * worker, short of asking — its logs reach the terminal, `process.exit`
+ * ends the process, and a Ctrl-C reaches its `process.on('SIGINT')`
+ * (src/cocoa/threaded.js). What the app imports before react-x11 runs
+ * before this, so a module that logs as it loads should come after it.
  */
 export function bootstrapWorker(state) {
   if (globalThis[BOOTED]) return;
@@ -170,9 +266,7 @@ export function bootstrapWorker(state) {
   const native = loadNative();
   installStdio();
   bindRelaunchState(state);
-  printUncaught();
   routeExit(native);
-  onWorkerEnd(signalEnded);
   openThreadedChannel(native).subscribe(forwardSignals());
 }
 
@@ -183,11 +277,24 @@ export function bootstrapWorker(state) {
  */
 export function relaunch(entry, native) {
   const state = new Int32Array(new SharedArrayBuffer(8));
-  // The worker's entry is the app's own, so nothing has to ship beside it —
+  // The worker runs the app's own entry, so nothing has to ship beside it —
   // a bundle (docs/packaging.md, tier 2) is one file, and a worker entry of
   // the package's own would be a second one the bundler never emits. The
   // worker sets itself up when it imports react-x11 (`bootstrapWorker`,
-  // src/bootstrap.js), recognising the shared state in its workerData.
+  // src/bootstrap.js), recognising the shared state in its workerData, and
+  // runs `WORKER_START` before anything else, so that it can end the
+  // process even if it never gets that far.
+  //
+  // Node starts the worker on those lines, as `eval` code that then runs
+  // the entry the way Node runs a worker's file: `process.argv[1]` set to
+  // it, and `Module.runMain`, which runs the `--import` loaders first and
+  // makes the entry the main module, `require.main` and `import.meta.main`
+  // as before. An `import()` of the entry does neither, and an eval worker
+  // runs no `--import` of its own (measured, Node 20–26). Bun's eval worker
+  // loses both a failure of the entry and `require.main` (measured, Bun
+  // 1.4), so there the entry stays the worker's own and the lines go in as
+  // its preload, base64-encoded: percent-encoded, Bun skipped them without
+  // an error.
   //
   // No `execArgv`: a Worker given none inherits the node flags the process
   // started with, and among them a loader like `--import tsx`, which is what
@@ -196,11 +303,25 @@ export function relaunch(entry, native) {
   // `--expose-gc`, `--max-old-space-size`, `--title` — which the worker
   // would have had anyway, since those hold for every thread: it gets `gc`
   // either way (measured, Node 20–26; Bun treats the two the same).
-  new Worker(entry, {
+  const options = {
     argv: process.argv.slice(2),
     env: SHARE_ENV,
     workerData: { reactX11State: state.buffer },
-  });
+  };
+  const start = `${WORKER_START}(process, globalThis);\n`;
+  if (globalThis.Bun) {
+    const source = Buffer.from(start).toString('base64');
+    new Worker(entry, {
+      ...options,
+      preload: [`data:text/javascript;base64,${source}`],
+    });
+  } else {
+    new Worker(
+      `${start}process.argv[1] = ${JSON.stringify(entry)};\n` +
+        "process.getBuiltinModule('node:module').runMain(process.argv[1]);\n",
+      { ...options, eval: true },
+    );
+  }
   for (;;) {
     Atomics.wait(state, 0, RELAUNCH.WAITING);
     const now = Atomics.load(state, 0);

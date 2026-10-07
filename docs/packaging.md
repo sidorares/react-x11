@@ -528,7 +528,9 @@ To skip the cost, or the move:
 - **Import react-x11 first** in the entry. What the entry imports before
   it loads on the main thread as well as on the worker: nothing to notice
   for React, but a module that does work as it loads — opens a port,
-  writes a file, logs — does it twice.
+  writes a file, logs — does it twice, and one that makes a call only a
+  main thread may, `process.chdir()`, throws the second time
+  ([macos.md](macos.md#what-changes-for-an-app)).
 
 The move does not happen in a single executable (tier 3, and
 `bun build --compile`), whose entry is not a file a worker can load, so it
