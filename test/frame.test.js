@@ -16,6 +16,7 @@
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { test } from 'node:test';
+import { getHeapStatistics } from 'node:v8';
 
 import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
@@ -482,6 +483,87 @@ test('a src that does not resolve fails as load, not as a hang', async () => {
   }
 });
 
+test("a pane's flags and environment reach its transport, and restart it only when they change", async () => {
+  const { app, other } = await headlessPair();
+  const x11Root = await createRoot({ app });
+  const loopback = loopbackFrameFactory({ childApp: other });
+  const asked = [];
+  const factory = (options) => {
+    asked.push(options);
+    return loopback(options);
+  };
+  const reports = [];
+  const failures = [];
+  // written in place on every render, as an app writes them: a new array
+  // and a new object each time
+  const tree = (execArgv, env) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(Frame, {
+        src: PANE,
+        transport: factory,
+        execArgv,
+        env,
+        props: { onReport: (data) => reports.push(data) },
+        style: { flexGrow: 1 },
+        fallback: ({ error }) => {
+          if (error) failures.push(error);
+          return h('box', {});
+        },
+      }),
+    );
+
+  try {
+    await render(
+      tree(['--max-old-space-size=96'], { A: '1', B: undefined }),
+      x11Root,
+    );
+    await until(app, () => reports.length >= 1, 'the first report');
+    assert.equal(asked.length, 1);
+    assert.deepEqual(asked[0].execArgv, ['--max-old-space-size=96']);
+    assert.deepEqual(asked[0].env, { A: '1', B: undefined });
+
+    await render(
+      tree(['--max-old-space-size=96'], { A: '1', B: undefined }),
+      x11Root,
+    );
+    await settle(app);
+    assert.equal(asked.length, 1, 'the same flags in a new array restarted it');
+
+    await render(
+      tree(['--max-old-space-size=96'], { A: '2', B: undefined }),
+      x11Root,
+    );
+    await until(
+      app,
+      () => asked.length === 2,
+      'the restart a new value asks for',
+    );
+    assert.equal(asked[1].env.A, '2');
+
+    // a variable taken away and one left alone are not the same launch
+    await render(tree(['--max-old-space-size=96'], { A: '2' }), x11Root);
+    await until(
+      app,
+      () => asked.length === 3,
+      'the restart a variable left alone asks for',
+    );
+
+    // what a fork cannot take fails as a spawn, and starts nothing
+    await render(tree(['--max-old-space-size=96', 96], {}), x11Root);
+    await until(
+      app,
+      () => failures.some((e) => e.phase === 'spawn'),
+      'the spawn failure',
+    );
+    assert.equal(asked.length, 3);
+    assert.match(failures.find((e) => e.phase === 'spawn').message, /execArgv/);
+  } finally {
+    await teardown(x11Root, app, other);
+  }
+});
+
 // ------------------------------------------------------------- real fork
 
 /** The in-process server, listening where a real display would: the child
@@ -507,6 +589,13 @@ test('the default transport forks a real pane process', async () => {
   const exits = [];
   const started = [];
 
+  // what the pane's process is started with: a heap bound, a variable set
+  // and one this process has taken away
+  process.env.REACT_X11_FRAME_TEST_GONE = 'present';
+  const probe = {
+    set: 'REACT_X11_FRAME_TEST_SET',
+    removed: 'REACT_X11_FRAME_TEST_GONE',
+  };
   const tree = (mounted) =>
     h(
       'window',
@@ -521,8 +610,14 @@ test('the default transport forks a real pane process', async () => {
             ? h(Frame, {
                 src: PANE,
                 display,
+                execArgv: ['--max-old-space-size=64'],
+                env: {
+                  REACT_X11_FRAME_TEST_SET: 'yes',
+                  REACT_X11_FRAME_TEST_GONE: undefined,
+                },
                 props: {
                   label: 'forked',
+                  probe,
                   onReport: (data) => reports.push(data),
                 },
                 style: { flexGrow: 1 },
@@ -540,12 +635,30 @@ test('the default transport forks a real pane process', async () => {
       tries: 4000,
       delay: 5,
     });
-    // theme and context crossed a real process boundary
-    assert.deepEqual(reports[0], {
+    // theme and context crossed a real process boundary, and the process
+    // was started as the frame said: its heap bounded by the flag — the
+    // limit itself, not the flag's being in `execArgv` — the variable set,
+    // the other taken away, and the pane still knowing it is one
+    const { process: started_, ...seen } = reports[0];
+    assert.deepEqual(seen, {
       label: 'forked',
       accent: '#abcdef',
       user: 'grace',
     });
+    // the limit is the old space the flag sets plus a young generation V8
+    // sizes for itself — 112 MB on Node 20 and 22, 256 on 24, 160 on 26 —
+    // so it is held to this process's own, some 4 GB without the flag
+    const hostLimitMb = Math.round(
+      getHeapStatistics().heap_size_limit / 2 ** 20,
+    );
+    assert.ok(
+      started_.heapLimitMb < hostLimitMb / 4,
+      `the heap is bounded: ${started_.heapLimitMb} MB, against ${hostLimitMb} MB here`,
+    );
+    assert.deepEqual(
+      { set: started_.set, removed: started_.removed, framed: started_.framed },
+      { set: 'yes', removed: null, framed: '1' },
+    );
     await until(app, () => started.length === 1, 'the forked onStarted', {
       tries: 4000,
       delay: 5,
@@ -571,7 +684,14 @@ test('the default transport forks a real pane process', async () => {
     assert.equal(exits[0].expected, true);
     assert.equal(exits[0].code, 0);
   } finally {
+    delete process.env.REACT_X11_FRAME_TEST_GONE;
     bridge.close();
     await teardown(x11Root, app, other);
   }
+});
+
+test('the entry a <Frame> forks is on the exports map, for a transport of its own', () => {
+  // resolved, never imported: importing it outside a fork exits
+  const url = import.meta.resolve('react-x11/frame/child');
+  assert.equal(url, new URL('../src/frame/child.js', import.meta.url).href);
 });

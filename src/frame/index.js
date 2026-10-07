@@ -73,21 +73,22 @@ const childPath = () =>
 
 /** The default transport: fork this package's child entry. `execArgv` is
  * inherited, which is what carries a dev loader (tsx, the refresh loader)
- * into the pane; a bundled app forks plain JS and needs none. */
-function forkTransport({ src, display }) {
+ * into the pane; a bundled app forks plain JS and needs none. The pane's
+ * own flags and environment (`<Frame execArgv env>`) go on top. */
+function forkTransport({ src, display, execArgv = [], env = {} }) {
   const child = fork(childPath(), [], {
     serialization: 'advanced',
     // dev loaders (tsx, the refresh loader) follow into the pane; the test
     // runner's own flags must not — `--test` in execArgv would run the pane
-    // entry as a test file
-    execArgv: process.execArgv.filter(
-      (a) => a !== '--test' && !a.startsWith('--test-'),
-    ),
-    env: {
-      ...process.env,
-      REACT_X11_FRAME: '1',
-      ...(display ? { DISPLAY: display } : {}),
-    },
+    // entry as a test file. The pane's come after, so a flag it names is
+    // the one in force where the two disagree.
+    execArgv: [
+      ...process.execArgv.filter(
+        (a) => a !== '--test' && !a.startsWith('--test-'),
+      ),
+      ...execArgv,
+    ],
+    env: paneEnv(env, display),
   });
   void src; // resolved by the child from the hello, not from argv
   return {
@@ -119,6 +120,58 @@ function forkTransport({ src, display }) {
     },
     pid: child.pid,
   };
+}
+
+/**
+ * The environment a pane process starts with: this one's, with what the
+ * `<Frame>` names over it — `undefined` takes a variable away — and then
+ * the two that are not the app's to set: `REACT_X11_FRAME`, which is how a
+ * pane knows it is one (`isFramed`), and `DISPLAY`, which `display` names.
+ */
+function paneEnv(env, display) {
+  const out = { ...process.env };
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined) delete out[name];
+    else out[name] = value;
+  }
+  out.REACT_X11_FRAME = '1';
+  if (display) out.DISPLAY = display;
+  return out;
+}
+
+/**
+ * What a pane's process is started with, checked and as one string: the
+ * session's key, so that an `execArgv` array or an `env` object written in
+ * place — a new one each render — restarts nothing, and one that says
+ * something else restarts the pane. Throws on what a fork cannot take,
+ * which the session reports as a `spawn` failure.
+ */
+function launchOf(execArgv, env) {
+  if (
+    execArgv !== undefined &&
+    (!Array.isArray(execArgv) || execArgv.some((a) => typeof a !== 'string'))
+  ) {
+    throw new TypeError(
+      'react-x11: <Frame execArgv> is an array of strings — the flags the ' +
+        "pane's process is started with.",
+    );
+  }
+  if (
+    env !== undefined &&
+    (env === null ||
+      typeof env !== 'object' ||
+      Object.values(env).some((v) => v !== undefined && typeof v !== 'string'))
+  ) {
+    throw new TypeError(
+      "react-x11: <Frame env> maps a variable's name to a string, or to " +
+        'undefined to take it away.',
+    );
+  }
+  // `undefined` is kept apart from a variable left alone, which
+  // JSON.stringify would drop
+  return JSON.stringify([execArgv ?? [], env ?? {}], (_, v) =>
+    v === undefined ? { unset: true } : v,
+  );
 }
 
 function srcString(src) {
@@ -220,6 +273,8 @@ export function Frame({
   props = EMPTY_PROPS,
   style,
   display,
+  execArgv,
+  env: processEnv,
   bridge = true,
   fallback,
   focusable,
@@ -262,8 +317,20 @@ export function Frame({
   const source = srcString(src);
   const makeTransport = transport ?? forkTransport;
   const containerRef = useRef(null);
+  // the pane process's own flags and environment, by what they say
+  let launch;
+  let launchError = null;
+  try {
+    launch = launchOf(execArgv, processEnv);
+  } catch (err) {
+    launch = '';
+    launchError = err;
+  }
+  const paneProcess = useRef(null);
+  paneProcess.current = { execArgv: execArgv ?? [], env: processEnv ?? {} };
 
-  // The session: one child process per (src, display, transport, restart).
+  // The session: one child process per (src, display, the process's flags
+  // and environment, transport, restart).
   // Declared before the update effect so that on the mounting commit the
   // hello goes out first and the update pass sees itself already sent.
   useEffect(() => {
@@ -297,7 +364,13 @@ export function Frame({
 
     let t;
     try {
-      t = makeTransport({ src: source, display });
+      if (launchError) throw launchError;
+      t = makeTransport({
+        src: source,
+        display,
+        execArgv: paneProcess.current.execArgv,
+        env: paneProcess.current.env,
+      });
     } catch (err) {
       fail(Object.assign(err, { phase: 'spawn' }));
       return undefined;
@@ -439,7 +512,7 @@ export function Frame({
       // ask, and everything is unref'd so nothing holds the host open
       if (session.current === s) session.current = null;
     };
-  }, [source, display, generation, makeTransport, canShowPane]);
+  }, [source, display, launch, generation, makeTransport, canShowPane]);
 
   // One update per commit that changed the pane's inputs, props and env in
   // the same message — so a theme flip and the state change that caused it

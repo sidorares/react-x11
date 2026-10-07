@@ -53,8 +53,10 @@ in-process:
 - **Crash isolation.** An uncaught throw, a native-module crash, an OOM: the
   pane dies, the `fallback` renders, `restart()` respawns. The shell never
   knew.
-- **Leak isolation.** A pane that leaks is a bounded, killable leak, and its
-  GC pauses are its own.
+- **Leak isolation.** A pane that leaks is a killable leak, bounded by the
+  heap its `execArgv` gives it
+  ([The pane process](#the-pane-process-flags-and-environment)), and its GC
+  pauses are its own.
 
 And what it does not buy, said once here and again in
 [security.md](security.md): **it is not a security boundary.** On X11 the
@@ -97,6 +99,8 @@ The pane process inherits the parent's `execArgv`, which is what carries a
 dev loader (tsx, the refresh loader) into it during development; a bundled
 application forks plain JavaScript and needs none. It connects to the
 display the host names in `display`, or `$DISPLAY` like everything else.
+What else it is started with is the `<Frame>`'s to say — see
+[The pane process](#the-pane-process-flags-and-environment).
 
 On macOS a pane stays on its process's main thread, where an app moves onto
 a worker ([macos.md](macos.md#js-on-a-worker-a-ui-thread-of-the-bridges-own)):
@@ -421,6 +425,39 @@ faster than the WindowServer let go of buffers drew into ones it still read.
 first frame and after one dies — the same server-painted rectangle
 `<foreign>` documents.
 
+## The pane process: flags and environment
+
+`execArgv` and `env` say what a pane's process is started with, beyond what
+it inherits:
+
+```jsx
+<Frame
+  src={new URL('./page.pane.js', import.meta.url)}
+  // a page that grows without bound costs its own process, at 256 MB
+  execArgv={['--max-old-space-size=256']}
+  env={{ PAGE_LOG: 'quiet', NODE_OPTIONS: undefined }}
+/>
+```
+
+- **`execArgv`** comes after the flags the pane inherits, so a dev loader
+  still follows it in and a flag it names is the one in force where the two
+  disagree. `--max-old-space-size` is the one a pane wants most: it bounds
+  the pane's heap, which nothing running inside the pane can, and a pane
+  that passes it is ended — and its `fallback` shown — rather than the
+  machine swapping. The flags go to the runtime that forks the pane, and are
+  its flags: Bun 1.4 takes node's V8 flags and bounds nothing by them, so
+  under Bun this is not a heap bound.
+- **`env`** is merged over this process's environment, and a variable named
+  with `undefined` is taken away. `DISPLAY` is `display`'s, and
+  `REACT_X11_FRAME` is how a pane knows it is one (`isFramed`), so the two
+  are set after it and cannot be overridden here.
+
+Either is read by value: a pane started with the same flags in a new array
+— one written in place, as above, at every render — is the pane it was, and
+flags or variables that say something else restart it, as a new `src` does.
+Something a fork cannot take — a flag that is not a string — fails as a
+`spawn` error and starts nothing.
+
 ## What a pane costs
 
 A pane is a node process with React and ntk loaded: roughly 40–70MB and
@@ -441,6 +478,13 @@ server, with `structuredClone` standing in for the fork's serialization
 `src/frame/childmain.js` is the pane's whole bootstrap behind the same
 seam). It is also the door to running a pane somewhere other than a child
 process without `<Frame>` learning about it.
+
+A transport is handed what the fork would be — `{ src, display, execArgv,
+env }` — and a transport that still forks the pane, its own way (under a
+sandbox, with another runtime), forks the entry the default one does, which
+is on the exports map to be resolved: `fileURLToPath(import.meta.resolve(
+'react-x11/frame/child'))`. It is a process's entry, not a module to import:
+outside a fork it says so and exits.
 
 ## Known gaps
 
