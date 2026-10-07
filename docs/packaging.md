@@ -536,15 +536,39 @@ The move does not happen in a single executable (tier 3, and
 `bun build --compile`), whose entry is not a file a worker can load, so it
 runs on the pump; in a `<Frame>` pane, whose IPC channel to its host is
 the main thread's; under a test runner; with `REACT_X11_THREADED=0` or
-`REACT_X11_BACKEND=x11`; and when react-x11 is imported after the app has
-started running — a dynamic `import()` from a timer — where the worker
-would run again what the entry has already done.
+`REACT_X11_BACKEND=x11`; when react-x11 is imported after the app has
+started running — by an `import()` from a timer, or one the entry awaits —
+where the worker would run again what the entry has already done; and on
+Node 20 and 22, under an ES module loader. By Node version, measured on
+20.20, 22.16, 24.12 and 26.0:
+
+| the app                                                | Node 20, 22 | Node 24 and later |
+| ------------------------------------------------------ | ----------- | ----------------- |
+| `node app.mjs`, an ES module entry, or a tier 2 bundle | moves       | moves             |
+| `node app.cjs`, a CommonJS entry                       | moves       | moves             |
+| `tsx app.jsx`, or any `--import` or `--loader`         | stays       | moves             |
+| under `--import react-x11/cocoa-main`                  | moves       | moves             |
+| importing react-x11 with an `import()`                 | stays       | stays             |
+
+An app under a loader stays on Node 20 and 22 because tsx, the loader an
+app is likeliest to run under, keeps its hooks to the main thread there,
+and a worker without them stops on the first `.jsx` or `.ts` file it loads
+(measured, tsx 4.23). No loader can be asked before the move, so any
+`--import` or `--loader`, on the command line or in `NODE_OPTIONS`,
+counts. The launcher moves such an app all the same, for a loader that
+does follow it onto a worker; tsx 4.23 does from Node 22.22.3, by its own
+version check. On Node 24 and later tsx follows from tsx 4.21.1 and Node
+24.11.1, and an older one there stops the app as it starts, on
+`ERR_UNKNOWN_FILE_EXTENSION` (measured, tsx 4.20.6): update tsx, or set
+`REACT_X11_THREADED=0`. Bun moves an ES module entry the way Node does, and
+tells a late import its own way ([macos.md](macos.md#the-renderers-half)).
 
 ## Checklist
 
 - On macOS, choose where the app's JS runs: the default move onto a worker
   costs 25–73 ms of startup, `--import react-x11/cocoa-main` skips it,
-  `REACT_X11_THREADED=0` keeps the pump, and a SEA always does
+  `REACT_X11_THREADED=0` keeps the pump, and a SEA always does, as does an
+  app under a loader on Node 20 or 22
   ([above](#on-macos-the-app-moves-onto-a-worker)).
 - Pick the format deliberately: `--format=esm` (tier 2, needs the banner) or
   `--format=cjs` (tier 3, needs no top-level await in your own code).

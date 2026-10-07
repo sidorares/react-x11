@@ -143,6 +143,19 @@ export const WORKER_START = `(function (process, global) {
 // process for ever.
 const WORKER_END_MS = 5000;
 
+// Where Node starts an app (`startedRunning`): the script that loads the
+// `--require` preloads and then the entry, and the module that runs the
+// entry, an ES module's graph from an async function.
+const ENTRY_POINT = new Set([
+  'node:internal/main/run_main_module',
+  'node:internal/modules/run_main',
+]);
+
+// How a process is started under an ES module loader, as a flag of its own
+// or in NODE_OPTIONS: `--import tsx`, `--import=tsx`, `--loader
+// ts-node/esm`, `--experimental-loader ./hooks.mjs`.
+const LOADER_FLAG = /^--(?:import|loader|experimental-loader)(?:=|$)/;
+
 /**
  * Why this import should not move the app onto a worker, or null when it
  * should. A pure answer over what the process says about itself, so that
@@ -152,6 +165,8 @@ export function relaunchVeto({
   isMainThread: main,
   platform,
   env,
+  execArgv,
+  node,
   entry,
   compiled,
   late,
@@ -184,11 +199,31 @@ export function relaunchVeto({
   ) {
     return 'a test runner';
   }
-  // Imported after the app started running — a dynamic import from a
-  // timer, say. Relaunching would run again, on the worker, everything the
-  // entry has already done on this thread.
+  // Imported after the app started running: by an `import()` from a timer,
+  // say, or one the entry's body awaits. Relaunching would run again, on
+  // the worker, everything the entry has already done on this thread.
   if (late) return 'imported after the app started running';
+  // Started under an ES module loader, before Node 24. The worker gets the
+  // loader's flags, and whether its hooks follow is the loader's to say:
+  // tsx, the one an app is likeliest to run under, keeps them to the main
+  // thread on Node 20 and 22 — before 22.22.3, by tsx 4.23's own check —
+  // and a worker without them stops on the entry's first .jsx or .ts module
+  // (measured, 20.20 and 22.16). No loader can be asked before the move, so
+  // any `--import` or `--loader` counts. From 24 an app under one moves,
+  // and tsx follows it there from 4.21.1 on 24.11.1 (an older one does not,
+  // docs/macos.md); `react-x11/cocoa-main` moves one on 20 or 22 whose
+  // loader follows.
+  if (node && node < 24 && startedUnderLoader(execArgv, env.NODE_OPTIONS)) {
+    return 'an ES module loader before Node 24';
+  }
   return null;
+}
+
+/** Whether node's flags, its own or NODE_OPTIONS', name an ES module loader. */
+function startedUnderLoader(execArgv = [], nodeOptions = '') {
+  return [...execArgv, ...nodeOptions.split(/\s+/)].some((flag) =>
+    LOADER_FLAG.test(flag),
+  );
 }
 
 /** What `relaunchVeto` reads, from this process. */
@@ -199,6 +234,9 @@ export function describeProcess(moduleUrl) {
     isMainThread,
     platform: process.platform,
     env: process.env,
+    execArgv: process.execArgv,
+    // Node's major version; Bun answers with one of its own choosing
+    node: bun ? null : Number(process.versions.node.split('.')[0]),
     entry: typeof entry === 'string' && fs.existsSync(entry) ? entry : null,
     compiled: compiledExecutable(bun),
     late: startedRunning(bun, moduleUrl, entry),
@@ -216,20 +254,67 @@ function compiledExecutable(bun) {
 }
 
 /**
- * Whether the entry's own code has started. Node's event loop has not
- * turned while the entry's static imports evaluate —
- * `performance.nodeTiming.loopStart` is -1 until it does. Bun reports 1
- * there from the first line; what tells in Bun is the entry's record in the
- * module cache, which is there once the entry has been evaluated and
- * absent while its imports are (both measured, Node 26 and Bun 1.4).
+ * Whether the entry's own code has started: whether this import is one the
+ * app made after its start, rather than part of it.
+ *
+ * Node tells by where the import is evaluated from. It starts an app from
+ * two modules of its own (`ENTRY_POINT`): a CommonJS entry, and every
+ * `require()` of its first run and of a `--require` preload, evaluate under
+ * them synchronously, and an ES module entry's graph — static imports, an
+ * `--import` preload's — from an async function there, which V8 keeps on
+ * the stack as an async frame. An `import()` is evaluated by a job of its
+ * own, whose stack ends in the module loader, or in the app's own code when
+ * that awaits it: an `await import()` in the entry's body, an async
+ * function of the app's. Measured on Node 20.20, 22.16, 23.2, 24.12, 25.4
+ * and 26.0, static imports nested and behind a module with a top-level
+ * await, and under tsx, `--experimental-loader`, source maps and a stack
+ * trace limit of 0. A Node that moved those modules would read every
+ * import as late, which keeps the app where it is rather than running it
+ * twice; test/cocoa-relaunch.test.js would say so on any OS.
+ *
+ * `performance.nodeTiming.loopStart`, -1 until the event loop turns, is the
+ * public signal and is wrong both ways: Node 20 and 22 turn the loop while
+ * they load an ES module entry, so no such entry moved there, and Node 24
+ * and later evaluate an `import()` the entry makes before the loop's first
+ * turn, so an app that made one moved and ran its entry twice.
+ *
+ * Bun reports 1 there from the first line; what tells in Bun is the entry's
+ * record in the module cache, which is there once the entry has been
+ * evaluated and absent while its imports are (measured, Bun 1.4).
  */
 function startedRunning(bun, moduleUrl, entry) {
-  if (!bun) return performance.nodeTiming?.loopStart > 0;
+  if (!bun) return !evaluatedFromEntryPoint();
   try {
     return Boolean(createRequire(moduleUrl).cache?.[entry]?.loaded);
   } catch {
     return false;
   }
+}
+
+/** Whether this stack, async frames and all, comes from `ENTRY_POINT`. */
+function evaluatedFromEntryPoint() {
+  const { prepareStackTrace, stackTraceLimit } = Error;
+  let sites;
+  try {
+    // Reflect.set: an Error the app has frozen is not a reason to throw
+    // from its import of react-x11
+    Reflect.set(Error, 'stackTraceLimit', Infinity);
+    Reflect.set(Error, 'prepareStackTrace', (_, callSites) => callSites);
+    const held = {};
+    Error.captureStackTrace(held);
+    sites = held.stack;
+  } finally {
+    Reflect.set(Error, 'prepareStackTrace', prepareStackTrace);
+    Reflect.set(Error, 'stackTraceLimit', stackTraceLimit);
+  }
+  if (!Array.isArray(sites)) return false;
+  for (const site of sites) {
+    const file = site.getFileName() ?? '';
+    if (ENTRY_POINT.has(file)) return true;
+    // the app's own code awaits this import, so it has run already
+    if (site.isAsync() && !file.startsWith('node:')) return false;
+  }
+  return false;
 }
 
 /**
@@ -238,7 +323,8 @@ function startedRunning(bun, moduleUrl, entry) {
  * not, for anyone asking; when it does, it does not return.
  */
 export function relaunchOnImport(moduleUrl) {
-  const veto = relaunchVeto(describeProcess(moduleUrl));
+  const facts = describeProcess(moduleUrl);
+  const veto = relaunchVeto(facts);
   if (veto) return veto;
   let native;
   try {
@@ -248,7 +334,7 @@ export function relaunchOnImport(moduleUrl) {
     return 'no cocoa bridge';
   }
   if (typeof native.runMain !== 'function') return 'the bridge has no runMain';
-  return relaunch(describeProcess(moduleUrl).entry, native);
+  return relaunch(facts.entry, native);
 }
 
 /**
