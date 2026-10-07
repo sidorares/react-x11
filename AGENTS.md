@@ -144,7 +144,13 @@ no override-redirect staging (issue #4).
   unmount message, and the pane process's `execArgv` and `env` are in the
   session's key **as one string, not by identity** (`launchOf`): an array
   written in place is a new one every render, and keyed by it every render
-  would restart the pane.
+  would restart the pane. And the watchdog that ends a pane which stopped
+  answering (`watchdog`, phase `unresponsive`) **takes a late tick of the
+  host's own for no news of the pane**, and **knows the inspector by the
+  flags that turn it on**: Node's test runner hands every test process
+  `--inspect-port` and `--inspect-publish-uid`, and a check for
+  `--inspect` anywhere took every pane in a test for one under a debugger,
+  and watched none of them.
 - `src/cocoa/` — the Cocoa backend, ~8,800 lines: `app.js` (the app
   object, the AppKit pump, the per-display frame clocks, event routing),
   `window.js` (an `NSWindow` and its IOSurface swapchain), `presenter.js`

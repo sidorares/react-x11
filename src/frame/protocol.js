@@ -3,17 +3,19 @@
 // channel (the fork transport), a loopback pair (the tests), or whatever a
 // custom transport is built on.
 //
-// Six messages, all objects with a `type`:
+// Eight messages, all objects with a `type`:
 //
 //   parent → child
 //     hello    { protocol, src, display, rect, props, env, players? }   first, once
 //     update   { props, env }        full snapshots, one per parent commit
 //     unmount  {}                    run close handlers, unmount, exit
+//     ping     { seq }               the watchdog: still answering?
 //
 //   child → parent
 //     ready    { windowId }          the pane mounted; embed this
 //     invoke   { id, args }          a bridged callback fired
 //     fatal    { phase, message, stack }   why the exit about to happen is one
+//     pong     { seq }               yes, from the event loop
 //
 // Values cross by **structured clone** (fork uses `serialization:
 // 'advanced'`), so Dates, Maps, TypedArrays and cycles survive — and
@@ -33,7 +35,9 @@
 // what makes the grace window about racing messages rather than about how
 // the app was written.
 
-export const PROTOCOL = 1;
+// 2: the watchdog's ping and pong. A pane of protocol 1 answers no ping,
+// and would be ended as one that stopped; it fails the handshake instead.
+export const PROTOCOL = 2;
 
 /** The marker key a function in `props` becomes on the wire. */
 export const CALLBACK = '$$reactX11FrameCallback';

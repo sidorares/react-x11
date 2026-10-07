@@ -221,8 +221,9 @@ The host's view:
 - **`fallback`** — what the rect shows when the pane crashed or could not
   start: an element, or `({ error, restart }) => …`. `error.phase` says
   where it went wrong: `spawn`, `load` (the commonest — a bad `src`),
-  `connect`, `handshake` (version skew), `runtime`, `send`, `embed`, or
-  plain `exit`.
+  `connect`, `handshake` (version skew), `runtime`, `send`, `embed`,
+  `unresponsive` (see [A pane that stops answering](#a-pane-that-stops-answering)),
+  or plain `exit`.
 - **`ref`** — `{ restart(), pid }`.
 
 The pane's view:
@@ -458,6 +459,54 @@ flags or variables that say something else restart it, as a new `src` does.
 Something a fork cannot take — a flag that is not a string — fails as a
 `spawn` error and starts nothing.
 
+## A pane that stops answering
+
+A pane whose event loop is stuck — a loop that never ends, a page's script
+with no timeout around it — stays `running` as far as anything else can
+tell: it is sent updates it never reads, its window stays up showing its
+last frame, and on X11 it holds the keyboard while the pointer is over it.
+Nothing about it fails, so nothing says so.
+
+So the host asks. About once a second it sends the pane a `ping`, and the
+pane answers from its event loop, which is the thing asked about. A pane
+that has not answered for `watchdog` ms — 15 seconds by default — has
+stopped, and goes the way a crashed one goes: the frame fails with phase
+`unresponsive`, `fallback` is shown and can `restart()` it, and the process
+is ended from outside, SIGTERM and then SIGKILL, since it cannot read an
+unmount. `onExit` reports it with `expected: false`.
+
+```jsx
+<Frame
+  src={new URL('./page.js', import.meta.url)}
+  watchdog={10000}
+  fallback={({ error, restart }) =>
+    error?.phase === 'unresponsive' ? (
+      <PageStopped onReload={restart} />
+    ) : (
+      <PageCrashed error={error} onReload={restart} />
+    )
+  }
+/>
+```
+
+Three things keep it from ending a pane that is fine:
+
+- **The host's own late tick is no news of the pane's.** Where the host's
+  timer comes late — the machine slept, or the host itself was stuck — the
+  count starts again from that tick, rather than taking the time nobody
+  was asking for as time the pane did not answer.
+- **A pane under the inspector is not watched.** `--inspect`,
+  `--inspect-brk` or `--inspect-wait`, in its own `execArgv`, in this
+  process's that it inherits, or in `NODE_OPTIONS`: a debugger stops a pane
+  on purpose. The flags that only set the inspector up, which Node's test
+  runner hands every test process, are not it.
+- **`watchdog={false}`** watches nothing, for a pane whose work is long
+  and synchronous by design.
+
+The ping and the pong are messages of the protocol, so a pane of an older
+react-x11 fails the handshake, which says why, rather than being ended for
+not answering a question it does not know.
+
 ## What a pane costs
 
 A pane is a node process with React and ntk loaded: roughly 40–70MB and
@@ -469,7 +518,7 @@ not.
 
 ## The transport seam
 
-Everything between the host and the pane is six message types over an
+Everything between the host and the pane is eight message types over an
 injectable transport, and `transport` replaces the fork wholesale — it is
 how the tests run a real pane (module, root, window, props, callbacks,
 close handlers) in-process over a loopback pair against the in-process X

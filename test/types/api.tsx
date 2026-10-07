@@ -2067,6 +2067,8 @@ function _Panes() {
           // taken away
           execArgv={['--max-old-space-size=256']}
           env={{ PANE_MODE: 'sandbox', HOME: undefined }}
+          // a pane stuck for 5 s is ended; `false` watches none
+          watchdog={5000}
           fallback={({ error, restart }) => (
             <text onMouseDown={restart}>
               {error?.message ?? String(framed)}
