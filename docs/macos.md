@@ -999,7 +999,16 @@ command line asking for it. It needs a bridge with `runMain()`,
   main thread in `Atomics.wait` — no AppKit yet — until the worker says
   what it needs. The flags are inherited, not handed over as `execArgv`: a
   Worker refuses a list holding one V8 or process-wide flag, such as
-  `--expose-gc`, and those hold for every thread already. The
+  `--expose-gc`, and those hold for every thread already. The worker runs
+  a few lines of react-x11's own before the entry (`WORKER_START`), so
+  that however early it stops, it can say so. Node starts it on them, as
+  `eval` code that then runs the entry the way Node runs a worker's file:
+  `process.argv[1]` set to it, and `Module.runMain`, which runs the
+  `--import` loaders first and makes the entry the main module,
+  `require.main` and `import.meta.main` as they were. An `import()` of the
+  entry does neither (measured, Node 20–26). Bun's eval worker loses both
+  an entry's failure and `require.main`, so there the entry stays the
+  worker's own and the lines go in as its `preload`. The
   first cocoa `createRoot` asks for AppKit (`requestAppKit`), and the main
   thread launches it and enters `runMain()`; an app that never makes one,
   an X11 app on XQuartz or a script, never launches AppKit and never gets a
@@ -1038,19 +1047,25 @@ command line asking for it. It needs a bridge with `runMain()`,
   `process.exit` asks the main thread first
   (`requestExit`) and then ends the worker, which is also how Node's own
   handling of an uncaught error reaches it, with code 1; `exit()` on the UI
-  thread, the probe's first try, raced static destructors. The worker says
-  it is done after the app's last exit listener — kept last, since Node
-  runs a worker's exit listeners through `process.emit` and Bun calls them
+  thread, the probe's first try, raced static destructors. From its first
+  line, before any of this (`WORKER_START`), the worker says it is done
+  after the app's last exit listener — kept last, since Node runs a
+  worker's exit listeners through `process.emit` and Bun calls them
   directly (measured) — and the main thread ends the process on that, so
   an app's exit handlers finish as they would in a process of its own. It
   prints its own uncaught error, because the parked main thread never runs
-  its loop again to hear the worker's `'error'`. A `signal` event is
-  re-emitted on the worker's `process`, and one nobody listens for exits
-  128 + n. The first cocoa root waits for `runMain` before it builds the
-  app: until the run starts the bridge has published nothing, and an app
-  that asked `listScreens()` then got `[]` and took scale 1 on a 2x panel
-  (measured). What the app imports before react-x11 runs before this
-  set-up, so a module that logs as it loads belongs after it.
+  its loop again to hear the worker's `'error'`. Both used to wait for this
+  set-up, and a worker that stopped before its import of react-x11 had run
+  there did neither: the process waited for ever, with nothing printed.
+  Such an error now comes with a word on why, since the main thread had
+  run the same code without a complaint (§"What changes for an app"). A
+  `signal` event is re-emitted on the worker's `process`, and one nobody
+  listens for exits 128 + n. The first cocoa root waits for `runMain`
+  before it builds the app: until the run starts the bridge has published
+  nothing, and an app that asked `listScreens()` then got `[]` and took
+  scale 1 on a 2x panel (measured). What the app imports before react-x11
+  runs before this set-up, so a module that logs as it loads belongs after
+  it.
 - **One channel** (`openThreadedChannel`). The bridge takes one `connect`
   per environment, so the bootstrap opens it before the entry runs and
   fans the batches out — signals to itself, the rest to `CocoaApp`. What a
@@ -1178,6 +1193,15 @@ What it does not do yet, each noted where it lives:
   called (the launcher forwards signals), `process.env` is a copy unless it
   is shared, and `process.stdin` forwards through the main thread the way
   stdout does.
+- What the entry imports ahead of react-x11 runs twice: on the main thread,
+  then again on the worker. A call only a main thread may make —
+  `process.chdir()`, `process.umask(mask)` — goes through the first time
+  and throws the second, and the app stops with that error and a word on
+  why. Make it on the main thread only (`isMainThread`, from
+  `node:worker_threads`): what it changes is the process's, so the worker
+  starts with it. One made after the import runs on the worker alone and
+  throws there; `REACT_X11_THREADED=0` keeps the whole app on the main
+  thread.
 - `--inspect` attaches to the main thread; the app is the worker target
   beside it.
 - Packaging: a single-executable build has to carry the worker's entry

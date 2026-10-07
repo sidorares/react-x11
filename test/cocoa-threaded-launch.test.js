@@ -86,6 +86,10 @@ test(
     const run = await launch('throw');
     assert.strictEqual(run.code, 1);
     assert.match(run.stderr, /thrown by the app/);
+    // once, and as itself: the word on an app that stopped before reaching
+    // its import of react-x11 is not about one that got this far
+    assert.strictEqual(run.stderr.split('thrown by the app').length, 2);
+    assert.doesNotMatch(run.stderr, /before reaching its import of react-x11/);
   },
 );
 

@@ -2,23 +2,22 @@
 // when an import of react-x11 moves the app onto a worker, and the worker's
 // side of the hand-off — the main thread waits on shared memory until the
 // worker asks for AppKit or says it is done, after every exit handler the
-// app has, with its crash printed by itself. Headless: the rules are a pure
-// function, the hand-off is shared memory and an EventEmitter, and the
-// worker's start is a child process whose worker never asks for AppKit.
+// app has, with its crash printed by itself, from the worker's first line
+// on. Headless: the rules are a pure function, the hand-off is shared
+// memory and an EventEmitter, and the worker's start is a child process
+// whose worker never asks for AppKit.
 import assert from 'node:assert';
 import { fork } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { inspect } from 'node:util';
 
-import { relaunchVeto } from '../src/cocoa/relaunch.js';
-import {
-  RELAUNCH,
-  onWorkerEnd,
-  printUncaught,
-  requestAppKit,
-  signalEnded,
-} from '../src/cocoa/threaded.js';
+import { relaunchVeto, WORKER_START } from '../src/cocoa/relaunch.js';
+import { RELAUNCH, requestAppKit } from '../src/cocoa/threaded.js';
 import { runNode } from './helpers/run-script.js';
 
 const app = {
@@ -64,7 +63,9 @@ test('node flags a Worker refuses to be handed do not stop the move, and the wor
   // the app died at its import of react-x11. An `--import`, the way a
   // loader like tsx comes in, must still reach the worker, and its
   // `process.execArgv` must stay the process's, since whatever starts node
-  // again from the worker — the bench's per-scenario children — passes it on.
+  // again from the worker — the bench's per-scenario children — passes it
+  // on. So must `process.argv`: the worker starts on lines of react-x11's
+  // own, and the entry is still the script the app was started with.
   const flags = [
     '--expose-gc',
     '--title=react-x11-relaunch',
@@ -83,7 +84,33 @@ test('node flags a Worker refuses to be handed do not stop the move, and the wor
     title: 'react-x11-relaunch',
     preloaded: true,
     execArgv: flags,
+    argv: [
+      fileURLToPath(
+        new URL('./fixtures/relaunch-node-flags.js', import.meta.url),
+      ),
+      'report',
+    ],
   });
+});
+
+test('a worker that stops before its import of react-x11 says why, and the process ends with its code', async () => {
+  // What an entry imports ahead of react-x11 runs again on the worker,
+  // where a call only a main thread may make — process.chdir() — throws.
+  // The worker used to learn how to end the process and print its crash
+  // only once it reached react-x11, so one that died first did neither:
+  // the main thread waited for ever, and nothing was printed, the error
+  // included. A hang here is the timeout's kill, which reads as code 0.
+  const run = await runNode(['test/fixtures/relaunch-early-death.js', 'chdir']);
+  assert.strictEqual(run.code, 1, `${run.error?.signal ?? ''}\n${run.stderr}`);
+  assert.match(
+    run.stderr,
+    /react-x11: the app stopped on its worker thread before reaching its import of react-x11 there\./,
+  );
+  // the worker's own error, printed once, under the word on why
+  const error = 'process.chdir() is not supported in workers';
+  assert.strictEqual(run.stderr.split(error).length, 2, run.stderr);
+  // and the exit handler the app added had finished when the process ended
+  assert.strictEqual(run.stdout, 'the exit handler ran to its end\n');
 });
 
 // The move for real, which needs macOS and a bridge that can run AppKit's
@@ -167,6 +194,62 @@ test(
   },
 );
 
+// The import moves an ES module entry only where Node evaluates it before
+// its event loop turns, 24 and later: Node 20 and 22 load one with the loop
+// running already, which `relaunchVeto` reads as an import made after the
+// app started (measured, 20.20 and 22.16), so nothing moves to stop there.
+const noModuleMove =
+  Number(process.versions.node.split('.')[0]) < 24 &&
+  'Node 20 and 22 do not move an ES module entry on import';
+
+test(
+  'an app that changes directory ahead of its import of react-x11 is told why it stopped, rather than left waiting',
+  { skip: noMove || noModuleMove },
+  async () => {
+    // The report as it came in, moved by the import for real: the main
+    // thread runs the module that calls process.chdir() without a
+    // complaint, moves the app, and the worker refuses the same call. It
+    // used to hang with nothing printed; REACT_X11_THREADED=0 ran it.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rx11-early-'));
+    try {
+      fs.writeFileSync(
+        path.join(dir, 'setup.mjs'),
+        `process.chdir(${JSON.stringify(dir)});\n`,
+      );
+      fs.writeFileSync(
+        path.join(dir, 'entry.mjs'),
+        "import './setup.mjs';\n" +
+          `import ${JSON.stringify(new URL('../src/index.js', import.meta.url).href)};\n` +
+          "console.error('the entry’s body ran');\n" +
+          'process.exit(0);\n',
+      );
+      const run = await runNode([path.join(dir, 'entry.mjs')], {
+        // the runner's mark would keep it where it is by itself, and so
+        // would either switch in the environment this suite runs in
+        NODE_TEST_CONTEXT: '',
+        REACT_X11_THREADED: '',
+        REACT_X11_BACKEND: '',
+      });
+      assert.strictEqual(
+        run.code,
+        1,
+        `${run.error?.signal ?? ''}\n${run.stderr}`,
+      );
+      assert.match(
+        run.stderr,
+        /react-x11: the app stopped on its worker thread before reaching its import of react-x11 there\./,
+      );
+      assert.match(
+        run.stderr,
+        /process\.chdir\(\) is not supported in workers/,
+      );
+      assert.doesNotMatch(run.stderr, /the entry’s body ran/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
 test('the first cocoa root asks the waiting main thread for AppKit, and waits for its run', async () => {
   const state = new Int32Array(new SharedArrayBuffer(8));
   let running = false;
@@ -183,36 +266,106 @@ test('the first cocoa root asks the waiting main thread for AppKit, and waits fo
   assert.strictEqual(Atomics.load(state, 0), RELAUNCH.APPKIT);
 });
 
-test('the worker says it is done after every exit handler the app has, however late it added one', () => {
+/**
+ * `WORKER_START` run against a stand-in for the worker's `process`, as the
+ * worker runs it before the app's entry. `writeSync` is what it prints
+ * through; `booted` says the app's import of react-x11 has run.
+ */
+function startWorker({ booted = false, writeSync } = {}) {
   const proc = new EventEmitter();
   proc.exitCode = undefined;
-  const order = [];
-  onWorkerEnd((code) => order.push(`ended ${code}`), proc);
-  proc.on('exit', () => order.push('the app'));
-  proc.once('exit', () => order.push('the app, once'));
-  proc.prependListener('exit', () => order.push('the app, first'));
-  proc.emit('exit', 4);
-  assert.deepStrictEqual(order, [
-    'the app, first',
-    'the app',
-    'the app, once',
-    'ended 4',
-  ]);
-
   const state = new Int32Array(new SharedArrayBuffer(8));
-  signalEnded(7, state);
-  assert.deepStrictEqual([...state], [RELAUNCH.ENDED, 7]);
+  const printed = [];
+  const builtins = {
+    'node:worker_threads': { workerData: { reactX11State: state.buffer } },
+    'node:fs': {
+      writeSync:
+        writeSync ??
+        ((fd, bytes, off) => {
+          printed.push([fd, Buffer.from(bytes.subarray(off)).toString()]);
+          return bytes.length - off;
+        }),
+    },
+    'node:util': { inspect },
+  };
+  proc.getBuiltinModule = (name) => builtins[name];
+  const global = {};
+  if (booted) global[Symbol.for('react-x11.cocoa.workerBooted')] = true;
+  new Function(`return ${WORKER_START}`)()(proc, global);
+  return { proc, state, printed };
+}
+
+test('the worker says it is done after every exit handler the app has, however late it added one', () => {
+  const { proc, state } = startWorker();
+  // each handler sees the main thread still waiting: the end comes after
+  // the last of them
+  const seen = [];
+  const handler = (name) => () => seen.push([name, Atomics.load(state, 0)]);
+  proc.on('exit', handler('the app'));
+  proc.once('exit', handler('the app, once'));
+  proc.prependListener('exit', handler('the app, first'));
+  proc.emit('exit', 4);
+  assert.deepStrictEqual(seen, [
+    ['the app, first', RELAUNCH.WAITING],
+    ['the app', RELAUNCH.WAITING],
+    ['the app, once', RELAUNCH.WAITING],
+  ]);
+  assert.deepStrictEqual([...state], [RELAUNCH.ENDED, 4]);
+
+  // an exit that names no code ends with the one the app set
+  const quiet = startWorker();
+  quiet.proc.exitCode = 7;
+  quiet.proc.emit('exit');
+  assert.deepStrictEqual([...quiet.state], [RELAUNCH.ENDED, 7]);
 });
 
-test('the worker prints its own uncaught error, unless the app handles it', () => {
-  const proc = new EventEmitter();
-  const printed = [];
-  printUncaught(proc, (s) => printed.push(s));
-  proc.emit('uncaughtExceptionMonitor', new Error('nobody caught this'));
-  assert.match(printed.join(''), /Error: nobody caught this/);
+test('the worker prints its own uncaught error, unless the app handles it, and says why when its import of react-x11 had not run', () => {
+  const early = startWorker();
+  early.proc.emit('uncaughtExceptionMonitor', new Error('nobody caught this'));
+  assert.strictEqual(early.printed.length, 1);
+  const [fd, text] = early.printed[0];
+  assert.strictEqual(fd, 2);
+  assert.match(
+    text,
+    /^react-x11: the app stopped on its worker thread before reaching its import of react-x11 there\. .*\nError: nobody caught this\n {4}at /,
+  );
+  // the section it sends the developer to is there
+  assert.match(text, /See docs\/macos\.md, "What changes for an app"\./);
+  const docs = fs.readFileSync(
+    new URL('../docs/macos.md', import.meta.url),
+    'utf8',
+  );
+  assert.match(docs, /^### What changes for an app$/m);
 
-  printed.length = 0;
-  proc.on('uncaughtException', () => {});
-  proc.emit('uncaughtExceptionMonitor', new Error('the app did'));
-  assert.deepStrictEqual(printed, []);
+  const later = startWorker({ booted: true });
+  later.proc.emit('uncaughtExceptionMonitor', new Error('after the import'));
+  assert.deepStrictEqual(later.printed.length, 1);
+  assert.match(later.printed[0][1], /^Error: after the import\n {4}at /);
+
+  later.printed.length = 0;
+  later.proc.on('uncaughtException', () => {});
+  later.proc.emit('uncaughtExceptionMonitor', new Error('the app did'));
+  assert.deepStrictEqual(later.printed, []);
+});
+
+test('the worker’s crash reaches stderr whole, through a pipe that is full', () => {
+  const written = [];
+  let full = true;
+  const { proc } = startWorker({
+    booted: true,
+    writeSync(fd, bytes, off) {
+      if (full) {
+        full = false;
+        throw Object.assign(new Error('resource temporarily unavailable'), {
+          code: 'EAGAIN',
+        });
+      }
+      const n = Math.min(3, bytes.length - off);
+      written.push(Buffer.from(bytes.subarray(off, off + n)));
+      return n;
+    },
+  });
+  const err = new Error('a crash');
+  proc.emit('uncaughtExceptionMonitor', err);
+  assert.strictEqual(Buffer.concat(written).toString(), `${inspect(err)}\n`);
 });

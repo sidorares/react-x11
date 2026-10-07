@@ -5,16 +5,16 @@
 //
 //   report  on the worker, print what it runs with — on fd 1, since its
 //           own stdout forwards through the parked main thread — and end
-//           the process with code 3
+//           the process with code 3: a bare process.exit, which the lines
+//           the worker starts on pass to the main thread
 //
 // With no mode it does nothing: the test runner runs every file under
 // test/ as a test of its own.
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { isMainThread, workerData } from 'node:worker_threads';
+import { isMainThread } from 'node:worker_threads';
 
 import { relaunch } from '../../src/cocoa/relaunch.js';
-import { signalEnded } from '../../src/cocoa/threaded.js';
 
 const noAppKit = () => {
   throw new Error('the worker asked for AppKit');
@@ -34,7 +34,8 @@ if (process.argv[2] !== 'report') {
     title: process.title,
     preloaded: globalThis.preloaded ?? false,
     execArgv: process.execArgv,
+    argv: process.argv.slice(1),
   };
   fs.writeSync(1, `${JSON.stringify(report)}\n`);
-  signalEnded(3, new Int32Array(workerData.reactX11State));
+  process.exit(3);
 }
