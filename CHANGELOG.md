@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.46.0](https://github.com/sidorares/react-x11/compare/v2.45.3...v2.46.0) (2026-10-07)
+
+
+### Features
+
+* **frame:** &lt;Frame execArgv env&gt; start a pane's process with flags and an environment of its own over what it inherits, so --max-old-space-size bounds a pane's heap, and react-x11/frame/child is on the exports map for a transport that forks the pane its own way ([#923](https://github.com/sidorares/react-x11/issues/923)) ([a95a927](https://github.com/sidorares/react-x11/commit/a95a927b25f8af496e030df19c11a81a8ed3f8c0))
+
+
+### Bug Fixes
+
+* **cocoa:** an ES module entry on Node 20 and 22 moves onto a worker as react-x11 is imported, where it kept the main thread, and an entry that awaits its import of react-x11 no longer runs twice on Node 24 and later ([#921](https://github.com/sidorares/react-x11/issues/921)) ([d15509c](https://github.com/sidorares/react-x11/commit/d15509c9ebe21dc775a6737e72e7f45495373da7))
+
 ## [2.45.3](https://github.com/sidorares/react-x11/compare/v2.45.2...v2.45.3) (2026-10-07)
 
 
