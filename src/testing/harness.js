@@ -388,10 +388,13 @@ export async function act(fn, only = null) {
     // block — commit and settle. One round leaves that update in flight, and
     // React says so out loud ("An update to Button inside a test was not
     // wrapped in act(...)"), which is how this was found.
+    // A pointer move off the wire is still not in the tree: its window holds
+    // it for the next frame, so each round also hands over what is held.
     for (let round = 0; round < 2; round++) {
       await React.act(async () => {
         await new Promise((resolve) => setImmediate(resolve));
         for (const entry of entries) await settle(entry.app);
+        for (const entry of entries) deliverHeldEvents(entry);
       });
     }
   } finally {
@@ -399,6 +402,35 @@ export async function act(fn, only = null) {
   }
   for (const entry of entries) flushFrames(entry);
   for (const entry of entries) await settle(entry.app);
+}
+
+/**
+ * Dispatch the events each window in a root is holding for its next frame.
+ *
+ * ntk delivers its noisy events — pointer motion, a resize, an expose —
+ * merged, once a frame, and starts frames at least a frame interval apart.
+ * A move that lands within an interval of the last frame waits out the rest
+ * of it, and the rest ends after `act()` has returned: the second of two
+ * hovers in a row is such a move, the first one's frame having started the
+ * interval, and the assertion right after it saw the pointer where it had
+ * been. A press or a key never waits, since ntk delivers what it holds ahead
+ * of any discrete event, but a pure move has nothing behind it.
+ *
+ * Delivered as the frame would deliver them, only now, and inside
+ * `React.act`, so what the handlers set commits in the same round.
+ * `flushCoalescedEvents()` is ntk's public way to ask for that; an ntk
+ * without it has only the method its frame calls, and that branch goes once
+ * the floor is an ntk with it.
+ */
+function deliverHeldEvents(entry) {
+  for (const node of windowNodesOf(entry.windowNode)) {
+    const win = node.window;
+    if (typeof win?.flushCoalescedEvents === 'function') {
+      win.flushCoalescedEvents();
+    } else {
+      win?._flushCoalesced?.();
+    }
+  }
 }
 
 /**

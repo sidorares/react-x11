@@ -265,7 +265,6 @@ describe('examples/fonts', () => {
     };
 
     await overFirstGlyph();
-    await waitFor(() => readout().getByText(/U\+0041/));
     const line = textOf(readout().getByText(/U\+0041/));
     assert.match(line, /advance 22\.50px/);
     assert.match(line, /drawn from KaTeX_Main/);
@@ -278,11 +277,9 @@ describe('examples/fonts', () => {
     );
     await waitFor(() => heading('KaTeX_Fraktur'));
     await overFirstGlyph();
-    await waitFor(() => {
-      const next = textOf(readout().getByText(/U\+0041/));
-      assert.match(next, /advance 21\.54px/);
-      assert.match(next, /drawn from KaTeX_Fraktur/);
-    });
+    const next = textOf(readout().getByText(/U\+0041/));
+    assert.match(next, /advance 21\.54px/);
+    assert.match(next, /drawn from KaTeX_Fraktur/);
   });
 
   test('the guides are lines, and the switch turns them back on', async () => {
@@ -428,9 +425,7 @@ describe('examples/fonts', () => {
       dy: 0,
     });
 
-    await waitFor(() =>
-      within(screen.getByTestName('glyph')).getByText(/U\+0042/),
-    );
+    within(screen.getByTestName('glyph')).getByText(/U\+0042/);
   });
 
   test('the size slider reaches 120, and the specimen draws there', async () => {

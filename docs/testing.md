@@ -333,15 +333,20 @@ stays flaky on pixel assertions:
    dispatched at all, which looks exactly like a hover that does not work.
 3. **ntk's frame clock** — painting is scheduled through
    `requestAnimationFrame`, paced behind the display's vertical blank (or a
-   server round trip where there is no Present extension). Synthetic input can
-   leave a frame scheduled and never run, so `act` runs the frame directly
-   rather than waiting for it, then round-trips so the server has actually
-   processed the drawing.
+   server round trip where there is no Present extension). Pointer motion
+   waits for a frame too: ntk delivers a window's moves merged, once a frame,
+   so a move that lands just after a frame, such as the second of two hovers
+   in a row, waits out the rest of the frame interval. Synthetic input can
+   also leave a frame scheduled and never run. So `act` dispatches what each
+   window holds and runs the frame directly rather than waiting for either,
+   then round-trips so the server has actually processed the drawing.
 
 `waitFor(fn)` retries until `fn` stops throwing, `act`-ing between attempts —
-so waiting also _advances_. Reach for it whenever the thing you are asserting
-arrives through more than one of those stages (a `Button`'s hover is React
-state, so its repaint is an event, a re-render and a frame).
+so waiting also _advances_. Reach for it when the thing you are asserting
+arrives on a clock none of those three is: a timer, an fs read, an image
+decode, another process. A `Button`'s hover needs no waiting, though it is an
+event, a re-render of React state and a frame: `act` runs all three, so the
+repaint is on screen when `userEvent.hover` resolves.
 
 It `act`s once more after the attempt that passes, so what it resolves with
 is on screen. That matters for a node. What an attempt finds can have arrived

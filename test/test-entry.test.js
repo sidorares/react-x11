@@ -119,15 +119,13 @@ test('fireEvent injects through the server, so the real event path runs', async 
   const at = { x: button.abs.x + 6, y: button.abs.y + 6 };
   const away = await pixelAt(ctx, at.x, at.y);
   await userEvent.hover(button);
-  // `waitFor`, not a bare read: a hover on `Button` is React state, so the
-  // repaint is a motion event off the wire, a re-render, and a frame — and
-  // `waitFor` advances between attempts rather than sleeping through them
-  await waitFor(async () =>
-    assert.notDeepStrictEqual(
-      await pixelAt(ctx, at.x, at.y),
-      away,
-      'the hover repainted',
-    ),
+  // a bare read: a hover on `Button` is React state, so the repaint is a
+  // motion event off the wire, a re-render and a frame, and the hover's
+  // act() runs all three
+  assert.notDeepStrictEqual(
+    await pixelAt(ctx, at.x, at.y),
+    away,
+    'the hover repainted',
   );
 
   // a click is delivered with a real button number
@@ -931,10 +929,107 @@ describe('mouseUp and mouseLeave aim at nothing', () => {
     const shy = screen.getByTestName('shy');
     await userEvent.hover(shy);
     // asked of what a pointer event would aim at, which injects nothing
-    await waitFor(() =>
-      assert.throws(() => screenPointOf(shy), /has `display: 'none'`/),
-    );
+    assert.throws(() => screenPointOf(shy), /has `display: 'none'`/);
     await userEvent.unhover(shy);
+  });
+});
+
+// **A pointer move is dispatched by the time its act() resolves.** ntk holds
+// a move for its window's next frame, and starts frames at least a frame
+// interval apart, so a move that lands within an interval of the last frame
+// waits out the rest of it. The second of two hovers in a row is one, the
+// first one's frame having started the interval: it reached the tree a few
+// milliseconds after act() had resolved, and the assertion right after it
+// saw the pointer where it had been.
+describe('a pointer move is dispatched by the time its act() resolves', () => {
+  const OVER = '#2980b9';
+  // Two boxes that log the pointer crossing them, and fill in the one it is
+  // over — React state, so painting it takes a commit and then a frame
+  function Board({ log }) {
+    const [over, setOver] = React.useState(null);
+    const tracked = (name, style) =>
+      h('box', {
+        'data-testname': name,
+        style: {
+          width: 60,
+          height: 40,
+          backgroundColor: over === name ? OVER : '#ffffff',
+          ...style,
+        },
+        onMouseEnter: () => {
+          log.push(`enter ${name}`);
+          setOver(name);
+        },
+        onMouseLeave: () => {
+          log.push(`leave ${name}`);
+          setOver(null);
+        },
+      });
+    return h(React.Fragment, null, tracked('a'), tracked('b', { margin: 20 }));
+  }
+
+  async function mount({ inPopup = false } = {}) {
+    const log = [];
+    const popup = React.createRef();
+    const board = h(Board, { log });
+    const { window, ctx } = await renderX11(
+      h(
+        'box',
+        // clear of the corner, which is where an unhover puts the pointer
+        { style: { flexGrow: 1, padding: 20 } },
+        inPopup
+          ? h(
+              'popup',
+              { ref: popup, x: 40, y: 40, width: 200, height: 200 },
+              board,
+            )
+          : board,
+      ),
+    );
+    // A second between frames, so that every move after the first is held:
+    // a display's few milliseconds hold one only on a machine that finishes
+    // an act() inside them, and on a slower one this would pass either way
+    (inPopup ? popup.current : window).frameInterval = 1000;
+    return {
+      log,
+      ctx,
+      a: screen.getByTestName('a'),
+      b: screen.getByTestName('b'),
+    };
+  }
+
+  const centre = ({ abs }) => [abs.x + abs.width / 2, abs.y + abs.height / 2];
+
+  test('the second of two hovers in a row', async () => {
+    const { log, ctx, a, b } = await mount();
+    await userEvent.hover(a);
+    assert.deepStrictEqual(log, ['enter a']);
+    await userEvent.hover(b);
+    assert.deepStrictEqual(log, ['enter a', 'leave a', 'enter b']);
+    // and what the handlers set is on screen
+    await expectPixel(ctx, ...centre(b), OVER);
+    await expectPixel(ctx, ...centre(a), '#ffffff');
+  });
+
+  test('an unhover right after a hover', async () => {
+    const { log, b } = await mount();
+    await userEvent.hover(b);
+    await userEvent.unhover(b);
+    assert.deepStrictEqual(log, ['enter b', 'leave b']);
+  });
+
+  test('a fireEvent.mouseMove in act() right after a hover', async () => {
+    const { log, a, b } = await mount();
+    await userEvent.hover(a);
+    await act(() => fireEvent.mouseMove(b));
+    assert.deepStrictEqual(log, ['enter a', 'leave a', 'enter b']);
+  });
+
+  test('in a <popup>, whose window holds its own', async () => {
+    const { log, a, b } = await mount({ inPopup: true });
+    await userEvent.hover(a);
+    await userEvent.hover(b);
+    assert.deepStrictEqual(log, ['enter a', 'leave a', 'enter b']);
   });
 });
 
