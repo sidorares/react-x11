@@ -20,7 +20,7 @@ import { createStyles } from '../src/styles.js';
 import { registerElement, unregisterElement } from '../src/host.js';
 import { Node } from '../src/node.js';
 import { spineScope } from '../src/nodes/window/spine.js';
-import { createMockApp, spinWheel } from './helpers/mock-app.js';
+import { createMockApp, flushFrames, spinWheel } from './helpers/mock-app.js';
 import { renderX11, screen, cleanup } from '../src/testing/index.js';
 
 const require = createRequire(import.meta.url);
@@ -45,7 +45,7 @@ async function mount(children, windowProps = {}) {
     ),
   );
   await tick();
-  app.windows[0].flushFrame?.();
+  flushFrames(app.windows[0]);
   await tick();
   return { app, root, node: app.windows[0]._reactX11Node };
 }
@@ -351,7 +351,7 @@ test('scrolling does not re-measure the floors', async () => {
   assert.ok(measured > 0, 'the rows were measured');
 
   spinWheel(app.windows[0], 50, 50, 1);
-  app.windows[0].flushFrame?.();
+  flushFrames(app.windows[0]);
   await tick();
   assert.strictEqual(node._floorsDirty, false, 'still the same answer');
   assert.strictEqual(node._floorsMeasured, measured, 'nothing re-measured');
@@ -560,7 +560,7 @@ const WINDOW = { title: 'floors', width: 300, height: 200 };
 async function rerender(app, root, children, windowProps = {}) {
   root.render(h('window', { ...WINDOW, ...windowProps }, children));
   await tick();
-  app.windows[0].flushFrame?.();
+  flushFrames(app.windows[0]);
   await tick();
 }
 
@@ -771,7 +771,7 @@ test('an absolutely positioned box of a set size that only moved measures no flo
     h('window', { title: 'moves', width: 300, height: 200 }, tree(10)),
   );
   await tick();
-  app.windows[0].flushFrame?.();
+  flushFrames(app.windows[0]);
   await tick();
   const win = app.windows[0]._reactX11Node;
   let measured = 0;
@@ -785,7 +785,7 @@ test('an absolutely positioned box of a set size that only moved measures no flo
       h('window', { title: 'moves', width: 300, height: 200 }, tree(left)),
     );
     await tick();
-    app.windows[0].flushFrame?.();
+    flushFrames(app.windows[0]);
     await tick();
   }
   assert.strictEqual(measured, 0, 'three moves, no floors measured');
@@ -797,7 +797,7 @@ test('an absolutely positioned box of a set size that only moved measures no flo
     h('window', { title: 'moves', width: 300, height: 200 }, tree(50, 80)),
   );
   await tick();
-  app.windows[0].flushFrame?.();
+  flushFrames(app.windows[0]);
   await tick();
   assert.strictEqual(measured, 1, 'a new size measures them');
 });

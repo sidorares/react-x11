@@ -27,7 +27,7 @@ import { registerElement, unregisterElement } from '../src/host.js';
 import { Node, Scrollable } from '../src/node.js';
 import { atspiRoleOf, ATSPI_ROLE } from '../src/a11y.js';
 import { XK_PAGE_DOWN } from '../src/keysyms.js';
-import { createMockApp, spinWheel } from './helpers/mock-app.js';
+import { createMockApp, flushFrames, spinWheel } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -128,7 +128,7 @@ async function mount(children, windowProps = {}) {
   );
   await tick();
   const wnd = app.windows[0];
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   await tick();
   return { app, root, wnd, node: wnd._reactX11Node };
 }
@@ -149,7 +149,7 @@ test('a painted element scrolls on the wheel with no prop handler', async () => 
   await tick();
   assert.equal(editor.scrollY, 48, 'one notch, through the default action');
 
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   await tick();
   assert.ok(
     editor.painted.some((p) => p.y === 48),

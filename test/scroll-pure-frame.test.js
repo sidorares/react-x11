@@ -13,7 +13,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
-import { createMockApp } from './helpers/mock-app.js';
+import { createMockApp, flushFrames } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -26,13 +26,13 @@ async function mount(children, windowProps = {}) {
   );
   await tick();
   const wnd = app.windows[0];
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   await tick();
   return { app, wnd, node: wnd._reactX11Node, x11Root };
 }
 
 const flush = async (wnd) => {
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   await tick();
 };
 

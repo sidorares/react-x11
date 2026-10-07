@@ -11,7 +11,7 @@ import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
 import { atspiRoleOf, ATSPI_ROLE } from '../src/a11y.js';
-import { createMockApp, spinWheel } from './helpers/mock-app.js';
+import { createMockApp, flushFrames, spinWheel } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -25,7 +25,7 @@ async function mount(children, windowProps = {}) {
   );
   await tick();
   const wnd = app.windows[0];
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   await tick();
   return { app, wnd, node: wnd._reactX11Node };
 }
@@ -147,7 +147,7 @@ test('a box that stops scrolling drops the offset it can no longer clamp', async
     );
   render('scroll');
   await tick();
-  app.windows[0].flushFrame?.();
+  flushFrames(app.windows[0]);
   await tick();
 
   const box = ref.current;
@@ -158,7 +158,7 @@ test('a box that stops scrolling drops the offset it can no longer clamp', async
   // the switch: a swap of elements would have taken the children with it
   render('hidden');
   await tick();
-  app.windows[0].flushFrame?.();
+  flushFrames(app.windows[0]);
   await tick();
   assert.equal(ref.current, box, 'the node survived the change');
   assert.equal(box.scrollY, 0, 'the content is not left shifted forever');
@@ -176,7 +176,7 @@ test('a window scrolls its own content', async () => {
   assert.equal(node._maxScroll('y'), 300);
 
   node.scrollTo({ y: 80 });
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   await tick();
   assert.equal(node.children[0].abs.y, -80, 'the children moved under it');
 

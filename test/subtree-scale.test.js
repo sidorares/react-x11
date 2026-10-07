@@ -11,7 +11,7 @@ import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
 import { renderX11 } from '../src/testing/index.js';
-import { createMockApp, spinWheel } from './helpers/mock-app.js';
+import { createMockApp, flushFrames, spinWheel } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -22,7 +22,7 @@ async function mount(element, { scale = 1 } = {}) {
   root.render(element);
   await tick();
   const wnd = app.windows[0];
-  wnd?.flushFrame?.();
+  flushFrames(wnd);
   await tick();
   return { app, root, wnd, node: wnd?._reactX11Node };
 }
@@ -140,7 +140,7 @@ test('re-zooming a mounted subtree lands exactly where a fresh mount at that zoo
   const live = await mount(tree(1));
   live.root.render(tree(1.6));
   await tick();
-  live.wnd.flushFrame?.();
+  flushFrames(live.wnd);
   await tick();
   const fresh = await mount(tree(1.6));
 
@@ -170,7 +170,7 @@ test('a node mounted into a zoomed subtree later resolves against it', async () 
   const { root, node, wnd } = await mount(tree(false));
   root.render(tree(true));
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   await tick();
   const added = child(child(node), 1);
   assert.strictEqual(added.scale, 2);
@@ -205,7 +205,7 @@ test('a `<popup>` written inside a zoomed subtree is not zoomed: a window is its
   // …and a live re-zoom walks past it rather than through it
   root.render(tree(3));
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   await tick();
   assert.strictEqual(zoomed.scale, 3);
   assert.strictEqual(popup.scale, 1);

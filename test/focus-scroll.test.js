@@ -16,7 +16,7 @@ import { test } from 'node:test';
 import React from 'react';
 
 import { createRoot } from '../src/index.js';
-import { createMockApp, pressButton } from './helpers/mock-app.js';
+import { createMockApp, flushFrames, pressButton } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = async () => {
@@ -42,7 +42,7 @@ async function mount() {
   );
   await tick();
   const wnd = app.windows[0];
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   const pane = wnd._reactX11Node.children[0];
   return { app, root, wnd, pane, doc: pane.children[1] };
 }
@@ -51,12 +51,12 @@ test('a press focuses a document taller than its pane where it is, without scrol
   const { root, wnd, pane, doc } = await mount();
   pane.scrollTo(500);
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   assert.equal(pane.scrollY, 500);
 
   pressButton(wnd, 50, 50);
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   assert.equal(
     wnd._reactX11Node.events.focused,
     doc,
@@ -71,24 +71,24 @@ test('scrollIntoView leaves a node that covers the viewport, and brings a taller
   // the document covers 500..600 of its 60..1060: nothing more of it fits
   pane.scrollTo(500);
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   pane.scrollIntoView(doc);
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   assert.equal(pane.scrollY, 500);
 
   // partly below the viewport and taller than it: its top edge comes in
   pane.scrollTo(0);
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   pane.scrollIntoView(doc);
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   assert.equal(pane.scrollY, 60);
 
   pane.scrollIntoView(pane.children[2]);
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   assert.equal(
     pane.scrollY,
     1020,
@@ -96,15 +96,15 @@ test('scrollIntoView leaves a node that covers the viewport, and brings a taller
   );
   pane.scrollIntoView(doc);
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   assert.equal(pane.scrollY, 960, 'taller and above: its bottom edge comes in');
 
   pane.scrollTo(0);
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   pane.scrollIntoView(pane.children[0]);
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   assert.equal(pane.scrollY, 0);
   await root.unmount();
 });

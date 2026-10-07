@@ -15,7 +15,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
-import { createMockApp } from './helpers/mock-app.js';
+import { createMockApp, flushFrames } from './helpers/mock-app.js';
 import { setScreensForTests } from '../src/screens.js';
 
 const h = React.createElement;
@@ -357,11 +357,20 @@ test('a floor that did not move is not sent again', async () => {
   await tick();
   const wnd = app.windows[0];
   const before = wnd.calls.filter(([name]) => name === 'setSizeHints').length;
+  const passes = wnd._reactX11Node._layoutPasses;
 
-  root.render(h(Rows, { n: 2, title: 'renamed' }));
+  // A change the window is laid out for that leaves the floor where it was:
+  // the rows move across, and the widest is as wide as before. Not a title
+  // change, which lays nothing out: the floor is never measured again, and a
+  // resend on every measurement would pass.
+  root.render(h(Rows, { n: 2, style: { alignItems: 'flex-end' } }));
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   await tick();
+  assert.ok(
+    wnd._reactX11Node._layoutPasses > passes,
+    'the change laid the window out',
+  );
   assert.strictEqual(
     wnd.calls.filter(([name]) => name === 'setSizeHints').length,
     before,
@@ -478,7 +487,7 @@ test('a window that pins itself re-pins at the size it grew to', async () => {
 
   root.render(h(Rows, { n: 5, resizable: false }));
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   await tick();
   record();
   assert.ok(pinnedAt.length > 0, 'the pin was re-sent after the window grew');
