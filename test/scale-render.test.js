@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
-import { createMockApp } from './helpers/mock-app.js';
+import { createMockApp, flushFrames } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -23,7 +23,7 @@ async function mount(element, { scale = 2 } = {}) {
   root.render(element);
   await tick();
   const wnd = app.windows[0];
-  wnd?.flushFrame?.();
+  flushFrames(wnd);
   await tick();
   return { app, root, wnd, node: wnd?._reactX11Node };
 }

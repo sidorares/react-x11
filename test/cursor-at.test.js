@@ -11,7 +11,12 @@ import { test } from 'node:test';
 import React from 'react';
 
 import { createRoot } from '../src/index.js';
-import { createMockApp, moveMouse, pressButton } from './helpers/mock-app.js';
+import {
+  createMockApp,
+  flushFrames,
+  moveMouse,
+  pressButton,
+} from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = async () => {
@@ -30,7 +35,7 @@ async function mount(style = {}, props = {}) {
   );
   await tick();
   const wnd = app.windows[0];
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   const pane = wnd._reactX11Node.children[0];
   const asked = [];
   // a "document" whose left half is a link
@@ -108,12 +113,12 @@ test('a cursor style changed by the press still shows while the capture holds', 
   root.render(h('window', { width: 200, height: 100 }, h(Handle)));
   await tick();
   const wnd = app.windows[0];
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   moveMouse(wnd, 40, 50);
   assert.equal(wnd.cursor, 'grab');
   pressButton(wnd, 40, 50, { release: false });
   await tick();
-  wnd.flushFrame?.();
+  flushFrames(wnd);
   moveMouse(wnd, 60, 50);
   assert.equal(wnd.cursor, 'grabbing');
   pressButton(wnd, 60, 50, { press: false });

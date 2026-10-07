@@ -16,7 +16,12 @@ import React from 'react';
 
 import { Frame, createRoot } from '../src/index.js';
 import { PANE_SIZED_WAIT_MS } from '../src/frame/index.js';
-import { createMockApp, moveMouse, spinWheel } from './helpers/mock-app.js';
+import {
+  createMockApp,
+  flushFrames,
+  moveMouse,
+  spinWheel,
+} from './helpers/mock-app.js';
 
 const h = React.createElement;
 const settle = async () => {
@@ -125,7 +130,7 @@ describe('<Frame>: input forwarded to a composited pane', () => {
       ),
     );
     await settle();
-    app.windows[0].flushFrame?.();
+    flushFrames(app.windows[0]);
     spinWheel(app.windows[0], 50, 50, { deltaY: 1 });
     spinWheel(app.windows[0], 50, 50, { deltaY: -0.25, smooth: true });
     await settle();
@@ -170,7 +175,7 @@ describe('<Frame>: input forwarded to a composited pane', () => {
     );
     await settle();
     const wnd = app.windows[0];
-    wnd.flushFrame?.();
+    flushFrames(wnd);
     const pointer = () =>
       sent
         .filter((m) => m.type === 'pane-event' && /^mouse/.test(m.name))
@@ -225,7 +230,7 @@ describe('<Frame>: the cursor of a composited pane', () => {
     );
     await settle();
     const wnd = app.windows[0];
-    wnd.flushFrame?.();
+    flushFrames(wnd);
     const fromPane = (msg) => {
       for (const cb of [...listeners]) cb(msg);
     };
@@ -289,7 +294,7 @@ describe('<Frame>: the size of a composited pane', () => {
     const resize = async (width) => {
       root.render(h('window', { width, height: 120 }, frame));
       await settle();
-      app.windows[0].flushFrame?.();
+      flushFrames(app.windows[0]);
     };
     await resize(200);
     const fromPane = (msg) => {

@@ -7,7 +7,12 @@ import React from 'react';
 import { createRoot, ThemeProvider, useTheme } from '../src/index.js';
 import { DefaultTheme } from '../src/palette.js';
 import { createStyles, flattenStyle, resolveTokens } from '../src/styles.js';
-import { createMockApp, pressButton, moveMouse } from './helpers/mock-app.js';
+import {
+  createMockApp,
+  flushFrames,
+  pressButton,
+  moveMouse,
+} from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -168,7 +173,7 @@ test('a row or column gap a style drops falls back to its gap', async () => {
       ),
     );
     await tick();
-    app.windows[0].flushFrame?.();
+    flushFrames(app.windows[0]);
     await tick();
     const [a, b] = nodeOf(app).children[0].children;
     return style.flexDirection === 'row'

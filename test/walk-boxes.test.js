@@ -10,7 +10,7 @@ import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
 import { layoutDiff } from '../src/nodes/damage.js';
-import { createMockApp } from './helpers/mock-app.js';
+import { createMockApp, flushFrames } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -108,7 +108,7 @@ test('every box a pane measured lands where yoga put it', async () => {
   const show = async (props) => {
     root.render(h('window', { width: 200, height: 100 }, doc(props)));
     await tick();
-    app.windows[0].flushFrame?.();
+    flushFrames(app.windows[0]);
     await tick();
     const win = app.windows[0]._reactX11Node;
     assert.deepStrictEqual(misplaced(win), [], JSON.stringify(props));
