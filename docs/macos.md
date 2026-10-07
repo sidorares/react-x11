@@ -985,10 +985,13 @@ is rule two of the Windows design, followed before it was written down.
 
 ### The renderer's half
 
-Threaded mode is the default on macOS: `node app.js`, `bun app.jsx` and
-`tsx app.jsx` run the app on a worker, with nothing in the app or on the
-command line asking for it. It needs a bridge with `runMain()`,
-@windowkit/appkit 0.10. What it costs at startup, and how to skip it, is in
+Threaded mode is the default on macOS: `node app.js` and `bun app.jsx` run
+the app on a worker, with nothing in the app or on the command line asking
+for it, and so does `tsx app.jsx` on Node 24 and later. On Node 20 and 22
+an app started under an ES module loader, tsx or any other `--import` or
+`--loader`, keeps the main thread and the pump (below). It needs a bridge
+with `runMain()`, @windowkit/appkit 0.10. What it costs at startup, how to
+skip it, and what moves on which Node, is in
 [packaging.md](packaging.md#on-macos-the-app-moves-onto-a-worker).
 
 - **The move** (`src/cocoa/relaunch.js`, reached from `src/bootstrap.js`,
@@ -1020,11 +1023,31 @@ command line asking for it. It needs a bridge with `runMain()`,
   worker can load; in a `<Frame>` pane, which has no AppKit to keep and
   talks to its host over the fork's IPC channel, the main thread's — a
   worker has no `process.send` ([frame.md](frame.md)); under a test
-  runner; and when react-x11 is imported after the app started running. It
-  tells that last case by Node's `performance.nodeTiming.loopStart`, -1
-  until the event loop turns, and in Bun, which reports 1 there from the
-  first line, by the entry's record in the module cache, absent until the
-  entry has run (both measured).
+  runner; when react-x11 is imported after the app started running; and on
+  Node 20 and 22, under an ES module loader. Node tells the late import by
+  what evaluates it. It starts an app from two modules of its own,
+  `node:internal/main/run_main_module` and `node:internal/modules/run_main`:
+  a CommonJS entry's first run and a `--require` preload evaluate under
+  them, and an ES module entry's graph, an `--import` preload's too, under
+  an async function there, which V8 keeps on the stack as an async frame.
+  An `import()` is evaluated by a job of its own, whose stack ends in the
+  module loader, or in the app's code that awaits it. So react-x11 reads
+  its own stack, async frames and all, as it is evaluated (measured, Node
+  20.20 to 26.0, nested and behind a top-level await, under tsx,
+  `--experimental-loader`, source maps and a stack trace limit of 0). The
+  public signal, `performance.nodeTiming.loopStart`, -1 until the event
+  loop turns, was the one before, and it is wrong both ways: Node 20 and 22
+  turn the loop while they load an ES module entry, so no ES module entry
+  moved there, and 24 and later evaluate an `import()` the entry makes
+  before the loop turns, so an app that awaited one moved and ran its entry
+  twice. Bun reports 1 there from the first line, and tells by the entry's
+  record in the module cache, absent until the entry has run (measured).
+  The loader rule is tsx's: it keeps its hooks to the main thread on Node 20
+  and 22, and a worker without them stops on the first `.jsx` or `.ts` file
+  it loads (measured, 20.20 and 22.16). No loader can be asked before the
+  move, so there any `--import` or `--loader`, on the command line or in
+  `NODE_OPTIONS`, keeps the app where it is, and the launcher moves one
+  whose loader follows.
 - **`react-x11/cocoa-main`** (`src/cocoa/main.js`) is the same move asked
   for by name — `node --import react-x11/cocoa-main app.js`,
   `bun --preload react-x11/cocoa-main app.jsx` — before the entry is loaded
@@ -1181,6 +1204,14 @@ What it does not do yet, each noted where it lives:
 - A transparent window's shadow is recomputed a frame interval after a
   flip, rather than once the flip has committed.
 - `process.stdin` still forwards through the parked main thread.
+- A worker that cannot load the entry stops the app, where the main thread
+  could have run it with the pump. Under a loader that keeps its hooks to
+  the main thread — tsx before 4.21.1 on Node 24 and later (measured, 4.20.6
+  on 24.12 and 26.0), or tsx on 20 and 22 under the launcher — the app
+  moves and stops as it starts, on `ERR_UNKNOWN_FILE_EXTENSION`. A load
+  failure has run nothing of the app's on the worker, so the main thread
+  could carry on in its place, if `WORKER_START` told such a failure from
+  the rest.
 
 ### What changes for an app
 

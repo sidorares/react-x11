@@ -3,9 +3,10 @@
 // side of the hand-off — the main thread waits on shared memory until the
 // worker asks for AppKit or says it is done, after every exit handler the
 // app has, with its crash printed by itself, from the worker's first line
-// on. Headless: the rules are a pure function, the hand-off is shared
-// memory and an EventEmitter, and the worker's start is a child process
-// whose worker never asks for AppKit.
+// on. Headless: the rules are a pure function, what tells an import made as
+// the app starts from one made later is read in child processes of every
+// shape, the hand-off is shared memory and an EventEmitter, and the
+// worker's start is a child process whose worker never asks for AppKit.
 import assert from 'node:assert';
 import { fork } from 'node:child_process';
 import { EventEmitter } from 'node:events';
@@ -13,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { inspect } from 'node:util';
 
 import { relaunchVeto, WORKER_START } from '../src/cocoa/relaunch.js';
@@ -24,7 +25,9 @@ const app = {
   isMainThread: true,
   platform: 'darwin',
   env: {},
-  entry: '/Users/me/app.jsx',
+  execArgv: [],
+  node: 22,
+  entry: '/Users/me/app.mjs',
   compiled: false,
   late: false,
 };
@@ -35,6 +38,22 @@ test('an app on macOS, imported as it starts, moves onto a worker', () => {
     relaunchVeto({ ...app, env: { REACT_X11_BACKEND: 'cocoa' } }),
     null,
   );
+  // under a loader too from Node 24 on, where tsx follows it onto the
+  // worker; with flags that are no loader on any Node; and in Bun, whose
+  // loaders are its own
+  for (const change of [
+    { node: 24, execArgv: ['--import', 'tsx'] },
+    { node: 26, env: { NODE_OPTIONS: '--import=tsx' } },
+    { node: 20, execArgv: ['--expose-gc', '--require', './setup.cjs'] },
+    { node: 22, env: { NODE_OPTIONS: '--max-old-space-size=4096' } },
+    { node: null, execArgv: ['--import', 'tsx'] },
+  ]) {
+    assert.strictEqual(
+      relaunchVeto({ ...app, ...change }),
+      null,
+      inspect(change),
+    );
+  }
 });
 
 test('everything that keeps it where it is says why', () => {
@@ -51,9 +70,103 @@ test('everything that keeps it where it is says why', () => {
     [{ env: { NODE_ENV: 'test' } }, 'a test runner'],
     [{ env: { VITEST: 'true' } }, 'a test runner'],
     [{ late: true }, 'imported after the app started running'],
+    [{ execArgv: ['--import', 'tsx'] }, 'an ES module loader before Node 24'],
+    [
+      { node: 20, execArgv: ['--import=tsx'] },
+      'an ES module loader before Node 24',
+    ],
+    [
+      { execArgv: ['--loader', 'ts-node/esm'] },
+      'an ES module loader before Node 24',
+    ],
+    [
+      { execArgv: ['--experimental-loader=./hooks.mjs'] },
+      'an ES module loader before Node 24',
+    ],
+    [
+      { env: { NODE_OPTIONS: '--max-old-space-size=4096 --import tsx' } },
+      'an ES module loader before Node 24',
+    ],
   ];
   for (const [change, reason] of cases) {
     assert.strictEqual(relaunchVeto({ ...app, ...change }), reason);
+  }
+});
+
+test('an import Node evaluates as it starts the app is not late, and one the app makes once its own code has run is', async () => {
+  // Static imports, an ES module entry's or a CommonJS one's, and a
+  // preload's, run before the entry's body, so the worker repeats nothing
+  // the app did; an import() is made by code that has run, which the worker
+  // would run again. This is what decides the move, so it runs on any OS.
+  // The event loop's first turn is the public signal, and wrong both ways:
+  // Node 20 and 22 turn it while they load an ES module entry, and 24 and
+  // later evaluate an import() the entry makes before it turns.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rx11-start-'));
+  try {
+    const relaunch = new URL('../src/cocoa/relaunch.js', import.meta.url);
+    const files = {
+      // Reads the stack with an app's own settings in place, a limit that
+      // shows no frame and a formatter, and says whether they are as it
+      // left them. An Error the app froze keeps whatever it has. With it,
+      // the flags and the Node the loader rule reads.
+      'probe.mjs':
+        "import { writeSync } from 'node:fs';\n" +
+        `import { describeProcess } from ${JSON.stringify(relaunch.href)};\n` +
+        'if (!Object.isFrozen(Error)) {\n' +
+        '  Error.stackTraceLimit = 0;\n' +
+        '  Error.prepareStackTrace = (error) => `${error}`;\n' +
+        '}\n' +
+        'const app = [Error.stackTraceLimit, Error.prepareStackTrace];\n' +
+        'const { late, execArgv, node } = describeProcess(import.meta.url);\n' +
+        'const kept =\n' +
+        '  Error.stackTraceLimit === app[0] && Error.prepareStackTrace === app[1];\n' +
+        'writeSync(1, JSON.stringify({ late, kept, execArgv, node }));\n',
+      'static.mjs': "import './probe.mjs';\n",
+      'nested.mjs': "import './static.mjs';\n",
+      'static.cjs': "require('./probe.mjs');\n",
+      'empty.mjs': '',
+      'timer.mjs': "setTimeout(() => import('./probe.mjs'), 10);\n",
+      'awaits.mjs':
+        "globalThis.started = true;\nawait import('./probe.mjs');\n",
+      'dynamic.cjs': "import('./probe.mjs');\n",
+      'freeze.mjs': 'Object.freeze(Error);\n',
+      'frozen.mjs': "import './freeze.mjs';\nimport './probe.mjs';\n",
+    };
+    for (const [name, source] of Object.entries(files)) {
+      fs.writeFileSync(path.join(dir, name), source);
+    }
+    const at = (name) => path.join(dir, name);
+    const probe = pathToFileURL(at('probe.mjs')).href;
+    const cases = [
+      ['a static import', [at('static.mjs')], false],
+      ['a static import of a static import', [at('nested.mjs')], false],
+      ['a require() of a CommonJS entry', [at('static.cjs')], false],
+      ['an --import preload', ['--import', probe, at('empty.mjs')], false],
+      [
+        'a --require preload',
+        ['--require', at('probe.mjs'), at('empty.mjs')],
+        false,
+      ],
+      ['an import() from a timer', [at('timer.mjs')], true],
+      ['an import() the entry awaits', [at('awaits.mjs')], true],
+      ['an import() of a CommonJS entry', [at('dynamic.cjs')], true],
+      // no stack to read: where the app is, rather than a throw at the
+      // import, or a worker that runs the entry twice
+      ['a static import, with Error frozen', [at('frozen.mjs')], true],
+    ];
+    const node = Number(process.versions.node.split('.')[0]);
+    const runs = await Promise.all(cases.map(([, args]) => runNode(args)));
+    cases.forEach(([how, args, late], i) => {
+      const run = runs[i];
+      assert.strictEqual(run.code, 0, `${how}: ${run.stderr}`);
+      assert.deepStrictEqual(
+        JSON.parse(run.stdout),
+        { late, kept: true, execArgv: args.slice(0, -1), node },
+        how,
+      );
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -194,17 +307,26 @@ test(
   },
 );
 
-// The import moves an ES module entry only where Node evaluates it before
-// its event loop turns, 24 and later: Node 20 and 22 load one with the loop
-// running already, which `relaunchVeto` reads as an import made after the
-// app started (measured, 20.20 and 22.16), so nothing moves to stop there.
-const noModuleMove =
-  Number(process.versions.node.split('.')[0]) < 24 &&
-  'Node 20 and 22 do not move an ES module entry on import';
+test(
+  'an app started under a loader keeps its main thread before Node 24, and moves from 24 on',
+  { skip: noMove },
+  async () => {
+    // tsx keeps its hooks to the main thread on Node 20 and 22, where a
+    // worker without them cannot load a .jsx entry, and no loader can be
+    // asked before the move, so there any --import keeps the app where it
+    // is. The fork with no pane in it is an app that moves otherwise.
+    const run = await forkPane(['--import', 'data:text/javascript,0'], false);
+    assert.strictEqual(run.code, 0, run.stderr);
+    assert.strictEqual(
+      run.report?.isMainThread,
+      Number(process.versions.node.split('.')[0]) < 24,
+    );
+  },
+);
 
 test(
   'an app that changes directory ahead of its import of react-x11 is told why it stopped, rather than left waiting',
-  { skip: noMove || noModuleMove },
+  { skip: noMove },
   async () => {
     // The report as it came in, moved by the import for real: the main
     // thread runs the module that calls process.chdir() without a
