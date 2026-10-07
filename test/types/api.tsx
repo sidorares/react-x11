@@ -2040,7 +2040,12 @@ const _edge: number = LayoutYoga.EDGE_LEFT;
 // `<Frame>` — a pane in its own process (docs/frame.md), and the context
 // that follows the app into it.
 import { Frame, createFrameContext, isFramed, useFrameClose } from 'react-x11';
-import type { FrameError, FrameHandle, FrameTransport } from 'react-x11';
+import type {
+  FrameError,
+  FrameHandle,
+  FrameTransport,
+  FrameTransportOptions,
+} from 'react-x11';
 
 const Session = createFrameContext('session', { user: null as string | null });
 const _sessionValue: { user: string | null } = Session.use();
@@ -2058,6 +2063,10 @@ function _Panes() {
           props={{ rows: [1, 2, 3], onPick: (row: number) => void row }}
           style={{ flexGrow: 1 }}
           bridge={['react-x11:theme', 'session']}
+          // the pane's process: its heap bounded, a variable set and one
+          // taken away
+          execArgv={['--max-old-space-size=256']}
+          env={{ PANE_MODE: 'sandbox', HOME: undefined }}
           fallback={({ error, restart }) => (
             <text onMouseDown={restart}>
               {error?.message ?? String(framed)}
@@ -2082,12 +2091,24 @@ const _loopback: FrameTransport = {
   onExit: () => () => {},
 };
 const _err: FrameError = Object.assign(new Error('x'), { phase: 'load' });
+// a transport is handed the flags and the environment to start the pane with
+const _forkYourOwn = (options: FrameTransportOptions): FrameTransport => {
+  const flags: readonly string[] = options.execArgv;
+  const home: string | undefined = options.env.HOME;
+  void [flags, home, options.src, options.display];
+  return _loopback;
+};
+const _withTransport = <Frame src="/abs/pane.js" transport={_forkYourOwn} />;
+// @ts-expect-error — an environment variable is a string, or undefined
+const _badEnv = <Frame src="/abs/pane.js" env={{ PORT: 8080 }} />;
 // @ts-expect-error — src is required
 const _badFrame = <Frame props={{}} />;
 void _Panes;
 void _loopback;
 void _err;
 void _badFrame;
+void _withTransport;
+void _badEnv;
 void _sessionValue;
 
 import {

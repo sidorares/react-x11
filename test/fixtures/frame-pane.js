@@ -1,7 +1,10 @@
 // The pane the frame tests mount: reports what reached it (props, bridged
 // theme, bridged context) through a bridged callback, crashes on demand,
-// and flushes through a callback from its close handler. Boxes only — no
-// text — so the forked variant needs no fonts on the machine.
+// and flushes through a callback from its close handler — and, asked with
+// `probe`, what its process was started with. Boxes only — no text — so
+// the forked variant needs no fonts on the machine.
+import { getHeapStatistics } from 'node:v8';
+
 import React, { useEffect } from 'react';
 
 import { useTheme } from '../../src/components/theme.js';
@@ -10,7 +13,18 @@ import { Session } from './frame-contexts.js';
 
 const h = React.createElement;
 
-export default function Pane({ label, crash, onReport, onClosed }) {
+/** What the pane's process was started with: its heap's limit, which a
+ *  flag sets, and the variables `probe` names. */
+function processReport(probe) {
+  return {
+    heapLimitMb: Math.round(getHeapStatistics().heap_size_limit / 2 ** 20),
+    set: process.env[probe.set] ?? null,
+    removed: process.env[probe.removed] ?? null,
+    framed: process.env.REACT_X11_FRAME ?? null,
+  };
+}
+
+export default function Pane({ label, crash, probe, onReport, onClosed }) {
   if (crash) throw new Error('pane asked to crash');
   const theme = useTheme();
   const session = Session.use();
@@ -23,13 +37,18 @@ export default function Pane({ label, crash, onReport, onClosed }) {
   const user = session?.user ?? null;
   useEffect(() => {
     onReport?.(
-      { label: label ?? null, accent, user },
+      {
+        label: label ?? null,
+        accent,
+        user,
+        ...(probe && { process: processReport(probe) }),
+      },
       {
         preventDefault: () => {},
         kept: 'yes',
       },
     );
-  }, [label, accent, user, onReport]);
+  }, [label, accent, user, probe, onReport]);
   // `$accent` on purpose: the *node* route. The report above carries the
   // context route's answer; the pixels this paints carry the planted-theme
   // route's, and a theme update has to move both (issue: a framed pane

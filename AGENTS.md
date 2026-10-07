@@ -135,13 +135,16 @@ no override-redirect staging (issue #4).
   bootstrap behind an injectable transport, which is what lets the tests
   run a real pane in-process over a loopback — `test/frame.test.js` forks
   for real exactly once, over a TCP bridge onto the in-process server).
-  Two things are deliberate and easy to undo: the **update listener goes up
-  before the pane module import starts** (a store the tree subscribes to
+  Three things are deliberate and easy to undo: the **update listener goes
+  up before the pane module import starts** (a store the tree subscribes to
   later — a listener scoped to the mounted tree would drop every update
-  that landed during the import), and the host's transport listeners
+  that landed during the import), the host's transport listeners
   **outlive the effect cleanup until the exit**, because a `useFrameClose`
   handler flushing through a callback prop sends its `invoke` after the
-  unmount message.
+  unmount message, and the pane process's `execArgv` and `env` are in the
+  session's key **as one string, not by identity** (`launchOf`): an array
+  written in place is a new one every render, and keyed by it every render
+  would restart the pane.
 - `src/cocoa/` — the Cocoa backend, ~8,800 lines: `app.js` (the app
   object, the AppKit pump, the per-display frame clocks, event routing),
   `window.js` (an `NSWindow` and its IOSurface swapchain), `presenter.js`

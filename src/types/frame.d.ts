@@ -46,6 +46,22 @@ export interface FrameComponentProps {
   /** X display for the pane process; defaults to the inherited `$DISPLAY`. */
   display?: string;
   /**
+   * Flags for the pane's process, after the ones it inherits from this one
+   * (a dev loader's): `['--max-old-space-size=256']` bounds the pane's heap,
+   * which nothing inside the pane can. They are handed to the runtime that
+   * forks it, so they are that runtime's flags. A change restarts the pane;
+   * the same flags in a new array do not.
+   */
+  execArgv?: readonly string[];
+  /**
+   * Environment variables for the pane's process, over this one's; a value
+   * of `undefined` takes a variable away. `DISPLAY` is `display`'s and
+   * `REACT_X11_FRAME` marks the pane (`isFramed`), so neither can be set
+   * here. A change restarts the pane; the same variables in a new object do
+   * not.
+   */
+  env?: Readonly<Record<string, string | undefined>>;
+  /**
    * Which bridged contexts follow the app into this pane: `true` (default)
    * for every registered one — the theme included — `false` for none, or an
    * allowlist of keys.
@@ -75,8 +91,21 @@ export interface FrameComponentProps {
    * (a loopback pair into `runFrameChild`), and the door to running a pane
    * somewhere other than a child process. Advanced; see docs/frame.md.
    */
-  transport?(options: { src: string; display?: string }): FrameTransport;
+  transport?(options: FrameTransportOptions): FrameTransport;
   ref?: Ref<FrameHandle>;
+}
+
+/** What a transport is asked to start: the pane module, and the display,
+ *  flags and environment `<Frame>` names for its process. The default
+ *  transport forks `react-x11/frame/child` with them. */
+export interface FrameTransportOptions {
+  src: string;
+  display?: string;
+  /** `<Frame execArgv>`, or none: added to what the pane inherits. */
+  execArgv: readonly string[];
+  /** `<Frame env>`, or none: over this process's environment, `undefined`
+   *  taking a variable away. */
+  env: Readonly<Record<string, string | undefined>>;
 }
 
 /** The parent's end of the wire to a pane. */

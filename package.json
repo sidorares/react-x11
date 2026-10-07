@@ -221,6 +221,10 @@
     "./cocoa-main": {
       "types": "./src/cocoa/main.d.ts",
       "default": "./src/cocoa/main.js"
+    },
+    "./frame/child": {
+      "types": "./src/frame/child.d.ts",
+      "default": "./src/frame/child.js"
     }
   },
   "types": "./src/index.d.ts"
