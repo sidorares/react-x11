@@ -107,6 +107,40 @@ test('at 1x, the bridge is asked what it always was', () => {
   }
 });
 
+test('a scale set later is the one every font is made at from then on, and what the app loaded stays loaded', () => {
+  // a <Frame> pane taking the host's scale (CocoaApp.adoptPaneScale)
+  const native = fakeNative();
+  const fonts = new CocoaFontManager(native, { scale: 1 });
+  makeEach(fonts);
+  native.asked.length = 0;
+  fonts.setScale(2);
+  // the requests a cache answered at 1x a moment ago
+  fonts.match('Helvetica', { weight: 700 }).metrics(26);
+  fonts.match('Loaded').metrics(26);
+  fonts._runHandle({ postscriptName: 'Opened-Regular', key: 'opened' }, 26);
+  assert.deepEqual(native.asked, [
+    [
+      'matchFont',
+      {
+        families: ['Helvetica'],
+        size: 26,
+        weight: 700,
+        italic: false,
+        scale: 2,
+      },
+    ],
+    // the loaded face, not a family match
+    ['cgFontWithSize', 'cg', 26, 2],
+    // and the opened one, without asking again whether it is installed
+    ['fontByPostScriptName', 'Opened-Regular', 26, 2],
+  ]);
+
+  native.asked.length = 0;
+  fonts.setScale(2);
+  fonts.match('Helvetica', { weight: 700 }).metrics(26);
+  assert.deepEqual(native.asked, [], 'the same scale again keeps everything');
+});
+
 // --- the real bridge ------------------------------------------------------------
 
 let bridge = null;
@@ -180,6 +214,19 @@ describe(
         );
         assert.ok(two > size * 2 + 2, `${size}px: wider than 1em, ${two}`);
       }
+    });
+
+    test('an engine set to 2x after measuring at 1x measures as one made at 2x', () => {
+      const fonts = new CocoaFontManager(bridge, { scale: 1 });
+      const at2 = new CocoaFontManager(bridge, { scale: 2 });
+      const at1 = width(fonts, SENTENCE, 'system-ui', 26);
+      fonts.setScale(2);
+      const now = width(fonts, SENTENCE, 'system-ui', 26);
+      assert.ok(Math.abs(now - at1) > 1, `re-measured: ${now} against ${at1}`);
+      assert.ok(
+        Math.abs(now - width(at2, SENTENCE, 'system-ui', 26)) < 1e-3,
+        `as one made at 2x: ${now}`,
+      );
     });
 
     test('a face with no size-dependent data measures as it did', () => {

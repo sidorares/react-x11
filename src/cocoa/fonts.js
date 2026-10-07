@@ -772,6 +772,31 @@ export class CocoaFontManager {
   }
 
   /**
+   * Make fonts at another scale from here on — a `<Frame>` pane taking the
+   * host's (`CocoaApp.adoptPaneScale`). Every handle made at the old one is
+   * let go: a size is in device pixels, so the same size at another scale
+   * is another point size, which is another optical size of San Francisco
+   * and another tracking. What the app loaded stays loaded.
+   */
+  setScale(scale) {
+    const next = scale > 0 && Number.isFinite(scale) ? scale : 1;
+    if (next === this._scale) return;
+    this._scale = next;
+    this._scaleArgs = next === 1 ? [] : [next];
+    this._fonts.clear();
+    this._faces.clear();
+    this._sized.clear();
+    this._layouts.clear();
+    // a face CoreText chose sizes itself by copying the handle it arrived
+    // as, and a copy keeps the scale it was made at
+    this._faceByPs.clear();
+    for (const faces of this._registered.values()) {
+      for (const reg of faces) reg.face = null;
+    }
+    this._forgetTypesetters();
+  }
+
+  /**
    * A paragraph's typesetter, kept from a layout of the same text at any
    * width. Two thirds of a layout is the text becoming glyphs — the
    * attributed string, then CoreText's shaping — and a paragraph laid out

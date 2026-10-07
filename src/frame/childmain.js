@@ -230,8 +230,13 @@ export async function runFrameChild(transport, options = {}) {
       send: (msg) => transport.send(msg),
       onMessage: (cb) => transport.onMessage(cb),
     },
-    // what the host does for the pane that a pane cannot do itself
-    { players: Boolean(hello.players) },
+    {
+      // what the host does for the pane that a pane cannot do itself
+      players: Boolean(hello.players),
+      // and the scale it is drawn at, before anything here is laid out at
+      // the one this process read for itself
+      displayScale: hello.rect?.displayScale,
+    },
   );
 
   let closing = false;

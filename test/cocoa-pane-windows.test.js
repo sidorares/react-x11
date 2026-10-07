@@ -10,6 +10,11 @@
 // pane mode over another — joined by the loopback transport the frame tests
 // run panes through, so what crosses is a structured clone, as over the
 // fork. What reaches each bridge is the whole of what the glue decides.
+//
+// Each bridge has a screen of its own scale, because a pane process reads
+// the screens when it starts and the host read them when it did: a page
+// forked after the desk went to 1x, under a host still at 2x, is the case
+// the last tests here are for.
 import assert from 'node:assert';
 import { afterEach, test } from 'node:test';
 import React from 'react';
@@ -29,7 +34,7 @@ const PANE = new URL('./fixtures/popup-pane.js', import.meta.url);
 
 /** Enough of @windowkit/appkit for windows, shared surfaces and layers,
  * recording what decides something. Points in, as AppKit's are. */
-function fakeBridge() {
+function fakeBridge({ scale = 2 } = {}) {
   const calls = [];
   const windows = new Map();
   let seq = 0;
@@ -45,7 +50,7 @@ function fakeBridge() {
         y: 0,
         width: 1440,
         height: 900,
-        scale: 2,
+        scale,
         fps: 60,
         visible: { x: 0, y: 0, width: 1440, height: 875 },
         primary: true,
@@ -122,12 +127,15 @@ function fakeBridge() {
   });
 }
 
+/** A CocoaApp over `native`, seeded as `createCocoaApp` seeds one: at the
+ * scale its screen reported. */
 function appOver(native, options) {
   const app = new CocoaApp(native, options);
-  setScaleForTests(app, 2, 'cocoa');
+  const s = app.scale;
+  setScaleForTests(app, s, 'cocoa');
   setScreensForTests(app, {
-    monitors: [{ x: 0, y: 0, width: 2880, height: 1800 }],
-    workArea: { x: 0, y: 0, width: 2880, height: 1750 },
+    monitors: [{ x: 0, y: 0, width: 1440 * s, height: 900 * s }],
+    workArea: { x: 0, y: 0, width: 1440 * s, height: 875 * s },
   });
   setCompositingForTests(app, true);
   app._frameInterval = 0;
@@ -202,13 +210,21 @@ function click(app, wnd, x, y) {
 
 /**
  * A host window at (100, 50) on the screen, a <Frame> 40 points in and 30
- * down, and in it the fixture: a `<Select>` 20 points into the pane.
+ * down, and in it the fixture: a `<Select>` 20 points into the pane. The
+ * pane process's screen reads `paneScale`, the host's 2.
  */
-async function mount(paneProps = {}) {
+async function mount(paneProps = {}, { paneScale = 2 } = {}) {
   const hostNative = fakeBridge();
   const host = appOver(hostNative);
-  const paneNative = fakeBridge();
+  const paneNative = fakeBridge({ scale: paneScale });
   const pane = appOver(paneNative, { pane: true });
+  // the size each window the pane makes is born at, device pixels
+  const births = [];
+  const createWindow = pane.createWindow.bind(pane);
+  pane.createWindow = (attributes) => {
+    births.push([attributes.width, attributes.height]);
+    return createWindow(attributes);
+  };
   const factory = loopbackFrameFactory({ childApp: pane });
   const picks = [];
   const closes = [];
@@ -296,6 +312,8 @@ async function mount(paneProps = {}) {
     pane,
     paneNative,
     paneWnd,
+    births,
+    factory,
     frameBox,
     trigger,
     hosted,
@@ -662,4 +680,68 @@ test("a pane's platform menu is dropped by the host, over the pane's place in it
   m.unmountFrame();
   await settle(m.host, m.pane);
   assert.ok(m.hostNative.menus[1].cancelled, 'cancelled with the pane');
+});
+
+/** A rect as plain numbers, to compare two trees' layouts. */
+const rectOf = (r) => ({ x: r.x, y: r.y, width: r.width, height: r.height });
+
+test("a pane lays out at the host's scale, whatever its own screen read when its process started", async () => {
+  // The host's tabs at 2x, and a page forked after the desk went to 1x — a
+  // mirror set for a projector: the page was laid out at 1x in a frame the
+  // host showed at 2x, every length in it half what it is beside the tabs.
+  const ref = await mount();
+  const m = await mount({}, { paneScale: 1 });
+  assert.strictEqual(m.pane.scale, 2, "the pane app takes the host's");
+  assert.strictEqual(m.paneWnd._reactX11Node.scale, 2, 'and so does its tree');
+  assert.deepStrictEqual(
+    m.births[0],
+    ref.births[0],
+    'its window born the size it is shown at, before the first pane-rect',
+  );
+  assert.deepStrictEqual(
+    rectOf(m.trigger().abs),
+    rectOf(ref.trigger().abs),
+    'laid out as a pane that started at 2x',
+  );
+  assert.deepStrictEqual(
+    [m.paneWnd.width, m.paneWnd.height],
+    [ref.paneWnd.width, ref.paneWnd.height],
+  );
+
+  // and its menu, a window the host makes, comes up the size it does there
+  await ref.open();
+  await m.open();
+  const size = (w) => [w.options.width, w.options.height];
+  assert.deepStrictEqual(size(m.hosted('popup')), size(ref.hosted('popup')));
+});
+
+test("a pane follows the host's display scale when a pane-rect says it moved", async () => {
+  const m = await mount();
+  const before = rectOf(m.trigger().abs);
+  const [session] = m.factory.sessions;
+  // the host, now at 1x: the same logical rect, at its new scale
+  const rect = {
+    type: 'pane-rect',
+    width: m.frameBox.abs.width / 2,
+    height: m.frameBox.abs.height / 2,
+    scale: 1,
+    displayScale: 1,
+  };
+  session.transport.send(rect);
+  await until(
+    [m.host, m.pane],
+    () => m.trigger().abs.width === before.width / 2,
+    'the pane laid out again at 1x',
+  );
+  assert.strictEqual(m.pane.scale, 1);
+  assert.deepStrictEqual(rectOf(m.trigger().abs), {
+    x: before.x / 2,
+    y: before.y / 2,
+    width: before.width / 2,
+    height: before.height / 2,
+  });
+  assert.deepStrictEqual(
+    [m.paneWnd.width, m.paneWnd.height],
+    [rect.width, rect.height],
+  );
 });

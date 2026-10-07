@@ -982,9 +982,12 @@ export class CocoaApp {
    * pane-present and pane-cursor go out. `players` is the
    * host's word that it plays the pane's `<video src>`s, which makes
    * `createPlayer` here — before the pane's first render, which asks.
+   * `displayScale` is the scale the host's window is drawn at, taken here
+   * for the same reason (`adoptPaneScale`).
    */
-  attachPaneChannel(channel, { players = false } = {}) {
+  attachPaneChannel(channel, { players = false, displayScale } = {}) {
     if (!this._paneMode) return;
+    this.adoptPaneScale(displayScale);
     this._paneSend = (msg) => {
       try {
         channel.send(msg);
@@ -1013,6 +1016,7 @@ export class CocoaApp {
         const wnd = msg.window != null ? this._windows.get(msg.window) : pane;
         wnd?._shown?.(msg.seq);
       } else if (msg?.type === 'pane-rect') {
+        this.adoptPaneScale(msg.displayScale);
         pane.setPaneSize(msg.width, msg.height, msg.scale, msg.screen);
         if (typeof msg.live === 'boolean') pane.setLive(msg.live);
         this._flushPaneOutbox();
@@ -1037,6 +1041,46 @@ export class CocoaApp {
         this._afterInput();
       }
     });
+  }
+
+  /**
+   * The scale of the window a pane is shown in, as the host says it — in
+   * the hello and in every pane-rect — made this process's. Returns whether
+   * it moved.
+   *
+   * A pane process reads the screens when it starts, and the host read
+   * them when it did. Across a change of the desk between the two the
+   * answers differ: a browser's tabs drawn at 2x and a page forked for a
+   * new tab after the desk went to 1x — a mirror set for a projector — was
+   * laid out at 1x in a frame the host showed at 2x, every length in it
+   * half what it is beside the tabs, and every click it was sent landing
+   * at twice the distance. A pane has no window on a screen of its own;
+   * the host's window is its display, and its scale is the one everything
+   * here multiplies by: the layout, the fonts, the windows the pane opens,
+   * the screen layout their popups are placed against.
+   *
+   * From the hello that is all, before anything is laid out. A tree
+   * already laid out is restyled in the new unit, as a `scale` prop that
+   * moved restyles a subtree. The pane's own window keeps the scale its
+   * pane-rect gives it (`setPaneSize`): that one is the frame's, a
+   * `<box scale>` around the `<Frame>` included, and says how many device
+   * pixels the rect is.
+   */
+  adoptPaneScale(scale) {
+    if (!this._paneMode || !(scale > 0) || !Number.isFinite(scale)) {
+      return false;
+    }
+    if (scale === this.scale) return false;
+    this.scale = scale;
+    setScaleForTests(this, scale, 'frame');
+    setScreensForTests(this, screenLayout(this._screens, scale));
+    this.fonts?.setScale?.(scale);
+    for (const wnd of this._windows.values()) {
+      if (wnd.destroyed) continue;
+      if (wnd !== this._paneWindow) wnd.scale = scale;
+      wnd._reactX11Node?._rescaleSubtree();
+    }
+    return true;
   }
 
   /**
