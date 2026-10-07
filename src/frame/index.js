@@ -407,6 +407,13 @@ export function Frame({
     const rect = {
       width: Math.round((node?.abs?.width || 0) / sc) || 400,
       height: Math.round((node?.abs?.height || 0) / sc) || 300,
+      // The display scale the host is drawn at. A pane process reads the
+      // screens when it starts, which is not when the host did: a page
+      // forked after the desk went to 1x — a mirror set for a projector —
+      // was laid out at 1x in a frame the host showed at 2x. A pane that
+      // has no window of its own takes this one instead of its own
+      // (`CocoaApp.adoptPaneScale`).
+      ...(node?.root?.scale > 0 && { displayScale: node.root.scale }),
     };
     s.sent = { props: p, env: e, bridge: b };
     trySend({
@@ -595,6 +602,7 @@ function PaneHostView({
         width: rect.width,
         height: rect.height,
         scale: rect.scale,
+        displayScale: rect.displayScale,
         live: liveNow(),
         ...(rect.screen && { screen: rect.screen }),
       });
@@ -609,6 +617,7 @@ function PaneHostView({
       a.width === b.width &&
       a.height === b.height &&
       a.scale === b.scale &&
+      a.displayScale === b.displayScale &&
       a.screen?.x === b.screen?.x &&
       a.screen?.y === b.screen?.y;
     const sized = () => {
@@ -632,7 +641,11 @@ function PaneHostView({
             y: Math.round(origin.y + node.abs.y),
           }
         : null;
-      const rect = { width, height, scale: sc, screen };
+      // `scale` is the frame's, a `<box scale>` around it included, and
+      // says how many device pixels the pane's rect is; `displayScale` is
+      // the window's, the one the pane lays out at (see the hello)
+      const displayScale = node.root?.scale ?? sc;
+      const rect = { width, height, scale: sc, displayScale, screen };
       if (sameRect(rect, pending ?? sent)) return;
       if (inFlight) pending = rect;
       else transmit(rect);

@@ -254,6 +254,20 @@ tree names its cursor as a window's would, the pane sends it
 default cursor, so a `cursor` in the frame's `style` still wins. On X11 the
 pane's own window carries its cursor, as any window does.
 
+**A pane is drawn at the host's scale.** A pane process reads the screens
+when it starts, and the host read them when it did. A desk that changed in
+between gave the two different answers: a page forked for a new tab after
+the desk went to 1x (a mirror set for a projector) was laid out at 1x in a
+frame the host showed at 2x. Everything in it came out half the size of the
+tabs beside it, and every click it was sent landed twice as far in. So the
+host says what scale its window is drawn at, in the hello and in every
+`pane-rect` (`displayScale`), and a Cocoa pane takes that one instead of
+its own. Its window, its fonts and the windows it opens are made at it from
+the first commit, and a later `pane-rect` that names another scale lays the
+pane out again in the new unit. A `<box scale>` around the `<Frame>` is not
+part of it: the frame's box grows with the zoom, and the pane lays out at
+the window's scale in the room it was given.
+
 **A pane's other windows.** On X11 a `<popup>` in a pane is a real window on
 the pane's own connection. A Cocoa pane process runs no AppKit, so a window
 made there exists and is never shown — a `<Select>` in a pane took the press
@@ -429,6 +443,10 @@ Named so they are not rediscovered:
 - **Windows** panes do not read `screen` yet: a popup a Windows pane
   anchors is placed against the screen's corner, the second half of what
   #824 fixed on Cocoa. Not run there.
+- **Windows** panes lay out at the scale their own process read when it
+  started, and do not take the host's `displayScale` yet: a page forked
+  after the desk changed scale is laid out at the wrong one, which Cocoa
+  panes no longer are.
 - The `<window embeddable>` underneath (created unmapped, waiting for an
   embedder — see [embedding.md](embedding.md)) speaks plain reparenting
   today, not the `_XEMBED` messages; focus works through the forwarding
