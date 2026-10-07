@@ -492,7 +492,9 @@ export function createFakeBridge({ layers = true } = {}) {
     const pane = bridge.panes.get(id);
     if (!pane) return 0;
     const handle = nextSurface++;
-    bridge.open.set(handle, { pane: id });
+    // drawn into like any surface the bridge opens: a tree painted into a
+    // pane records its verbs where a window's does
+    bridge.open.set(handle, { pane: id, ops: [] });
     record('paneBeginDraw', id, handle);
     return handle;
   };
