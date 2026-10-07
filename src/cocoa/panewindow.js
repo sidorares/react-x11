@@ -188,6 +188,17 @@ export class CocoaPaneWindow {
     this._post({ type: 'pane-cursor', cursor: name ?? null });
   }
 
+  /**
+   * Tab off an end of the pane's order, handed to the host, which goes on
+   * from the `<Frame>`'s box as from any stop of its own
+   * (`EventManager._tabOut`). Answers whether anyone was there to take it.
+   */
+  tabOut(backwards) {
+    if (this.destroyed || !this.app._paneSend) return false;
+    this._post({ type: 'pane-tab-out', backwards });
+    return true;
+  }
+
   /** A message about this window, to the host. The pane's own names none:
    * the host knows it as the pane (`CocoaPaneSubwindow` names itself). */
   _post(msg) {
@@ -731,6 +742,12 @@ export class CocoaPaneSubwindow extends CocoaPaneWindow {
   /** Named, and held until the host is listening (`CocoaApp._postWindow`). */
   _post(msg) {
     this.app._postWindow({ ...msg, window: this.windowId });
+  }
+
+  /** A window the pane makes besides its own is no stop in the host's
+   *  order: Tab goes round inside it, as in any window. */
+  tabOut() {
+    return false;
   }
 
   _send(msg) {
