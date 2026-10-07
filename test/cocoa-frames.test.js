@@ -51,6 +51,7 @@ import { CocoaPaneHost } from '../src/cocoa/panehost.js';
 import { setCompositingForTests } from '../src/compositing.js';
 import { registerElement, unregisterElement } from '../src/host.js';
 import { createRoot } from '../src/index.js';
+import { MOD, XK_TAB } from '../src/keysyms.js';
 import { Node } from '../src/node.js';
 import { setAnimationClock } from '../src/nodes/animation.js';
 import { setScaleForTests } from '../src/scale.js';
@@ -1746,6 +1747,54 @@ test('a pane sends the host the cursor its tree names, once per change', async (
   assert.deepEqual(cursors(), ['pointer'], 'the same cursor is not sent again');
   move(160, 40);
   assert.deepEqual(cursors(), ['pointer', null], 'and none is the default');
+});
+
+test('Tab comes into a pane at an end, goes through its stops, and is handed back past the other', async () => {
+  // The host's half is `<Frame>`'s (test/frame-tab.test.js); this is what
+  // the pane does with what the host sends, through the channel a pane
+  // process hears it on.
+  const refs = [];
+  const stop = (i) =>
+    h('box', {
+      ref: (n) => (refs[i] = n),
+      focusable: true,
+      style: { height: 10, flexShrink: 0 },
+    });
+  const { sent, deliver, node } = await mountPane(
+    h('box', { style: { flexGrow: 1 } }, stop(0), stop(1), stop(2)),
+  );
+  const focused = () => refs.indexOf(node.events.focusManager.focused);
+  const handed = () =>
+    sent.filter((m) => m.type === 'pane-tab-out').map((m) => m.backwards);
+  // what the host forwards: the key, and its modifiers as X has them
+  const tab = (shift = false) =>
+    deliver({
+      type: 'pane-event',
+      name: 'keydown',
+      ev: {
+        keysym: XK_TAB,
+        baseKeysym: XK_TAB,
+        keycode: 48,
+        buttons: shift ? MOD.Shift : 0,
+        time: Date.now(),
+      },
+    });
+  deliver({ type: 'pane-event', name: 'tabenter', ev: { backwards: false } });
+  assert.equal(focused(), 0);
+  tab();
+  tab();
+  assert.equal(focused(), 2);
+  tab();
+  assert.deepEqual(handed(), [false]);
+  assert.equal(focused(), -1, 'the pane kept its focus as it handed Tab on');
+
+  deliver({ type: 'pane-event', name: 'tabenter', ev: { backwards: true } });
+  assert.equal(focused(), 2);
+  tab(true);
+  assert.equal(focused(), 1, 'a back-Tab went forwards');
+  tab(true);
+  tab(true);
+  assert.deepEqual(handed(), [false, true]);
 });
 
 test('the host adds, places and removes the pane with implicit animations off', () => {

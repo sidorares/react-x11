@@ -34,7 +34,10 @@ page is the window half, and everything below about stacking, focus and
 teardown holds for a `<Frame>` pane too. The pane's own root window opts in
 with `<window embeddable>`: created **unmapped** — a window waiting to be
 embedded is unmapped, that is what waiting looks like — and mapped by the
-embedder once reparented.
+embedder once reparented. On X11 it is an XEmbed client for Tab: `FOCUS_IN`
+with `FIRST` or `LAST` lands on its first or last stop, and Tab off an end of
+its order sends `FOCUS_NEXT` or `FOCUS_PREV`, so Tab goes through a
+react-x11 guest as it goes through any subtree of the host's.
 
 **Being the guest yourself** — a react-x11 app embedded in somebody else's UI
 — is that same prop plus one accessor: `windowHandleOf(ref)` (or

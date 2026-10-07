@@ -4,6 +4,7 @@
 import { discrete } from '../../events.js';
 import { createClientMessages } from '../../clientmessage.js';
 import { callHandler } from '../../errors.js';
+import { ntkRoot } from '../../ntkroot.js';
 import { runWithPriority, DiscreteEventPriority } from '../../priority.js';
 import { DEV } from '../util.js';
 
@@ -178,7 +179,46 @@ export class WindowListeners {
         }),
       );
     }
+    if (this.props.embeddable && !parentWindow) this._initXEmbedTab(wnd);
     this.events.attach();
+  }
+
+  /**
+   * Tab through a window another client embeds — a `<Frame>`'s pane on X11
+   * — as XEmbed's client. The embedder is a `<foreign>`
+   * (src/foreignnodes.js): Tab arriving at it sends XEMBED_FOCUS_IN with
+   * FOCUS_FIRST or FOCUS_LAST, which is this window's `tabenter`, and
+   * XEMBED_FOCUS_NEXT or _PREV, which its `tabOut` sends, moves the
+   * embedder's focus on from it (`EventManager._tabEnter`, `_tabOut`). The
+   * Cocoa and Windows panes say the same two things over their channel.
+   * Without it, Tab went round the pane's own stops for good: nothing
+   * handed it back.
+   *
+   * ntk's `XEmbedPlug` speaks it, and publishes `_XEMBED_INFO` with
+   * XEMBED_MAPPED set — an embedder maps such a window as it takes it, as it
+   * maps one that publishes none, so the pane still never maps itself.
+   */
+  _initXEmbedTab(wnd) {
+    const ntk = ntkRoot();
+    if (!ntk?.XEmbedPlug || typeof wnd.sendClientMessage !== 'function') {
+      return;
+    }
+    if (typeof wnd.tabOut === 'function') return;
+    const { XEMBED } = ntk;
+    const plug = new ntk.XEmbedPlug(this.app, { window: wnd });
+    plug.ready.catch(() => {});
+    plug.on('focusIn', (detail) => {
+      if (detail !== XEMBED.FOCUS_FIRST && detail !== XEMBED.FOCUS_LAST) {
+        return;
+      }
+      wnd.emit('tabenter', { backwards: detail === XEMBED.FOCUS_LAST });
+    });
+    wnd.tabOut = (backwards) => {
+      if (!plug.embedder) return false;
+      if (backwards) plug.focusPrev();
+      else plug.focusNext();
+      return true;
+    };
   }
 
   /**

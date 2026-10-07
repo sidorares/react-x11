@@ -46,6 +46,7 @@ import React, {
 import { useAppOrNull } from '../appcontext.js';
 import { canEmbed } from '../embedding.js';
 import { WHEEL_NOTCH_PX } from '../events.js';
+import { XK_TAB } from '../keysyms.js';
 import { FrameEnv } from './env.js';
 import { CallbackTable, PROTOCOL } from './protocol.js';
 
@@ -532,6 +533,37 @@ function PaneHostView({
   const embedErrorRef = useRef(onEmbedError);
   embedErrorRef.current = onEmbedError;
 
+  const forward = (name, data) => (ev) => {
+    const s = session.current;
+    const node = containerRef.current;
+    if (!s || !node) return;
+    const sc = node.scale ?? 1;
+    const payload = {
+      x: Math.max(0, Math.round(ev.x * sc - node.abs.x)),
+      y: Math.max(0, Math.round(ev.y * sc - node.abs.y)),
+      rootx: Math.round(ev.x * sc),
+      rooty: Math.round(ev.y * sc),
+      // The modifier mask, which a synthetic event carries on its native
+      // event alone. Read off the synthetic one, every key and press
+      // reached the pane with none: Shift+Tab went forwards there, and a
+      // Ctrl+C or a Shift+click was a C and a click.
+      buttons: ev.nativeEvent?.buttons ?? 0,
+      time: Date.now(),
+      ...data(ev),
+    };
+    try {
+      s.trySend?.({ type: 'pane-event', name, ev: payload });
+    } catch {
+      // the exit path owns the failure story
+    }
+  };
+  const key = (ev) => ({
+    keysym: ev.keysym,
+    baseKeysym: ev.baseKeysym ?? ev.keysym,
+    codepoint: ev.codepoint,
+    keycode: ev.keycode ?? 0,
+  });
+
   useEffect(() => {
     const s = session.current;
     const node = containerRef.current;
@@ -676,8 +708,67 @@ function PaneHostView({
       }),
     );
 
+    // Tab, which goes through the pane as it goes through any subtree. The
+    // box is a stop in this window's order, and the pane's own order hangs
+    // off it — the chain XEmbed makes for a `<foreign>` with FOCUS_FIRST,
+    // FOCUS_LAST and FOCUS_NEXT/PREV (src/foreignnodes.js). Tab arriving
+    // at the box goes on into the pane, at its first stop or, for a
+    // back-Tab, its last (`tabenter`). Tab while the box has the focus is
+    // the pane's, sent on and not cycled here. And the pane running off an
+    // end of its order hands Tab back (`pane-tab-out`), which goes on from
+    // the box. Without the three, the box took a Tab and the pane the next,
+    // which moved the pane's focus a stop and this window's out of the
+    // pane, so Tab went between one of the pane's stops and the window's.
+    //
+    // Keys go over as the box's default action, after the whole tree has
+    // had them, so a chord the application answered above the box never
+    // reaches the pane: sent from the box's handler, Ctrl+Tab switched the
+    // application's tab and moved the focus in the pane. And the pane
+    // composes what it is sent, as an embedded client does, rather than
+    // this window composing it first.
+    const tabInto = (backwards) =>
+      s.trySend?.({
+        type: 'pane-event',
+        name: 'tabenter',
+        ev: { backwards, buttons: 0, time: Date.now() },
+      });
+    const own = {
+      defaultFocus: Object.hasOwn(node, 'defaultFocus'),
+      defaultKeyDown: Object.hasOwn(node, 'defaultKeyDown'),
+      defaultKeyUp: Object.hasOwn(node, 'defaultKeyUp'),
+      composes: Object.hasOwn(node, 'composes'),
+    };
+    const was = {
+      defaultFocus: node.defaultFocus,
+      defaultKeyDown: node.defaultKeyDown,
+      defaultKeyUp: node.defaultKeyUp,
+      composes: node.composes,
+    };
+    const sendKeyDown = forward('keydown', key);
+    const sendKeyUp = forward('keyup', key);
+    node.defaultFocus = (info) => {
+      if (info?.reason === 'key') tabInto(Boolean(info.backwards));
+    };
+    node.defaultKeyDown = (ev) => {
+      sendKeyDown(ev);
+      // the pane's order answers it, and hands it back at an end
+      if (ev.keysym === XK_TAB) ev.preventDefault();
+    };
+    node.defaultKeyUp = sendKeyUp;
+    node.composes = false;
+
     const off = s.transport.onMessage((msg) => {
-      if (msg?.type === 'pane-window') {
+      if (msg?.type === 'pane-tab-out') {
+        // Only from focus the box holds: a pane that hands back a Tab it
+        // was not given is news that came too late.
+        const manager = node.root?.events?.focusManager;
+        if (!manager || manager.focused !== node) return;
+        const backwards = msg.backwards === true;
+        manager._cycleFocus(backwards);
+        // the window's only stop: round into the pane again, at the end
+        // that Tab comes to next
+        if (manager.focused === node) tabInto(backwards);
+      } else if (msg?.type === 'pane-window') {
         host.paneWindow?.(msg);
       } else if (msg?.type === 'pane-menu') {
         host.popUpMenu?.(msg);
@@ -718,31 +809,14 @@ function PaneHostView({
       node.root?.events?.refreshCursor();
       node.absolutize = origAbsolutize;
       if (origShift) node._shiftAbs = origShift;
+      for (const name of Object.keys(own)) {
+        if (own[name]) node[name] = was[name];
+        else delete node[name];
+      }
       if (s.paneHost === host) s.paneHost = null;
       host.destroy();
     };
   }, [app, session, containerRef]);
-
-  const forward = (name, data) => (ev) => {
-    const s = session.current;
-    const node = containerRef.current;
-    if (!s || !node) return;
-    const sc = node.scale ?? 1;
-    const payload = {
-      x: Math.max(0, Math.round(ev.x * sc - node.abs.x)),
-      y: Math.max(0, Math.round(ev.y * sc - node.abs.y)),
-      rootx: Math.round(ev.x * sc),
-      rooty: Math.round(ev.y * sc),
-      buttons: ev.buttons ?? 0,
-      time: Date.now(),
-      ...data(ev),
-    };
-    try {
-      s.trySend?.({ type: 'pane-event', name, ev: payload });
-    } catch {
-      // the exit path owns the failure story
-    }
-  };
 
   return h('box', {
     ref: containerRef,
@@ -766,18 +840,6 @@ function PaneHostView({
       deltaMode: ev.deltaMode ?? 'line',
       smooth: Boolean(ev.smooth),
       source: 'forwarded',
-    })),
-    onKeyDown: forward('keydown', (ev) => ({
-      keysym: ev.keysym,
-      baseKeysym: ev.baseKeysym ?? ev.keysym,
-      codepoint: ev.codepoint,
-      keycode: ev.keycode ?? 0,
-    })),
-    onKeyUp: forward('keyup', (ev) => ({
-      keysym: ev.keysym,
-      baseKeysym: ev.baseKeysym ?? ev.keysym,
-      codepoint: ev.codepoint,
-      keycode: ev.keycode ?? 0,
     })),
   });
 }

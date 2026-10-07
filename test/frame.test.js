@@ -36,6 +36,7 @@ import { loopbackFrameFactory } from './helpers/frame-loopback.js';
 const h = React.createElement;
 
 const PANE = new URL('./fixtures/frame-pane.js', import.meta.url);
+const STOPS = new URL('./fixtures/frame-pane-stops.js', import.meta.url);
 
 // ---------------------------------------------------------------- protocol
 
@@ -344,6 +345,108 @@ test('a crash shows the fallback; restart() gets a fresh pane', async () => {
     await until(app, () => reports.length >= 1, 'the pane after restart');
     assert.equal(reports[0].label, 'boom');
     assert.equal(factory.sessions.length, 2);
+  } finally {
+    await teardown(x11Root, app, other);
+  }
+});
+
+test('Tab goes through an embedded pane and back out: in at an end, out past the other', async () => {
+  // The pane's half of XEmbed's Tab: FOCUS_IN with FOCUS_FIRST or _LAST
+  // lands on its first or last stop, and running off an end sends
+  // FOCUS_NEXT or _PREV, which `<foreign>` moves the host's focus on from.
+  // Without it the pane took Tab and never gave it back.
+  const { app, other } = await headlessPair();
+  const x11Root = await createRoot({ app });
+  const factory = loopbackFrameFactory({ childApp: other });
+  const seen = [];
+  const started = [];
+  const refs = {};
+  const stop = (name) =>
+    h('box', {
+      ref: (n) => (refs[name] = n),
+      focusable: true,
+      style: { height: 10, flexShrink: 0 },
+    });
+  try {
+    const instance = await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        stop('before'),
+        h(Frame, {
+          src: STOPS,
+          transport: factory,
+          props: { onFocusStop: (name) => seen.push(name) },
+          style: { flexGrow: 1 },
+          onStarted: (info) => started.push(info),
+        }),
+        stop('after'),
+      ),
+      x11Root,
+    );
+    await until(app, () => started.length === 1, 'onStarted');
+    await until(
+      app,
+      async () => {
+        const top = await queryTree(app, instance.id);
+        const container = top.children[0];
+        return (
+          container !== undefined &&
+          (await queryTree(app, container)).children.length === 1
+        );
+      },
+      'the pane window inside the container',
+    );
+    const events = refs.before.root.events;
+    // the window has to hold the X focus for a node's focus to be real
+    events.windowFocused = true;
+    events.focus(refs.before, 'key');
+    const focused = () => events.focusManager.focused;
+
+    // Tab as the server hands it to the host, which sends it on to the pane
+    // while the pane has the focus (`<foreign>`)
+    const keycode = Number(
+      Object.keys(app.X.keycode2keysyms).find(
+        (k) => app.X.keycode2keysyms[k]?.[0] === 0xff09,
+      ),
+    );
+    const tab = (shift = false) =>
+      instance.emit('keydown', {
+        type: 2,
+        name: 'KeyPress',
+        seq: 1,
+        keycode,
+        time: 100,
+        root: app.display.screen[0].root,
+        wid: instance.id,
+        child: 0,
+        rootx: 5,
+        rooty: 5,
+        x: 5,
+        y: 5,
+        buttons: shift ? 1 : 0,
+        sameScreen: 1,
+      });
+    const last = () => seen.filter((s) => !s.startsWith('-')).at(-1);
+
+    tab();
+    await until(app, () => last() === 'a', 'the pane’s first stop');
+    assert.notEqual(focused(), refs.before);
+    assert.notEqual(focused(), refs.after);
+    tab();
+    tab();
+    await until(app, () => last() === 'c', 'the pane’s last stop');
+    tab();
+    await until(app, () => focused() === refs.after, 'the host’s next stop');
+    await until(app, () => seen.at(-1) === '-c', 'the pane to let go');
+
+    tab(true);
+    await until(app, () => seen.at(-1) === 'c', 'back into the pane at c');
+    tab(true);
+    tab(true);
+    await until(app, () => last() === 'a', 'back to a');
+    tab(true);
+    await until(app, () => focused() === refs.before, 'out past the first');
   } finally {
     await teardown(x11Root, app, other);
   }

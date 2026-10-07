@@ -622,6 +622,9 @@ export class EventManager {
     // window gets keys, and the focused node's caret/ring has to follow
     onDiscrete('focus', (ev) => this._onWindowFocus(true, ev));
     onDiscrete('blur', (ev) => this._onWindowFocus(false, ev));
+    // Tab arriving from outside the window: a `<Frame>`'s host moving its
+    // focus into the pane this window is (`_tabEnter`)
+    onDiscrete('tabenter', (ev) => this._tabEnter(Boolean(ev?.backwards)));
   }
 
   /**
@@ -2071,8 +2074,9 @@ export class EventManager {
     const manager = this.focusManager;
     if (manager !== this) return manager._cycleFocus(backwards);
     const list = this._tabbables();
-    if (list.length === 0) return;
     const index = list.indexOf(this.focused);
+    if (this._tabOut(list, index, backwards)) return;
+    if (list.length === 0) return;
     if (index === -1) {
       // nothing focused, or focus sits outside the current scope: Tab enters
       this.focus(backwards ? list[list.length - 1] : list[0], 'key', {
@@ -2087,6 +2091,47 @@ export class EventManager {
       'key',
       { backwards },
     );
+  }
+
+  /**
+   * Tab off an end of a window that is itself a stop in another window's
+   * order — a `<Frame>`'s pane, whose host goes on from the box the pane is
+   * shown in. The order does not wrap there: the window hands Tab back
+   * (`tabOut` on the backend window, which says whether anyone took it),
+   * and lets go of its focus, as an XEmbed client does when it sends
+   * FOCUS_NEXT, so the stop it was at shows no ring while the host's next
+   * one does. Coming back, Tab lands at an end again (`_tabEnter`).
+   *
+   * Not inside a focus scope: a modal's order wraps in a pane as it does
+   * in a window, and the dialog keeps the keyboard until it closes.
+   */
+  _tabOut(list, index, backwards) {
+    const wnd = this.node.window;
+    if (typeof wnd?.tabOut !== 'function') return false;
+    if (this._scopeRoot() !== this.node) return false;
+    // nothing focused is not an end: Tab enters at one
+    if (list.length && index !== (backwards ? 0 : list.length - 1)) {
+      return false;
+    }
+    if (!wnd.tabOut(backwards)) return false;
+    this.focus(null);
+    return true;
+  }
+
+  /**
+   * Tab arriving at this window from the one it is shown in: the first stop
+   * in its order, or the last for a back-Tab, as a Tab into a window with
+   * nothing focused lands. A window with no stop keeps the keys where they
+   * are, and the next Tab hands them straight back (`_tabOut`).
+   */
+  _tabEnter(backwards) {
+    const manager = this.focusManager;
+    if (manager !== this) return manager._tabEnter(backwards);
+    const list = this._tabbables();
+    if (list.length === 0) return;
+    this.focus(backwards ? list[list.length - 1] : list[0], 'key', {
+      backwards,
+    });
   }
 
   /**

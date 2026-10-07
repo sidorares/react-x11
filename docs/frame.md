@@ -252,7 +252,25 @@ the input over the channel. The cursor travels the other way. The pane's
 tree names its cursor as a window's would, the pane sends it
 (`pane-cursor`), and the host shows it over the box. It is the box's
 default cursor, so a `cursor` in the frame's `style` still wins. On X11 the
-pane's own window carries its cursor, as any window does.
+pane's own window carries its cursor, as any window does. Keys go over as
+the box's default action, as `<foreign>` forwards them, so a chord the host
+answered above the frame never reaches the pane, and with their modifiers.
+
+**Tab goes through a pane as through any subtree.** The frame is one stop in
+the host's order, and the pane's own order hangs off it: Tab arriving at the
+frame goes on into the pane at its first stop, or its last for Shift+Tab;
+Tab while the frame has the focus is the pane's; and the pane running off an
+end of its order hands Tab back, and the host goes on from the frame. The
+pane lets go of its focus as it does, so the stop it was at shows no ring
+while the host's next one does. A modal open in the pane keeps Tab going
+round inside it. On X11 this is XEmbed's own chain — `FOCUS_IN` with
+`FOCUS_FIRST` or `FOCUS_LAST` one way, `FOCUS_NEXT` or `FOCUS_PREV` the other,
+which the pane's window answers and sends as an XEmbed client
+(`_initXEmbedTab`). On Cocoa and Windows it is the same two messages over the
+channel, `tabenter` and `pane-tab-out` (`EventManager._tabEnter`,
+`_tabOut`). Before it, the host sent Tab on and cycled its own focus as
+well, so Tab went between one of the pane's stops and one of the host's, and
+on X11 Tab went round the pane's stops for good.
 
 **A pane is drawn at the host's scale.** A pane process reads the screens
 when it starts, and the host read them when it did. A desk that changed in
@@ -443,7 +461,12 @@ Named so they are not rediscovered:
 - **Windows** panes do not read `screen` yet: a popup a Windows pane
   anchors is placed against the screen's corner, the second half of what
   #824 fixed on Cocoa. Not run there.
-- The `<window embeddable>` underneath (created unmapped, waiting for an
-  embedder — see [embedding.md](embedding.md)) speaks plain reparenting
-  today, not the `_XEMBED` messages; focus works through the forwarding
-  rules above rather than XEmbed's own handshake.
+- **A pane hears its window's focus, not its frame's.** Tab out of a pane
+  takes its focus with it, but a click on the host does not: the stop the
+  pane had focused keeps its focus, and its ring, while the host's is
+  elsewhere. On X11 the `<window embeddable>` underneath (created unmapped,
+  waiting for an embedder — see [embedding.md](embedding.md)) speaks
+  XEmbed's Tab and no more of its focus handshake — `FOCUS_CURRENT`,
+  `FOCUS_OUT` and window activation are left to the forwarding rules above —
+  and on Cocoa and Windows the pane is sent the host window's `focus` and
+  `blur` alone.

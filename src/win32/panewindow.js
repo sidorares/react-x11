@@ -224,6 +224,14 @@ export class Win32PaneWindow {
     this.title = title;
   }
 
+  /** Tab off an end of the pane's order, handed to the host, which goes on
+   *  from the `<Frame>`'s box (the Cocoa pane's `tabOut`). */
+  tabOut(backwards) {
+    if (this.destroyed || !this.app._paneSend) return false;
+    this.app._paneSend({ type: 'pane-tab-out', backwards });
+    return true;
+  }
+
   /** The cursor this pane's tree names, sent to the host, which shows it:
    *  the pointer is over the host's window, not this one (the Cocoa pane's
    *  `setCursor`). */
