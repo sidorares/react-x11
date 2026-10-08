@@ -60,6 +60,20 @@ import { importDmabuf, DmabufRefused } from './dmabuf.js';
 const DEFAULT_MAX_IN_FLIGHT = 2;
 
 /**
+ * Buffers are made a multiple of this larger than the window where they
+ * may be (`slack`), so that a resize a few pixels at a time — a window edge
+ * dragged — shows a different part of the same buffers rather than making
+ * new ones at every step.
+ */
+const SLACK_STEP = 128;
+/** A visible area this many times smaller than the buffers makes them
+ *  again, smaller: a window shrunk far is not to hold its old size's
+ *  memory. */
+const SLACK_SHRINK = 4;
+/** Frames at one size before buffers grown for a drag are cut back to it. */
+const SLACK_SETTLE = 60;
+
+/**
  * Damage sets are kept small: past a handful of rectangles the bookkeeping
  * costs more than the full-surface copy it is trying to avoid, and the
  * compositor clips to the surface anyway.
@@ -92,8 +106,14 @@ export class WaylandSwapchain {
     this.gbm = null;
     /** `${generation}:${key}` -> { wlBuffer, busy, damage, key, generation } */
     this.buffers = new Map();
+    /** the part of each buffer shown: the window's buffer size */
     this.width = 0;
     this.height = 0;
+    /** the buffers' own size, at least the part shown (`slack`) */
+    this.allocWidth = 0;
+    this.allocHeight = 0;
+    /** frames since the size shown last changed */
+    this._sameSize = 0;
     /** set once the compositor has refused a tiled buffer */
     this.linear = false;
     /** swaps since a buffer was last seen for the first time */
@@ -111,14 +131,66 @@ export class WaylandSwapchain {
   /**
    * Point the chain at a size.
    *
+   * With `slack` — where the window has a viewport, whose source rectangle
+   * shows part of a buffer — the buffers are made larger than the size and
+   * kept while it fits in them: dragging a window's edge used to make the
+   * chain's buffers again at every step, and import each one into the
+   * compositor, a dozen requests and a GPU allocation a step. Without it,
+   * the buffers are the size exactly, as a surface with no viewport shows
+   * all of its buffer.
+   *
+   * @param {number} width
+   * @param {number} height
+   * @param {{ slack?: boolean }} [opts]
    * @returns the GBM surface to draw into
    */
-  surfaceFor(width, height) {
+  surfaceFor(width, height, { slack = false } = {}) {
     const w = Math.max(1, Math.round(width));
     const h = Math.max(1, Math.round(height));
-    if (!this.gbm) return this._create(w, h);
-    if (w === this.width && h === this.height) return this.gbm;
+    if (!this.gbm) {
+      const [aw, ah] = slack ? slackFor(w, h, 1) : [w, h];
+      this._create(aw, ah);
+      this.width = w;
+      this.height = h;
+      return this.gbm;
+    }
+    if (w === this.width && h === this.height) {
+      // A size held a while is given buffers its own size again, where a
+      // drag left them larger than it needs.
+      if (
+        ++this._sameSize === SLACK_SETTLE &&
+        (this.allocWidth !== w || this.allocHeight !== h)
+      ) {
+        const [aw, ah] = slack ? slackFor(w, h, 1) : [w, h];
+        if (aw !== this.allocWidth || ah !== this.allocHeight)
+          this._resize(aw, ah);
+      }
+      return this.gbm;
+    }
+    this._sameSize = 0;
+    if (
+      slack &&
+      w <= this.allocWidth &&
+      h <= this.allocHeight &&
+      w * h * SLACK_SHRINK >= this.allocWidth * this.allocHeight
+    ) {
+      // The buffers hold it: show another part of them. What each holds is
+      // of the old size, so all of it is owed to it.
+      this.width = w;
+      this.height = h;
+      for (const entry of this.buffers.values()) entry.damage = 'all';
+      return this.gbm;
+    }
+    const growing = w > this.allocWidth || h > this.allocHeight;
+    const [aw, ah] = slack ? slackFor(w, h, growing ? 1.25 : 1) : [w, h];
+    this._resize(aw, ah);
+    this.width = w;
+    this.height = h;
+    return this.gbm;
+  }
 
+  /** Give the chain buffers of this size, keeping its GBM surface. */
+  _resize(w, h) {
     // In place: the handle stays valid, the context keeps its GL objects and
     // stays current. Buffers from the old generation are gone, so their
     // `wl_buffer`s go with them — the compositor may still be showing one, so
@@ -132,14 +204,13 @@ export class WaylandSwapchain {
           { cause: err },
         ),
       );
-      return this.gbm;
+      return;
     }
     this._dropBuffers();
-    this.width = w;
-    this.height = h;
+    this.allocWidth = w;
+    this.allocHeight = h;
     this.inFlight = 0;
     this._swapsSinceNew = 0;
-    return this.gbm;
   }
 
   _create(w, h) {
@@ -157,8 +228,8 @@ export class WaylandSwapchain {
         { cause: err },
       );
     }
-    this.width = w;
-    this.height = h;
+    this.allocWidth = w;
+    this.allocHeight = h;
     this._swapsSinceNew = 0;
     return this.gbm;
   }
@@ -285,7 +356,8 @@ export class WaylandSwapchain {
       this.policy.linearFallback &&
       !this.linear
     ) {
-      const { width, height } = this;
+      // the buffers again, at the size they were: the part shown stays
+      const { allocWidth: width, allocHeight: height } = this;
       this.linear = true;
       this._dropBuffers();
       try {
@@ -408,4 +480,15 @@ export function unionDamage(a, b) {
   if (!b) return a;
   const merged = [...a, ...b];
   return merged.length > MAX_RECTS ? 'all' : merged;
+}
+
+/**
+ * Buffers for a size, with room to grow: each side rounded up to a
+ * multiple of `SLACK_STEP`, after `grow` — 1.25 for a size outgrowing the
+ * buffers it had, so a window dragged wider makes a few sets of buffers
+ * rather than one a bucket.
+ */
+function slackFor(w, h, grow) {
+  const up = (v) => Math.ceil((v * grow) / SLACK_STEP) * SLACK_STEP;
+  return [up(w), up(h)];
 }

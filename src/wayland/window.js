@@ -182,6 +182,8 @@ export class WaylandWindow extends EventEmitter {
       this._onConfigured = resolve;
     });
     this._viewport = null;
+    /** the part of the buffer the viewport shows, once one is attached */
+    this._shownPart = null;
     this._fractional = null;
     this._geometry = null;
     /** the xdg-decoration object, where the compositor has the protocol (ssd.js) */
@@ -543,6 +545,31 @@ export class WaylandWindow extends EventEmitter {
     } else if (this.surface.version >= 3) {
       this.surface.$.set_buffer_scale(Math.max(1, Math.round(this.scale)));
     }
+  }
+
+  /**
+   * Whether the surface shows a part of its buffer, the top left
+   * `bufferWidth` by `bufferHeight` of it, rather than all of it: where the
+   * compositor has a viewport to say so. The buffer may then be larger than
+   * the window, and is kept as the window is resized within it.
+   */
+  get showsPartOfBuffer() {
+    return this._viewport !== null;
+  }
+
+  /**
+   * Show the top left `width` by `height` of the buffer the next commit
+   * attaches (`showsPartOfBuffer`). Only with a commit that attaches one at
+   * least that large: a source rectangle past the buffer shown is a protocol
+   * error, and a commit with no new buffer — every buffer busy, a configure
+   * acked — shows the old one. In buffer pixels, the buffer scale being 1.
+   */
+  showBufferPart(width, height) {
+    if (!this._viewport) return;
+    const shown = this._shownPart;
+    if (shown && shown.width === width && shown.height === height) return;
+    this._shownPart = { width, height };
+    this._viewport.$.set_source(0, 0, width, height);
   }
 
   /** The size the backing buffer has to be for the current scale. */

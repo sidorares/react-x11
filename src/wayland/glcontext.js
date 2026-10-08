@@ -255,7 +255,11 @@ export class WaylandGLContext {
     if (this.destroyed) return null;
     const w = this.window.bufferWidth;
     const h = this.window.bufferHeight;
-    const surface = this.chain.surfaceFor(w, h);
+    // a window whose viewport shows part of a buffer keeps its buffers
+    // through a resize that fits them (`surfaceFor`'s slack)
+    const surface = this.chain.surfaceFor(w, h, {
+      slack: this.window.showsPartOfBuffer === true,
+    });
     this._surface = surface;
     this.gpu.makeCurrent(surface);
     let resized = false;
@@ -321,11 +325,12 @@ export class WaylandGLContext {
     // next buffer might be missing. Then the GPU work is settled (optionally
     // through a fence rather than a stall) before the swap hands it over.
     const rects = this.chain.blitHint(damage);
+    // into the top left of a buffer that may be larger than the window
     this.backing.blitTo(
       null,
       rects === 'all' ? null : rects,
-      this.chain.width,
-      this.chain.height,
+      this.chain.allocWidth,
+      this.chain.allocHeight,
     );
     await this._settleGpu();
 
@@ -338,6 +343,9 @@ export class WaylandGLContext {
     // is EGL_BAD_SURFACE (0x300d): the second window of examples/windows.jsx.
     this.gpu.makeCurrent(this._surface);
     const presented = await this.chain.swap(damage);
+    // the part of the buffer just attached that is the window — only with a
+    // buffer, since the one shown otherwise is the last, of its own size
+    if (presented) win.showBufferPart?.(this.chain.width, this.chain.height);
     // `swap` attached and damaged but did not commit; and when nothing went
     // out — every buffer busy — the frame request still needs a commit to be
     // delivered. Either way, exactly one commit.
