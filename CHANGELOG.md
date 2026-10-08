@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.47.0](https://github.com/sidorares/react-x11/compare/v2.46.0...v2.47.0) (2026-10-08)
+
+
+### Features
+
+* **cocoa:** createRadialGradient draws canvas's two-circle gradient through @windowkit/appkit's ctxFillRadialGradient, where every radial gradient a page drew on macOS came out flat, and filter takes blur(), which drawImage applies by blurring its source at a scale the blur is a few pixels across ([#926](https://github.com/sidorares/react-x11/issues/926)) ([4d03b1f](https://github.com/sidorares/react-x11/commit/4d03b1f926b2034479e3e5451afe0962d620c4b4))
+* **frame:** a pane that stops answering for watchdog ms, 15 seconds by default, fails with phase unresponsive and is ended, so fallback can offer to start it again, where a pane whose event loop wedged stayed running and said nothing ([#924](https://github.com/sidorares/react-x11/issues/924)) ([c9a6646](https://github.com/sidorares/react-x11/commit/c9a6646b64d56ef380dec05735303475bd6a360c))
+
 ## [2.46.0](https://github.com/sidorares/react-x11/compare/v2.45.3...v2.46.0) (2026-10-07)
 
 
