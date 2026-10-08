@@ -90,10 +90,11 @@ export interface Context2D {
    * Canvas's: a CSS filter list applied to what is drawn after it. Native
    * contexts only (macOS, Windows), and only the colour functions —
    * `grayscale()`, `sepia()`, `saturate()`, `hue-rotate()`, `invert()`,
-   * `brightness()`, `contrast()` and `opacity()` — over a bridge that reads
-   * a surface's pixels back. Anything else does not stick: assign and read
-   * back to know. Absent on X11, whose server runs no colour matrix and
-   * answers a read a round trip later.
+   * `brightness()`, `contrast()` and `opacity()` — and `blur()`, which
+   * blurs what `drawImage` draws and leaves fills, strokes and text sharp,
+   * over a bridge that reads a surface's pixels back. Anything else does
+   * not stick: assign and read back to know. Absent on X11, whose server
+   * runs no colour matrix and answers a read a round trip later.
    */
   filter?: string;
   save(): void;

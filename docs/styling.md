@@ -372,7 +372,8 @@ against the node's own box so it works wherever the node lands.
   gradient tints the colour underneath it rather than replacing it.
 
 Only linear gradients exist. A radial or conic one is a `<canvas onDraw>`
-away (ntk's context has `createRadialGradient` and `createConicalGradient`),
+away (`createRadialGradient` draws on every backend but Windows', and
+ntk's context has `createConicalGradient`),
 and CSS's sizing keywords for them are most of the work for very little of
 the demand.
 

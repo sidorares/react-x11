@@ -1696,13 +1696,26 @@ and drawn — which is a pass over the pixels on the JavaScript thread for
 every draw. A shadow is cast after the filter, in its own colour, and
 faded with what `opacity()` fades.
 
-`blur()`, `drop-shadow()` and a `url()` reach past what is drawn, which
-this does not apply, so a list with one in it does not stick; nor does
-any on a bridge without the pixel verbs. As with the other properties
-here, a caller knows by reading `filter` back. `<Html>` draws a CSS
-`filter`'s colour functions so where it sticks, and from a read back
-where it does not — X11, whose server runs no colour matrix and answers a
-read a round trip later.
+`blur()` sticks too, and is applied to what is drawn as an image — a
+`drawImage` of an image or a surface, which is what a renderer
+composites a layer of its own with — and not to a fill, a stroke or
+text, which are drawn sharp in the colours the rest of the list makes.
+Its standard deviation is in the units the destination is given in, and
+two `blur()`s are one. The source is read as far round as the blur
+reaches, three deviations, scaled down by the bridge's resampling until
+the deviation is two pixels, blurred there and run through the colour
+functions, and drawn back up, smoothed: a Gaussian is smooth to the
+scale it was taken at, which is how Skia blurs a large radius, and a
+glass card's 64-pixel blur at 2x is a pass over a few thousand pixels.
+Past the source is nothing, which the blur fades into, as canvas has it.
+
+`drop-shadow()` and a `url()` reach past what is drawn, which this does
+not apply, so a list with one in it does not stick; nor does any on a
+bridge without the pixel verbs. As with the other properties here, a
+caller knows by reading `filter` back. `<Html>` draws a CSS `filter`'s
+colour functions so where it sticks, and from a read back where it does
+not — X11, whose server runs no colour matrix and answers a read a round
+trip later.
 
 ### A clip's fill rule
 
@@ -2391,8 +2404,9 @@ surface into another ✅ (`ctxDrawSurface`), shift a band in place ✅
 sizes ✅ (`blitSurface`, 0.7.0 — issue #498; the context feature-detects
 both, so an older bridge draws every composite as a CGImage under
 source-over), and the resampling an `imageSmoothingQuality` sets ✅
-(`ctxSetImageSmoothing`, 0.23.0). Still 🆕: a pattern fill (`createPattern`,
-which `<Flow>`'s grid tiles ask for), radial gradients, and an explicit
+(`ctxSetImageSmoothing`, 0.23.0), and a radial gradient ✅
+(`ctxFillRadialGradient`, 0.28.0). Still 🆕: a pattern fill (`createPattern`,
+which `<Flow>`'s grid tiles ask for), and an explicit
 free (a surface goes with its handle's finalizer). The alternative — rasterize JS-side and use the raw-buffer
 upload — stays open; the API supports both so the choice can be
 measured.
@@ -2552,8 +2566,8 @@ is the open number on a shipped backend. (4) Moving the context
 wrapper and the swapchain under `src/backend/` with neutral names — when
 a second native backend or Wayland actually starts, and not before: a
 half-renamed tree is worse than either name. (5) Bridge growth stays
-verb-shaped — a pattern fill for `<Flow>`'s grid tiles, radial
-gradients, a blend op for `PictOp.Src` — and never a JS canvas class.
+verb-shaped — a pattern fill for `<Flow>`'s grid tiles, a blend op for
+`PictOp.Src` — and never a JS canvas class.
 
 ## Measured: the frame clock and the large tree
 
