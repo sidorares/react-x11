@@ -28,6 +28,7 @@ import { cssColorStraight } from 'ntk/color';
 import { normalizeRadii, planShadowTiles } from 'ntk/shadow-tiles';
 
 import {
+  blurPixels,
   filterColour,
   filterPixels,
   filterStops,
@@ -183,15 +184,35 @@ function warnUndrawable(image) {
   );
 }
 
-class LinearGradient {
-  constructor(x0, y0, x1, y1) {
-    this._coords = [x0, y0, x1, y1];
+/** A canvas gradient's stops, which `fillStyle` takes: `LinearGradient`
+ *  and `RadialGradient` are where they run. */
+class Gradient {
+  constructor() {
     this._stops = [];
   }
 
   addColorStop(offset, color) {
     const [r, g, b, a] = parseColor(color);
     this._stops.push(offset, r, g, b, a);
+  }
+
+  /** The stops as `[offset, r, g, b, a]`, in order of offset, two at
+   *  least: one stop is a colour from end to end. */
+  _sorted() {
+    const stops = [];
+    for (let i = 0; i + 4 < this._stops.length; i += 5) {
+      stops.push(this._stops.slice(i, i + 5));
+    }
+    stops.sort((p, q) => p[0] - q[0]);
+    if (stops.length === 1) stops.push([...stops[0]]);
+    return stops;
+  }
+}
+
+class LinearGradient extends Gradient {
+  constructor(x0, y0, x1, y1) {
+    super();
+    this._coords = [x0, y0, x1, y1];
   }
 
   /**
@@ -203,13 +224,8 @@ class LinearGradient {
    * remaps into [0, 1].
    */
   _normalized() {
-    const stops = [];
-    for (let i = 0; i + 4 < this._stops.length; i += 5) {
-      stops.push(this._stops.slice(i, i + 5));
-    }
-    stops.sort((p, q) => p[0] - q[0]);
+    const stops = this._sorted();
     if (stops.length === 0) return { coords: this._coords, flat: [] };
-    if (stops.length === 1) stops.push([...stops[0]]);
     const min = Math.min(0, stops[0][0]);
     const max = Math.max(1, stops[stops.length - 1][0]);
     let [x0, y0, x1, y1] = this._coords;
@@ -228,6 +244,35 @@ class LinearGradient {
     for (const stop of stops) stop[0] = Math.min(1, Math.max(0, stop[0]));
     return { coords: [x0, y0, x1, y1], flat: stops.flat() };
   }
+}
+
+/**
+ * Canvas's radial gradient: the colours spread from the start circle to
+ * the end one (@windowkit/appkit's `ctxFillRadialGradient`, whose
+ * CoreGraphics gradient is canvas's two-circle one). Canvas keeps every
+ * stop's offset in [0, 1], so they are only put in order.
+ */
+class RadialGradient extends Gradient {
+  constructor(x0, y0, r0, x1, y1, r1) {
+    super();
+    this._circles = [x0, y0, r0, x1, y1, r1];
+  }
+
+  _normalized() {
+    const stops = this._sorted();
+    for (const stop of stops) stop[0] = Math.min(1, Math.max(0, stop[0]));
+    return { circles: this._circles, flat: stops.flat() };
+  }
+}
+
+/**
+ * `createRadialGradient` on a bridge with no radial fill: a linear gradient
+ * along no line, which paints flat, as every radial gradient did before
+ * the bridge had one. It takes no circles, which is how a caller tells it
+ * from the one that draws them (`<Html>` asks `createRadialGradient.length`).
+ */
+function flatRadialGradient() {
+  return new LinearGradient(0, 0, 0, 0);
 }
 
 const clamp01 = (v) => Math.min(1, Math.max(0, Number(v) || 0));
@@ -431,6 +476,10 @@ function meets(a, b) {
   );
 }
 
+/** How many pixels across a blur's standard deviation is kept as the
+ *  source is scaled down for it (`_drawBlurred`). */
+const BLUR_SCALE = 2;
+
 /** The qualities `imageSmoothingQuality` takes, canvas's. */
 const SMOOTHING_QUALITIES = new Set(['low', 'medium', 'high']);
 
@@ -525,6 +574,15 @@ export class BackendContext2D {
     this._filters = ['createSurface', 'ctxGetImageData', 'ctxPutImageData']
       .map((name) => name in native && typeof native[name] === 'function')
       .every(Boolean);
+    // and a radial gradient's fill, @windowkit/appkit 0.28.0's: where the
+    // bridge has none, the flat stand-in it always had, which takes no
+    // circles — the one a caller asks for, and keys on
+    if (!(
+      'ctxFillRadialGradient' in native &&
+      typeof native.ctxFillRadialGradient === 'function'
+    )) {
+      this.createRadialGradient = flatRadialGradient;
+    }
     this._onDirty = null;
     // the recorded path, and whether the native one still matches it (a
     // chunked stroke leaves only its last chunk behind)
@@ -1330,9 +1388,13 @@ export class BackendContext2D {
     return new LinearGradient(x0, y0, x1, y1);
   }
 
-  createRadialGradient() {
-    // radial paints flat until someone needs it; the stop list still works
-    return new LinearGradient(0, 0, 0, 0);
+  createRadialGradient(x0, y0, r0, x1, y1, r1) {
+    if (r0 < 0 || r1 < 0) {
+      throw new RangeError(
+        "Failed to execute 'createRadialGradient': a radius is negative.",
+      );
+    }
+    return new RadialGradient(x0, y0, r0, x1, y1, r1);
   }
 
   _applyFill() {
@@ -1452,7 +1514,14 @@ export class BackendContext2D {
   _fillPath(rule) {
     this._path();
     const style = this._state.fillStyle;
-    if (style instanceof LinearGradient) {
+    if (style instanceof RadialGradient) {
+      const { circles, flat: stops } = style._normalized();
+      this._native.ctxFillRadialGradient(
+        this._s(),
+        ...circles,
+        this._stops(stops),
+      );
+    } else if (style instanceof LinearGradient) {
       const { coords, flat: stops } = style._normalized();
       const flat = this._stops(stops);
       this._native.ctxFillLinearGradient(
@@ -1688,7 +1757,18 @@ export class BackendContext2D {
 
   _fillRectNow(x, y, w, h) {
     const style = this._state.fillStyle;
-    if (style instanceof LinearGradient) {
+    if (style instanceof RadialGradient) {
+      const { circles, flat: stops } = style._normalized();
+      this._native.ctxFillRadialGradient(
+        this._s(),
+        ...circles,
+        this._stops(stops),
+        x,
+        y,
+        w,
+        h,
+      );
+    } else if (style instanceof LinearGradient) {
       const { coords, flat: stops } = style._normalized();
       const flat = this._stops(stops);
       this._native.ctxFillLinearGradient(
@@ -1802,6 +1882,10 @@ export class BackendContext2D {
    * resampling an `imageSmoothingQuality` sets all take as before.
    */
   _drawFiltered(src, size, [sx, sy, sw, sh, dx, dy, dw, dh], ink) {
+    if (ink.blur > 0) {
+      this._drawBlurred(src, size, [sx, sy, sw, sh, dx, dy, dw, dh], ink);
+      return;
+    }
     const x0 = Math.max(0, Math.floor(sx));
     const y0 = Math.max(0, Math.floor(sy));
     const w = Math.min(size.width, Math.ceil(sx + sw)) - x0;
@@ -1829,6 +1913,83 @@ export class BackendContext2D {
     } finally {
       st.filterInk = ink;
       release(n, filtered);
+    }
+  }
+
+  /**
+   * `drawImage` under a filter with a `blur()`: the part of the source the
+   * source rect covers and as far round it as the blur reaches, three
+   * standard deviations, scaled down so that the blur is a few pixels
+   * across — the resampling the bridge does as it draws, which averages —
+   * blurred and run through the rest of the filter there, and drawn back up
+   * over the destination and as far round it, smoothed. A Gaussian is
+   * smooth to the scale it was taken at, so the pixels it lost scaling down
+   * were ones it would have blurred away, as Skia blurs a large radius. What
+   * is past the source is nothing, which a blur fades into, as canvas has it.
+   */
+  _drawBlurred(src, size, [sx, sy, sw, sh, dx, dy, dw, dh], ink) {
+    if (!(sw > 0 && sh > 0 && dw !== 0 && dh !== 0)) return;
+    // the blur in source pixels, across and down
+    const bx = (ink.blur * sw) / Math.abs(dw);
+    const by = (ink.blur * sh) / Math.abs(dh);
+    const mx = Math.ceil(3 * bx);
+    const my = Math.ceil(3 * by);
+    // what is read, in source pixels, the source's part of it, and the
+    // factor it is scaled down by
+    const left = Math.floor(sx) - mx;
+    const top = Math.floor(sy) - my;
+    const across = Math.ceil(sx + sw) + mx - left;
+    const down = Math.ceil(sy + sh) + my - top;
+    const factor = Math.max(1, Math.floor(Math.min(bx, by) / BLUR_SCALE));
+    const w = Math.max(1, Math.ceil(across / factor));
+    const h = Math.max(1, Math.ceil(down / factor));
+    const n = this._native;
+    const small = n.createSurface(w, h, 1);
+    const st = this._state;
+    try {
+      const ix = Math.max(0, left);
+      const iy = Math.max(0, top);
+      const iw = Math.min(size.width, left + across) - ix;
+      const ih = Math.min(size.height, top + down) - iy;
+      if (iw > 0 && ih > 0) {
+        if (this._smoothing) n.ctxSetImageSmoothing(small, 'high');
+        n.ctxDrawSurface(
+          small,
+          src,
+          ix,
+          iy,
+          iw,
+          ih,
+          (ix - left) / factor,
+          (iy - top) / factor,
+          iw / factor,
+          ih / factor,
+        );
+      }
+      const pixels = n.ctxGetImageData(small, 0, 0, w, h);
+      blurPixels(pixels, w, h, Math.min(bx, by) / factor);
+      if (ink.matrices.length || ink.alpha < 1) {
+        filterPixels(pixels, pixels, ink);
+      }
+      n.ctxPutImageData(small, pixels, w, h, 0, 0);
+      st.filterInk = null;
+      // the destination's units a source pixel is
+      const kx = dw / sw;
+      const ky = dh / sh;
+      this.drawImage(
+        { _surfaceHandle: small },
+        0,
+        0,
+        across / factor,
+        down / factor,
+        dx + (left - sx) * kx,
+        dy + (top - sy) * ky,
+        across * kx,
+        down * ky,
+      );
+    } finally {
+      st.filterInk = ink;
+      release(n, small);
     }
   }
 
@@ -2129,7 +2290,7 @@ export class BackendContext2D {
       ];
     }
     const style = this._state.fillStyle;
-    return style instanceof LinearGradient ? BLACK : parseColor(style);
+    return style instanceof Gradient ? BLACK : parseColor(style);
   }
 
   // --- text (minimal: enough for <canvas onDraw> users) --------------------

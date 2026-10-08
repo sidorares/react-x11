@@ -127,7 +127,8 @@ test('a filter of colour functions sticks and reads back as written, and anythin
   ctx.filter = ' grayscale(50%) hue-rotate(90deg) ';
   assert.equal(ctx.filter, 'grayscale(50%) hue-rotate(90deg)');
   for (const no of [
-    'blur(2px)',
+    'blur(2em)',
+    'blur(-1px)',
     'grayscale(1) drop-shadow(1px 1px red)',
     'url(#f)',
     'grayscale(-1)',
@@ -229,6 +230,40 @@ try {
   bridge = null;
 }
 
+test('a blur() sticks, and an image drawn under it is read with what the blur reaches round it, scaled down to a few pixels a deviation, blurred, and drawn back up over where it goes and round it', () => {
+  const { ctx, native, dst } = context();
+  ctx.filter = 'blur(6px) blur(8px) saturate(2)';
+  assert.equal(ctx.filter, 'blur(6px) blur(8px) saturate(2)');
+  const src = native.createSurface(100, 60, 1);
+  native.calls.length = 0;
+  // two blurs are one of ten pixels, which reaches thirty; scaled down by
+  // five, it is two pixels a deviation
+  ctx.drawImage({ _surfaceHandle: src }, 20, 10);
+  const [[smallW, smallH]] = native.of('createSurface');
+  assert.deepEqual([smallW, smallH], [32, 24], '160 by 120, a fifth of it');
+  const small = native.calls.find((c) => c[0] === 'createSurface');
+  const [down, up] = native.of('ctxDrawSurface');
+  assert.deepEqual(
+    down.slice(1),
+    [src.id, 0, 0, 100, 60, 6, 6, 20, 12],
+    'the source scaled down, its margin left empty round it',
+  );
+  assert.equal(native.of('ctxGetImageData')[0][1], 0);
+  assert.deepEqual(native.of('ctxGetImageData')[0].slice(1), [0, 0, 32, 24]);
+  assert.deepEqual(
+    up.slice(0, 1).concat(up.slice(2)),
+    [dst.id, 0, 0, 32, 24, -10, -20, 160, 120],
+    'drawn back up over the image and thirty pixels round it',
+  );
+  assert.ok(native.of('releaseSurface').length >= 1, 'and let go');
+  assert.equal(small[1], 32);
+  // a fill under it is drawn sharp, in the colours the rest makes
+  native.calls.length = 0;
+  ctx.fillStyle = '#ff0000';
+  ctx.fillRect(0, 0, 10, 10);
+  assert.equal(native.of('createSurface').length, 0);
+});
+
 describe(
   'against the real bridge',
   {
@@ -261,6 +296,27 @@ describe(
       dst.ctx.fillRect(10, 0, 10, 10);
       assert.ok(close(pixelAt(dst.handle, 4, 4), [54, 54, 54, 255]));
       assert.ok(close(pixelAt(dst.handle, 15, 4), [0, 255, 255, 255]));
+      bridge.releaseSurface(red.handle);
+      bridge.releaseSurface(dst.handle);
+    });
+
+    test('a surface drawn under blur(4px) fades out across its edge, in its own colour', () => {
+      const red = surface(20, 20);
+      red.ctx.fillStyle = '#ff0000';
+      red.ctx.fillRect(0, 0, 20, 20);
+      const dst = surface(60, 60);
+      dst.ctx.filter = 'blur(4px)';
+      dst.ctx.drawImage({ _surfaceHandle: red.handle }, 20, 20);
+      const alpha = (x) => pixelAt(dst.handle, x, 30)[3];
+      assert.ok(alpha(30) > 230, `the middle is all but whole: ${alpha(30)}`);
+      assert.ok(
+        Math.abs(alpha(20) - 128) < 40,
+        `half at the edge: ${alpha(20)}`,
+      );
+      assert.ok(alpha(14) > 0 && alpha(14) < alpha(20), 'less outside');
+      assert.ok(alpha(4) < 8, `and next to nothing well past it: ${alpha(4)}`);
+      const [r, g, b] = pixelAt(dst.handle, 16, 30);
+      assert.ok(r > 200 && g < 30 && b < 30, `red, faded: ${[r, g, b]}`);
       bridge.releaseSurface(red.handle);
       bridge.releaseSurface(dst.handle);
     });

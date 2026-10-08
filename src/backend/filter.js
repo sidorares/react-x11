@@ -9,10 +9,21 @@
 // glyph run's ink and a symbol's colour are filtered by filtering the colour
 // they are drawn in, exactly. An image and a surface are filtered pixel by
 // pixel, and a text layout that carries colours of its own on a surface of
-// its own (src/backend/context2d.js). `blur()`, `drop-shadow()` and a
-// `url()` reach past what is drawn, which a colour cannot say; this context
-// does not apply them, so a list with one in it does not stick, and a
-// caller knows from reading the property back.
+// its own (src/backend/context2d.js). `drop-shadow()` and a `url()` reach
+// past what is drawn, which a colour cannot say; this context does not
+// apply them, so a list with one in it does not stick, and a caller knows
+// from reading the property back.
+//
+// `blur()` reaches past what is drawn too, and is applied to an image or a
+// surface drawn — `drawImage`, what a renderer composites a layer of its
+// own with, CSS's `backdrop-filter` among them — by blurring its pixels
+// (`blurPixels`). A fill, a stroke and text are drawn sharp under it, in
+// the colours the rest of the list makes. Its standard deviation is in the
+// units `drawImage`'s destination is given in. Several `blur()`s are one,
+// the root of the sum of their squares, as two Gaussians make one; and each
+// colour function here is a linear map on premultiplied colour, which a
+// blur, a weighted sum of premultiplied pixels, commutes with, so where in
+// the list a blur is written changes nothing but where the clamps fall.
 
 /** A function's amount where none is written: all of the effect for the
  *  ones whose argument is how much of it to take, and none for the others
@@ -38,17 +49,19 @@ const ANGLE_UNITS = {
 };
 
 /**
- * A filter list as this context applies it: `{ matrices, alpha }`, the
- * colour matrices in the order written, each over straight RGB in 0–1 with
- * an offset — none for a function that changes no colour — and what alpha
- * is multiplied by. Null for `none`; undefined for what is no filter list,
- * or one with a function this context does not apply.
+ * A filter list as this context applies it: `{ matrices, alpha, blur }`,
+ * the colour matrices in the order written, each over straight RGB in 0–1
+ * with an offset — none for a function that changes no colour — what alpha
+ * is multiplied by, and the standard deviation of the blur, 0 for none.
+ * Null for `none`; undefined for what is no filter list, or one with a
+ * function this context does not apply.
  */
 export function parseCanvasFilter(value) {
   const text = String(value).trim();
   if (text.toLowerCase() === 'none') return null;
   const matrices = [];
   let alpha = 1;
+  let blur2 = 0;
   let rest = text;
   let seen = 0;
   while (rest.length) {
@@ -57,8 +70,14 @@ export function parseCanvasFilter(value) {
     rest = rest.slice(m[0].length);
     seen += 1;
     const name = m[1].toLowerCase();
-    if (!COLOUR.has(name)) return undefined;
     const arg = m[2].trim();
+    if (name === 'blur') {
+      const radius = arg ? lengthOf(arg) : 0;
+      if (radius === null || radius < 0) return undefined;
+      blur2 += radius * radius;
+      continue;
+    }
+    if (!COLOUR.has(name)) return undefined;
     if (name === 'hue-rotate') {
       const angle = arg ? angleOf(arg) : 0;
       if (angle === null) return undefined;
@@ -76,12 +95,24 @@ export function parseCanvasFilter(value) {
     if (matrix) matrices.push(matrix);
   }
   if (!seen) return undefined;
-  return { matrices, alpha };
+  return { matrices, alpha, blur: Math.sqrt(blur2) };
 }
 
 /** Whether a parsed filter changes anything drawn. */
 export function filters(filter) {
-  return !!filter && (filter.matrices.length > 0 || filter.alpha < 1);
+  return (
+    !!filter &&
+    (filter.matrices.length > 0 || filter.alpha < 1 || filter.blur > 0)
+  );
+}
+
+/** A length in pixels; a bare 0 is one. */
+function lengthOf(arg) {
+  const m = /^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(px)?$/i.exec(arg);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return null;
+  return m[2] || n === 0 ? n : null;
 }
 
 /** A number or a percentage of one. */
@@ -282,4 +313,118 @@ export function filterPixels(src, dst, filter) {
 
 function clampByte(v) {
   return v <= 0 ? 0 : v >= 255 ? 255 : Math.round(v);
+}
+
+/**
+ * Straight RGBA pixels, 0–255, `width` by `height`, blurred in place by a
+ * Gaussian of standard deviation `sigma` pixels: three box blurs across and
+ * three down, each as wide as the Gaussian they come to (Kovesi, "Fast
+ * almost-Gaussian filtering", 2010), on premultiplied colour — a blur of
+ * straight colour bleeds the colour of what is transparent into its edge —
+ * with nothing past the edge, as canvas has it.
+ */
+export function blurPixels(pixels, width, height, sigma) {
+  if (!(sigma > 0) || !(width > 0 && height > 0)) return;
+  const n = width * height;
+  // premultiplied, the four channels of a pixel side by side
+  const plane = new Float32Array(n * 4);
+  for (let p = 0; p < n * 4; p += 4) {
+    const alpha = pixels[p + 3] / 255;
+    plane[p] = pixels[p] * alpha;
+    plane[p + 1] = pixels[p + 1] * alpha;
+    plane[p + 2] = pixels[p + 2] * alpha;
+    plane[p + 3] = pixels[p + 3];
+  }
+  const line = new Float32Array(Math.max(width, height) * 4);
+  for (const radius of boxRadii(sigma)) {
+    if (radius < 1) continue;
+    boxPass(plane, width, height, radius, 4, width * 4, line);
+    boxPass(plane, height, width, radius, width * 4, 4, line);
+  }
+  for (let p = 0; p < n * 4; p += 4) {
+    const alpha = plane[p + 3];
+    if (alpha <= 0.5) {
+      pixels[p] = pixels[p + 1] = pixels[p + 2] = pixels[p + 3] = 0;
+      continue;
+    }
+    const k = 255 / alpha;
+    pixels[p] = clampByte(plane[p] * k);
+    pixels[p + 1] = clampByte(plane[p + 1] * k);
+    pixels[p + 2] = clampByte(plane[p + 2] * k);
+    pixels[p + 3] = clampByte(alpha);
+  }
+}
+
+/** The radii of three box blurs that come to a Gaussian of `sigma`. */
+function boxRadii(sigma) {
+  const passes = 3;
+  const ideal = Math.sqrt((12 * sigma * sigma) / passes + 1);
+  let lower = Math.floor(ideal);
+  if (lower % 2 === 0) lower -= 1;
+  const upper = lower + 2;
+  const m = Math.round(
+    (12 * sigma * sigma -
+      passes * lower * lower -
+      4 * passes * lower -
+      3 * passes) /
+      (-4 * lower - 4),
+  );
+  const out = [];
+  for (let i = 0; i < passes; i += 1) {
+    out.push(((i < m ? lower : upper) - 1) / 2);
+  }
+  return out;
+}
+
+/**
+ * One box blur of `radius` along every line of a plane of RGBA pixels:
+ * `lines` lines of `length` pixels, a pixel `step` values from the next
+ * along a line and a line `stride` values from the next. Past either end
+ * is nothing.
+ */
+function boxPass(plane, length, lines, radius, step, stride, line) {
+  const scale = 1 / (2 * radius + 1);
+  for (let l = 0; l < lines; l += 1) {
+    const base = l * stride;
+    for (let i = 0, q = base; i < length; i += 1, q += step) {
+      const o = i * 4;
+      line[o] = plane[q];
+      line[o + 1] = plane[q + 1];
+      line[o + 2] = plane[q + 2];
+      line[o + 3] = plane[q + 3];
+    }
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let a = 0;
+    for (let i = 0; i <= radius && i < length; i += 1) {
+      const o = i * 4;
+      r += line[o];
+      g += line[o + 1];
+      b += line[o + 2];
+      a += line[o + 3];
+    }
+    for (let i = 0, q = base; i < length; i += 1, q += step) {
+      plane[q] = r * scale;
+      plane[q + 1] = g * scale;
+      plane[q + 2] = b * scale;
+      plane[q + 3] = a * scale;
+      const enter = i + radius + 1;
+      if (enter < length) {
+        const o = enter * 4;
+        r += line[o];
+        g += line[o + 1];
+        b += line[o + 2];
+        a += line[o + 3];
+      }
+      const leave = i - radius;
+      if (leave >= 0) {
+        const o = leave * 4;
+        r -= line[o];
+        g -= line[o + 1];
+        b -= line[o + 2];
+        a -= line[o + 3];
+      }
+    }
+  }
 }
