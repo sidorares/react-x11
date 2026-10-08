@@ -1,5 +1,6 @@
 // The pane the frame tests mount: reports what reached it (props, bridged
 // theme, bridged context) through a bridged callback, crashes on demand,
+// wedges its event loop on demand (`wedge`),
 // and flushes through a callback from its close handler — and, asked with
 // `probe`, what its process was started with. Boxes only — no text — so
 // the forked variant needs no fonts on the machine.
@@ -24,8 +25,23 @@ function processReport(probe) {
   };
 }
 
-export default function Pane({ label, crash, probe, onReport, onClosed }) {
+export default function Pane({
+  label,
+  crash,
+  wedge,
+  probe,
+  onReport,
+  onClosed,
+}) {
   if (crash) throw new Error('pane asked to crash');
+  useEffect(() => {
+    // after the report has gone: a loop nothing ends, but the process
+    if (!wedge) return;
+    const id = setTimeout(() => {
+      for (;;);
+    }, 50);
+    return () => clearTimeout(id);
+  }, [wedge]);
   const theme = useTheme();
   const session = Session.use();
   useFrameClose(() => {

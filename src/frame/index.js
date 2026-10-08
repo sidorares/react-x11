@@ -146,6 +146,32 @@ function paneEnv(env, display) {
  * something else restarts the pane. Throws on what a fork cannot take,
  * which the session reports as a `spawn` failure.
  */
+/** How long a pane may go without answering by default: long enough for a
+ *  pane that is working, through a collection or a long layout, short
+ *  enough that one that is not is noticed before the reader gives up. */
+const WATCHDOG_MS = 15000;
+
+/**
+ * The watchdog's limit, in ms, or 0 where the pane is not watched: `false`,
+ * or a pane started under the inspector — by its own flags, this process's
+ * that it inherits, or `NODE_OPTIONS` — which a debugger stops on purpose.
+ * The flags that turn the inspector on, and not its kin that only set it
+ * up: Node's test runner hands every test process `--inspect-port` and
+ * `--inspect-publish-uid`, and a pane in a test is not being debugged.
+ */
+function watchdogMs(watchdog, execArgv) {
+  if (watchdog === false) return 0;
+  const limit = Number(watchdog);
+  if (!(limit > 0)) return 0;
+  const flags = [
+    ...process.execArgv,
+    ...(execArgv ?? []),
+    ...(process.env.NODE_OPTIONS ?? '').split(/\s+/),
+  ];
+  return flags.some((flag) => INSPECTING.test(flag)) ? 0 : limit;
+}
+const INSPECTING = /^--inspect(?:-brk|-wait)?(?:=|$)/;
+
 function launchOf(execArgv, env) {
   if (
     execArgv !== undefined &&
@@ -275,6 +301,7 @@ export function Frame({
   display,
   execArgv,
   env: processEnv,
+  watchdog = WATCHDOG_MS,
   bridge = true,
   fallback,
   focusable,
@@ -328,6 +355,8 @@ export function Frame({
   }
   const paneProcess = useRef(null);
   paneProcess.current = { execArgv: execArgv ?? [], env: processEnv ?? {} };
+  // how long the pane may go without answering, where it is watched at all
+  const watched = watchdogMs(watchdog, execArgv);
 
   // The session: one child process per (src, display, the process's flags
   // and environment, transport, restart).
@@ -382,6 +411,8 @@ export function Frame({
       fatal: null,
       sent: null,
       shutdown: null,
+      answered: performance.now(),
+      watch: null,
     };
     session.current = s;
 
@@ -410,6 +441,8 @@ export function Frame({
           pid: t.pid ?? null,
           windowId: msg.windowId,
         });
+      } else if (msg?.type === 'pong') {
+        s.answered = performance.now();
       } else if (msg?.type === 'invoke') {
         s.table.invoke(msg.id, msg.args);
       } else if (msg?.type === 'fatal') {
@@ -427,6 +460,7 @@ export function Frame({
     };
     offExit = t.onExit(({ code = null, signal = null, error } = {}) => {
       clearEscalation?.();
+      clearInterval(s.watch);
       detach();
       const expected = s.closing;
       if (alive && !expected) {
@@ -455,6 +489,7 @@ export function Frame({
     s.shutdown = () => {
       if (s.closing) return;
       s.closing = true;
+      clearInterval(s.watch);
       let sent = false;
       try {
         t.send({ type: 'unmount' });
@@ -503,6 +538,48 @@ export function Frame({
       ...(paneApp?.playsForPanes && { players: true }),
     });
 
+    // The watchdog. A pane whose event loop is stuck stays `running`, is
+    // sent updates it never reads, and on X11 holds the keys while the
+    // pointer is over it — and says nothing. So it is asked, about once a
+    // second, and answers from its event loop (`runFrameChild`); one that
+    // has not answered in `watchdog` ms has stopped, and goes the way a
+    // pane that crashed goes: failed, phase `'unresponsive'`, and its
+    // process ended, so `fallback` can offer to start it again. A tick of
+    // this side's own that comes late — the machine slept, or this
+    // process was the one stuck — is no news of the pane's, and the
+    // count starts again from it.
+    if (watched > 0) {
+      const every = Math.max(50, Math.min(1000, watched / 4));
+      let ticked = performance.now();
+      let seq = 0;
+      s.watch = setInterval(() => {
+        if (s.closing) return;
+        const now = performance.now();
+        const late = now - ticked > every * 3;
+        ticked = now;
+        if (late) s.answered = now;
+        else if (now - s.answered > watched) {
+          clearInterval(s.watch);
+          const message = `the pane stopped answering for ${Math.round(
+            now - s.answered,
+          )} ms`;
+          s.fatal = { phase: 'unresponsive', message };
+          fail(Object.assign(new Error(message), { phase: 'unresponsive' }));
+          // it cannot read an unmount: ended, from outside
+          t.kill?.('SIGTERM');
+          const kill = setTimeout(() => t.kill?.('SIGKILL'), 2000);
+          kill.unref?.();
+          return;
+        }
+        try {
+          t.send({ type: 'ping', seq: (seq += 1) });
+        } catch {
+          // the channel is going; the exit says the rest
+        }
+      }, every);
+      s.watch.unref?.();
+    }
+
     return () => {
       alive = false;
       s.shutdown();
@@ -512,7 +589,15 @@ export function Frame({
       // ask, and everything is unref'd so nothing holds the host open
       if (session.current === s) session.current = null;
     };
-  }, [source, display, launch, generation, makeTransport, canShowPane]);
+  }, [
+    source,
+    display,
+    launch,
+    generation,
+    makeTransport,
+    canShowPane,
+    watched,
+  ]);
 
   // One update per commit that changed the pane's inputs, props and env in
   // the same message — so a theme flip and the state change that caused it

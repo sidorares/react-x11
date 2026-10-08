@@ -351,6 +351,126 @@ test('a crash shows the fallback; restart() gets a fresh pane', async () => {
   }
 });
 
+/** A loopback transport whose pane hears no `ping` while `deaf` says so:
+ *  a pane whose event loop is stuck, without stopping this one's. */
+function deafening(childApp) {
+  const inner = loopbackFrameFactory({ childApp });
+  const control = { deaf: false };
+  const factory = (options) => {
+    const t = inner(options);
+    return {
+      ...t,
+      send: (msg) => {
+        if (!(control.deaf && msg?.type === 'ping')) t.send(msg);
+      },
+    };
+  };
+  factory.sessions = inner.sessions;
+  factory.control = control;
+  return factory;
+}
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('a pane that stops answering fails as unresponsive and is ended, where one that answers runs on', async () => {
+  const { app, other } = await headlessPair();
+  const x11Root = await createRoot({ app });
+  const factory = deafening(other);
+  const reports = [];
+  const exits = [];
+  const fallbacks = [];
+  const tree = (watchdog) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(Frame, {
+        src: PANE,
+        transport: factory,
+        watchdog,
+        props: { label: 'w', onReport: (d) => reports.push(d) },
+        style: { flexGrow: 1 },
+        fallback: ({ error }) => {
+          fallbacks.push({ message: error?.message, phase: error?.phase });
+          return h('box', { style: { flexGrow: 1 } });
+        },
+        onExit: (info) => exits.push(info),
+      }),
+    );
+  try {
+    await render(tree(300), x11Root);
+    await until(app, () => reports.length >= 1, 'the first report');
+    // answering, it runs on past many a watchdog's length
+    await wait(900);
+    await settle(app);
+    assert.equal(fallbacks.length, 0, 'a pane that answers was ended');
+    assert.deepEqual(factory.sessions[0].kills, []);
+
+    factory.control.deaf = true;
+    await until(app, () => fallbacks.length >= 1, 'the unresponsive pane', {
+      tries: 1000,
+    });
+    assert.equal(fallbacks[0].phase, 'unresponsive');
+    assert.match(fallbacks[0].message, /stopped answering for \d+ ms/);
+    assert.equal(factory.sessions[0].kills[0], 'SIGTERM');
+    // what cannot hear an unmount is ended from outside
+    await until(app, () => exits.length === 1, 'the end of the process', {
+      tries: 2000,
+    });
+    assert.equal(exits[0].expected, false);
+    assert.equal(factory.sessions[0].exitSignal, 'SIGKILL');
+  } finally {
+    await teardown(x11Root, app, other);
+  }
+});
+
+test('a pane is not watched with watchdog={false}, and a late tick of the host is no news of the pane', async () => {
+  const { app, other } = await headlessPair();
+  const x11Root = await createRoot({ app });
+  const factory = deafening(other);
+  const reports = [];
+  const fallbacks = [];
+  const tree = (watchdog, label) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(Frame, {
+        src: PANE,
+        transport: factory,
+        watchdog,
+        props: { label, onReport: (d) => reports.push(d) },
+        style: { flexGrow: 1 },
+        fallback: ({ error }) => {
+          fallbacks.push(error?.phase);
+          return h('box', { style: { flexGrow: 1 } });
+        },
+      }),
+    );
+  try {
+    // deaf from the start, and never asked
+    factory.control.deaf = true;
+    await render(tree(false, 'off'), x11Root);
+    await until(app, () => reports.length >= 1, 'the first report');
+    await wait(800);
+    await settle(app);
+    assert.deepEqual(fallbacks, [], 'an unwatched pane was ended');
+
+    // Watched, and answering — then this process stuck for longer than the
+    // watchdog: the pane is stuck with it, here, and its first tick after
+    // is late. The machine sleeping is the same news.
+    await x11Root.unmount();
+    factory.control.deaf = false;
+    await render(tree(300, 'on'), x11Root);
+    await until(app, () => reports.length >= 2, 'the watched pane');
+    const until_ = performance.now() + 900;
+    while (performance.now() < until_);
+    await wait(700);
+    await settle(app);
+    assert.deepEqual(fallbacks, [], 'a late tick ended the pane');
+  } finally {
+    await teardown(x11Root, app, other);
+  }
+});
+
 test('Tab goes through an embedded pane and back out: in at an end, out past the other', async () => {
   // The pane's half of XEmbed's Tab: FOCUS_IN with FOCUS_FIRST or _LAST
   // lands on its first or last stop, and running off an end sends
@@ -685,6 +805,49 @@ test('the default transport forks a real pane process', async () => {
     assert.equal(exits[0].code, 0);
   } finally {
     delete process.env.REACT_X11_FRAME_TEST_GONE;
+    bridge.close();
+    await teardown(x11Root, app, other);
+  }
+});
+
+test('a forked pane that wedges its event loop is found and ended', async () => {
+  const { app, other, server } = await headlessPair();
+  const x11Root = await createRoot({ app });
+  const { bridge, display } = await tcpDisplay(server);
+  const exits = [];
+  const fallbacks = [];
+  try {
+    await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(Frame, {
+          src: PANE,
+          display,
+          watchdog: 600,
+          props: { label: 'wedged', wedge: true },
+          style: { flexGrow: 1 },
+          fallback: ({ error }) => {
+            fallbacks.push(error?.phase);
+            return h('box', { style: { flexGrow: 1 } });
+          },
+          onExit: (info) => exits.push(info),
+        }),
+      ),
+      x11Root,
+    );
+    // A loop nothing in the pane can end: the watchdog's answer, and the
+    // process ended by a signal it cannot handle while it spins. Not its
+    // report first: on a loaded machine the pane can be spinning before
+    // the report has left it, which is the case this is about.
+    await until(app, () => exits.length === 1, 'the wedged pane ended', {
+      tries: 4000,
+      delay: 5,
+    });
+    assert.equal(fallbacks.at(-1), 'unresponsive');
+    assert.equal(exits[0].expected, false);
+    assert.equal(exits[0].signal, 'SIGTERM');
+  } finally {
     bridge.close();
     await teardown(x11Root, app, other);
   }

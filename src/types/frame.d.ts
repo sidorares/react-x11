@@ -16,7 +16,7 @@ export type FrameProps = Record<string, unknown>;
 /** Why a pane is not running, for `fallback` and `onExit` to read. */
 export interface FrameError extends Error {
   /** Where it went wrong: `'spawn' | 'load' | 'connect' | 'handshake' |
-   * 'runtime' | 'send' | 'embed' | 'exit'`. */
+   * 'runtime' | 'send' | 'embed' | 'unresponsive' | 'exit'`. */
   phase?: string;
   code?: number | null;
   signal?: string | null;
@@ -53,6 +53,14 @@ export interface FrameComponentProps {
    * the same flags in a new array do not.
    */
   execArgv?: readonly string[];
+  /**
+   * How long the pane may go without answering, in ms, before it is taken
+   * for one whose event loop is stuck: failed with phase `'unresponsive'`,
+   * its process ended, and `fallback` shown. Asked about once a second,
+   * from its event loop. Default 15000; `false` never. A pane started
+   * under the inspector is never watched.
+   */
+  watchdog?: number | false;
   /**
    * Environment variables for the pane's process, over this one's; a value
    * of `undefined` takes a variable away. `DISPLAY` is `display`'s and

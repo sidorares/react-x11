@@ -168,6 +168,18 @@ export async function runFrameChild(transport, options = {}) {
   }
   markFramed();
 
+  // The host's watchdog asks whether this process is still answering; the
+  // answer comes from the event loop, which is the thing it asks about.
+  // From the first moment, since the host asks from its hello on.
+  transport.onMessage((msg) => {
+    if (msg?.type !== 'ping') return;
+    try {
+      transport.send({ type: 'pong', seq: msg.seq });
+    } catch {
+      // the host is going away
+    }
+  });
+
   const hello = await new Promise((resolve) => {
     const off = transport.onMessage((msg) => {
       if (msg?.type !== 'hello') return;
