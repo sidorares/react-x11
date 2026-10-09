@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.47.1](https://github.com/sidorares/react-x11/compare/v2.47.0...v2.47.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **deps:** @windowkit/appkit ^0.28.0, so a radial gradient is drawn on a Mac and clipboard.write() copies an image there, where 2.47.0's range admitted no bridge with ctxFillRadialGradient or pasteboardWrite ([#928](https://github.com/sidorares/react-x11/issues/928)) ([5dd261c](https://github.com/sidorares/react-x11/commit/5dd261cd0f135075e8be5568391a49339b0c2820))
+
+
+### Performance Improvements
+
+* **wayland:** a window whose viewport shows part of its buffer keeps its buffers through a resize that fits them, where every step of a dragged edge made the swapchain's buffers again and imported each into the compositor ([#896](https://github.com/sidorares/react-x11/issues/896)) ([de5e4c7](https://github.com/sidorares/react-x11/commit/de5e4c728c12c3fae5c923d354facaf396746684))
+
 ## [2.47.0](https://github.com/sidorares/react-x11/compare/v2.46.0...v2.47.0) (2026-10-08)
 
 
