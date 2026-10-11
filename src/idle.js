@@ -31,6 +31,16 @@
 // next check is 288 seconds away — so an active user costs one round trip per
 // timeout period.
 //
+// A backend with no X server says the same number itself, as
+// `app.lastInputMs()`: `GetLastInputInfo` on win32, and on macOS the bridge's
+// CoreGraphics read or `ioreg`'s `HIDIdleTime` (src/cocoa/idle.js). That rung
+// polls on the same schedule, and may answer with a promise.
+//
+// Every rung stops when the last subscriber to its timeout goes. A watcher
+// that outlived its component kept its alarm, or its poll, for the life of
+// the root — near free for an alarm, and a child process per check for
+// `ioreg`.
+//
 // ## Inhibition: three rungs that agree on what they do
 //
 // All three keep the **screen** awake and none of them stops a suspend. That
@@ -187,11 +197,12 @@ class IdleWatcher {
 async function armIdle(watcher) {
   const session = watcher.session;
 
-  // The Windows rung, first because it is the only one there: everything
-  // below this reaches into `app.X`, and a tree that is not on an X server
-  // has none. `GetLastInputInfo` answers for the whole session, which is what
-  // an idle timeout means, so the shape is the polling rung's — with the
-  // answer arriving synchronously instead of over a connection.
+  // The rung for a backend with no X server, first because it is the only
+  // one there: everything below this reaches into `app.X`, and the cocoa and
+  // win32 apps carry at most a stub of one. `GetLastInputInfo` and macOS's
+  // idle time both answer for the whole session, which is what an idle
+  // timeout means, so the shape is the polling rung's — with the answer
+  // coming from a call, or from a child process, instead of a connection.
   if (typeof session.app?.lastInputMs === 'function') {
     pollLastInput(watcher);
     return;
@@ -293,27 +304,37 @@ function poll(watcher, saver) {
 }
 
 /**
- * The same adaptive wait as {@link poll}, over a counter this process can read
- * without asking anybody: `GetLastInputInfo` is a call, not a round trip.
+ * The same adaptive wait as {@link poll}, over a number the backend reads
+ * itself: `GetLastInputInfo` is a call, not a round trip, and so is the cocoa
+ * bridge's; the cocoa `ioreg` fallback is a child process, and answers with a
+ * promise.
  *
  * The two directions are still asymmetric for the same reason. Not idle yet:
  * sleep for exactly the remainder. Idle: nothing says when the user will come
  * back, and no input reaches this process while they are typing in another
- * window, so poll on an interval scaled to the timeout.
+ * window, so poll on an interval scaled to the timeout. No answer at all —
+ * `ioreg` failed — asks again a timeout later, the way {@link poll} does on
+ * an error, rather than settling on "not idle" for good.
  */
-function pollLastInput(watcher) {
+async function pollLastInput(watcher) {
   if (watcher.stopped) return;
-  const elapsed = watcher.session.app.lastInputMs?.();
-  if (typeof elapsed !== 'number') return;
-  const idle = elapsed >= watcher.timeout;
-  watcher.set(idle);
-  clearTimeout(watcher._timer);
-  watcher._timer = setTimeout(
-    () => pollLastInput(watcher),
-    idle
+  let elapsed = null;
+  try {
+    elapsed = await watcher.session.app.lastInputMs();
+  } catch {
+    // no answer this time; asked again below
+  }
+  if (watcher.stopped) return;
+  let wait = watcher.timeout;
+  if (Number.isFinite(elapsed)) {
+    const idle = elapsed >= watcher.timeout;
+    watcher.set(idle);
+    wait = idle
       ? Math.min(30_000, Math.max(1_000, watcher.timeout / 4))
-      : Math.max(250, watcher.timeout - elapsed),
-  );
+      : Math.max(250, watcher.timeout - elapsed);
+  }
+  clearTimeout(watcher._timer);
+  watcher._timer = setTimeout(() => pollLastInput(watcher), wait);
   watcher._timer.unref?.();
 }
 
@@ -347,7 +368,16 @@ export function watchIdle(app, timeout, onChange) {
     });
   }
   watcher.listeners.add(onChange);
-  return () => watcher.listeners.delete(onChange);
+  return () => {
+    watcher.listeners.delete(onChange);
+    if (watcher.listeners.size > 0 || watcher.stopped) return;
+    // The last one out stops the alarm or the poll; the next subscriber to
+    // this timeout arms a new watcher.
+    watcher.stop();
+    if (session.watchers.get(timeout) === watcher) {
+      session.watchers.delete(timeout);
+    }
+  };
 }
 
 /** Tear down with the root that started it. */

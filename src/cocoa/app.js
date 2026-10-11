@@ -38,6 +38,7 @@ import { CocoaPaneSubwindow, CocoaPaneWindow } from './panewindow.js';
 import { CocoaColorSampler } from './screencolor.js';
 import { CocoaFilePanels } from './filepanels.js';
 import { CocoaFontManager } from './fonts.js';
+import { lastInputReader } from './idle.js';
 import { releaseImageUpload } from '../backend/context2d.js';
 import { PanePlayer, canShowPanePlayers } from './paneplayer.js';
 import { CocoaPlayer, canPlay } from './player.js';
@@ -344,6 +345,12 @@ export class CocoaApp {
       typeof native.sampleScreenColor === 'function'
         ? new CocoaColorSampler(native)
         : null;
+
+    // How long since anybody touched the Mac, which is what `useIdle()`
+    // asks of an app with no X server behind it (src/idle.js): the bridge's
+    // `lastInputMs` where it has one, `ioreg` where it does not
+    // (src/cocoa/idle.js, #938).
+    this.lastInputMs = lastInputReader(native);
 
     // The GL policy, glbackend.js's shape. No GLX exists here, so the
     // default is 'auto' (the direct backend where the runtime loads);
