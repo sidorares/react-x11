@@ -1226,6 +1226,26 @@ toggleType, toggleState, icon, iconName, disposition, key }`. Both take an
 `onSelect(item)` prop as well, fired after the item's own. A bar menu opens on
 the **press**, for the reason `Select` does.
 
+**A context menu's items can come from the right-click.** The click records
+only where it happened; what the menu shows, how big it is and where it fits
+are taken from the `items` of the render that follows. So a row that says
+which thing was right-clicked in its own `onContextMenu`, with the items
+derived from that, gets a menu for that thing, sized for it, on the first
+right-click. Items still empty in that render open nothing: no popup, no
+pointer grab, and the focus left where the press put it.
+
+```jsx
+const [target, setTarget] = useState(null);
+
+<ContextMenu items={target ? itemsFor(target) : []}>
+  {rows.map((row) => (
+    <box key={row.id} onContextMenu={() => setTarget(row)}>
+      <text>{row.name}</text>
+    </box>
+  ))}
+</ContextMenu>;
+```
+
 **`shortcut` is a binding, not a label.** It is a list of alternatives, each a
 list of modifier tokens ending in the key — `[['Control', 'S']]` — and a
 mounted menu answers it: Ctrl+S fires that item's `onSelect` without the menu

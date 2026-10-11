@@ -2,7 +2,13 @@
 // support needed. Plain createElement (no JSX) so the library stays
 // build-step-free for consumers.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   capBand,
   capTrim,
@@ -990,14 +996,45 @@ export function ContextMenu({
   ...boxProps
 }) {
   const ref = useRef(null);
-  const [rect, setRect] = useState(null);
+  // Where the right-click asked for the menu, in logical root coordinates —
+  // and nothing else. What to show, and so how big a popup and where it can
+  // fit, is decided from the `items` of the render the menu appears in.
+  //
+  // The click cannot decide it: a row inside here says which thing was
+  // right-clicked in its own `onContextMenu`, which runs before ours on the
+  // same event but renders after it, and an app derives the items from that.
+  // Read at the click, the items were the render before's — so a menu with
+  // none before opened on the second right-click, and one that grew showed
+  // its new rows in a popup sized for the old ones (#934).
+  const [anchor, setAnchor] = useState(null);
   const [path, setPath] = useState([]);
   const typeAhead = useTypeAhead();
   const rtl = useDirection() === 'rtl';
   const metrics = useMenuMetrics(fontSize);
 
+  const showing = anchor != null && visibleItems(items).length > 0;
+  const rect = useMemo(() => {
+    const node = ref.current;
+    if (!showing || !node) return null;
+    const width = menuListWidth(node, items, metrics);
+    const height = menuListHeight(items, metrics);
+    const area = anchorArea(node);
+    // anchored at the pointer rather than at a widget: clamp by hand, since
+    // there is no anchor rect to flip around
+    return {
+      x: area
+        ? Math.max(area.x, Math.min(anchor.x, area.x + area.width - width))
+        : anchor.x,
+      y: area
+        ? Math.max(area.y, Math.min(anchor.y, area.y + area.height - height))
+        : anchor.y,
+      width,
+      height,
+    };
+  }, [showing, anchor, items, metrics]);
+
   const close = () => {
-    setRect(null);
+    setAnchor(null);
     setPath([]);
   };
   const select = (item) => {
@@ -1016,30 +1053,34 @@ export function ContextMenu({
   // pointer grab until something closes it
   useDismissOnWindowBlur(ref, Boolean(rect), close);
 
-  const openAt = (ev) => {
-    const node = ref.current;
-    if (!node || !items.length) return;
-    const width = menuListWidth(node, items, metrics);
-    const height = menuListHeight(items, metrics);
-    const area = anchorArea(node);
-    // anchored at the pointer rather than at a widget: clamp by hand, since
-    // there is no anchor rect to flip around. Root coordinates are device;
-    // the rect feeds popup props, which are logical like the area.
-    const x = (ev.nativeEvent?.rootx ?? ev.x * node.scale) / node.scale;
-    const y = (ev.nativeEvent?.rooty ?? ev.y * node.scale) / node.scale;
-    setRect({
-      x: area ? Math.max(area.x, Math.min(x, area.x + area.width - width)) : x,
-      y: area
-        ? Math.max(area.y, Math.min(y, area.y + area.height - height))
-        : y,
-      width,
-      height,
-    });
-    setPath([-1]);
+  // Settled in the commit the click's own updates land in, before anything
+  // is drawn. Nothing to show is no menu at all — no popup, so no grab, and
+  // the focus left where the press put it — and the request is dropped
+  // rather than kept, or items arriving later would open a menu nobody
+  // asked for just then. The same goes for items emptied under an open menu.
+  useLayoutEffect(() => {
+    if (!anchor) return;
+    if (!showing) {
+      close();
+      return;
+    }
     // `'pointer'`, so no ring: this only ever opens from a right-click, and
     // the wrapper is the whole content area — a focus ring around all of it
     // says nothing a keyboard user needs and quite a lot nobody wants.
-    node.root?.events?.focus?.(node, 'pointer');
+    const node = ref.current;
+    node?.root?.events?.focus?.(node, 'pointer');
+  }, [anchor, showing]);
+
+  const openAt = (ev) => {
+    const node = ref.current;
+    if (!node) return;
+    // Root coordinates are device; the anchor feeds popup props, which are
+    // logical like the area they are clamped to.
+    setAnchor({
+      x: (ev.nativeEvent?.rootx ?? ev.x * node.scale) / node.scale,
+      y: (ev.nativeEvent?.rooty ?? ev.y * node.scale) / node.scale,
+    });
+    setPath([-1]);
   };
 
   return h(
