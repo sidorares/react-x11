@@ -275,6 +275,9 @@ export class WindowNode extends Scrollable(Node) {
     // has not echoed yet: both are ours when an echo carries them (_ownSize)
     this._confirmedSize = null;
     this._sizesInFlight = [];
+    // the size `_refit` is waiting for before it lays out again, and the
+    // timer that gives up on it (_holdForRefit)
+    this._refitHeld = null;
     // the last `WM_NORMAL_HINTS` struct written and the size it was written
     // at, so that a bound measured every frame is only *sent* on the frames
     // it moves (see _sendSizeHints for why the size is part of it)

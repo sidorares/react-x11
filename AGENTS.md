@@ -1742,7 +1742,12 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   Matching only the latest `_requestedSize` is the trap: a move's echo
   carries the old size and an earlier re-fit's echo its own, and both land
   after the record moved on (#929). Every request goes through `_askSize`,
-  and has to name **both** axes, since the echo does.
+  and has to name **both** axes, since the echo does. And on X11, where the
+  size lands with the echo, the frame that re-fit **waits for it**
+  (`_holdForRefit`): laid out at the old size, content that grew wraps and
+  is clipped for a round trip — and its height floors, measured at that
+  width, used to send a second, wrong request. A natural height is measured
+  with the floors re-probed at the natural width for the same reason.
 - Windows cannot be nested inside `<box>` (throws); raw strings are only
   legal inside `<text>` (throws otherwise).
 - **Never test an unreleased ntk by symlinking the checkout into
