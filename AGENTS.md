@@ -1736,10 +1736,13 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   it cuts wrapped text off; and ntk must **never see the keyword**, so
   `windowAttributes` drops an auto axis and `realize()` writes the resolved
   number back. Afterwards `_refit()` keeps an auto window on its content
-  until `_userSized` — a ConfigureNotify that does not match
-  `_requestedSize`, i.e. the user dragging an edge or a WM overriding —
-  hands the size over for good. `_requestedSize` has to name **both** axes on
-  every configure, since the echo does.
+  until `_userSized` — a ConfigureNotify whose size is neither the one the
+  server last reported nor one still in flight (`_ownSize`), i.e. the user
+  dragging an edge or a WM overriding — hands the size over for good.
+  Matching only the latest `_requestedSize` is the trap: a move's echo
+  carries the old size and an earlier re-fit's echo its own, and both land
+  after the record moved on (#929). Every request goes through `_askSize`,
+  and has to name **both** axes, since the echo does.
 - Windows cannot be nested inside `<box>` (throws); raw strings are only
   legal inside `<text>` (throws otherwise).
 - **Never test an unreleased ntk by symlinking the checkout into

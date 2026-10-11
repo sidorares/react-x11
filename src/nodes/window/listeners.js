@@ -41,12 +41,13 @@ export class WindowListeners {
       // is theirs. Growing it back under a user who has just made it smaller
       // is the one behaviour worse than not fitting the content.
       //
-      // Checked against `_requestedSize` rather than ntk's `ev.resized`
-      // because our own configures come back as echoes, and every one of
-      // them would otherwise read as the user taking over on the first
-      // re-fit.
-      const asked = this._requestedSize;
-      if (asked && (ev.width !== asked.width || ev.height !== asked.height)) {
+      // Checked against the sizes we asked for rather than ntk's
+      // `ev.resized`, because our own configures come back as echoes, and
+      // every one of them would otherwise read as the user taking over on
+      // the first re-fit — and against all of them still in flight, not
+      // only the latest, because a move echo or an earlier re-fit's can land
+      // after the record moved on (#929, `_ownSize`).
+      if (this._requestedSize && !this._ownSize(ev)) {
         this._userSized = true;
       }
       // Where the window sits on screen decides where popups anchored to it

@@ -46,6 +46,10 @@ const NO_SCOPED_FLOORS = process.env.REACT_X11_NO_SCOPED_FLOORS === '1';
 // …and for the width pass reading only the extents a floor is written from
 // (`markUnreadLeaves`): with it set, every leaf is shaped at no width again.
 const NO_UNREAD_WIDTHS = process.env.REACT_X11_NO_UNREAD_WIDTHS === '1';
+// How many sizes an `'auto'` window keeps as asked for and not yet echoed
+// (`_askSize`). Echoes come back within a round trip, so a re-fit a frame
+// is a handful at most.
+const SIZES_IN_FLIGHT = 8;
 
 /** Take a node's extents off, as `collectFloorStale` does a dirty child's:
  *  both are measured again, and the minimum yoga holds may no longer be
@@ -995,7 +999,7 @@ export class WindowSize {
     if (asked && next.width === asked.width && next.height === asked.height) {
       return;
     }
-    this._requestedSize = { width: next.width, height: next.height };
+    this._askSize({ width: next.width, height: next.height });
     // Asked for, not assumed. `window.width` stays what the server last said
     // until the ConfigureNotify lands, and this frame lays out against that
     // — the echo brings `needsLayout` and an unbounded repaint with it (see
@@ -1036,6 +1040,57 @@ export class WindowSize {
         height: size.height,
       }
     );
+  }
+
+  /**
+   * Record a size this window has asked the backend for. `_requestedSize`
+   * is the latest, which `_refit()` compares against to ask only once; the
+   * echoes still to come are kept beside it, because every one of them is
+   * ours and none has to be the latest (`_ownSize`).
+   */
+  _askSize(size) {
+    this._requestedSize = size;
+    const flight = (this._sizesInFlight ??= []);
+    flight.push(size);
+    // A backend that never echoes — a mock — would grow this for ever, and
+    // a size asked for this many re-fits ago is not coming back.
+    if (flight.length > SIZES_IN_FLIGHT) flight.shift();
+  }
+
+  /**
+   * Whether a resize event's size is one this window chose, as opposed to
+   * the user or the window manager choosing it — the question that ends an
+   * `'auto'` window's tracking for good. Settles the record either way.
+   *
+   * Not "is it the latest size asked for" (#929). Two kinds of echo are ours
+   * and carry another size. A **move** reports the size the window has, and
+   * when it reached the server before a resize that was already asked for —
+   * a popup re-anchored by the same re-fit, an `x` prop moving with the
+   * content — it lands after the record moved on. And a re-fit asked for
+   * before the last one was answered has its echo arrive with the size it
+   * asked for, not the one asked for since. So an event is ours when its
+   * size is the one the server last reported (nothing was resized at all:
+   * a move, or a request the manager refused), or one still in flight —
+   * which spends it, and every one asked for before it, since the server
+   * answers in order. Anything else is somebody else's size: the user and
+   * a window manager can only ever *change* it.
+   */
+  _ownSize(ev) {
+    const is = (size) =>
+      size && size.width === ev.width && size.height === ev.height;
+    const confirmed = this._confirmedSize;
+    this._confirmedSize = { width: ev.width, height: ev.height };
+    // the confirmed size first: a size that came round again (A → B → A)
+    // is in flight too, and spending it there would spend B with it
+    if (is(confirmed)) return true;
+    const flight = this._sizesInFlight ?? [];
+    const at = flight.findIndex(is);
+    if (at < 0) {
+      flight.length = 0;
+      return false;
+    }
+    flight.splice(0, at + 1);
+    return true;
   }
 
   /** One layout pass at the window's size, with the content floors it
