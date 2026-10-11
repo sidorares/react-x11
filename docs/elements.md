@@ -305,7 +305,21 @@ size.** Add a row and the window grows, take it away and the window shrinks
 back; the moment the user drags an edge, or a window manager answers with a
 size of its own, the window is theirs and stops re-fitting. Setting `width` to
 a number is the app doing the same thing, and setting it back to `'auto'`
-hands it back.
+hands it back. Only a size the window did not ask for counts: its own
+requests come back from the server as echoes, sometimes late and sometimes
+behind a move that still carries the old size, and none of those is anybody
+taking the window over.
+
+**A re-fit is laid out once, at the new size.** On X11 a window takes a size
+when the server answers the request, a round trip later, so the frame that
+re-fits waits for that answer before it lays out, and the old pixels stay
+up meanwhile. Laid out at the size it still had, content that grew would be
+drawn for a round trip wrapped and cut off at the bottom of a window too
+small for it — a tooltip whose value gained a word. A request answered with
+no new size (a window manager refusing it) gives up the wait after 150 ms.
+Cocoa takes a size on the call, so there is nothing to wait for there.
+`REACT_X11_NO_REFIT_HOLD=1` turns the wait off
+([debugging.md](debugging.md#react_x11_no_refit_hold1)).
 
 On the Cocoa backend a window is a whole number of **points**, so content
 100.5 points tall makes a window 101 points tall — rounded up, so nothing is

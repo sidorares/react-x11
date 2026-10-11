@@ -175,6 +175,11 @@ export class WindowFlush {
       // so a frame whose first pass is the floors' own collects once.
       this._floorsCollectOwed = true;
       this._refit();
+      // An `'auto'` window waiting for the size its content just asked for
+      // lays out when the echo brings it, not at the size it still has
+      // (`_holdForRefit`). Nothing here is cleared, so that frame owes
+      // everything this one did.
+      if (this._refitHolding()) return false;
     }
     const width = this.window.width ?? this._requestedSize?.width ?? 0;
     const height = this.window.height ?? this._requestedSize?.height ?? 0;

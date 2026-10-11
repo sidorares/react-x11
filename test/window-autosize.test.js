@@ -575,3 +575,212 @@ test('a resize sends no position, and a move no size', async () => {
   ]);
   await root.unmount();
 });
+
+// --- a re-fit lays out once, at the size it asked for (#929) -----------------
+
+/**
+ * Make a mock window take a size the way an X server does: the request goes
+ * out, `wnd.width` stays what it was, and the size lands with the
+ * ConfigureNotify — here, when the test calls `echo()`.
+ */
+function resizeOnEcho(wnd) {
+  let pending = null;
+  wnd.resize = (width, height) => {
+    wnd.calls.push(['resize', width, height]);
+    pending = { width, height };
+  };
+  return () => {
+    wnd.width = pending.width;
+    wnd.height = pending.height;
+    wnd.emit('resize', { ...pending, resized: true, moved: false });
+    pending = null;
+  };
+}
+
+/** Tiles of 50x20 in a wrapping row, reporting every size it is laid out
+ *  at: at less than its natural width it wraps, and the report says so. */
+function Tiles({ n, layouts }) {
+  return h(
+    'window',
+    null,
+    h(
+      'box',
+      {
+        style: { flexDirection: 'row', flexWrap: 'wrap' },
+        onLayout: (rect) => layouts.push([rect.width, rect.height]),
+      },
+      ...Array.from({ length: n }, (_, i) => box({ width: 50, height: 20 }, i)),
+    ),
+  );
+}
+
+test('content that asked for a new size is laid out at it, never at the old one', async () => {
+  // A tooltip whose value grew by a word was laid out for a frame at the
+  // width it had — the word wrapped, and was cut off at the bottom of a
+  // window one line tall — and the frame after the echo laid it out again.
+  const layouts = [];
+  const app = createMockApp();
+  const root = await createRoot({ app });
+  root.render(h(Tiles, { n: 2, layouts }));
+  await tick();
+  await tick();
+  const wnd = app.windows[0];
+  assert.deepStrictEqual([wnd.width, wnd.height], [100, 20]);
+  const echo = resizeOnEcho(wnd);
+
+  root.render(h(Tiles, { n: 3, layouts }));
+  await tick();
+  await tick();
+  assert.deepStrictEqual(wnd.calls.at(-1), ['resize', 150, 20]);
+  assert.strictEqual(wnd.width, 100, 'the server has not answered yet');
+  // a move landing first, at the size the window still has, is not the
+  // answer either
+  wnd.emit('resize', { width: 100, height: 20, resized: false, moved: true });
+  await tick();
+  await tick();
+
+  echo();
+  await tick();
+  await tick();
+  assert.deepStrictEqual(
+    layouts.at(-1),
+    [150, 20],
+    'one row, at the new width',
+  );
+  assert.ok(
+    !layouts.some(([, height]) => height > 20),
+    `never laid out wrapped at the old width: ${JSON.stringify(layouts)}`,
+  );
+  await root.unmount();
+});
+
+test('somebody else’s size ends the wait, and so does no answer at all', async () => {
+  const layouts = [];
+  const app = createMockApp();
+  const root = await createRoot({ app });
+  root.render(h(Tiles, { n: 2, layouts }));
+  await tick();
+  await tick();
+  const wnd = app.windows[0];
+  resizeOnEcho(wnd);
+
+  // the user's drag arriving instead of the echo: theirs, laid out at once
+  root.render(h(Tiles, { n: 3, layouts }));
+  await tick();
+  wnd.width = 120;
+  wnd.height = 200;
+  wnd.emit('resize', { width: 120, height: 200, resized: true, moved: false });
+  await tick();
+  await tick();
+  assert.deepStrictEqual(layouts.at(-1), [120, 40], 'wrapped at their width');
+  root.render(null);
+  await tick();
+
+  // a request answered with nothing — a window manager refusing it, whose
+  // answer carries the old size — still puts the content up, at the size
+  // the window has, once the wait runs out
+  const refused = [];
+  root.render(h(Tiles, { n: 2, layouts: refused }));
+  await tick();
+  await tick();
+  const other = app.windows[1];
+  resizeOnEcho(other);
+  root.render(h(Tiles, { n: 3, layouts: refused }));
+  await tick();
+  await tick();
+  other.emit('resize', {
+    width: 100,
+    height: 20,
+    resized: false,
+    moved: false,
+  });
+  await tick();
+  assert.deepStrictEqual(refused.at(-1), [100, 20], 'still waiting');
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  await tick();
+  assert.deepStrictEqual(refused.at(-1), [100, 40], 'laid out at what it has');
+  await root.unmount();
+});
+
+test('a natural height is measured at the natural width, not the last one', async () => {
+  // A height floor is a height for a width. Text that wrapped at the width
+  // the window had carried its taller floor into the measurement at the
+  // width that fits it on one line, and the window came out that tall: a
+  // frame-long bounce while it tracked, and for good when nothing laid the
+  // window out again — as here, where the app hands its width back.
+  const { renderX11, act, cleanup } = await import('../src/testing/index.js');
+  const { createRequire } = await import('node:module');
+  const { dirname, join } = await import('node:path');
+  const katex = dirname(
+    createRequire(import.meta.url).resolve('katex/package.json'),
+  );
+  const fonts = {
+    'sans-serif': join(katex, 'dist', 'fonts', 'KaTeX_Main-Regular.ttf'),
+  };
+  const label = (width) =>
+    h(
+      'window',
+      { width },
+      h('text', { style: { fontSize: 12 } }, 'Chance of rain, 88%'),
+    );
+  try {
+    const fits = await renderX11(label('auto'), { wrap: false, fonts });
+    const natural = fits.windowNode.window;
+    const oneLine = [natural.width, natural.height];
+    await cleanup();
+
+    const view = await renderX11(label(40), { wrap: false, fonts });
+    const wnd = view.windowNode.window;
+    assert.ok(wnd.height > oneLine[1], 'wrapped at 40');
+    await act(() => view.rerender(label('auto')));
+    assert.deepStrictEqual([wnd.width, wnd.height], oneLine);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('act() hands a re-fit its answer, and returns with the content laid out at it', async () => {
+  // The frame a click's update re-fits in waits for the server's answer
+  // before it lays out (`_holdForRefit`). `act()` delivers that answer and
+  // runs the frame it releases in its own rounds; if it ever stops, a test
+  // reads the content at the old layout, or not laid out at all.
+  const { renderX11, act, fireEvent, cleanup } =
+    await import('../src/testing/index.js');
+  const { createRequire } = await import('node:module');
+  const { dirname, join } = await import('node:path');
+  const katex = dirname(
+    createRequire(import.meta.url).resolve('katex/package.json'),
+  );
+  const fonts = {
+    'sans-serif': join(katex, 'dist', 'fonts', 'KaTeX_Main-Regular.ttf'),
+  };
+  function Grows() {
+    const [long, setLong] = React.useState(false);
+    return h(
+      'window',
+      null,
+      h(
+        'box',
+        { style: { padding: 4 }, onClick: () => setLong(true) },
+        h(
+          'text',
+          { style: { fontSize: 12 } },
+          long ? 'Chance of rain, 88% this evening' : 'Chance of rain',
+        ),
+      ),
+    );
+  }
+  try {
+    const view = await renderX11(h(Grows), { wrap: false, fonts });
+    const node = view.windowNode;
+    const before = node.window.height;
+    fireEvent.click(node.children[0]);
+    await act();
+    assert.strictEqual(node._refitHeld, null, 'nothing still waiting');
+    const content = node.children[0];
+    assert.strictEqual(node.window.width, content.abs.width);
+    assert.strictEqual(content.abs.height, before, 'still one line');
+  } finally {
+    await cleanup();
+  }
+});

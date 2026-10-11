@@ -47,8 +47,10 @@ export class WindowListeners {
       // the first re-fit — and against all of them still in flight, not
       // only the latest, because a move echo or an earlier re-fit's can land
       // after the record moved on (#929, `_ownSize`).
-      if (this._requestedSize && !this._ownSize(ev)) {
-        this._userSized = true;
+      if (this._requestedSize) {
+        const own = this._ownSize(ev);
+        if (!own) this._userSized = true;
+        this._settleRefitHold(ev, own);
       }
       // Where the window sits on screen decides where popups anchored to it
       // belong — and finding that out is a server round trip

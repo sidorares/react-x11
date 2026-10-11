@@ -148,6 +148,16 @@ floor depends on it — is not set a word to a line to find one, which on
 something in a row ever comes out narrower than its content after the first
 frame. Read once at startup; answers only to `1`.
 
+## `REACT_X11_NO_REFIT_HOLD=1`
+
+Lays an `'auto'`-sized window out at the size it has on the frame its
+content asked for a new one, the way it did before that frame waited for the
+server's answer ([elements.md](elements.md#natural-size)). On X11 that frame shows
+the new content at the old size — a label that grew wraps, and is cut off —
+for the round trip before the resize lands. For measuring the two against
+each other, and as first aid if an `'auto'` window ever stops repainting
+after its content changes. Read once at startup; answers only to `1`.
+
 ## `REACT_X11_NO_SCROLL_BLIT=1`
 
 Disables the scroll-blit fast path (a pure scroll `CopyArea`s the
