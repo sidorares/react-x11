@@ -51,6 +51,16 @@ const NO_UNREAD_WIDTHS = process.env.REACT_X11_NO_UNREAD_WIDTHS === '1';
 // is a handful at most.
 const SIZES_IN_FLIGHT = 8;
 
+// How long an `'auto'` window's frames wait for the size a re-fit asked for
+// (`_holdForRefit`). A round trip is well under it locally and on a LAN; a
+// slower link runs past it into the frame at the old size, which is the
+// behaviour without the hold. The bound is there for a request answered
+// with no new size at all — a window manager refusing it — where the
+// content would otherwise wait for good.
+const REFIT_HOLD_MS = 150;
+// …and off, for A/B measurement and as first aid.
+const NO_REFIT_HOLD = process.env.REACT_X11_NO_REFIT_HOLD === '1';
+
 /** Take a node's extents off, as `collectFloorStale` does a dirty child's:
  *  both are measured again, and the minimum yoga holds may no longer be
  *  the one the floors wrote. */
@@ -879,6 +889,20 @@ export class WindowSize {
       // tree holding the max-content one would hand `flush()` a stale
       // arrangement.
       yoga.calculateLayout(width, needH ? undefined : props.height, dir);
+      // **A height floor is a height for a width**, and the ones on hand
+      // were measured at the width the window was last laid out at — which
+      // is not this one whenever the content asked for a new width. A label
+      // that wrapped at the old width carries the two-line floor it earned
+      // there, and read back here it is a window two lines tall at a width
+      // that fits it on one: the window grew, and shrank again a frame
+      // later once the real pass had re-measured (#929). The same probe the
+      // real pass asks (`_applyContentFloors`): whether any leaf's height at
+      // this width differs from the one its floor was taken at, and only
+      // then the measurement and one more pass.
+      if (needH && this._probeHeightFloors().owed) {
+        measuringExactly(() => this._measureHeightFloors(width, false));
+        yoga.calculateLayout(width, undefined, dir);
+      }
       const naturalH = needH
         ? clampExtent(yoga.getComputedHeight(), undefined, availH)
         : undefined;
@@ -1001,17 +1025,25 @@ export class WindowSize {
     }
     this._askSize({ width: next.width, height: next.height });
     // Asked for, not assumed. `window.width` stays what the server last said
-    // until the ConfigureNotify lands, and this frame lays out against that
-    // — the echo brings `needsLayout` and an unbounded repaint with it (see
-    // the 'resize' listener), which is the same one-frame settle a
-    // controlled `width` prop change has always had. Writing the new size
-    // onto the window here would be worse than the wait: ntk allocates the
-    // backing pixmap from the resize event, so a frame painted at a size the
-    // pixmap has not reached yet is a frame clipped to the old one.
+    // until the ConfigureNotify lands — on X11; Cocoa takes a size on the
+    // call — and writing the new size onto the window here would be worse
+    // than waiting: ntk allocates the backing pixmap from the resize event,
+    // so a frame painted at a size the pixmap has not reached yet is a frame
+    // clipped to the old one.
     if (typeof wnd.setState === 'function') {
       wnd.setState({ width: next.width, height: next.height });
     } else {
       wnd.resize?.(next.width, next.height);
+    }
+    // …and laying this frame out at the size the window still has would be
+    // worse again: content that changed *because* it needs more room is
+    // content that does not fit the old size — a label one word longer
+    // wraps, and is cut off at the bottom of a window one line tall — and
+    // that frame went up, for a round trip, before the echo laid it out
+    // again (#929). So the frame waits for the echo (`_holdForRefit`); the
+    // old pixels stay up meanwhile, which is the last thing that was right.
+    if (wnd.width !== next.width || wnd.height !== next.height) {
+      this._holdForRefit(next);
     }
     // A window that grew is a window whose *placement* moved with it, and
     // the anchored ones have to be told: a completion list that gains a row
@@ -1040,6 +1072,65 @@ export class WindowSize {
         height: size.height,
       }
     );
+  }
+
+  /**
+   * Hold this window's frames until the backend reports the size `_refit`
+   * just asked for, so the content that asked for it is laid out once, at
+   * that size, and never at the old one. The echo releases the hold (the
+   * 'resize' listener, `_settleRefitHold`), and so does somebody else's size
+   * arriving instead — the user's or a window manager's. A request that is
+   * never answered with a new size is the one case left: a window manager
+   * may refuse it, and its answer then carries the old size, which a move
+   * echo also does. So a timer ends the hold too, and the frame goes up at
+   * whatever size the window has — what every frame did before the hold.
+   */
+  _holdForRefit(size) {
+    if (NO_REFIT_HOLD) return;
+    clearTimeout(this._refitHeld?.timer);
+    const timer = setTimeout(() => {
+      if (this._refitHeld?.timer !== timer) return;
+      this._releaseRefitHold();
+    }, REFIT_HOLD_MS);
+    timer.unref?.();
+    this._refitHeld = { width: size.width, height: size.height, timer };
+  }
+
+  /** Whether this frame waits for the size `_refit` asked for: held, and
+   *  the window not that size yet. */
+  _refitHolding() {
+    const held = this._refitHeld;
+    if (!held) return false;
+    const wnd = this.window;
+    if (wnd && (wnd.width !== held.width || wnd.height !== held.height)) {
+      return true;
+    }
+    this._releaseRefitHold(false);
+    return false;
+  }
+
+  /**
+   * What a resize event does to a hold: the size it was waiting for, or a
+   * size that is not ours (`own` false), ends it. A move echo at the old
+   * size, or the echo of an earlier re-fit still in flight, does not —
+   * those are exactly the frames the hold is there to skip.
+   */
+  _settleRefitHold(ev, own) {
+    const held = this._refitHeld;
+    if (!held) return;
+    if (!own || (ev.width === held.width && ev.height === held.height)) {
+      this._releaseRefitHold();
+    }
+  }
+
+  /** End a hold, and run the frame it held back unless that is the caller's
+   *  own (`schedule` false). */
+  _releaseRefitHold(schedule = true) {
+    const held = this._refitHeld;
+    if (!held) return;
+    clearTimeout(held.timer);
+    this._refitHeld = null;
+    if (schedule && !this.destroyed && this.needsLayout) this._scheduleFrame();
   }
 
   /**
