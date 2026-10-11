@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.47.3](https://github.com/sidorares/react-x11/compare/v2.47.2...v2.47.3) (2026-10-11)
+
+
+### Bug Fixes
+
+* an 'auto'-sized window lays out a re-fit once, at the size it asked for, where on X11 the frame between the request and its echo drew the new content wrapped and clipped at the old size, and its height floors then sent a second request one line too tall ([#929](https://github.com/sidorares/react-x11/issues/929)) ([#932](https://github.com/sidorares/react-x11/issues/932)) ([e84c140](https://github.com/sidorares/react-x11/commit/e84c14004cf37b8ff084e0c1190ac30d4ad5e044))
+
 ## [2.47.2](https://github.com/sidorares/react-x11/compare/v2.47.1...v2.47.2) (2026-10-11)
 
 
