@@ -151,7 +151,7 @@
     "eslint-plugin-react": "^7.37.5",
     "globals": "^17.8.0",
     "hot-module-replacement": "^4.0.1",
-    "katex": "^0.18.1",
+    "katex": "^0.19.0",
     "prettier": "^3.6.0",
     "react": "^19.3.0",
     "react-devtools-core": "^8.0.0",
