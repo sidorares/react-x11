@@ -165,6 +165,15 @@ unit a node's `abs` is in — reach for it when doing geometry against `abs`,
 and for nothing else. The split is the same one `ev.x` and `nativeEvent.x`
 have (docs/scale.md).
 
+`detail` counts a press as the next of a multi-click when it lands within the
+desktop's double-click time and distance of the last one
+([system.md](system.md#usedesktopsettings--how-the-desktop-wants-an-app-to-feel)),
+and the gap is the one between the times the two presses carry,
+`nativeEvent.time`, not between when each was handled. So a first click
+whose render outlasts the window still makes a double click with a second
+the user pressed in time. Presses that carry no time (win32's) are timed as
+they are handled.
+
 On the Wayland backend a finger or a tablet tool drives the same mouse
 events, and those events alone carry `nativeEvent.pointerType` (`'touch'`,
 `'pen'`, `'eraser'` or `'mouse'`) with `pressure`, `tiltX`/`tiltY`,

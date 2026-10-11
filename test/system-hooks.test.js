@@ -62,7 +62,13 @@ import {
 } from '../src/locale.js';
 import { useLocale } from '../src/localehooks.js';
 import { CARET_BLINK_MS } from '../src/nodes/textinput.js';
-import { act, cleanup, renderX11, settle } from '../src/testing/index.js';
+import {
+  act,
+  cleanup,
+  renderX11,
+  settle,
+  userEvent,
+} from '../src/testing/index.js';
 
 const h = React.createElement;
 
@@ -899,6 +905,33 @@ describe('desktop interaction settings', () => {
     });
     // 15px apart is outside the 4px default and inside this desktop's 20
     assert.equal(events._clickDetail(at(28, 10)), 3);
+  });
+
+  // The window is measured between the two presses, by the times the server
+  // stamped on them, and not by when each was handled: a first click whose
+  // re-render outlasts the window held the second press back past it, and a
+  // double click came out as two singles (#936).
+  test('a slow render after the first click keeps the double click', async () => {
+    const details = [];
+    function Slow() {
+      const [clicks, setClicks] = React.useState(0);
+      if (clicks > 0) {
+        const end = Date.now() + 150;
+        while (Date.now() < end);
+      }
+      return h('box', {
+        'data-testname': 'target',
+        style: { width: 100, height: 30 },
+        onClick: (ev) => {
+          details.push(ev.detail);
+          setClicks((n) => n + 1);
+        },
+      });
+    }
+    const { app, getByTestName } = await renderX11(h(Slow));
+    setDesktopSettingsForTests(app, { doubleClickMs: 100 });
+    await userEvent.doubleClick(getByTestName('target'));
+    assert.deepEqual(details, [1, 2]);
   });
 });
 
