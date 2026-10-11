@@ -372,6 +372,74 @@ test('the echo of our own configure is not the user taking over', async () => {
   await root.unmount();
 });
 
+test('a move echo at the old size is not the user taking over', async () => {
+  // A window that moves while it re-fits — a tooltip anchored to a
+  // crosshair, a popup whose `x` follows something — gets a ConfigureNotify
+  // for the move, and when the move reached the server before the resize
+  // that echo still carries the old size. It arrives after `_refit()` has
+  // recorded the new one, and compared against that it read as somebody
+  // else choosing the size: tracking ended on the first change (#929).
+  const app = createMockApp();
+  const root = await createRoot({ app });
+  root.render(h(Rows, { n: 2 }));
+  await tick();
+  const wnd = app.windows[0];
+  wnd.emit('resize', { width: 100, height: 60, resized: true, moved: false });
+
+  root.render(h(Rows, { n: 4 }));
+  await tick();
+  assert.strictEqual(wnd.height, 120);
+  // the move, at the size the window had before the resize landed …
+  wnd.emit('resize', { width: 100, height: 60, resized: false, moved: true });
+  // … and then the resize itself
+  wnd.emit('resize', { width: 100, height: 120, resized: true, moved: false });
+  await tick();
+  assert.strictEqual(wnd._reactX11Node._userSized, false);
+
+  root.render(h(Rows, { n: 6 }));
+  await tick();
+  assert.strictEqual(wnd.height, 180, 'still tracking');
+  root.render(h(Rows, { n: 1 }));
+  await tick();
+  assert.strictEqual(wnd.height, 30, 'both ways');
+  await root.unmount();
+});
+
+test('every size asked for and not yet confirmed is ours', async () => {
+  // Two re-fits before the server answers the first: its echo is a size
+  // that is neither the latest one asked for nor the one the window had,
+  // and it is still our own.
+  const app = createMockApp();
+  const root = await createRoot({ app });
+  root.render(h(Rows, { n: 2 }));
+  await tick();
+  const wnd = app.windows[0];
+
+  root.render(h(Rows, { n: 4 }));
+  await tick();
+  root.render(h(Rows, { n: 6 }));
+  await tick();
+  assert.strictEqual(wnd.height, 180);
+  wnd.emit('resize', { width: 100, height: 120, resized: true, moved: false });
+  wnd.emit('resize', { width: 100, height: 180, resized: true, moved: false });
+  await tick();
+  assert.strictEqual(wnd._reactX11Node._userSized, false);
+
+  root.render(h(Rows, { n: 3 }));
+  await tick();
+  assert.strictEqual(wnd.height, 90, 'still tracking');
+
+  // and a confirmed size is spent: the user dragging the window back to one
+  // the content asked for earlier is the user's decision
+  wnd.emit('resize', { width: 100, height: 90, resized: true, moved: false });
+  wnd.width = 100;
+  wnd.height = 120;
+  wnd.emit('resize', { width: 100, height: 120, resized: true, moved: false });
+  await tick();
+  assert.strictEqual(wnd._reactX11Node._userSized, true);
+  await root.unmount();
+});
+
 test('handing the size back to auto starts it fitting again', async () => {
   const app = createMockApp();
   const root = await createRoot({ app });

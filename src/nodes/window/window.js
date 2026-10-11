@@ -271,6 +271,10 @@ export class WindowNode extends Scrollable(Node) {
     // the only thing that ever does is the user dragging an edge.
     this._requestedSize = null;
     this._userSized = false;
+    // what the server last reported, and the sizes asked for since that it
+    // has not echoed yet: both are ours when an echo carries them (_ownSize)
+    this._confirmedSize = null;
+    this._sizesInFlight = [];
     // the last `WM_NORMAL_HINTS` struct written and the size it was written
     // at, so that a bound measured every frame is only *sent* on the frames
     // it moves (see _sendSizeHints for why the size is part of it)
@@ -409,6 +413,7 @@ export class WindowNode extends Scrollable(Node) {
     // resize echo is compared against, so it has to be the size the echo
     // will carry (#586, `_snapSize`).
     this._requestedSize = { width: wnd.width, height: wnd.height };
+    this._confirmedSize = this._requestedSize;
     // Now that the visual is known: settle the capabilities, re-resolve any
     // `@supports` block against them, and start following the compositor.
     // Before the first paint, and before children realize against it.
@@ -862,10 +867,12 @@ export class WindowNode extends Scrollable(Node) {
     const geo = scaleWindowGeometry(newProps, this.scale);
     if (sizeChanged) {
       this._userSized = false;
-      this._requestedSize = this._snapSize({
-        width: isAutoSize(geo.width) ? wnd.width : geo.width,
-        height: isAutoSize(geo.height) ? wnd.height : geo.height,
-      });
+      this._askSize(
+        this._snapSize({
+          width: isAutoSize(geo.width) ? wnd.width : geo.width,
+          height: isAutoSize(geo.height) ? wnd.height : geo.height,
+        }),
+      );
     }
     if (geometryChanged) {
       if (typeof wnd.setState === 'function') {
