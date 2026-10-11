@@ -125,7 +125,6 @@ export function FormPanel() {
         title="Clear the form?"
         onClose={() => setConfirming(false)}
         width={320}
-        height={150}
         actions={
           <>
             <Button label="Cancel" onPress={() => setConfirming(false)} />

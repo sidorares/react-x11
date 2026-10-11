@@ -550,9 +550,15 @@ test("a dialog a pane opens is a managed window the host makes, centred over the
     x: (m.hostWnd.x + m.frameBox.abs.x) / s,
     y: (m.hostWnd.y + m.frameBox.abs.y) / s,
   };
+  // …at the size of what it holds (#940): a 20-point row, 16 of padding
+  // either side of it and the border
+  assert.deepStrictEqual(
+    [dialog.options.width, dialog.options.height],
+    [360, 1 + 16 + 20 + 16 + 1],
+  );
   assert.deepStrictEqual(
     [dialog.options.x, dialog.options.y],
-    [pane.x + (300 - 360) / 2, pane.y + (200 - 170) / 2],
+    [pane.x + (300 - 360) / 2, pane.y + (200 - dialog.options.height) / 2],
   );
   const sub = [...m.pane._windows.values()].find(
     (w) => w.attributes?.overrideRedirect === false,

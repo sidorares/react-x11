@@ -1,7 +1,13 @@
 // A window anchored to a rect in another (#255, #280): where it goes, and
 // following the anchor as it moves.
 
-import { anchorOffscreen, anchorRect, anchorScreenRect } from '../../anchor.js';
+import {
+  anchorOffscreen,
+  anchorRect,
+  anchorScreenRect,
+  deviceAnchorArea,
+} from '../../anchor.js';
+import { availableArea } from '../../screens.js';
 
 /** Anchoring, installed onto `WindowNode.prototype` by window.js. */
 export class WindowAnchoring {
@@ -109,7 +115,10 @@ export class WindowAnchoring {
       }
     }
     if (lost || !size) return;
-    const rect = this._anchorPlacement(size);
+    let rect = this._anchorPlacement(size);
+    if (!rect) return;
+    if (rect.placement === 'center') rect = this._keepCentredTop(rect, size);
+    this._placedSize = { width: size.width, height: size.height };
     if (!rect) return;
     if (this._placedAt?.x === rect.x && this._placedAt?.y === rect.y) return;
     this._placedAt = { x: rect.x, y: rect.y };
@@ -118,6 +127,82 @@ export class WindowAnchoring {
     } else {
       this.window.move?.(rect.x, rect.y);
     }
+  }
+
+  /**
+   * Where a **centred** window goes when it is placed again: centred
+   * afresh when what it is centred over has moved, and otherwise — its own
+   * size changed, nothing else did — grown from where it already is.
+   *
+   * A centred popup is a dialog, and a dialog that grows is one the user is
+   * reading: an error line under a field, a "details" section opening. Re-
+   * centring it moves its top edge by half the growth, so the title, the
+   * field and the button that was just pressed all jump up under the
+   * pointer. So it keeps its top edge and its horizontal centre, grows down
+   * (and sideways about the middle), and is pulled back only as far as it
+   * takes to stay on its monitor — which is where the actions row of a
+   * dialog that grew past the bottom of the screen would otherwise go.
+   *
+   * A window the window manager frames is the manager's and the user's to
+   * move once it is up — they may have dragged it — so it grows from where
+   * the server says it is, and is moved only when it would leave the
+   * monitor. Never to where it opened: that would undo the drag.
+   *
+   * Returns the rect to place at, or null for "stay put".
+   */
+  _keepCentredTop(rect, size) {
+    const was = this._centredFor;
+    const at = this._placedAt;
+    if (was && at) {
+      const again = this._anchorPlacement(was.size);
+      if (again && again.x === was.x && again.y === was.y) {
+        return this._growInPlace(size);
+      }
+    }
+    this._centredFor = { size: { ...size }, x: rect.x, y: rect.y };
+    return rect;
+  }
+
+  /** `_keepCentredTop`'s other half: this window at `size`, its top edge and
+   *  its middle where they are, clamped into the monitor. */
+  _growInPlace(size) {
+    const managed = this.attributes.overrideRedirect === false;
+    // An override-redirect window is wherever it was last put, and the
+    // record of that is ours; a managed one may have been moved since.
+    const from = managed
+      ? (this.window._screenOrigin ?? this._placedAt)
+      : this._placedAt;
+    const old = this._placedSize ?? size;
+    let x = from.x + Math.round((old.width - size.width) / 2);
+    let y = from.y;
+    const area = this._anchorArea();
+    if (area) {
+      x = Math.max(area.x, Math.min(x, area.x + area.width - size.width));
+      y = Math.max(area.y, Math.min(y, area.y + area.height - size.height));
+    }
+    // Nothing to send. For a managed window that matters beyond the round
+    // trip: a position handed back to an X window manager is read as the
+    // frame's, and would push the window down by its titlebar.
+    if (managed && x === from.x && y === from.y) return null;
+    return { x, y };
+  }
+
+  /** The monitor area this window is kept inside, in device pixels — the
+   *  one its anchor picks (`anchorRect`, `anchorScreenRect`). */
+  _anchorArea() {
+    const anchor = this.props.anchor;
+    if (anchor.rect) {
+      const s = this.scale;
+      const r = anchor.rect;
+      return availableArea(this.app, {
+        x: r.x * s,
+        y: r.y * s,
+        width: (r.width ?? 0) * s,
+        height: (r.height ?? 0) * s,
+      });
+    }
+    const node = this._anchorTarget(anchor.to);
+    return node ? deviceAnchorArea(node) : null;
   }
 
   /**

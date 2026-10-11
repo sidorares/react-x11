@@ -343,6 +343,13 @@ export class WindowNode extends Scrollable(Node) {
       attributes.x = placed.x;
       attributes.y = placed.y;
       this._placedAt = { x: placed.x, y: placed.y };
+      this._placedSize = { width: natural.width, height: natural.height };
+      // what a centred window was centred at, so a later change of its own
+      // size grows it from here rather than centring it again
+      // (`_keepCentredTop`)
+      if (placed.placement === 'center') {
+        this._centredFor = { size: this._placedSize, x: placed.x, y: placed.y };
+      }
     }
     // A bound the content decides is a number by now, and the window manager
     // reads `WM_NORMAL_HINTS` when it frames the window — so it goes in with
@@ -923,6 +930,8 @@ export class WindowNode extends Scrollable(Node) {
       this._followAnchor();
     } else if (before.anchor) {
       this._placedAt = null;
+      this._placedSize = null;
+      this._centredFor = null;
       // A popup that gives up its anchor gives up being hidden by one: it
       // is an ordinary `x`/`y` popup from here, and the configure above
       // has already put it where the app asked.
