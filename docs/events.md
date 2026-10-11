@@ -337,10 +337,14 @@ The keys are a **default action**, which is the whole of the contract:
   the pane answers it before this one, so a clickable pane pages with Space
   and activates with Enter. A focusable row _inside_ a pane is not affected
   either way: default actions run on the focused node, and the pane is not
-  it.
+  it;
+- **a chord is not a press.** With Ctrl, Alt or Super held — ⌘ or ⌃ or ⌥ on
+  the Cocoa backend — Space and Enter are a command, and the node leaves them
+  to whoever bound it: a menu's Ctrl+Return fires with focus on a clickable
+  box exactly as it does anywhere else ([accelerators](#accelerators)).
 
-Modifiers travel: the synthesized click carries the key press's own modifier
-mask, so Shift+Enter reaches `onClick` as a shift-click.
+Shift is not a command, and it travels: the synthesized click carries the key
+press's own modifier mask, so Shift+Enter reaches `onClick` as a shift-click.
 
 It is the same function an assistive technology's activation goes through, on
 purpose — one definition of "activate" for the pointer, the keyboard and
@@ -453,6 +457,15 @@ So **a focused text field keeps the chords it answers**: Ctrl+C copies the
 selection and never reaches a menu item that also says Ctrl+C. Ctrl+S is not
 one of the field's, so it falls through to the menu — a control that swallowed
 every chord would be a control no application could put a shortcut behind.
+
+Return is the same rule. A `<textinput>` answers Return and Shift+Return with
+`onSubmit`, and nothing else: Ctrl+Return, Alt+Return and Super+Return — ⌘↩
+on the Cocoa backend — are chords, and reach the menu that prints them. A
+field with **no** `onSubmit` has no answer for Return at all, so the key goes
+on to whatever binds it, a form's `[['Return']]` default button included. A
+`<textarea>` keeps Return and Shift+Return for the newline and Ctrl+Return
+(⌘↩) for `onSubmit` when it has one; Alt and Super on Return are chords there
+too, except on the Cocoa backend, where ⌃↩ and ⌥↩ are AppKit's newline.
 
 Two things suppress them entirely, both because something else has the
 keyboard:

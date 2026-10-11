@@ -1645,7 +1645,7 @@ across kerning, shaping boundaries and trailing whitespace.
 | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `value` + `onChange(ev)`          | controlled mode (display follows the prop)                                                                                        |
 | `defaultValue`                    | uncontrolled mode                                                                                                                 |
-| `onSubmit(ev)`                    | Enter                                                                                                                             |
+| `onSubmit(ev)`                    | Enter or Shift+Enter; with Ctrl, Alt or Super held it is a shortcut's ([events.md](events.md#accelerators))                       |
 | `name`                            | field name, echoed on the event                                                                                                   |
 | `placeholder`, `placeholderColor` | shown when empty                                                                                                                  |
 | `maxLength`                       | code-point limit                                                                                                                  |
@@ -1803,8 +1803,10 @@ becomes its own entry, and undoing steps back through it.
 ## `<textarea>`
 
 Multi-line editable text on the same editing core as `<textinput>`:
-word-wraps at the content width, Enter inserts a newline (Ctrl+Enter fires
-`onSubmit`, ⌘↩ on the Cocoa backend), Up/Down move between visual lines keeping a goal column,
+word-wraps at the content width, Enter and Shift+Enter insert a newline
+(Ctrl+Enter fires `onSubmit`, ⌘↩ on the Cocoa backend, and with no `onSubmit`
+is left to a shortcut, as Alt+Enter and Super+Enter are everywhere but there —
+[events.md](events.md#accelerators)), Up/Down move between visual lines keeping a goal column,
 Home/End go to the start/end of the visual (wrapped) line, selection spans
 lines, and the view scrolls vertically to follow the caret (mouse wheel
 scrolls too). On the Cocoa backend ⌘←/→ are Home/End, ⌘↑/↓ go to the ends of

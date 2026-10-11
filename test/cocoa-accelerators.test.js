@@ -42,12 +42,13 @@ function press(app, wnd, { keyCode, chars, shifted = chars, ...modifiers }) {
   app._route({ type: 'keyup', ...ev });
 }
 
-// kVK_ANSI_* and kVK_F5
+// kVK_ANSI_*, kVK_F5 and kVK_Return
 const KEY = {
   a: { keyCode: 0, chars: 'a' },
   s: { keyCode: 1, chars: 's' },
   k: { keyCode: 40, chars: 'k' },
   f5: { keyCode: 96 },
+  return: { keyCode: 36 },
 };
 const cmd = (key, extra = {}) => ({ ...key, command: true, ...extra });
 const ctrl = (key) => ({ ...key, control: true });
@@ -110,6 +111,45 @@ test('useAccelerator answers ⌘ for `Control`, and not ⌃', async () => {
   assert.deepStrictEqual(fired, [], '⌃K is not the chord a Mac user presses');
   press(app, wnd, cmd(KEY.k));
   assert.deepStrictEqual(fired, ['palette'], '⌘K');
+});
+
+test('⌘↩ reaches the shortcut from a focused field and a clickable box', async () => {
+  // `Control` is ⌘ here, so `[['Control', 'Return']]` is ⌘↩ — which a field
+  // used to submit on and a clickable box to press, consuming it either way,
+  // because neither asked what was held on the Return (#935)
+  const fired = [];
+  const field = React.createRef();
+  const clickable = React.createRef();
+  function App() {
+    useAccelerator([['Control', 'Return']], () => fired.push('run'));
+    return h(
+      'box',
+      { style: { flexGrow: 1 } },
+      h('textinput', {
+        ref: field,
+        onSubmit: () => fired.push('submit'),
+        style: { width: 100, height: 24 },
+      }),
+      h('box', {
+        ref: clickable,
+        focusable: true,
+        onClick: () => fired.push('click'),
+        style: { width: 100, height: 24 },
+      }),
+    );
+  }
+  const { app, wnd } = await mountCocoa(h(App));
+
+  field.current.focus();
+  press(app, wnd, cmd(KEY.return));
+  press(app, wnd, KEY.return);
+  assert.deepStrictEqual(fired, ['run', 'submit']);
+
+  fired.length = 0;
+  clickable.current.focus();
+  press(app, wnd, cmd(KEY.return));
+  press(app, wnd, KEY.return);
+  assert.deepStrictEqual(fired, ['run', 'click']);
 });
 
 test('a drawn ContextMenu prints ⌘S, announces Meta+S, and answers ⌘S', async () => {

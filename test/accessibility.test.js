@@ -11,6 +11,7 @@ import assert from 'node:assert';
 import React from 'react';
 
 import { createRoot, Slider, Switch, ThemeProvider } from '../src/index.js';
+import { MOD } from '../src/keysyms.js';
 import { createMockApp, pressButton } from './helpers/mock-app.js';
 
 const h = React.createElement;
@@ -486,6 +487,29 @@ test('a press on the keyboard carries the modifiers it was made with', async () 
   assert.ok(ev, 'the click arrived');
   assert.strictEqual(ev.shiftKey, true, 'Shift+Enter reads as a shift-click');
   assert.strictEqual(ev.detail, 1, 'and as a single click');
+});
+
+test('…and a chord is not a press: Ctrl, Alt or Super leave the key alone', async () => {
+  // Ctrl+Return is a menu's, ⌘↩ on the Cocoa backend; pressing the box on
+  // it consumed the key and the menu never heard it (#935). Shift is the
+  // one modifier that is not a command, which the test above holds to.
+  const log = [];
+  const { app, wnd, root } = await mount(recorder(log));
+  root.children[0].focus();
+
+  for (const mask of [MOD.Control, MOD.Alt, MOD.Super]) {
+    for (const [keysym, codepoint] of [
+      [XK_RETURN, undefined],
+      [XK_KP_ENTER, undefined],
+      [XK_SPACE, 32],
+    ]) {
+      const keycode = (keysym % 248) + 8;
+      app.X.keycode2keysyms[keycode] = [keysym];
+      wnd.emit('keydown', { keycode, keysym, codepoint, buttons: mask });
+    }
+  }
+  await settle();
+  assert.deepStrictEqual(log, [], 'nothing was pressed');
 });
 
 test('preventDefault in the element’s own onKeyDown suppresses it', async () => {

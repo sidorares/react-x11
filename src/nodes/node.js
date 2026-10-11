@@ -1033,6 +1033,12 @@ export class Node {
     // point. A key an open composition took reaches no default action at all.
     const space = ev.keysym === XK_SPACE || ev.codepoint === 32;
     if (!enter && !space) return;
+    // …unmodified, or with Shift alone. Ctrl, Alt or Super make the key a
+    // chord, which is a command and somebody else's — a menu's Ctrl+Return,
+    // ⌘↩ on the Cocoa backend — and a press here would consume it on the way
+    // past (#935). Shift is not a command: it reaches `onClick` as a
+    // shift-click, the way GTK's `activate` takes it too.
+    if (ev.ctrlKey || ev.altKey || ev.metaKey) return;
     if (!hasClickHandler(this)) return;
     // consumed, said the way every default action says it: what it prevents
     // is the default action after this one

@@ -506,6 +506,14 @@ export class TextInputNode extends Node {
     const k = ev.keysym;
 
     if (k === XK_RETURN || k === XK_KP_ENTER) {
+      // Return submits, and Shift+Return with it — Shift is not a command.
+      // Ctrl, Alt or Super make it a chord, and a chord this field has no
+      // answer for is not the field's (below): a menu's Ctrl+Return, ⌘↩ on
+      // the Cocoa backend, reaches the menu (#935). Nor is a Return nobody
+      // listens for — with no `onSubmit` there is no answer to give, and the
+      // key goes on to a shortcut that wants it, a form's default button.
+      if (ev.ctrlKey || ev.altKey || ev.metaKey) return false;
+      if (!this.props.onSubmit) return false;
       this._fireValueEvent('onSubmit', this.value, ev.nativeEvent);
       return true;
     }
