@@ -18,7 +18,7 @@
 //   each item's allocator starts in a stride of its own (`ID_STRIDE`), the
 //   ids of two trays' menus are disjoint by construction, and the app asks
 //   each item whether the id is one of its own.
-import { IdAllocator, snapshot } from '../dbusmenu.js';
+import { IdAllocator, diffSnapshots, snapshot } from '../dbusmenu.js';
 import { menuItemsSpec } from './globalmenu.js';
 
 /** How far apart two items' id ranges start. A menu with a million rows is
@@ -48,6 +48,9 @@ export class CocoaStatusItem {
     this.alloc = new IdAllocator();
     this.alloc.next = nextStride++ * ID_STRIDE + 1;
     this.nodes = null;
+    // the `items` last handed to `setMenu`; undefined until the first, which
+    // is always sent
+    this.items = undefined;
     this.removed = false;
     this.onClick = options.onClick ?? null;
     this.handle = app._native.createStatusItem(statusItemSpec(options));
@@ -65,16 +68,33 @@ export class CocoaStatusItem {
     this.setMenu(options.menu ?? null);
   }
 
-  /** `items`, or null to go back to reporting clicks. */
+  /**
+   * `items`, or null to go back to reporting clicks.
+   *
+   * Sent only when it would build a different menu (#939). The bridge makes
+   * a new `NSMenu` for every `setStatusItemMenu`, and `useTray` passes the
+   * menu with every patch, so a tray whose title ticks once a second rebuilt
+   * its menu once a second. The same array is the same menu; a new one —
+   * a menu written inline is new every render — is snapshotted, which keeps
+   * this render's `onSelect`s, and is sent only if the snapshot differs from
+   * the last: the spec is built from nothing else.
+   */
   setMenu(items) {
-    if (this.removed) return;
-    if (!items) {
-      this.nodes = null;
-      this.app._native.setStatusItemMenu(this.handle, null);
-      return;
-    }
-    this.nodes = snapshot(items, this.alloc);
-    this.app._native.setStatusItemMenu(this.handle, menuItemsSpec(this.nodes));
+    if (this.removed || items === this.items) return;
+    const first = this.items === undefined;
+    this.items = items;
+    const nodes = items ? snapshot(items, this.alloc) : null;
+    const same =
+      !first &&
+      (nodes && this.nodes
+        ? diffSnapshots(this.nodes, nodes).kind === 'none'
+        : nodes === this.nodes);
+    this.nodes = nodes;
+    if (same) return;
+    this.app._native.setStatusItemMenu(
+      this.handle,
+      nodes ? menuItemsSpec(nodes) : null,
+    );
   }
 
   /** Is this `menu-activate` id one of this item's menu's? */
