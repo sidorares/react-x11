@@ -109,6 +109,20 @@ function threadedBridge() {
     };
   };
   answers('pasteboardReadText', () => native.pasteboard);
+  answers('pasteboardItems', () =>
+    native.pasteboard == null
+      ? []
+      : [
+          {
+            types: ['public.utf8-plain-text', 'org.nspasteboard.ConcealedType'],
+          },
+        ],
+  );
+  answers('pasteboardItemData', (index, type) =>
+    native.pasteboard != null && type === 'org.nspasteboard.ConcealedType'
+      ? Buffer.alloc(0)
+      : null,
+  );
   answers('snapshotWindow', () => true);
   return native;
 }
@@ -453,9 +467,16 @@ test('the clipboard is read through the bridge’s callback on a worker', async 
   native.pasteboard = 'from AppKit';
   assert.strictEqual(await app.clipboard.read(), 'from AppKit');
   assert.deepStrictEqual(await app.clipboard.targets(), [
+    'text/plain;charset=utf-8',
     'UTF8_STRING',
+    'text/plain',
     'STRING',
+    'org.nspasteboard.ConcealedType',
   ]);
+  assert.deepStrictEqual(
+    await app.clipboard.read({ target: 'org.nspasteboard.ConcealedType' }),
+    Buffer.alloc(0),
+  );
   native.pasteboard = null;
   await assert.rejects(app.clipboard.read(), /the pasteboard is empty/);
   assert.deepStrictEqual(await app.clipboard.targets(), []);

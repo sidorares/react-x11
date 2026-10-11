@@ -19,6 +19,7 @@ import assert from 'node:assert';
 import { afterEach, describe, test } from 'node:test';
 import React from 'react';
 
+import { _setOsascriptForTests } from '../src/cocoa/clipboard.js';
 import { useClipboard } from '../src/index.js';
 import {
   cleanupCocoa,
@@ -29,23 +30,45 @@ import {
 
 const h = React.createElement;
 
-afterEach(cleanupCocoa);
+afterEach(() => {
+  _setOsascriptForTests(null);
+  return cleanupCocoa();
+});
 
 /** What the user copied in some other application, before touching ours. */
 const ELSEWHERE = 'https://example.com/copied-in-another-app';
 
+const TEXT = 'public.utf8-plain-text';
+
 /**
- * `NSPasteboard.general` as far as the shim reaches it — one text slot —
+ * `NSPasteboard.general` as far as the shim reaches it — its items, each a
+ * map of pasteboard type to value, and the change count every write bumps —
  * installed on the fake bridge, which records every call made through it.
+ * `pb.set(items)` is another application writing it.
  */
 function pasteboardOn(native, text = null) {
-  const pb = { text };
-  native.pasteboardWriteText = (value) => {
-    pb.text = value;
+  const pb = {
+    items: text == null ? [] : [{ [TEXT]: text }],
+    count: 100,
+    get text() {
+      const value = pb.items[0]?.[TEXT];
+      return value == null ? null : String(value);
+    },
+    set(items) {
+      pb.items = items;
+      pb.count++;
+    },
   };
+  native.pasteboardWriteText = (value) => pb.set([{ [TEXT]: value }]);
+  native.pasteboardWrite = (item) => pb.set([item]);
   native.pasteboardReadText = () => pb.text;
-  native.pasteboardClear = () => {
-    pb.text = null;
+  native.pasteboardClear = () => pb.set([]);
+  native.pasteboardChangeCount = () => pb.count;
+  native.pasteboardItems = () =>
+    pb.items.map((item) => ({ types: Object.keys(item) }));
+  native.pasteboardItemData = (index, type) => {
+    const value = pb.items[index]?.[type];
+    return value == null ? null : Buffer.from(value);
   };
   return pb;
 }
@@ -246,7 +269,12 @@ describe('app.clipboard on cocoa', () => {
     const { native, app } = fakeCocoaApp();
     const pb = pasteboardOn(native, ELSEWHERE);
 
-    assert.deepEqual(await app.clipboard.targets(), ['UTF8_STRING', 'STRING']);
+    assert.deepEqual(await app.clipboard.targets(), [
+      'text/plain;charset=utf-8',
+      'UTF8_STRING',
+      'text/plain',
+      'STRING',
+    ]);
     assert.equal(await app.clipboard.read(), ELSEWHERE);
 
     await app.clipboard.write('one');
@@ -351,5 +379,319 @@ describe('a write with more than text', () => {
     const said = String(warn.mock.calls[0].arguments[0]);
     assert.match(said, /public\.png/);
     assert.match(said, /pasteboardWrite/);
+  });
+});
+
+// --- what is on the pasteboard, and when it changes (#937) -------------------
+
+// The shim used to be text-only: `targets()` answered UTF8_STRING and STRING
+// whenever there was text and `[]` otherwise, `read({ target })` converted
+// text and nothing else, and `watch()` resolved to an unsubscribe that never
+// had anything to unsubscribe from. So an image on the pasteboard read as an
+// empty one, a password manager's `org.nspasteboard.ConcealedType` was
+// invisible to an app that wanted to honour it, and the edit menu's Paste row
+// never heard of a copy made after it armed.
+
+/** A password manager's copy: the secret, and the marker that asks
+ * clipboard tools to keep it out of their history (nspasteboard.org). */
+const CONCEALED = 'org.nspasteboard.ConcealedType';
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const TIFF = Buffer.from([0x4d, 0x4d, 0x00, 0x2a]);
+
+/** The interval the watch polls the change count on, in ms. */
+const POLL = 250;
+
+describe('targets(): the pasteboard’s own types', () => {
+  test('text with a concealed marker reports the marker', async () => {
+    const { native, app } = fakeCocoaApp();
+    const pb = pasteboardOn(native, ELSEWHERE);
+    pb.set([{ [TEXT]: 'hunter2', [CONCEALED]: '' }]);
+
+    assert.deepEqual(await app.clipboard.targets(), [
+      'text/plain;charset=utf-8',
+      'UTF8_STRING',
+      'text/plain',
+      'STRING',
+      CONCEALED,
+    ]);
+    // the marker reads as what it is, an empty flavour
+    assert.deepEqual(
+      await app.clipboard.read({ target: CONCEALED }),
+      Buffer.alloc(0),
+    );
+  });
+
+  test('an image reports its image types, and no text', async () => {
+    const { native, app } = fakeCocoaApp();
+    const pb = pasteboardOn(native, ELSEWHERE);
+    pb.set([{ 'public.png': PNG, 'public.tiff': TIFF }]);
+
+    assert.deepEqual(await app.clipboard.targets(), [
+      'image/png',
+      'image/tiff',
+    ]);
+  });
+
+  test('every item counts, and the legacy names AppKit hands out do not', async () => {
+    const { native, app } = fakeCocoaApp();
+    const pb = pasteboardOn(native);
+    pb.set([
+      { 'public.file-url': 'file:///tmp/a.txt', NSFilenamesPboardType: 'x' },
+      { 'public.file-url': 'file:///tmp/b%20c.txt' },
+    ]);
+
+    assert.deepEqual(await app.clipboard.targets(), ['text/uri-list']);
+  });
+});
+
+describe('read(): more than text', () => {
+  test('an image comes back as its bytes, through useClipboard() too', async () => {
+    let clipboard = null;
+    function Probe() {
+      clipboard = useClipboard();
+      return h('box');
+    }
+    const { native, app } = await mountCocoa(h(Probe));
+    const pb = pasteboardOn(native, ELSEWHERE);
+    pb.set([{ 'public.png': PNG, 'public.tiff': TIFF }]);
+
+    assert.deepEqual(await app.clipboard.read({ target: 'image/png' }), PNG);
+    assert.deepEqual(await clipboard.read('image/png'), PNG);
+    assert.deepEqual(await clipboard.read('image/tiff'), TIFF);
+    assert.equal(await clipboard.read('text'), null);
+    await assert.rejects(
+      app.clipboard.read({ target: 'image/jpeg' }),
+      /cannot convert the pasteboard to image\/jpeg/,
+    );
+  });
+
+  test('files copied in Finder: one item each, read as one uri-list', async () => {
+    let clipboard = null;
+    function Probe() {
+      clipboard = useClipboard();
+      return h('box');
+    }
+    const { native } = await mountCocoa(h(Probe));
+    const pb = pasteboardOn(native);
+    pb.set([
+      { 'public.file-url': 'file:///tmp/a.txt' },
+      { 'public.file-url': 'file:///tmp/b%20c.txt' },
+    ]);
+
+    assert.deepEqual(await clipboard.readFiles(), [
+      { uri: 'file:///tmp/a.txt', path: '/tmp/a.txt' },
+      { uri: 'file:///tmp/b%20c.txt', path: '/tmp/b c.txt' },
+    ]);
+  });
+
+  test('an empty pasteboard has nothing to paste', async () => {
+    const { native, app } = fakeCocoaApp();
+    pasteboardOn(native);
+    await assert.rejects(
+      app.clipboard.read({ target: 'image/png' }),
+      /nothing to paste — the pasteboard is empty/,
+    );
+  });
+});
+
+describe('watch(): the change count, asked while someone is watching', () => {
+  test('fires for a copy made in another app, and says when it is empty', async (t) => {
+    const { native, app } = fakeCocoaApp();
+    const pb = pasteboardOn(native, ELSEWHERE);
+    t.mock.timers.enable({ apis: ['setInterval'] });
+
+    const seen = [];
+    const stop = await app.clipboard.watch('CLIPBOARD', (ev) => seen.push(ev));
+    t.mock.timers.tick(POLL);
+    await tick();
+    assert.deepEqual(seen, [], 'nothing changed yet, so nothing is said');
+
+    pb.set([{ [TEXT]: 'hunter2', [CONCEALED]: '' }]);
+    t.mock.timers.tick(POLL);
+    await tick();
+    await tick();
+    pb.set([]);
+    t.mock.timers.tick(POLL);
+    await tick();
+    await tick();
+
+    assert.equal(seen.length, 2);
+    assert.equal(seen[0].selection, 'CLIPBOARD');
+    assert.notEqual(seen[0].owner, 0, 'something is on it');
+    assert.equal(seen[0].changeCount, 101);
+    assert.equal(seen[1].owner, 0, 'nothing is on it');
+    assert.equal(seen[1].changeCount, 102);
+
+    // gone with the last watcher: the count is not asked again
+    stop();
+    const asked = native.of('pasteboardChangeCount').length;
+    pb.set([{ [TEXT]: 'later' }]);
+    t.mock.timers.tick(POLL * 4);
+    await tick();
+    assert.equal(seen.length, 2);
+    assert.equal(native.of('pasteboardChangeCount').length, asked);
+  });
+
+  test('our own copy is a change too, as SetSelectionOwner is on X11', async (t) => {
+    let clipboard = null;
+    function Probe() {
+      clipboard = useClipboard();
+      return h('box');
+    }
+    const { native } = await mountCocoa(h(Probe));
+    pasteboardOn(native, ELSEWHERE);
+    t.mock.timers.enable({ apis: ['setInterval'] });
+
+    const seen = [];
+    const stop = await clipboard.watch((ev) => seen.push(ev.owner !== 0));
+    await clipboard.writeText('copied here');
+    t.mock.timers.tick(POLL);
+    await tick();
+    await tick();
+    stop();
+    assert.deepEqual(seen, [true]);
+  });
+
+  test('nobody polls an app that never watches', async () => {
+    const { native, app } = fakeCocoaApp();
+    pasteboardOn(native, ELSEWHERE);
+    await app.clipboard.targets();
+    await app.clipboard.read();
+    assert.deepEqual(native.of('pasteboardChangeCount'), []);
+  });
+
+  test('a bridge without pasteboardChangeCount rejects, as a server without XFixes does', async () => {
+    const { native, app } = fakeCocoaApp();
+    pasteboardOn(native, ELSEWHERE);
+    native.pasteboardChangeCount = undefined;
+    await assert.rejects(
+      app.clipboard.watch('CLIPBOARD', () => {}),
+      /pasteboardChangeCount/,
+    );
+  });
+
+  test('the edit menu’s Paste row follows the pasteboard', async (t) => {
+    const { armPasteState, canPaste } = await import('../src/pastestate.js');
+    const { native, app } = fakeCocoaApp();
+    const pb = pasteboardOn(native);
+    t.mock.timers.enable({ apis: ['setInterval'] });
+
+    armPasteState(app, app.clipboard);
+    await tick();
+    await tick();
+    assert.equal(canPaste(app), false, 'empty when it armed');
+
+    pb.set([{ [TEXT]: 'copied in another app' }]);
+    t.mock.timers.tick(POLL);
+    await tick();
+    await tick();
+    assert.equal(canPaste(app), true);
+
+    pb.set([]);
+    t.mock.timers.tick(POLL);
+    await tick();
+    await tick();
+    assert.equal(canPaste(app), false);
+    await app.close();
+  });
+});
+
+describe('a bridge without the item verbs asks osascript', () => {
+  /** `osascript` over the fake pasteboard, answering the two questions the
+   * script asks `NSPasteboard`, and every argument list it was run with. */
+  function osascriptOn(pb) {
+    const runs = [];
+    _setOsascriptForTests(async (file, args) => {
+      runs.push([file, ...args]);
+      const [verb, type] = args.slice(4);
+      if (verb === 'items') {
+        return (
+          JSON.stringify({
+            count: pb.count,
+            items: pb.items.map((item) => Object.keys(item)),
+          }) + '\n'
+        );
+      }
+      return JSON.stringify(
+        pb.items.map((item) =>
+          item[type] == null
+            ? null
+            : Buffer.from(item[type]).toString('base64'),
+        ),
+      );
+    });
+    return runs;
+  }
+
+  function withoutItemVerbs() {
+    const { native, app } = fakeCocoaApp();
+    const pb = pasteboardOn(native, ELSEWHERE);
+    native.pasteboardItems = undefined; // an appkit from before the verbs
+    native.pasteboardItemData = undefined;
+    return { native, app, pb };
+  }
+
+  test('the types, asked once per change', async () => {
+    const { app, pb } = withoutItemVerbs();
+    const runs = osascriptOn(pb);
+    pb.set([{ [TEXT]: 'hunter2', [CONCEALED]: '' }]);
+
+    const offered = await app.clipboard.targets();
+    assert.ok(offered.includes('UTF8_STRING'));
+    assert.ok(offered.includes(CONCEALED));
+    assert.equal(runs.length, 1);
+    const [file, lang, js, flag, script, verb] = runs[0];
+    assert.equal(file, '/usr/bin/osascript');
+    assert.deepEqual(
+      [lang, js, flag, verb],
+      ['-l', 'JavaScript', '-e', 'items'],
+    );
+    assert.match(script, /NSPasteboard\.generalPasteboard/);
+
+    // nothing copied since: the list it had is still the list
+    await app.clipboard.targets();
+    assert.equal(runs.length, 1);
+    pb.set([{ 'public.png': PNG }]);
+    assert.deepEqual(await app.clipboard.targets(), ['image/png']);
+    assert.equal(runs.length, 2);
+  });
+
+  test('an image read through it, and text still through the bridge', async () => {
+    const { native, app, pb } = withoutItemVerbs();
+    const runs = osascriptOn(pb);
+    pb.set([{ 'public.png': PNG, [TEXT]: 'a picture' }]);
+
+    assert.deepEqual(await app.clipboard.read({ target: 'image/png' }), PNG);
+    assert.deepEqual(runs.at(-1).slice(5), ['data', 'public.png']);
+    const before = runs.length;
+    assert.equal(await app.clipboard.read(), 'a picture');
+    assert.deepEqual(
+      await app.clipboard.read({ target: 'UTF8_STRING' }),
+      Buffer.from('a picture'),
+    );
+    assert.equal(runs.length, before, 'a text read spawns nothing');
+    assert.equal(native.of('pasteboardReadText').length, 2);
+  });
+
+  test('an osascript that cannot run leaves the text, and says so once', async (t) => {
+    const { app } = withoutItemVerbs();
+    _setOsascriptForTests(async () => {
+      throw new Error('spawn /usr/bin/osascript EACCES');
+    });
+    const warn = t.mock.method(console, 'warn', () => {});
+
+    assert.deepEqual(await app.clipboard.targets(), [
+      'text/plain;charset=utf-8',
+      'UTF8_STRING',
+      'text/plain',
+      'STRING',
+    ]);
+    await assert.rejects(
+      app.clipboard.read({ target: 'image/png' }),
+      /cannot read image\/png from the pasteboard — spawn/,
+    );
+    assert.equal(await app.clipboard.read(), ELSEWHERE);
+    assert.equal(warn.mock.callCount(), 1);
+    assert.match(String(warn.mock.calls[0].arguments[0]), /pasteboardItems/);
   });
 });

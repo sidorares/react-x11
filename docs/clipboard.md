@@ -20,22 +20,20 @@ middle-click paste, select-to-own. This page is for everything else: a
 canvas that copies an image, a list that pastes files, a document view with
 its own Copy item.
 
-> **This page describes the X11 backend.** The clipboard is the one API
-> where the two backends are not yet at parity, and the difference is
-> structural rather than cosmetic: X's model is _ownership of a selection_,
-> negotiated per paste, and macOS's is a _pasteboard the system holds_. On
-> the Cocoa backend `writeText`/`readText` work, and everything built on
-> them — the text controls' Ctrl/⌘ C, X, V and their Edit menus — works with
-> them. [`PRIMARY`](#primary-is-x11-only) is X11-only rather than missing:
-> nothing on macOS is filled by selecting text, so there selecting copies
-> nothing. A [multi-flavour payload](#writing) is written whole — an
-> image, HTML, any type the system has a pasteboard type for, as one item —
-> when the bridge has `pasteboardWrite` (windowkit/appkit#119); an older
-> bridge keeps the text and says once, in development, what it dropped. What
-> is not there yet is reading anything but text (`read({ target })` rejects
-> it) and [`watch()`](#knowing-when-it-changes) (it resolves to a no-op
-> unsubscribe and never fires). Drag and drop is not affected — it carries
-> its full payload on both backends ([drag-and-drop.md](drag-and-drop.md)).
+> **On the Cocoa backend** the clipboard is `NSPasteboard.general`, and the
+> difference from X11 is structural rather than cosmetic: X's model is
+> _ownership of a selection_, negotiated per paste, and macOS's is a
+> _pasteboard the system holds_. Everything below works there — writing,
+> [reading](#reading) any type the pasteboard carries, `targets()` and
+> [`watch()`](#knowing-when-it-changes) — with three differences, each
+> described where it applies: [`PRIMARY`](#primary-is-x11-only) is X11-only
+> rather than missing, since nothing on macOS is filled by selecting text;
+> `targets()` names the pasteboard's types rather than an owner's atoms; and
+> `watch()` asks the pasteboard's change count while something is watching,
+> since nothing announces a copy. A [multi-flavour payload](#writing) is
+> written whole when the bridge has `pasteboardWrite` (windowkit/appkit#119);
+> an older bridge keeps the text and says once, in development, what it
+> dropped.
 
 ## Two clipboards
 
@@ -139,6 +137,24 @@ deliberately so: the flavours a file manager offers on a drop are the ones
 it offers on a copy. Groups do not overlap — a Firefox link is
 `text/x-moz-url`, which is in `uris`, not `text`.
 
+On the Cocoa backend `targets()` lists the pasteboard's types in these
+names: a type with a MIME type under that (`public.png` is `image/png`,
+Finder's `public.file-url` is `text/uri-list`), text under both its X and
+MIME names, and any other type under its own identifier. That last rule is
+what lets an app honour a password manager: one that copies a secret puts
+[`org.nspasteboard.ConcealedType`](http://nspasteboard.org) beside it, the
+macOS convention for "keep this out of clipboard history", and a clipboard
+history should skip any copy whose `targets()` include it (or
+`org.nspasteboard.TransientType`). Files copied in Finder are one item each,
+and `read('files')` reads them as one uri-list.
+
+Text is read through the bridge's own text verb. Anything else is read from
+the pasteboard's items: through `pasteboardItems`/`pasteboardItemData` on a
+bridge that has them, and otherwise through `osascript -l JavaScript`, one
+short-lived child of about 60 ms per `targets()` or `read()`. The type list
+is kept against the pasteboard's change count, so asking again with nothing
+copied in between costs nothing.
+
 `readFiles()` is `read('files')` with the RFC 2483 parsing applied: CRLF
 separators, `#` comment lines, percent-decoding. `path` is present only for
 genuinely local `file:` URIs — a remote `file://otherhost/…` gets a `uri`
@@ -171,6 +187,16 @@ menu, open the standard one instead and the Paste row comes with it
 something changes. `owner === 0` means nothing is on the clipboard, which is
 the case a Paste menu item wants. It rejects on a server without XFixes;
 every X server since about 2004 has it.
+
+On the Cocoa backend nothing announces a copy, so `watch()` is a poll after
+all: it asks the pasteboard's change count, which every write bumps, every
+250 ms while anything is watching, and stops with the last unsubscribe. The
+count is a published number on the bridge, under a microsecond to read, and
+a change costs one look at what the pasteboard now holds, to say whether
+`owner` is `0`. No window owns the pasteboard, so `owner` is `-1` when it
+holds anything; `ev.changeCount` is the pasteboard's own count. Two copies
+inside one poll are one change, and the app's own copies are changes too, as
+they are on X11. It rejects on a bridge without `pasteboardChangeCount`.
 
 ## Timestamps
 
@@ -235,10 +261,10 @@ raw protocol. See ntk's own clipboard documentation for the ICCCM details.
 
 ## Limits
 
-- **The Cocoa backend is text-only**, as the note at the top of this page
-  says: one flavour, and `watch()` never fires. `PRIMARY` is not a limit
-  there but a platform difference: see
-  [`PRIMARY` is X11-only](#primary-is-x11-only).
+- **On the Cocoa backend `watch()` polls**, a quarter second behind a copy
+  made elsewhere, and a read of anything but text spawns `osascript` until
+  the bridge has `pasteboardItems`. `PRIMARY` is not a limit there but a
+  platform difference: see [`PRIMARY` is X11-only](#primary-is-x11-only).
 - **No clipboard-manager handoff** (`SAVE_TARGETS`), so the data really does
   vanish when the app exits.
 - **`STRING` is latin-1 by definition**, so codepoints above U+00FF are lossy
