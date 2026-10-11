@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.47.2](https://github.com/sidorares/react-x11/compare/v2.47.1...v2.47.2) (2026-10-11)
+
+
+### Bug Fixes
+
+* an 'auto'-sized window keeps tracking its content through a move whose echo carries the old size, where a popup that moved while it re-fit read that echo as the user taking the size over and froze for good ([#929](https://github.com/sidorares/react-x11/issues/929)) ([#930](https://github.com/sidorares/react-x11/issues/930)) ([c9753cb](https://github.com/sidorares/react-x11/commit/c9753cbcb45df31d56fc10b49338d213daa8f399))
+
 ## [2.47.1](https://github.com/sidorares/react-x11/compare/v2.47.0...v2.47.1) (2026-10-09)
 
 
