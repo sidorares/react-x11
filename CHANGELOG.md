@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.47.4](https://github.com/sidorares/react-x11/compare/v2.47.3...v2.47.4) (2026-10-12)
+
+
+### Bug Fixes
+
+* a click is counted from its event's own time, where detail was measured with Date.now() when the handler ran, so a slow render after the first click of a pair lost the double click ([#936](https://github.com/sidorares/react-x11/issues/936)) ([#945](https://github.com/sidorares/react-x11/issues/945)) ([da1b105](https://github.com/sidorares/react-x11/commit/da1b105ffa09d7749b8435ce435223ef7340cbc5))
+* a ContextMenu opens with the items of the render the right-click caused, where it decided to open and sized itself from the previous render's, so a first right-click on a Table row whose menu was empty until then opened nothing ([#934](https://github.com/sidorares/react-x11/issues/934)) ([#947](https://github.com/sidorares/react-x11/issues/947)) ([f7b362f](https://github.com/sidorares/react-x11/commit/f7b362fc07d7d7eb292dd1fbdb1f6a3a4d89cf1b))
+* a Dialog is as tall as its content, centred over its owner at that size and capped at the monitor, with the body scrolling and the actions row pinned, where it was 170 pixels whatever it held and the content past that, the actions row first, was cut off at the bottom edge ([#940](https://github.com/sidorares/react-x11/issues/940)) ([#949](https://github.com/sidorares/react-x11/issues/949)) ([f85473d](https://github.com/sidorares/react-x11/commit/f85473dddbeda7a8b689ca345ec379de6db513cf))
+* **cocoa:** a tray's menu reaches AppKit only when its items change, so a title that ticks every second leaves the NSMenu alone, where every useTray update rebuilt it and the mount sent it twice ([#939](https://github.com/sidorares/react-x11/issues/939)) ([#950](https://github.com/sidorares/react-x11/issues/950)) ([b59140e](https://github.com/sidorares/react-x11/commit/b59140e9a7905c95b0e85a75e445103cdbfa7d9c))
+* **cocoa:** useClipboard() reads the whole pasteboard — targets() lists its types, org.nspasteboard.ConcealedType included, read() returns an image or Finder's files, and watch() fires on each change by polling the change count while watched, where the shim was text-only and watch() never fired, so the edit menu's Paste row never followed the pasteboard ([#937](https://github.com/sidorares/react-x11/issues/937)) ([#952](https://github.com/sidorares/react-x11/issues/952)) ([aa44a79](https://github.com/sidorares/react-x11/commit/aa44a79151455f7d963859214055136494c9dd97))
+* **cocoa:** useIdle reports an empty desk on macOS, from the bridge's lastInputMs where it has one and ioreg's HIDIdleTime where it does not, where no rung reached the system idle time and the hook stayed false ([#938](https://github.com/sidorares/react-x11/issues/938)) ([#951](https://github.com/sidorares/react-x11/issues/951)) ([6e23927](https://github.com/sidorares/react-x11/commit/6e23927e82ac2eb36b761259f6b0fc3b3c01e149))
+* Ctrl, Alt and Super+Return reach the app's shortcuts, where a focused &lt;textinput&gt; submitted on them and a focusable onClick box activated on them, so a modified-Return menu shortcut never fired while either had focus ([#935](https://github.com/sidorares/react-x11/issues/935)) ([#946](https://github.com/sidorares/react-x11/issues/946)) ([72b6f96](https://github.com/sidorares/react-x11/commit/72b6f969107188200494495356fd713f1f506894))
+* **types:** TabItem.content accepts a function, as the runtime and docs do, where the type allowed only a ReactNode and a lazy tab failed to typecheck ([#941](https://github.com/sidorares/react-x11/issues/941)) ([#948](https://github.com/sidorares/react-x11/issues/948)) ([fc1d62b](https://github.com/sidorares/react-x11/commit/fc1d62bf32cf576af9be98bb9fce824c99841ff7))
+
 ## [2.47.3](https://github.com/sidorares/react-x11/compare/v2.47.2...v2.47.3) (2026-10-11)
 
 
