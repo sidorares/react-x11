@@ -1563,7 +1563,8 @@ function _Clip() {
     const offered: string[] = await clipboard.targets();
     const stop = await clipboard.watch((ev) => {
       const empty: boolean = ev.owner === 0;
-      void empty;
+      const count: number | undefined = ev.changeCount;
+      void [empty, count];
     });
     const stop2 = await clipboard.watch('PRIMARY', () => {});
     stop();

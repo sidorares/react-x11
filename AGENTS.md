@@ -158,7 +158,7 @@ no override-redirect staging (issue #4).
   `promotion.js` (animated nodes lifted onto CALayers above it),
   `context2d.js` (a canvas-shaped 2d context over CoreGraphics), `fonts.js`
   (CoreText measurement and glyph runs), plus one small module per platform
-  service: `bezels`, `calendar`, `dnd`, `dock`, `filepanels`, `glarea`,
+  service: `bezels`, `calendar`, `clipboard`, `dnd`, `dock`, `filepanels`, `glarea`,
   `globalmenu`, `keymap`, `notifications`, `panehost`/`panewindow`,
   `permissions`, `screencolor`, `statusitem`, `surface`. `native.js`
   resolves the bridge (`REACT_X11_CALAYERS_PATH` points it at a checkout).

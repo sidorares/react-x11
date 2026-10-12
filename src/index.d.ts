@@ -135,11 +135,16 @@ export interface ClipboardOptions {
 export interface SelectionChange {
   selection: string;
   /** Window now owning it, or `0` when nothing does — the case an edit
-   * menu wants. */
+   * menu wants. On the Cocoa backend no window owns the pasteboard: `-1`
+   * when it holds anything, `0` when it was left empty. */
   owner: number;
   timestamp?: number;
   selectionTimestamp?: number;
   reason?: 'new-owner' | 'destroyed' | 'closed';
+  /** Cocoa only: `NSPasteboard.changeCount` after the change, which every
+   * write bumps — what a clipboard history tells one copy from the next
+   * by. */
+  changeCount?: number;
 }
 
 /** What `useClipboard()` returns. See docs/clipboard.md. */
@@ -152,7 +157,10 @@ export interface Clipboard {
   writeText(text: string, options?: ClipboardOptions): Promise<void>;
   /** Stop owning the selection, so nothing is served for it any more. */
   clear(selection?: string): Promise<void>;
-  /** What the current owner can convert to; `[]` when nothing owns it. */
+  /** What the current owner can convert to; `[]` when nothing owns it.
+   * On the Cocoa backend, the pasteboard's types: MIME names where there is
+   * one (`image/png`), text as both its X and MIME names, and any other
+   * type under its own identifier (`org.nspasteboard.ConcealedType`). */
   targets(options?: ClipboardOptions): Promise<string[]>;
   /** Plain text, via the owner's `UTF8_STRING`/`STRING` targets. Rejects
    * when there is no owner or it offers neither — `read('text')` is the
@@ -169,7 +177,10 @@ export interface Clipboard {
     options?: ClipboardOptions,
   ): Promise<Array<{ uri: string; path?: string }>>;
   /** Called whenever the selection changes hands. Resolves to an
-   * unsubscribe function. Rejects on a server without XFixes. */
+   * unsubscribe function. Rejects on a server without XFixes. On the Cocoa
+   * backend it is the pasteboard's change count, asked four times a second
+   * while something is watching: copies closer together than that are one
+   * change. */
   watch(handler: (change: SelectionChange) => void): Promise<() => void>;
   watch(
     selection: string,

@@ -31,6 +31,7 @@ import { CocoaDockMenu } from './dock.js';
 import { CocoaGlobalMenuExport } from './globalmenu.js';
 import { CocoaStatusItem } from './statusitem.js';
 import { CocoaCalendars } from './calendar.js';
+import { CocoaClipboard } from './clipboard.js';
 import { CocoaNotifications } from './notifications.js';
 import { CocoaPaneHost } from './panehost.js';
 import { CocoaPermissions } from './permissions.js';
@@ -45,7 +46,6 @@ import { CocoaPlayer, canPlay } from './player.js';
 import { CocoaSurface } from './surface.js';
 import { CocoaSymbols } from './symbols.js';
 import { CocoaWindow, FRAME_SLACK_MS } from './window.js';
-import { utiFromMime, wire } from './dnd.js';
 import { decodeKey, modifierMask } from './keymap.js';
 import { loadNative } from './native.js';
 import { requestAppKit, threadedChannel } from './threaded.js';
@@ -398,110 +398,10 @@ export class CocoaApp {
     };
     this._atoms = new Map();
 
-    // ntk's clipboard shape over `NSPasteboard.general` — which is the one
-    // pasteboard, and it is CLIPBOARD's. X's other everyday selection,
-    // PRIMARY, is taken by *selecting text at all* and pasted with a middle
-    // click, and core takes it on every selection gesture (textselection.js
-    // `own()`, the text controls' `_ownSelection`). Sent to the pasteboard,
-    // each of those gestures was a Copy: a drag across a paragraph replaced
-    // the link the user had just copied in another app.
-    //
-    // So every other name — PRIMARY, SECONDARY, one of the app's own — is a
-    // selection nobody on this desktop can paste from: a write resolves and
-    // changes nothing, a read finds no owner, `targets()` is empty, `clear()`
-    // leaves the pasteboard alone. Deliberately not a PRIMARY kept in this
-    // process: its point is the paste in *another* application, and inside
-    // one all it would keep is a middle click that types into a text field,
-    // which no Mac text field does. An app that wants select-to-copy anyway
-    // — a terminal — writes CLIPBOARD from `onSelectionChange`
-    // (docs/clipboard.md, "Two clipboards").
-    const isClipboard = (selection = 'CLIPBOARD') => selection === 'CLIPBOARD';
-    this.clipboard = {
-      // A write is one pasteboard item with every flavour under its UTI —
-      // dnd.js's table, then the system's — the way a drag offers its
-      // payload. Text alone keeps pasteboardWriteText, the verb every
-      // bridge has; anything else needs pasteboardWrite (windowkit/appkit
-      // #119), and a bridge without it keeps the text and says, once, what
-      // it dropped — an image that silently never reaches the pasteboard
-      // looks like a Copy that did nothing.
-      write: (data, { selection } = {}) => {
-        if (!isClipboard(selection)) return Promise.resolve();
-        if (typeof data === 'string') {
-          native.pasteboardWriteText(data);
-          return Promise.resolve();
-        }
-        const item = {};
-        for (const [type, value] of Object.entries(data ?? {})) {
-          const uti = utiFromMime(type, native);
-          if (uti && value != null && !(uti in item)) item[uti] = wire(value);
-        }
-        const TEXT = 'public.utf8-plain-text';
-        const raw = item[TEXT];
-        const text =
-          raw == null
-            ? ''
-            : typeof raw === 'string'
-              ? raw
-              : Buffer.from(raw).toString('utf8');
-        const others = Object.keys(item).filter((uti) => uti !== TEXT);
-        if (others.length === 0) {
-          native.pasteboardWriteText(text);
-        } else if (typeof native.pasteboardWrite === 'function') {
-          native.pasteboardWrite(item);
-        } else {
-          if (
-            !this._warnedPasteboardFlavours &&
-            process.env.NODE_ENV !== 'production'
-          ) {
-            this._warnedPasteboardFlavours = true;
-            console.warn(
-              `react-x11: clipboard.write() kept only the text — this ` +
-                `@windowkit/appkit has no pasteboardWrite, so ` +
-                `${others.join(', ')} did not reach the pasteboard. ` +
-                'Update @windowkit/appkit to a release with pasteboardWrite ' +
-                '(windowkit/appkit#119).',
-            );
-          }
-          native.pasteboardWriteText(text);
-        }
-        return Promise.resolve();
-      },
-      clear: (selection) => {
-        if (isClipboard(selection)) native.pasteboardClear();
-        return Promise.resolve();
-      },
-      targets: ({ selection } = {}) => {
-        if (!isClipboard(selection)) return Promise.resolve([]);
-        return this._ask('pasteboardReadText').then((text) =>
-          text == null ? [] : ['UTF8_STRING', 'STRING'],
-        );
-      },
-      read: ({ selection, target } = {}) => {
-        if (!isClipboard(selection)) {
-          return Promise.reject(
-            new Error(
-              `clipboard: nothing to paste — ${selection} is an X11 ` +
-                'selection, and on macOS only CLIPBOARD is the pasteboard',
-            ),
-          );
-        }
-        return this._ask('pasteboardReadText').then((text) => {
-          if (text == null) {
-            throw new Error(
-              'clipboard: nothing to paste — the pasteboard is empty',
-            );
-          }
-          if (target === undefined) return text;
-          if (target === 'UTF8_STRING' || target === 'STRING') {
-            return Buffer.from(text, 'utf8');
-          }
-          throw new Error(
-            `clipboard: cannot convert the pasteboard to ${target}`,
-          );
-        });
-      },
-      watch: () => Promise.resolve(() => {}),
-    };
+    // ntk's clipboard shape over `NSPasteboard.general`, the one pasteboard
+    // and CLIPBOARD's — every other selection is one nobody here can paste
+    // from (src/cocoa/clipboard.js says why).
+    this.clipboard = new CocoaClipboard(this, native);
   }
 
   _parseColor(value) {
@@ -1919,6 +1819,7 @@ export class CocoaApp {
     if (this._frameTimer) clearTimeout(this._frameTimer);
     this._frameTimer = null;
     this._pollScreens(false);
+    this.clipboard.close();
     this._cocoaGL?.destroy();
     this._cocoaGL = null;
     this._unsubscribe?.();

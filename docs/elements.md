@@ -1765,7 +1765,9 @@ asking on the way in — asking would mean a round trip against whatever
 foreign client owns the clipboard, and a wait if that client is wedged, at
 exactly the moment a menu should already be on screen. So the very first
 menu of a session still shows Paste enabled; every one after it knows. On
-a server without XFixes it stays enabled, which is where it started.
+a server without XFixes it stays enabled, which is where it started. On
+macOS it follows the pasteboard's change count, a quarter second behind a
+copy made in another app ([clipboard.md](clipboard.md#knowing-when-it-changes)).
 
 Arrows walk the rows, skipping the disabled ones, Enter chooses, Escape or
 a press anywhere outside closes. The selection stays visibly highlighted

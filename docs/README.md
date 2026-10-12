@@ -65,9 +65,8 @@ opt-in ([wayland-backend.md](wayland-backend.md), with its research RFC in
 - [clipboard.md](clipboard.md) — copy and paste beyond the built-in text
   controls: `useClipboard()`, the CLIPBOARD/PRIMARY split, offering several
   flavours of one payload, the `text`/`files`/`uris` groups shared with drag
-  and drop, `watch()`, and why a copy carries a timestamp. The one API where
-  the backends are not at parity — text works on both, and the rest of that
-  list is X11's.
+  and drop, `watch()`, and why a copy carries a timestamp — and what the
+  pasteboard does differently on macOS.
 - [typescript.md](typescript.md) — the bundled types: one tsconfig option,
   why JSX comes from `react-x11/jsx-runtime` rather than an augmentation,
   and how the declarations are kept from drifting.
