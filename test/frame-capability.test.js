@@ -196,6 +196,47 @@ describe('<Frame>: input forwarded to a composited pane', () => {
     );
     await root.unmount();
   });
+
+  // The pane counts a double click by the time its presses carry, so they
+  // carry the time the host's did: stamped when the host sent them on, a
+  // host busy past the double-click window after the first click split the
+  // pair into two singles (#936).
+  it('a press reaches the pane with the time it carried here', async () => {
+    const app = createMockApp();
+    app.createPaneHost = () => ({ setRect() {}, present() {}, destroy() {} });
+    const sent = [];
+    const transport = () => ({
+      send: (msg) => sent.push(msg),
+      onMessage: (cb) => {
+        setImmediate(() => cb({ type: 'ready', windowId: 1 }));
+        return () => {};
+      },
+      onExit: () => () => {},
+      pid: -1,
+    });
+    const root = await createRoot({ app });
+    root.render(
+      h(
+        'window',
+        { width: 200, height: 120 },
+        h(Frame, { src: PANE, transport, style: { flexGrow: 1 } }),
+      ),
+    );
+    await settle();
+    const wnd = app.windows[0];
+    flushFrames(wnd);
+    const at = { x: 50, y: 50, rootx: 50, rooty: 50, keycode: 1, buttons: 0 };
+    wnd.emit('mousedown', { ...at, time: 4114 });
+    wnd.emit('mouseup', { ...at, time: 4117 });
+    const times = sent
+      .filter((m) => m.type === 'pane-event' && /^mouse(down|up)$/.test(m.name))
+      .map((m) => [m.name, m.ev.time]);
+    assert.deepEqual(times, [
+      ['mousedown', 4114],
+      ['mouseup', 4117],
+    ]);
+    await root.unmount();
+  });
 });
 
 describe('<Frame>: the cursor of a composited pane', () => {

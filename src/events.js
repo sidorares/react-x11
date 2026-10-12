@@ -424,7 +424,10 @@ export class EventManager {
     // windows' focus events settle it once rather than twice
     // (`_syncDefaultFocus`)
     this._defaultFocusOn = false;
-    this._lastClick = { time: 0, x: 0, y: 0, detail: 0 };
+    // the last press, which the next is counted against (`_clickDetail`).
+    // No time until there has been one: a 0 here made the first press on a
+    // server up for less than the double-click window count as a second.
+    this._lastClick = { time: null, stamped: false, x: 0, y: 0, detail: 0 };
     // the sub-pixel part of a smooth scroll the default action has not spent
     // yet — see `_onWheel`, which moves whole pixels so the scroll blit stays
     // available
@@ -567,9 +570,19 @@ export class EventManager {
    * and `Net/DoubleClickDistance` — falling back to 400ms/4px where no
    * settings daemon answered. A double click that needs to be faster here
    * than everywhere else on the desktop is a double click people miss.
+   *
+   * The time is the press's own, which is when the user pressed. When it was
+   * handled is another matter: a first click whose render outlasts the
+   * window holds the second press back past it, and a double click read off
+   * the clock came out as two singles (#936). The X server stamps a press
+   * in milliseconds, and so do AppKit (its uptime) and a Wayland
+   * compositor. A press that carries no time (win32's, a test's `emit`) is
+   * timed by the clock instead, and never against one that carried its own:
+   * the two count from nothing in common.
    */
   _clickDetail(native) {
-    const now = Date.now();
+    const stamped = typeof native.time === 'number';
+    const now = stamped ? native.time : Date.now();
     const last = this._lastClick;
     const { doubleClickMs, doubleClickDistance } = desktopSettings(
       this.node?.app,
@@ -577,12 +590,17 @@ export class EventManager {
     // the desktop's slop is logical pixels; the coordinates are device
     const slop = doubleClickDistance * this.scale;
     const detail =
-      now - last.time < doubleClickMs &&
+      last.time !== null &&
+      last.stamped === stamped &&
+      // X time is 32 bits and wraps every 49.7 days: unsigned, a press just
+      // past the wrap is still just after the one before it, and one stamped
+      // earlier than the last is never inside the window
+      (now - last.time) >>> 0 < doubleClickMs &&
       Math.abs(native.x - last.x) <= slop &&
       Math.abs(native.y - last.y) <= slop
         ? last.detail + 1
         : 1;
-    this._lastClick = { time: now, x: native.x, y: native.y, detail };
+    this._lastClick = { time: now, stamped, x: native.x, y: native.y, detail };
     return detail;
   }
 

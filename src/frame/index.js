@@ -706,7 +706,10 @@ function PaneHostView({
       // reached the pane with none: Shift+Tab went forwards there, and a
       // Ctrl+C or a Shift+click was a C and a click.
       buttons: ev.nativeEvent?.buttons ?? 0,
-      time: Date.now(),
+      // And the time the input carried, which the pane counts a double
+      // click by: stamped as the host got round to sending it, a first click
+      // the host was slow to answer put the second outside the window (#936)
+      time: ev.nativeEvent?.time ?? Date.now(),
       ...data(ev),
     };
     try {
