@@ -1058,6 +1058,32 @@ function MenuBarApp() {
 protocol has no item rect. Nothing moves the rect but a new one, and it is
 never out of view.
 
+### Centred over something
+
+`placement: 'center'` puts the popup **over** its anchor rather than beside
+it — the middle of one on the middle of the other, clamped into the monitor,
+with nothing to flip to. Over a window's rect it is a dialog, and that is
+what [`Dialog`](components.md#dialog) does: it takes its owner window's rect
+on the screen when it opens and hands it over as `rect`, so the popup is
+measured, centred at the size it measured and only then created.
+
+```jsx
+<popup
+  anchor={{ rect: ownerRect, placement: 'center' }}
+  width={360}
+  height="auto"
+>
+```
+
+A centred popup is centred **once**. When its own size changes afterwards —
+its content growing a line — it keeps its top edge and its horizontal middle
+and grows from there, pulled back only as far as it takes to stay on the
+monitor: re-centring would move the top edge by half the growth, and with it
+whatever the user was reading or about to press. A managed one grows from
+wherever the window manager or the user has put it since, and is moved only
+to keep it on the monitor. A new `rect` (or the `to` node moving) centres it
+again.
+
 **The monitor comes from the whole rect**, not from a corner of it. A
 menu-bar item's frame starts a few points _above_ the top of the display it
 is on, so its top-left corner is outside that display — and on a desk where

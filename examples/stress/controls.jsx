@@ -291,13 +291,12 @@ export function ControlsPanel() {
         </box>
       </box>
 
-      {/* A popup is a real X window and needs its size before layout, so the
-          dialog is sized explicitly rather than to its content. */}
+      {/* As tall as what it says: the dialog measures its content before
+          its window is made, and opens centred at that size. */}
       <Dialog
         open={dialog}
         title="A modal dialog"
         width={380}
-        height={190}
         onClose={() => setDialog(false)}
         actions={
           <>

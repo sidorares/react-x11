@@ -11,8 +11,8 @@ wins by position rather than by clobbering a computed value:
 ```
 
 Props that a component consumes itself are never style — `ProgressBar`'s
-`color`, `Dialog`'s `width`/`height` (a dialog is a real popup window and
-needs its geometry up front), `ContextMenu`'s `fontSize` (it measures labels
+`color`, `Dialog`'s `width`/`height` (a dialog is a real popup window, and
+those are its window's size), `ContextMenu`'s `fontSize` (it measures labels
 with it). Everything else is forwarded to the host box. See
 [styling.md](styling.md).
 
@@ -1129,15 +1129,16 @@ import { Button, Dialog } from 'react-x11';
 </Dialog>;
 ```
 
-| prop              |                                                                                                    |
-| ----------------- | -------------------------------------------------------------------------------------------------- |
-| `open`            | renders nothing when false; the popup exists only while true                                       |
-| `title`           | names the dialog, drawn once: the frame's caption when managed, a bold in-content heading when not |
-| `children`        | body content; strings become `<text>`                                                              |
-| `actions`         | elements for the right-aligned button row                                                          |
-| `onClose`         | Escape, or the window manager's close button                                                       |
-| `managed`         | `false` for the override-redirect popup 1.x shipped (below)                                        |
-| `width`, `height` | popup size (default 360×170)                                                                       |
+| prop       |                                                                                                      |
+| ---------- | ---------------------------------------------------------------------------------------------------- |
+| `open`     | renders nothing when false; the popup exists only while true                                         |
+| `title`    | names the dialog, drawn once: the frame's caption when managed, a bold in-content heading when not   |
+| `children` | body content; strings become `<text>`                                                                |
+| `actions`  | elements for the right-aligned button row                                                            |
+| `onClose`  | Escape, or the window manager's close button                                                         |
+| `managed`  | `false` for the override-redirect popup 1.x shipped (below)                                          |
+| `width`    | popup width (default 360); `'auto'` for the content's                                                |
+| `height`   | popup height (default `'auto'`: the content's, capped at the monitor — [below](#size-and-placement)) |
 
 The focus behaviour is the **renderer's**, not the component's: `trapFocus`
 keeps Tab inside the dialog, stops presses elsewhere from moving focus, and
@@ -1180,10 +1181,39 @@ The owner is resolved automatically: `Dialog` already keeps an out-of-flow
 resolves to the window that owns it
 ([`transientFor`](elements.md#transientfor--a-window-that-belongs-to-another)).
 
-A `<popup>` is a real X window and needs its size up front, hence explicit
-`width`/`height` rather than sizing to content. Placement comes from
-`centerRect(node, {width, height})`, exported alongside `anchorRect` for
-window-centred popups of your own.
+### Size and placement
+
+**The height is the content's** by default (`height="auto"`): ten lines and
+a row of buttons make a dialog as tall as ten lines and a row of buttons. The
+popup measures its content, centres itself over the owner window at that
+size and only then opens — it is born the right size in the right place,
+never shown at a guess and corrected
+([`placement: 'center'`](elements.md#centred-over-something)).
+
+- **Capped at the monitor.** Content taller than the usable height of the
+  monitor caps the dialog there; the body scrolls, and the `actions` row stays
+  pinned at the bottom of the window. The body is a tab stop only while it has
+  something to scroll. A numeric `height` scrolls the same way when the
+  content needs more than it, where the overflow, buttons included, used to
+  be cut off at the bottom edge (#940).
+- **Following its content.** A dialog whose content changes while it is open
+  re-fits to it, growing from its **top edge**: the title and the field the
+  user is looking at stay where they are, and only the bottom moves. It moves
+  up only as far as it takes to stay on the monitor. A managed dialog the user
+  dragged aside grows where they put it.
+- **Centred once,** over where the owner window was when the dialog opened,
+  and not tracked after that: moving the owner does not drag the dialog with
+  it, which is the window manager's call on a managed one.
+
+`width` stays a number by default, 360: a body of prose wraps to it, where a
+natural width would be as wide as its longest sentence. `width="auto"` is
+there for a dialog whose content has a width of its own (a grid of fields, an
+image). A number for either axis is that size exactly.
+
+`centerRect(node, {width, height})` is the same centring as a function,
+exported alongside `anchorRect` for window-centred popups of your own that
+know their size; one that does not uses `<popup anchor={{ rect, placement:
+'center' }}>` and lets the window work it out.
 
 ## `MenuBar` / `ContextMenu`
 
@@ -1585,20 +1615,24 @@ const rect = measure({ placement: 'bottom', align: 'center', width, height });
 // -> { x, y, width, height, placement }
 ```
 
-| option            |                                                                        |
-| ----------------- | ---------------------------------------------------------------------- |
-| `placement`       | `'bottom'` (default), `'top'`, `'start'`, `'end'`, `'left'`, `'right'` |
-| `align`           | `'start'` (default), `'center'`, `'end'` on the cross axis             |
-| `offset`          | gap from the anchor in px (default 2)                                  |
-| `at`              | a rect **inside** the node to anchor to instead — a caret, a cell      |
-| `width`, `height` | size of the popup you are positioning                                  |
-| `alignTo`         | node the alignment reads, when it is not the anchor                    |
+| option            |                                                                                    |
+| ----------------- | ---------------------------------------------------------------------------------- |
+| `placement`       | `'bottom'` (default), `'top'`, `'start'`, `'end'`, `'left'`, `'right'`, `'center'` |
+| `align`           | `'start'` (default), `'center'`, `'end'` on the cross axis                         |
+| `offset`          | gap from the anchor in px (default 2)                                              |
+| `at`              | a rect **inside** the node to anchor to instead — a caret, a cell                  |
+| `width`, `height` | size of the popup you are positioning                                              |
+| `alignTo`         | node the alignment reads, when it is not the anchor                                |
 
 `placement` is a **preference, not a promise**: a menu near the bottom of
 the screen flips above its trigger rather than opening off-screen, and the
 result is clamped into the screen either way. The side actually used comes
 back as `placement`. Where screen geometry is unavailable it places without
 clamping.
+
+`'center'` is no side: the popup goes **over** the anchor, middle on
+middle, and is only clamped — `align` and `offset` mean nothing to it. It is
+what a dialog is placed with ([`Dialog`](#size-and-placement)).
 
 `'start'` and `'end'` are the **logical** sides and are what a submenu
 wants: it opens away from the edge its parent's rows begin at, which is

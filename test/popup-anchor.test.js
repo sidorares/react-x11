@@ -186,6 +186,28 @@ test('an `at` with no size is a point, and is what `width` then defaults to', ()
   );
 });
 
+test("placement 'center' goes over the anchor, and is only clamped", () => {
+  const owner = fakeNode({ x: 0, y: 0, width: 600, height: 400 });
+  const over = anchorRect(owner, {
+    placement: 'center',
+    width: 200,
+    height: 100,
+  });
+  assert.deepStrictEqual(
+    [over.x, over.y, over.placement],
+    [100 + (600 - 200) / 2, 50 + (400 - 100) / 2, 'center'],
+    'the middle of the popup on the middle of the anchor',
+  );
+  // taller than its owner by more than the owner is from the top of the
+  // monitor: nothing to flip to, so the monitor's edge is where it stops
+  const tall = anchorRect(owner, {
+    placement: 'center',
+    width: 200,
+    height: 600,
+  });
+  assert.deepStrictEqual([tall.x, tall.y], [300, 0]);
+});
+
 test('`align` reads the sub-rect too', () => {
   const node = fakeNode(
     { x: 0, y: 0, width: 400, height: 300 },

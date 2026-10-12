@@ -56,6 +56,26 @@ export function windowOrigin(node) {
 }
 
 /**
+ * The rect of the window that owns `node`, on the screen, in logical
+ * pixels: what a dialog is centred over. From the window rather than from
+ * the root's laid-out box, because a dialog that opens with its owner is
+ * asked for it before that box has been laid out — the window already has
+ * its size. Null with no window yet.
+ */
+export function windowRect(node) {
+  const win = node?.root?.window;
+  if (!win) return null;
+  const origin = windowOrigin(node);
+  const s = node.scale ?? 1;
+  return {
+    x: origin.x / s,
+    y: origin.y / s,
+    width: win.width / s,
+    height: win.height / s,
+  };
+}
+
+/**
  * The rect within a node that a popup is anchored to, in the node's own
  * coordinates — a caret, a table cell, a chart datapoint, the span under a
  * text-range tooltip. `width`/`height` default to 0, so `{x, y}` alone is a
@@ -197,6 +217,11 @@ export function deviceAnchorArea(node) {
  * the eye lines up the items, not the boxes.
  *
  * ## Which side is which
+ *
+ * `placement: 'center'` is no side at all: the popup goes **over** the
+ * anchor, the middle of one on the middle of the other, and is only clamped
+ * — a dialog over its owner window (`centerRect`, and `Dialog` through a
+ * `<popup anchor>`).
  *
  * `placement: 'start'` and `'end'` are the **logical** sides, and they are
  * what a submenu wants: a menu opens away from the edge its rows begin at, so
@@ -340,7 +365,14 @@ function placeAgainst(anchor, cross, area, s, options) {
   let x;
   let y;
 
-  if (side === 'bottom' || side === 'top') {
+  if (side === 'center') {
+    // Over the anchor rather than beside it: the middle of the one on the
+    // middle of the other, on both axes. Nothing to flip to, and nothing
+    // for `align` or an `offset` to mean — the clamp below is the whole of
+    // what keeps it on the screen.
+    x = ax + (aw - width) / 2;
+    y = ay + (ah - height) / 2;
+  } else if (side === 'bottom' || side === 'top') {
     const below = ay + ah + offset;
     const above = ay - height - offset;
     if (
@@ -399,19 +431,15 @@ function placeAgainst(anchor, cross, area, s, options) {
 /**
  * Where to put a `<popup>` of this size **centred over the owner window**,
  * in screen coordinates, clamped into the screen. A dialog is anchored to
- * the window rather than to a widget, which is the one placement
- * `anchorRect` cannot express.
+ * the window rather than to a widget — `placement: 'center'` against the
+ * window's rect, which is what this is.
  */
-export function centerRect(node, { width: logicalW, height: logicalH }) {
+export function centerRect(node, { width, height }) {
   if (!node) return null;
   // Logical in, logical out, device in between — anchorRect's contract,
   // for the same caller: the result becomes a popup's `x`/`y` props.
   const s = node.scale ?? 1;
-  const width = logicalW * s;
-  const height = logicalH * s;
   const win = node.root?.window;
-  const ww = win?.width ?? width;
-  const wh = win?.height ?? height;
   // `_screenOrigin` for the same reason `anchorRect` uses it: `x`/`y` come
   // from ConfigureNotify, and under a reparenting window manager those can be
   // relative to the *frame* rather than the root — which would centre the
@@ -420,19 +448,17 @@ export function centerRect(node, { width: logicalW, height: logicalH }) {
   // coordinates, so the two agree there; that is not something to rely on.)
   // The raw coordinates stay as the fallback, since the headless mock has no
   // server to ask.
-  const origin = win?._screenOrigin ?? { x: win?.x ?? 0, y: win?.y ?? 0 };
-  let x = origin.x + (ww - width) / 2;
-  let y = origin.y + (wh - height) / 2;
-
-  const area = deviceAnchorArea(node);
-  if (area) {
-    x = Math.max(area.x, Math.min(x, area.x + area.width - width));
-    y = Math.max(area.y, Math.min(y, area.y + area.height - height));
-  }
-  return {
-    x: Math.round(x) / s,
-    y: Math.round(y) / s,
-    width: logicalW,
-    height: logicalH,
+  const origin = windowOrigin(node);
+  const over = {
+    x: origin.x,
+    y: origin.y,
+    width: win?.width ?? width * s,
+    height: win?.height ?? height * s,
   };
+  const at = placeAgainst(over, over, deviceAnchorArea(node), s, {
+    placement: 'center',
+    width,
+    height,
+  });
+  return { x: at.x, y: at.y, width: at.width, height: at.height };
 }

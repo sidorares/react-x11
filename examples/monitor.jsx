@@ -607,7 +607,6 @@ export function MonitorPanel({ sampler }) {
         open={confirming != null}
         title="Kill this process?"
         width={340}
-        height={170}
         onClose={() => setConfirming(null)}
         actions={
           <>

@@ -679,7 +679,6 @@ export function SettingsPanel({ store, onQuit }) {
           open={asking}
           title="Leave without applying?"
           width={340}
-          height={160}
           onClose={() => setAsking(false)}
           actions={
             <>

@@ -832,6 +832,18 @@ const _popover = (
   />
 );
 const _atPoint = <popup anchor={{ rect: { x: 400, y: 300 } }} />;
+// issue #940: centred over a rect — a dialog over its owner window — at a
+// height that is the content's
+const _centred = (
+  <popup
+    anchor={{
+      rect: { x: 100, y: 50, width: 800, height: 600 },
+      placement: 'center',
+    }}
+    width={360}
+    height="auto"
+  />
+);
 const _placed = anchorScreenRect(null, { x: 1, y: 2 }, { scale: 2 });
 
 // @ts-expect-error — a node or a rect on the screen, not both
@@ -1252,6 +1264,17 @@ function Widgets() {
       {/* the 1.x shape: override-redirect, dismissed by a press outside */}
       <Dialog open managed={false} onClose={() => {}}>
         <text>unmanaged</text>
+      </Dialog>
+      {/* sized to its content (the default, spelled out), or a fixed size */}
+      <Dialog open height="auto" width="auto">
+        <text>natural</text>
+      </Dialog>
+      <Dialog open width={420} height={170}>
+        <text>fixed</text>
+      </Dialog>
+      {/* @ts-expect-error — a size is a number or 'auto' */}
+      <Dialog open height="tall">
+        <text>no</text>
       </Dialog>
     </ThemeProvider>
   );

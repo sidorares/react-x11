@@ -495,8 +495,22 @@ export interface DialogProps extends WidgetProps {
   managed?: boolean;
   onClose?: () => void;
   actions?: ReactNode;
-  width?: number;
-  height?: number;
+  /**
+   * The dialog's width, 360 by default — a number, because a body of prose
+   * wraps to it, where a natural width would be as wide as its longest
+   * sentence. `'auto'` sizes it to its content, capped at the monitor.
+   */
+  width?: number | 'auto';
+  /**
+   * `'auto'` (the default) is the content's height: the dialog is measured,
+   * centred over its owner at that size and only then opened, and it keeps
+   * following its content while open, growing from its top edge rather than
+   * being centred again. Capped at the usable height of the monitor; past
+   * that the body scrolls and the `actions` row stays pinned at the bottom
+   * of the window. A number is that height exactly, with the same scrolling
+   * body when the content needs more.
+   */
+  height?: number | 'auto';
   style?: StyleProp;
 }
 export const Dialog: ComponentType<DialogProps>;
@@ -755,12 +769,17 @@ export const SplitPane: ComponentType<SplitPaneProps>;
 /**
  * The side a popup is asked for. `'start'`/`'end'` are the **logical** ones
  * and mirror with the anchor's direction, which is what a submenu wants;
- * `'left'`/`'right'` stay physical.
+ * `'left'`/`'right'` stay physical. `'center'` is no side: the popup goes
+ * over the anchor, middle on middle, and is only clamped into the monitor —
+ * what `Dialog` uses over its owner window. On a `<popup anchor>` a centred
+ * popup is centred when it opens and grows from its top edge when its own
+ * size changes afterwards.
  */
-export type AnchorPlacement = Placement | 'start' | 'end';
+export type AnchorPlacement = Placement | 'start' | 'end' | 'center';
 
 export interface AnchorOptions {
-  /** Preferred side, flipped at a screen edge (default `'bottom'`). */
+  /** Preferred side, flipped at a screen edge (default `'bottom'`);
+   *  `'center'` goes over the anchor instead, and ignores `align`/`offset`. */
   placement?: AnchorPlacement;
   /** Which edges line up on the cross axis (default `'start'`). */
   align?: 'start' | 'center' | 'end';
@@ -793,7 +812,7 @@ export interface AnchorOptions {
 
 /** An anchored rect, and the side it actually ended up on. */
 export interface AnchorRect extends Rect {
-  placement: Placement;
+  placement: Placement | 'center';
 }
 
 /**
@@ -827,7 +846,8 @@ export interface ScreenAnchorRect {
   height?: number;
 }
 
-/** Centre a popup of this size on the node's screen. */
+/** Centre a popup of this size over the window the node is in, clamped
+ *  into the monitor — `placement: 'center'` against the window's rect. */
 export function centerRect(
   node: DrawnNode,
   size: { width: number; height: number },
