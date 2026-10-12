@@ -10,6 +10,7 @@ import {
   XK_PAGE_UP,
   XK_PAGE_DOWN,
   XK_END,
+  primaryModifier,
   primaryModifierHeld,
 } from '../keysyms.js';
 import {
@@ -310,11 +311,19 @@ export class TextAreaNode extends TextInputNode {
     const layout = this._valueLayout();
 
     if (k === XK_RETURN || k === XK_KP_ENTER) {
-      // Ctrl+Enter, ⌘↩ on the Cocoa backend
+      // Ctrl+Enter, ⌘↩ on the Cocoa backend — the field's submit when it has
+      // an `onSubmit`, and with none a chord it has no answer for, which goes
+      // on to a shortcut the way it does from a <textinput> (#935)
       if (primaryModifierHeld(ev, this.app)) {
+        if (!this.props.onSubmit) return false;
         this._fireValueEvent('onSubmit', this.value, ev.nativeEvent);
         return true;
       }
+      // Alt+Return and Super+Return are chords too, and a field types
+      // nothing for a chord — except on the Mac, where ⌃↩ and ⌥↩ are
+      // AppKit's own newline bindings and its shortcuts are ⌘ chords anyway
+      const mac = primaryModifier(this.app) === 'Super';
+      if (!mac && (ev.altKey || ev.metaKey)) return false;
       this._goalX = null;
       this._insert('\n');
       return true;

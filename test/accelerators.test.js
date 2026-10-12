@@ -26,9 +26,21 @@ import {
   matchesShortcut,
 } from '../src/accelerators.js';
 import { decodeKey } from '../src/ntk.js';
-import { keysymFromName, keysymOf, MOD } from '../src/keysyms.js';
+import {
+  keysymFromName,
+  keysymOf,
+  MOD,
+  XK_END,
+  XK_KP_ENTER,
+} from '../src/keysyms.js';
 import { createMockApp } from './helpers/mock-app.js';
-import { act, fireEvent, renderX11 } from '../src/testing/index.js';
+import {
+  act,
+  fireEvent,
+  renderX11,
+  screen,
+  userEvent,
+} from '../src/testing/index.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -519,6 +531,223 @@ test('an application handler still wins, by the ordinary preventDefault', async 
   await settle();
   assert.deepEqual(fired, ['app']);
   await root.unmount();
+});
+
+// Return and Space are the keys a field submits with and a clickable box is
+// pressed with — and Ctrl, Alt or Super on them makes a chord, a command,
+// which both used to answer as the plain key, `preventDefault()` and all. So
+// a menu row that printed Ctrl+Return fired from anywhere but the two places
+// focus usually is (#935). Through the in-process X server, with the
+// modifiers really held, so the mask is the one ntk decodes.
+
+const RETURN_MENUS = (fired) => [
+  {
+    label: 'Run',
+    items: [
+      {
+        label: 'Run',
+        shortcut: [['Control', 'Return']],
+        onSelect: () => fired.push('run'),
+      },
+      {
+        label: 'Run in place',
+        shortcut: [['Alt', 'Return']],
+        onSelect: () => fired.push('run-alt'),
+      },
+      {
+        label: 'Run elsewhere',
+        shortcut: [['Super', 'Return']],
+        onSelect: () => fired.push('run-super'),
+      },
+      {
+        label: 'Toggle',
+        shortcut: [['Control', 'space']],
+        onSelect: () => fired.push('toggle'),
+      },
+    ],
+  },
+];
+
+/** The chords above, pressed one after another, and what each fired. */
+async function pressChords(fired) {
+  const out = {};
+  for (const [name, keysym, modifiers] of [
+    ['Ctrl+Return', XK_RETURN, ['Control']],
+    ['Alt+Return', XK_RETURN, ['Alt']],
+    ['Super+Return', XK_RETURN, ['Super']],
+    ['Ctrl+Space', XK_SPACE, ['Control']],
+  ]) {
+    fired.length = 0;
+    await userEvent.key(keysym, { modifiers });
+    out[name] = [...fired];
+  }
+  return out;
+}
+
+const CHORDS_FIRED = {
+  'Ctrl+Return': ['run'],
+  'Alt+Return': ['run-alt'],
+  'Super+Return': ['run-super'],
+  'Ctrl+Space': ['toggle'],
+};
+
+test('a modified Return in a text field is a shortcut, not a submit', async () => {
+  const fired = [];
+  const { unmount } = await renderX11(
+    h(
+      'window',
+      { width: 400, height: 200 },
+      h(MenuBar, { menus: RETURN_MENUS(fired), globalMenu: false }),
+      h('textinput', {
+        'data-testname': 'submits',
+        defaultValue: 'hi',
+        onSubmit: () => fired.push('submit'),
+        style: { width: 200, height: 24 },
+      }),
+      // no `onSubmit`: nothing here answers Return, modified or not
+      h('textinput', {
+        'data-testname': 'plain',
+        defaultValue: 'hi',
+        style: { width: 200, height: 24 },
+      }),
+    ),
+  );
+
+  for (const name of ['submits', 'plain']) {
+    await userEvent.click(screen.getByTestName(name));
+    assert.deepEqual(await pressChords(fired), CHORDS_FIRED, name);
+    assert.equal(screen.getByTestName(name).value, 'hi', 'and typed nothing');
+  }
+
+  // the keys without a chord are the field's, as they always were — Shift
+  // included, which is not a command and submits in every toolkit's entry
+  await userEvent.click(screen.getByTestName('submits'));
+  fired.length = 0;
+  await userEvent.key(XK_RETURN);
+  await userEvent.key(XK_KP_ENTER);
+  await userEvent.key(XK_RETURN, { modifiers: ['Shift'] });
+  assert.deepEqual(fired, ['submit', 'submit', 'submit']);
+  fired.length = 0;
+  await userEvent.key(XK_KP_ENTER, { modifiers: ['Control'] });
+  assert.deepEqual(fired, [], 'Ctrl+keypad Enter is a chord too');
+
+  await unmount();
+});
+
+test('a text field with no onSubmit leaves Return to the shortcuts', async () => {
+  // The field's answer to Return is `onSubmit`, and one with none has no
+  // answer — so a form's `[['Return']]` reaches its default button from
+  // inside the field, which is what Qt does with a line edit nobody
+  // connected. A field that does submit keeps the key.
+  const fired = [];
+  function Form() {
+    useAccelerator([['Return']], () => fired.push('default-button'));
+    return h(
+      'box',
+      null,
+      h('textinput', {
+        'data-testname': 'submits',
+        onSubmit: () => fired.push('submit'),
+        style: { width: 200, height: 24 },
+      }),
+      h('textinput', {
+        'data-testname': 'plain',
+        style: { width: 200, height: 24 },
+      }),
+    );
+  }
+  const { unmount } = await renderX11(
+    h('window', { width: 400, height: 200 }, h(Form)),
+  );
+
+  await userEvent.click(screen.getByTestName('submits'));
+  await userEvent.key(XK_RETURN);
+  assert.deepEqual(fired, ['submit'], 'the field took it');
+
+  fired.length = 0;
+  await userEvent.click(screen.getByTestName('plain'));
+  await userEvent.key(XK_RETURN);
+  assert.deepEqual(fired, ['default-button'], 'nothing took it, so it went on');
+
+  await unmount();
+});
+
+test('a modified Return in a textarea is a shortcut, not a newline', async () => {
+  // Plain and Shift+Return type a newline; Ctrl+Return is the field's
+  // submit when it has an `onSubmit` and nobody's when it has none; Alt and
+  // Super are chords, which a textarea types nothing for
+  const fired = [];
+  const { unmount } = await renderX11(
+    h(
+      'window',
+      { width: 400, height: 200 },
+      h(MenuBar, { menus: RETURN_MENUS(fired), globalMenu: false }),
+      h('textarea', {
+        'data-testname': 'area',
+        defaultValue: 'x',
+        style: { width: 200, height: 60 },
+      }),
+      h('textarea', {
+        'data-testname': 'submits',
+        defaultValue: 'x',
+        onSubmit: () => fired.push('submit'),
+        style: { width: 200, height: 60 },
+      }),
+    ),
+  );
+  const area = screen.getByTestName('area');
+  await userEvent.click(area);
+  assert.deepEqual(await pressChords(fired), CHORDS_FIRED);
+  assert.equal(area.value, 'x', 'no newline, and no space either');
+
+  fired.length = 0;
+  await userEvent.key(XK_END);
+  await userEvent.key(XK_RETURN);
+  await userEvent.key(XK_RETURN, { modifiers: ['Shift'] });
+  assert.equal(area.value, 'x\n\n', 'the unmodified keys are still text');
+  assert.deepEqual(fired, []);
+
+  // Ctrl+Return is a binding of the field's own, as Ctrl+C is: with an
+  // `onSubmit` the field answers it and the menu does not
+  await userEvent.click(screen.getByTestName('submits'));
+  await userEvent.key(XK_RETURN, { modifiers: ['Control'] });
+  assert.deepEqual(fired, ['submit']);
+
+  await unmount();
+});
+
+test('a modified Return or Space on a clickable box is a shortcut, not a click', async () => {
+  const fired = [];
+  const { unmount } = await renderX11(
+    h(
+      'window',
+      { width: 400, height: 200 },
+      h(MenuBar, { menus: RETURN_MENUS(fired), globalMenu: false }),
+      h(
+        'box',
+        {
+          'data-testname': 'clickable',
+          focusable: true,
+          onClick: (ev) => fired.push(ev.shiftKey ? 'shift-click' : 'click'),
+          style: { width: 100, height: 24 },
+        },
+        h('text', null, 'clickable'),
+      ),
+    ),
+  );
+  await userEvent.click(screen.getByTestName('clickable'));
+  assert.deepEqual(await pressChords(fired), CHORDS_FIRED);
+
+  // #329's keys are untouched: Return and Space press it, and Shift still
+  // reads as a shift-click rather than as a chord
+  fired.length = 0;
+  await userEvent.key(XK_RETURN);
+  await userEvent.key(XK_SPACE);
+  await userEvent.key(XK_KP_ENTER);
+  await userEvent.key(XK_RETURN, { modifiers: ['Shift'] });
+  assert.deepEqual(fired, ['click', 'click', 'click', 'shift-click']);
+
+  await unmount();
 });
 
 test('nothing fires while the menu itself is open', async () => {
