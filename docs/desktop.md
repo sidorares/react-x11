@@ -346,7 +346,10 @@ from the screen's origin as the click was.
 menu-bar app that wants no Dock tile pairs it with
 `createRoot({ cocoa: { activationPolicy: 'accessory' } })` above. A PNG icon
 is drawn as a **template** — its shape in the bar's ink, so it follows light
-and dark the way a symbol does; `template: false` keeps its colours.
+and dark the way a symbol does; `template: false` keeps its colours. AppKit
+is handed a new `NSMenu` only when the menu's items change, so a title that
+ticks every second leaves the menu alone, whether `menu` is memoized or
+written inline.
 
 ### What the hook hands back
 

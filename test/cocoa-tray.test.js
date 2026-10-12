@@ -264,6 +264,59 @@ test('useTray: created on mount, patched in place, removed on unmount', async ()
   assert.equal(native.of('removeStatusItem').length, 1);
 });
 
+// #939: a tray whose title ticks — a timer, a clock — rebuilt its NSMenu on
+// every tick, and the mount sent it twice. The bridge builds a new NSMenu
+// for every setStatusItemMenu, so one is owed only when the menu it would
+// build changed.
+test('useTray: the menu reaches the bridge only when it changes', async () => {
+  const native = fakeNative();
+  const app = appOver(native);
+  const root = await createRoot({ app });
+  roots.push(root);
+  const picked = [];
+  const stable = [{ label: 'Open', onSelect: () => picked.push('stable') }];
+  function Tray({ title, menu }) {
+    useTray({ title, menu });
+    return h('box');
+  }
+  const show = async (title, menu) => {
+    root.render(
+      h('window', { width: 200, height: 100 }, h(Tray, { title, menu })),
+    );
+    await tick();
+    await tick();
+  };
+  const menus = () => native.of('setStatusItemMenu');
+
+  await show('1', stable);
+  assert.equal(menus().length, 1, 'mount sends the menu once');
+  await show('2', stable);
+  await show('3', stable);
+  assert.equal(native.of('setStatusItem').at(-1)[1].title, '3');
+  assert.equal(menus().length, 1, 'a title tick leaves the menu alone');
+
+  // a menu written inline is a new array every render; the same items
+  // build the same NSMenu, and a pick reaches this render's onSelect
+  const inline = (label, tag) => [{ label, onSelect: () => picked.push(tag) }];
+  await show('4', inline('Open', 'inline 4'));
+  await show('5', inline('Open', 'inline 5'));
+  assert.equal(menus().length, 1, 'the same items, rebuilt, are not re-sent');
+  native.emit({
+    type: 'menu-activate',
+    menu: 'status',
+    id: menus()[0][1][0].id,
+  });
+  assert.deepEqual(picked, ['inline 5']);
+
+  await show('6', inline('Close', 'close'));
+  assert.equal(menus().length, 2, 'a changed item is sent');
+  assert.equal(menus()[1][1][0].title, 'Close');
+  await show('7', null);
+  assert.deepEqual(menus().at(-1)[1], null, 'no menu: back to clicks');
+  await show('8', null);
+  assert.equal(menus().length, 3);
+});
+
 test('useTray on a backend with no tray is inert and says so', async () => {
   const app = createMockApp();
   const root = await createRoot({ app });
