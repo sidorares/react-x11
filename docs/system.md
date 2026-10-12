@@ -282,8 +282,16 @@ another when input pulls it back down, which is what every idle daemon on the
 desktop is built on. On a server without one (XQuartz) it falls back to polling
 MIT-SCREEN-SAVER, scheduled against the remaining time rather than on a tick —
 and on win32, `GetLastInputInfo` on the same schedule, which answers for the
-whole session the way the X counter does.
-On a display with neither it stays `false`.
+whole session the way the X counter does. On macOS it is the same schedule
+over the session's idle time: the `@windowkit/appkit` bridge's `lastInputMs()`
+(CoreGraphics' count, a call) where it has one, and otherwise `ioreg`'s
+`HIDIdleTime` — a short-lived child process per check, which is one per
+`timeout` while the user is there and one every quarter of it, at most every
+half minute, while they are away.
+On an X display with neither extension it stays `false`.
+
+Nothing is armed until a component subscribes, and the alarm or the poll
+stops when the last subscriber to that `timeout` unmounts.
 
 `timeout` is a dependency, so hold it in a constant rather than building it
 inline from state that moves.

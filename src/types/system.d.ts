@@ -169,7 +169,9 @@ export function useWindowState(
  *
  * Costs no timer where the X server carries an `IDLETIME` counter (Xorg
  * does): a SYNC alarm fires on each crossing. Falls back to polling
- * MIT-SCREEN-SAVER, and stays `false` on a display with neither.
+ * MIT-SCREEN-SAVER, and stays `false` on an X display with neither. On win32
+ * and macOS it polls the session's own idle time on the same adaptive
+ * schedule.
  */
 export function useIdle(timeout: number): boolean;
 

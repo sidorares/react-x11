@@ -30,8 +30,11 @@ import { idleSnapshot, keepAwake, watchIdle } from './idle.js';
  * **no timer at all**: a SYNC alarm fires when the counter crosses `timeout`
  * and again when input pulls it back down. On a server without one (XQuartz)
  * it falls back to polling MIT-SCREEN-SAVER, scheduled against the remaining
- * time rather than on a tick. On a display with neither it stays `false`,
- * which is the honest answer for a display that cannot be asked.
+ * time rather than on a tick. win32 and macOS answer the same number
+ * themselves (`GetLastInputInfo`; the bridge's CoreGraphics read, or `ioreg`
+ * under a bridge without one) and are polled on that schedule. On an X
+ * display with neither extension it stays `false`, which is the honest
+ * answer for a display that cannot be asked.
  *
  * `timeout` is a dependency: passing a computed value re-arms on every change,
  * so hold it in a constant or a `useMemo` rather than building it inline from
