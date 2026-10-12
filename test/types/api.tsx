@@ -1162,7 +1162,12 @@ function Widgets() {
       <textinput sensitive value="s3cret" onChange={() => {}} />
 
       <Tabs
-        items={[{ id: 'a', label: 'A', content: <box /> }]}
+        items={[
+          { id: 'a', label: 'A', content: <box /> },
+          // a function is the lazy form, built only while its tab is selected
+          { id: 'b', label: 'B', content: () => <box /> },
+          { id: 'c', label: 'C' },
+        ]}
         defaultValue="a"
         orientation="vertical"
         manual
@@ -1257,6 +1262,15 @@ const _badSlider = <Slider value="20" />;
 
 // @ts-expect-error — Tabs items need an id
 const _badTabs = <Tabs items={[{ label: 'A' }]} />;
+
+const _badTabContent = (
+  <Tabs
+    items={[
+      // @ts-expect-error — a content function is called with no arguments
+      { id: 'a', label: 'A', content: (id: string) => <text>{id}</text> },
+    ]}
+  />
+);
 
 // --- entry points ----------------------------------------------------------
 
@@ -2021,6 +2035,7 @@ void _badSelectable;
 void _badSelectionHandler;
 void _badSlider;
 void _badTabs;
+void _badTabContent;
 
 // `react-x11/yoga` — the engine, for a package that implements a layout
 // algorithm of its own (@react-x11/components' <Html> and its `display: flex`).

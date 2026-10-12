@@ -672,7 +672,14 @@ export const MenuBar: ComponentType<MenuBarProps>;
 export interface TabItem {
   id: string;
   label: string;
-  content?: ReactNode;
+  /**
+   * The panel shown while this tab is selected. A function is the lazy form:
+   * it is called with no arguments, only while its tab is selected, and again
+   * on each render of `Tabs` while it stays selected — nothing is memoised, so
+   * a hidden tab's panel is never built. Leave it out to use `Tabs` as a pure
+   * navigator whose panel lives elsewhere.
+   */
+  content?: ReactNode | (() => ReactNode);
   disabled?: boolean;
 }
 
