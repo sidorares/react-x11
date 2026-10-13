@@ -36,6 +36,7 @@
 // length — is not a spine, and the tree is measured whole.
 
 import {
+  columnSums,
   declaresOwnMinimum,
   inFlow,
   mainAxisOf,
@@ -74,7 +75,9 @@ const PADDINGS = [
  * main axis without wrapping, and with a height that is its content's —
  * nothing named on the height axis (`declaresOwnMinimum`), so neither a
  * size, a floor, a ceiling nor a clip stands between its children and its
- * extent.
+ * extent. And one the sum has an answer for (`columnSums`): a column with a
+ * block pulled up over the one before it is measured, as a root, rather
+ * than summed into no extent and no floor.
  */
 export function isSummableColumn(node) {
   const style = node.style;
@@ -86,7 +89,8 @@ export function isSummableColumn(node) {
     mainAxisOf(node) === 'height' &&
     style.flexDirection !== 'column-reverse' &&
     (style.flexWrap == null || style.flexWrap === 'nowrap') &&
-    !declaresOwnMinimum(node, 'height')
+    !declaresOwnMinimum(node, 'height') &&
+    columnSums(node)
   );
 }
 
@@ -129,6 +133,17 @@ export function spineScope(root, sources, listOnly) {
   const spine = new Set();
   const stops = new Set();
   const offered = new OfferedWidths(root);
+  // asked once a column: a dozen rows that arrive in one column of a
+  // thousand ask it of that column a dozen times (`columnSums`)
+  const summable = new Map();
+  const sums = (column) => {
+    let answer = summable.get(column);
+    if (answer === undefined) {
+      answer = isSummableColumn(column);
+      summable.set(column, answer);
+    }
+    return answer;
+  };
   for (const source of sources) {
     const list = listOnly(source);
     // the way up to where the change stops mattering
@@ -148,7 +163,7 @@ export function spineScope(root, sources, listOnly) {
     let top = -1;
     for (let i = path.length - 1; i >= 0; i--) {
       const summed = i > 0 || list;
-      if (!summed || !isSummableColumn(path[i])) {
+      if (!summed || !sums(path[i])) {
         top = i;
         break;
       }
@@ -379,6 +394,9 @@ function rootWidths(node, offered, stop) {
   if (!stretched(node)) return null;
   if (MARGINS.some((key) => typeof style[key] === 'string')) return null;
   if (PADDINGS.some((key) => typeof style[key] === 'string')) return null;
+  // …nor a gap that is a share of something: laid out alone, it is a share
+  // of something else
+  if (typeof (style.rowGap ?? style.gap) === 'string') return null;
   return offered.in(parent, stop);
 }
 

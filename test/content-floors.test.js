@@ -1290,11 +1290,12 @@ test('a frame collects what changed once, ahead of the first pass', async () => 
   });
 });
 
-test('a block whose margin stops being a length ends the spine it sits in', async () => {
+test('a block whose margin stops being a length makes its column the root of the spine', async () => {
   // A spine sums its column from the extents its blocks carry, and a margin
-  // that is not a length is one it cannot add (`styleFlags`, read once per
-  // style). A change beside such a block is the whole tree's, from the frame
-  // the block takes it until the frame it gives it up.
+  // that is not a length is one it cannot add (`columnSums`). A change
+  // beside such a block measures the column alone, as the root of its spine,
+  // from the frame the block takes the margin until the frame it gives it
+  // up — and comes out as the whole tree measures it.
   await withTestElements(async () => {
     const at = (margin, n) =>
       box(
@@ -1317,8 +1318,8 @@ test('a block whose margin stops being a length ends the spine it sits in', asyn
     const steps = [
       [5, 60, true],
       ['10%', 60, null], // the box's own change
-      ['10%', 80, false], // the label beside it
-      ['10%', 20, false],
+      ['10%', 80, true], // the label beside it
+      ['10%', 20, true],
       [5, 20, null],
       [5, 70, true],
     ];
@@ -1342,6 +1343,81 @@ test('a block whose margin stops being a length ends the spine it sits in', asyn
     }
     await scoped.root.unmount();
     await whole.root.unmount();
+  });
+});
+
+test('a column a spine cannot sum is measured instead, and keeps its floor', async () => {
+  // A spine sums a column from the extents its blocks carry
+  // (`columnHeightSpan`), and some columns it has no sum for: a block pulled
+  // up over the one before it by a negative margin, a gap that is a share of
+  // something, nothing left in flow. Taken for a spine all the same, the sum
+  // came back with no answer, an extent of none wrote the style's own
+  // minimum, and the column and every one summed above it lost its floor:
+  // a label that changed beside a `marginTop: -4` squeezed its section in a
+  // pane into its padding, the rows drawn over the box below it, and left
+  // nothing to scroll. Such a column is measured as the root of its spine
+  // now (`columnSums`), and with the tree where it cannot be laid out alone.
+  await withTestElements(async () => {
+    const sections = {
+      // [section style, its rows, whether the frame is on a spine]
+      'a negative margin': [
+        { padding: 8, gap: 4 },
+        (n) => [
+          h('label', { key: 'l', length: n }),
+          box({ height: 20 }),
+          box({ height: 20 }),
+          box({ height: 20, marginTop: -4 }),
+        ],
+        true,
+      ],
+      'a percentage gap': [
+        { padding: 8, gap: '10%' },
+        (n) => [
+          h('label', { key: 'l', length: n }),
+          box({ height: 20 }),
+          box({ height: 20 }),
+        ],
+        false,
+      ],
+      'nothing in flow': [
+        { padding: 8, gap: 4 },
+        (n) =>
+          n === 40 ? [h('box', { key: 'r', style: { height: 20 } })] : [],
+        true,
+      ],
+    };
+    for (const [name, [style, rows, spine]] of Object.entries(sections)) {
+      const at = (n) =>
+        box(
+          { overflow: 'scroll', flexGrow: 1 },
+          box({}, box(style, ...rows(n))),
+          box({ height: 400 }),
+        );
+      const windowProps = { width: 120, height: 150 };
+      const scoped = await mount(at(40), windowProps);
+      const whole = await mount(at(40), windowProps);
+      for (const n of [60, 20, 80]) {
+        const before = scoped.node._layoutPasses;
+        await rerender(scoped.app, scoped.root, at(n), windowProps);
+        assert.strictEqual(
+          scoped.node._layoutPasses - before <= 1,
+          spine,
+          `${name}, label ${n}: on a spine`,
+        );
+        whole.node._floorsUnscoped = true;
+        await rerender(whole.app, whole.root, at(n), windowProps);
+        assertSameMeasurement(scoped.node, whole.node, `${name}, label ${n}`);
+      }
+      if (name === 'a negative margin') {
+        // 16 of padding, three gaps of 4 and four rows of 20, less the 4
+        // the last row is pulled up by — and its column as tall
+        const section = scoped.node.children[0].children[0].children[0];
+        assert.strictEqual(section.abs.height, 104, 'as tall as it holds');
+        assert.strictEqual(section.parent.abs.height, 104, 'and its column');
+      }
+      await scoped.root.unmount();
+      await whole.root.unmount();
+    }
   });
 });
 

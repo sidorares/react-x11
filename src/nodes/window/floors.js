@@ -333,7 +333,8 @@ export function dirtyOutside(node, boundaries, paths) {
  * Undefined where it cannot be summed: a child with no extent on hand, a
  * negative margin (the boxes would overlap, and the last would not have to
  * be the lowest), or nothing in flow at all — a leaf's answer, which is
- * `contentSpan`'s to give.
+ * `contentSpan`'s to give. All but the first are the column's own, and a
+ * spine never sums a column that has them (`columnSums`).
  */
 export function columnHeightSpan(node) {
   const yoga = node.yoga;
@@ -361,6 +362,30 @@ export function columnHeightSpan(node) {
     yoga.getComputedBorder(Yoga.EDGE_TOP) +
     yoga.getComputedBorder(Yoga.EDGE_BOTTOM)
   );
+}
+
+/**
+ * Whether `columnHeightSpan` has an answer for this column once its children
+ * carry extents: everything else it asks — something in flow, margins down
+ * that are lengths and pull no box over the one before it, a gap that is a
+ * length — asked ahead of the measurement, from the same readings.
+ *
+ * A spine asks it before it sums a column (`isSummableColumn`), because once
+ * the measurement is under way a sum with no answer has nowhere to go: it is
+ * written as the column's extent, an extent of none writes the style's own
+ * minimum, and the column — and every column summed above it — lost its
+ * floor to a label that changed beside a block with `marginTop: -4`.
+ */
+export function columnSums(node) {
+  if (columnGap(node) === undefined) return false;
+  let count = 0;
+  for (const child of node.children) {
+    if (!inFlow(child)) continue;
+    const { top, bottom } = marginsDown(child);
+    if (!(top >= 0 && bottom >= 0)) return false;
+    count += 1;
+  }
+  return count !== 0;
 }
 
 /**
