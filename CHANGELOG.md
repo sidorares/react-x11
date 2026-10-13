@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.47.5](https://github.com/sidorares/react-x11/compare/v2.47.4...v2.47.5) (2026-10-13)
+
+
+### Bug Fixes
+
+* a column whose blocks a spine cannot sum (a negative margin, a gap or margin that is not a length, nothing in flow) is measured as the spine's root and keeps its floor, where the empty sum took the floor off it and every column above it ([#954](https://github.com/sidorares/react-x11/issues/954)) ([#955](https://github.com/sidorares/react-x11/issues/955)) ([9135e5a](https://github.com/sidorares/react-x11/commit/9135e5a4449d037421f124388c7aefff65be15bc))
+
 ## [2.47.4](https://github.com/sidorares/react-x11/compare/v2.47.3...v2.47.4) (2026-10-12)
 
 
