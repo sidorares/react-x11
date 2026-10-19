@@ -34,7 +34,8 @@
 // the pasteboard, so an in-app drop still gets `e.items` by reference and
 // `e.source === 'internal'`, the contract the X11 transport keeps. Other
 // applications read the pasteboard, where a thunk is a promise the bridge
-// asks `provide` to keep.
+// asks `provide` to keep — on the main thread. On a worker the bridge takes
+// no `provide`, and a thunk resolves as the drag begins (`dragSpec`).
 //
 // ## Types
 //
@@ -223,6 +224,16 @@ export const wire = (value) =>
  * to keep. The files thunk alone resolves now, because the items cannot
  * be counted without it.
  *
+ * Unless the app is on a worker (`upFront`, threaded mode): AppKit asks a
+ * provider from inside its own callback on the main thread, which a worker
+ * cannot answer in time, so the bridge refuses `provide` there with a
+ * TypeError. That was every drag on a Mac, since an app runs on a worker
+ * by default. There every thunk resolves now, as the win32 backend has
+ * them, and this is the external promotion `_resolve` caches for: an
+ * in-app drop is handed the same value by reference. A value that resolves
+ * to nothing, or that JSON cannot carry (a cycle, a node), is left off
+ * the pasteboard rather than failing the drag; an in-app drop still has it.
+ *
  * No image, and so no slide-back. The picture of the drag is the app's own
  * `<popup dragPreview>`; what the system session carries is a blank 1×1.
  * Left at AppKit's default, a refused or cancelled drop plays
@@ -236,7 +247,7 @@ export const wire = (value) =>
  * to animate from `onDragEnd`. Not a seam: there is no system image for
  * a caller to want slid back.
  */
-export function dragSpec(session, native, scale) {
+export function dragSpec(session, native, scale, { upFront = false } = {}) {
   const types = session.types;
   const reverse = new Map(); // uti -> react-x11 type
   const items = [];
@@ -256,7 +267,17 @@ export function dragSpec(session, native, scale) {
     if (!uti || uti in first) continue;
     reverse.set(uti, type);
     const raw = session._data[type];
-    first[uti] = typeof raw === 'function' ? null : wire(raw);
+    if (!upFront) {
+      first[uti] = typeof raw === 'function' ? null : wire(raw);
+      continue;
+    }
+    const value = session._resolve(type);
+    if (value == null) continue;
+    try {
+      first[uti] = wire(value);
+    } catch {
+      // not something the pasteboard can carry; the in-app drop has it
+    }
   }
   if (Object.keys(first).length) {
     if (items.length) Object.assign(items[0], first);
@@ -269,7 +290,11 @@ export function dragSpec(session, native, scale) {
     items,
     operations: session.actions,
     slideBack: false,
-    provide: (uti) => wire(session._resolve(reverse.get(uti) ?? uti)),
+    ...(upFront
+      ? null
+      : {
+          provide: (uti) => wire(session._resolve(reverse.get(uti) ?? uti)),
+        }),
   };
 }
 

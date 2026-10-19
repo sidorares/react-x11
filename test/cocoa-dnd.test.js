@@ -807,4 +807,121 @@ describe('the drag side', () => {
     spec.provide('public.png', 0);
     assert.equal(asked, 1, 'resolved once per drag');
   });
+
+  test('on a worker every value is on the pasteboard as the drag begins, and a drop here still gets it by reference', async () => {
+    const native = fakeNative();
+    // the bridge on a worker: AppKit asks a provider on the main thread,
+    // so `provide` is refused there (@windowkit/appkit `BeginDrag`)
+    const beginDrag = native.beginDrag;
+    native.beginDrag = (win, spec) => {
+      if (typeof spec.provide === 'function') {
+        throw new TypeError(
+          'beginDrag: `provide` answers AppKit synchronously, which a ' +
+            'worker cannot — give every value up front',
+        );
+      }
+      beginDrag(win, spec);
+      return undefined;
+    };
+    const app = appOver(native);
+    const root = await createRoot({ app });
+    roots.push(root);
+    const log = [];
+    const asked = [];
+    const row = { id: 9 };
+    const cyclic = {};
+    cyclic.self = cyclic;
+    const thunk = (type, value) => () => {
+      asked.push(type);
+      return value;
+    };
+    root.render(
+      h(
+        'window',
+        { width: 400, height: 200 },
+        h('box', {
+          draggable: true,
+          dragData: {
+            'application/x-demo-row': thunk('row', row),
+            'application/x-demo-node': thunk('node', cyclic),
+            'image/png': thunk('png', Buffer.from([1, 2, 3])),
+            'text/html': thunk('html', null),
+            'text/plain': 'p',
+          },
+          dragActions: ['move'],
+          onDragEnd: (e) => log.push(['end', e.action, e.dropped]),
+          style: {
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            width: 100,
+            height: 100,
+          },
+        }),
+        h('box', {
+          dropAccept: ['application/x-demo-node'],
+          onDragOver: (e) => e.accept('move'),
+          onDrop: (e) =>
+            log.push([
+              'drop',
+              e.items['application/x-demo-row'],
+              e.items['application/x-demo-node'],
+            ]),
+          style: {
+            position: 'absolute',
+            left: 200,
+            top: 0,
+            width: 150,
+            height: 150,
+          },
+        }),
+      ),
+    );
+    await settle(app);
+    const wnd = wndOf(app);
+    app._threaded = true;
+    try {
+      press(wnd, 50, 50);
+      move(wnd, 70, 50);
+      await tick();
+    } finally {
+      app._threaded = false;
+    }
+    const [[, spec]] = native.of('beginDrag');
+    assert.ok(!('provide' in spec), 'nothing promised');
+    const [item] = spec.items;
+    assert.equal(item[DYN('application/x-demo-row')], JSON.stringify(row));
+    assert.deepEqual([...item['public.png']], [1, 2, 3]);
+    assert.equal(item['public.utf8-plain-text'], 'p');
+    assert.ok(
+      !(DYN('application/x-demo-node') in item),
+      'JSON cannot carry it',
+    );
+    assert.ok(!('public.html' in item), 'nothing to carry');
+    assert.deepEqual(asked.sort(), ['html', 'node', 'png', 'row']);
+
+    const n = wnd.windowNumber;
+    const local = {
+      local: true,
+      sourceWindowNumber: n,
+      types: [],
+      operations: ['move'],
+    };
+    native.emit(dragEvent('drag-enter', n, 250, 30, local));
+    native.emit(dragEvent('drag-perform', n, 250, 30, local));
+    await tick();
+    assert.equal(log[0][0], 'drop');
+    assert.ok(log[0][1] === row, 'the row, by reference');
+    assert.ok(log[0][2] === cyclic, 'what the pasteboard could not carry');
+    assert.equal(asked.length, 4, 'resolved once per drag');
+    native.emit({
+      type: 'drag-session-ended',
+      x: 250,
+      y: 30,
+      operation: 'move',
+      dropped: true,
+    });
+    await tick();
+    assert.deepEqual(log[1], ['end', 'move', true]);
+  });
 });
