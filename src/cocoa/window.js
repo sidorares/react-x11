@@ -520,7 +520,9 @@ export class CocoaWindow {
     if (this.destroyed) return null;
     const began = this._native.beginDrag(
       this._h,
-      dragSpec(session, this._native, this.scale),
+      dragSpec(session, this._native, this.scale, {
+        upFront: this.app._threaded,
+      }),
     );
     this.app._afterInput();
     return began;
