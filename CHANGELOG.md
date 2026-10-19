@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.48.0](https://github.com/sidorares/react-x11/compare/v2.47.5...v2.48.0) (2026-10-19)
+
+
+### Features
+
+* **cocoa:** REACT_X11_COCOA_PANE_STRETCH, or cocoa.paneStretch, says when a &lt;Frame&gt; pane's last frame is stretched while a resize waits on the next, apart from resizeWait ([#961](https://github.com/sidorares/react-x11/issues/961)) ([cc6ad7b](https://github.com/sidorares/react-x11/commit/cc6ad7bbb6f7d0639507f021a089d514e30ce050))
+
+
+### Bug Fixes
+
+* **cocoa:** a drag from an app on its worker hands AppKit every value as it begins, where dragSpec always passed a provide callback the bridge refuses off the main thread, and every drag on a Mac threw from beginDrag ([#959](https://github.com/sidorares/react-x11/issues/959)) ([5395eac](https://github.com/sidorares/react-x11/commit/5395eac43a71267f6d499f459b0ca4bc6164beb1))
+
 ## [2.47.5](https://github.com/sidorares/react-x11/compare/v2.47.4...v2.47.5) (2026-10-13)
 
 
