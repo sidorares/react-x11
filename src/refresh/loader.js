@@ -31,11 +31,22 @@ import { markHotReloadSession } from '../registry.js';
 const RUNTIME_URL = new URL('./index.js', import.meta.url).href;
 const SRC_DIR = fileURLToPath(new URL('../', import.meta.url));
 
-const TOOLCHAIN = [
-  '@babel/core',
-  '@babel/plugin-transform-react-jsx',
-  'react-refresh',
-  'hot-module-replacement',
+/**
+ * The hot-reload toolchain: each specifier this loader imports, and the
+ * package it comes from. Optional peer dependencies, so `react-x11 dev`
+ * checks the same list before it starts (src/cli/dev.js).
+ */
+export const TOOLCHAIN = [
+  { specifier: '@babel/core', name: '@babel/core' },
+  {
+    specifier: '@babel/plugin-transform-react-jsx',
+    name: '@babel/plugin-transform-react-jsx',
+  },
+  { specifier: 'react-refresh/babel', name: 'react-refresh' },
+  {
+    specifier: 'hot-module-replacement/register',
+    name: 'hot-module-replacement',
+  },
 ];
 
 async function loadToolchain() {
@@ -54,13 +65,22 @@ async function loadToolchain() {
     '@babel/plugin-transform-react-jsx',
   );
   const refreshTransform = await load('react-refresh/babel', 'react-refresh');
+  // Resolved rather than imported: importing it registers its hooks, which
+  // has to wait until ours are in. Checked here all the same, so a missing
+  // one is this message and not a bare ERR_MODULE_NOT_FOUND after the
+  // babel hooks already went in.
+  try {
+    import.meta.resolve('hot-module-replacement/register');
+  } catch {
+    missing.push('hot-module-replacement');
+  }
   if (missing.length > 0) {
     throw new Error(
       `react-x11/refresh: the hot-reload toolchain is not installed ` +
         `(missing: ${missing.join(', ')}). It is a set of optional peer ` +
         `dependencies — an app that never hot-reloads does not carry them. ` +
         `Install them where the dev loop runs:\n\n` +
-        `  npm install --save-dev ${TOOLCHAIN.join(' ')}\n`,
+        `  npm install --save-dev ${TOOLCHAIN.map((t) => t.name).join(' ')}\n`,
     );
   }
   return {

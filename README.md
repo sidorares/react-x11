@@ -446,14 +446,15 @@ To have it manage your real session instead — including replacing
 npm run examples:tasks:hot     # then edit examples/tasks.jsx while it runs
 ```
 
-Runs the tasks example under the supported hot-reload entry point,
-`react-x11/refresh` (`node --import react-x11/refresh/register`, Node ≥
-22.15), with React **Fast Refresh**: saving `examples/tasks.jsx` updates
-the edited components in place. The connection, the mounted window, and
-component state — the task list, even half-typed text in the input —
-survive the reload (a component whose hook signature changed remounts
-alone). Any app adopts it the same way — no accept handlers, no loader
-files to copy; see
+Runs the tasks example under `react-x11 dev`, with React **Fast Refresh**
+(Node ≥ 22.15): saving `examples/tasks.jsx` updates the edited components
+in place. The connection, the mounted window, and component state — the
+task list, even half-typed text in the input — survive the reload (a
+component whose hook signature changed remounts alone). Any app adopts it
+the same way, with no accept handlers and no entry file to write:
+`npx react-x11 dev app.jsx` mounts the file's default export, in a window
+of its own while the tree renders none, and offers to install the toolchain
+on its first run; see
 [docs/ecosystem/dev-tooling.md](docs/ecosystem/dev-tooling.md#react-refresh).
 
 ## React DevTools

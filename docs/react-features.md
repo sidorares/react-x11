@@ -381,12 +381,14 @@ props and highlight-on-hover all behave normally, with the highlight drawn
 into the real window. The Profiler **Timeline** tab is unavailable; the
 commit list and flamegraph work. See [devtools.md](devtools.md).
 
-**Fast Refresh** works without a bundler, through the supported
-`react-x11/refresh` entry point (`node --import react-x11/refresh/register`).
-Keep anything whose identity must survive a reload — contexts, stores — in
-a module you are not editing. See
-[dev tooling](ecosystem/dev-tooling.md#react-refresh) and the
-[hot-reload example](../examples/tasks-hot.jsx).
+**Fast Refresh** works without a bundler: `npx react-x11 dev app.jsx` runs
+a file with its default export mounted and every save applied in place, over
+the `react-x11/refresh` entry point, which a tool that hosts the loader
+itself registers with `--import`. Keep anything
+whose identity must survive a reload — contexts, stores — in a module you
+are not editing. See [dev tooling](ecosystem/dev-tooling.md#react-refresh)
+and the [hot-reload example](../examples/tasks.jsx), which is
+`npm run examples:tasks:hot`.
 
 ## Not available
 

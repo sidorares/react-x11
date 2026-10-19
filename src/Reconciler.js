@@ -44,6 +44,7 @@ import { hasDropProps } from './dnd.js';
 import { AppProvider } from './appcontext.js';
 import {
   defaultRootHandlers,
+  NOT_IN_WINDOW,
   setErrorHandler,
   STRICT_TOKENS,
 } from './errors.js';
@@ -138,11 +139,13 @@ const ROOT_TYPES = new Set(['window', 'popup', THEME_SCOPE]);
  * `<box>` the app never wrote (#584).
  */
 function notAtRoot(type) {
-  return new Error(
+  const err = new Error(
     `react-x11: <${type}> must be inside a <window> — it is at the root of ` +
       'the tree, which holds only <window> and <popup> elements. Render it ' +
       `inside one: <window><${type} …/></window>.`,
   );
+  err.code = NOT_IN_WINDOW;
+  return err;
 }
 
 const HostConfig = {

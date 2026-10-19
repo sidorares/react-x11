@@ -6,8 +6,8 @@
 // input. The window also refuses to be resized smaller than its own content
 // (`minWidth="auto"`, at the bottom of this file) — drag an edge and see.
 // Run with: npm run examples:tasks  (needs an X server / DISPLAY)
-// — or hot-reloadable with: npm run examples:tasks:hot  (edit this file
-// while it runs; see tasks-hot.jsx)
+// — or hot-reloadable with: npm run examples:tasks:hot, which is
+// `react-x11 dev examples/tasks.jsx` (edit this file while it runs)
 import React, { useContext, useMemo, useReducer, useState } from 'react';
 import ReactX11, { Button, Checkbox } from '../src/index.js';
 import { DispatchContext } from './tasks-context.js';
@@ -197,11 +197,12 @@ function App() {
 
 export default App;
 
-// Skip the autorun under hot reload too: tasks-hot.jsx owns the root
-// there, and this module re-evaluates on every reload. The default import
-// (not the named `createRoot`) because this call sits at module top level:
-// the hot loader rejects named-import calls there — under a reload those
-// bindings initialize in a microtask.
+// Skip the autorun under hot reload too: `react-x11 dev` mounts the default
+// export there, and this module re-evaluates on every reload — a createRoot
+// here would open another window per save. The default import (not the
+// named `createRoot`) because this call sits at module top level: the hot
+// loader rejects named-import calls there — under a reload those bindings
+// initialize in a microtask.
 if (!process.env.REACT_X11_NO_AUTORUN && !import.meta.hot) {
   const root = await ReactX11.createRoot();
   root.render(<App />);

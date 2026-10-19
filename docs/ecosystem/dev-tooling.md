@@ -68,16 +68,110 @@ X11 window. See [devtools](../devtools.md) for the full walkthrough.
 
 ## react-refresh {#react-refresh}
 
-**Supported — `react-x11/refresh` is the entry point.** Fast Refresh
-without a bundler: edit a component, and the mounted X11 window updates in
-place with hook state intact. The X connection, the window, the task list,
-half-typed text in an input — all survive.
+**Supported — `react-x11 dev` is the command, and `react-x11/refresh` the
+entry point under it.** Fast Refresh without a bundler: edit a component,
+and the mounted window updates in place with hook state intact. The X
+connection, the window, the task list, half-typed text in an input — all
+survive.
 
 ```sh
-node --enable-source-maps --import react-x11/refresh/register app.jsx
+npx react-x11 dev app.jsx
 ```
 
-The app's entry needs no changes. The loader instruments every `.jsx`
+### `react-x11 dev` {#react-x11-dev}
+
+The package's `bin`, and the route with nothing to set up. What it does,
+each because the bare loader leaves it to the app:
+
+- **It is the entry, and imports the file.** The file named on node's
+  command line is the one module hot-module-replacement never watches (see
+  below), so here the file is imported instead, which makes it an ordinary
+  hot module: an app in one file reloads.
+- **It mounts the file's default export.** A file that mounts a root of its
+  own while it is imported runs as it is — `dev` sees the root appear and
+  mounts nothing — and then the modules it imports reload while it does
+  not. A file that runs both ways mounts itself behind
+  `if (!import.meta.hot)`, which is false under `dev` and true under `node`,
+  `tsx` and `bun`; `examples/tasks.jsx` is written that way. One that mounts
+  itself unguarded _and_ exports only components is told, at start, that
+  every save re-runs its `createRoot` and opens another window.
+- **It supplies a `<window>` while the tree renders none.** The tree is
+  mounted as it is; a drawn element at the root throws an error with
+  `code: 'NOT_IN_WINDOW'` before anything commits, and on that `dev` mounts
+  it again inside a window titled after the file, sized to its content with
+  a 320×200 floor. Decided again on every reload: render a `<window>` and
+  `dev`'s goes (the component remounts, so its state resets — `dev` says
+  so), lose it and it comes back. A tree that renders a `<window>` _beside_
+  content in none stays wrapped, with a note saying which content needs a
+  window. Closing the window ends the process, as closing an app's primary
+  window does.
+- **It says when a save will not reload.** A module reloads in place only
+  when everything it exports is a component by React Refresh's rule — a
+  capitalized name — so `export default () => …` and a module exporting a
+  constant beside its component run, but saving them reloads nothing. `dev`
+  says so, and why, when it starts, instead of leaving the first save to
+  find out.
+- **It asks before it installs the toolchain.** The four packages below are
+  optional peer dependencies, so an app's users never download them; `dev`
+  finds the ones missing, pins them to the ranges react-x11 is written
+  against, and runs the project's package manager — from its lockfile, else
+  the one that launched `dev`, else npm — when you say yes, then starts
+  again. With no terminal to ask on it prints the command and exits.
+- **It runs the project's react-x11.** A second copy of the renderer is a
+  root nobody refreshes, so a global or npx-cached `react-x11` hands over to
+  the copy the file imports, and a file that imports none is told to
+  install it.
+
+An error thrown while rendering takes the tree down as it would anywhere;
+fix it and save, and the next reload renders it again. A throw from an
+event handler is reported and dispatch continues. Arguments after the file
+are the app's: `react-x11 dev app.jsx --size large` hands the app the
+`process.argv` that `node app.jsx --size large` would. `.jsx` files are
+compiled and hot; `.js` and `.mjs` run as Node runs them, and the `.jsx`
+modules they import are hot. TypeScript is not supported yet.
+
+### Under `--import` {#refresh-import}
+
+`dev` hosts the loader in its own process; a tool that hosts it itself —
+a workbench, a custom dev loop — registers it with `--import`:
+
+```sh
+node --enable-source-maps --import react-x11/refresh/register main.jsx
+```
+
+The entry — the file named on the command line — is the one module that is
+**never reloaded**: hot-module-replacement starts watching a module when
+another module imports it, and nothing imports the entry. So an app written
+as one file does not reload at all, and nothing says so. Keep the entry to
+mounting, and the components in modules it imports:
+
+```jsx
+// main.jsx — written once, never edited while the app runs
+import React from 'react';
+import ReactX11 from 'react-x11'; // default import: see the rules below
+import App from './app.jsx'; // `export default function App() { ... }`
+
+const root = await ReactX11.createRoot();
+root.render(<App />);
+```
+
+A tool that needs the loader's options writes its own two-line `--import`
+module instead of `react-x11/refresh/register`:
+
+```js
+// tool-register.mjs, then: node --import ./tool-register.mjs app.jsx
+import { registerRefresh } from 'react-x11/refresh/loader';
+
+await registerRefresh({
+  extensions: ['.jsx'], // which files are hot modules
+  ignore: (path) => path.includes('/stores/'), // identity that must survive
+  prelude: ['globalThis.__TOOL__ = true'], // injected into every hot module
+});
+```
+
+### How it reloads {#refresh-rules}
+
+Both routes run the same loader. It instruments every `.jsx`
 module and decides per module whether it is a **refresh boundary**: a
 module whose exports are all components self-accepts, so an edit to it (or
 to anything below it with no boundary of its own) re-evaluates up to that
@@ -94,7 +188,8 @@ onReload(({ urls, refreshed }) => {
 ```
 
 Node 22.15 or newer is required, for synchronous `module.registerHooks`,
-and the toolchain rides four optional peer dependencies:
+and the toolchain rides four optional peer dependencies, which `dev` offers
+to install and `--import` expects installed:
 
 ```sh
 npm install --save-dev @babel/core @babel/plugin-transform-react-jsx react-refresh hot-module-replacement
@@ -109,27 +204,16 @@ injecting the runtime import into every hot module's prelude. The hot
 boundary excludes `node_modules` and react-x11's own sources, so React,
 the renderer and `react-refresh/runtime` stay singletons.
 
-A tool that needs the seams — a workbench, a custom dev loop — writes its
-own two-line `--import` module instead of `react-x11/refresh/register`:
-
-```js
-// tool-register.mjs, then: node --import ./tool-register.mjs app.jsx
-import { registerRefresh } from 'react-x11/refresh/loader';
-
-await registerRefresh({
-  extensions: ['.jsx'], // which files are hot modules
-  ignore: (path) => path.includes('/stores/'), // identity that must survive
-  prelude: ['globalThis.__TOOL__ = true'], // injected into every hot module
-});
-```
-
 The constraints are enforced errors now, not folklore:
 
 - **A named import called at module top level inside a hot module is a
   transform error.** Named imports become live bindings initialized in a
   microtask, so at module scope the value is still undefined. Use the
   default import at top level (`React.createContext(...)`, not
-  `createContext(...)`); inside components anything goes.
+  `createContext(...)`); inside components anything goes. The entry is
+  transformed like the rest, so a named `createRoot` import followed by a
+  top-level `await createRoot()` is this error: write
+  `ReactX11.createRoot()` there.
 - **Only the classic JSX runtime.** `jsxRuntime: 'automatic'` throws: the
   automatic runtime appends its `react/jsx-runtime` import to the last
   import's line, which the line-oriented import rewrite breaks.
@@ -139,10 +223,12 @@ The constraints are enforced errors now, not folklore:
 
 What is _not_ enforced, so it is not rediscovered as a bug:
 
-- An edit only reaches the tree if a boundary sits on its import chain.
-  The entry itself (no exports) is not one — editing it needs a restart.
-  So does a module whose importers dead-end without any component-only
-  module above.
+- Under `--import`, an edit to the entry is dropped, whatever the entry
+  exports: it is never watched (above), so editing it needs a restart. An
+  edit anywhere else reaches the tree only if a boundary sits on its import
+  chain; a module whose importers lead to the entry without passing a
+  component-only module is dropped the same way. Neither says anything —
+  `dev` says the second, at start, for the file it runs.
 - **Module-scope side effects re-run on every reload** of the module and
   of everything between it and its boundary. Keep hot modules'
   top level idempotent, and keep identity that must survive (contexts,

@@ -299,6 +299,16 @@ no override-redirect staging (issue #4).
   `minmax(200px, 1fr)` from asking them anything; and a bare number is a
   count in `gridTemplate*`, a length in `gridAuto*` and a line in
   `gridColumn`/`gridRow`, on purpose.
+- `src/cli/` — the package's `bin`, `react-x11 dev <file>`: hot reload
+  with nothing to set up (docs/ecosystem/dev-tooling.md). Three things
+  are easy to undo. It has to **stay the entry and import the file**: the
+  module named on node's command line is the one hot-module-replacement
+  never watches, so a `dev` that spawned `node --import … <file>` would
+  bring back the silent one-file trap it exists to remove. It imports the
+  renderer **only after `registerRefresh()` and the refresh runtime**,
+  which patch React DevTools' hook before the renderer is handed to it. And
+  it knows a file mounted itself by `liveApps()` growing across the import,
+  not by reading the file.
 
 ## Pre-release: there is nothing to be compatible with
 
@@ -454,7 +464,15 @@ stop it, in one place — see docs/desktop.md for the worked example.
   React **Fast Refresh**: edit `examples/tasks.jsx` while it runs and the
   edited components update in place — connection, window, and component
   state (the task list, half-typed input text) survive; a component whose
-  hook signature changed remounts alone. Runs under the supported entry
+  hook signature changed remounts alone. It runs `examples/tasks.jsx`
+  under `react-x11 dev` — the package's `bin` (`src/cli/`), which is the
+  entry itself so the file it is handed is an ordinary hot module (the file
+  named on node's command line is the one module never watched), mounts
+  that file's default export, inside a `<window>` of its own when the tree
+  renders none (it mounts as is, and wraps on the `NOT_IN_WINDOW` code the
+  root's check throws — decided again on every reload), and asks before it
+  installs the toolchain. `test/cli-dev.test.js` runs it against the mock
+  app. Underneath is the supported entry
   point, `src/refresh/` (issue #317): `--import react-x11/refresh/register`
   chains a sync babel loader (JSX classic + `react-refresh/babel`,
   `retainLines`, plus a per-module boundary footer) under

@@ -3,6 +3,9 @@
   "version": "2.48.0",
   "description": "react renderer with X11 as a target",
   "main": "./src/index.js",
+  "bin": {
+    "react-x11": "./src/cli/index.js"
+  },
   "files": [
     "src"
   ],
@@ -26,7 +29,7 @@
     "examples:xeyes": "tsx examples/xeyes.jsx",
     "examples:dashboard": "tsx examples/dashboard.jsx",
     "examples:tasks": "tsx examples/tasks.jsx",
-    "examples:tasks:hot": "node --enable-source-maps --import react-x11/refresh/register examples/tasks-hot.jsx",
+    "examples:tasks:hot": "node src/cli/index.js dev examples/tasks.jsx",
     "examples:menu": "tsx examples/menu.jsx",
     "examples:notify": "tsx examples/notify.jsx",
     "examples:monitor": "tsx examples/monitor.jsx",

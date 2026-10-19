@@ -157,10 +157,11 @@ npm run examples:tasks:hot     # then edit examples/tasks.jsx while it runs
 
 Edited components update in place through React Fast Refresh — the
 connection, the window and component state (the task list, half-typed input)
-all survive. The example runs under the supported entry point
-(`node --import react-x11/refresh/register`): [`tasks-hot.jsx`](tasks-hot.jsx)
-is an ordinary entry, and [`tasks-context.js`](tasks-context.js) exists so
-context identity survives a reload. The constraints on what may live inside
+all survive. The script is `react-x11 dev examples/tasks.jsx`: `dev` mounts
+the file's default export, and the file mounts itself only behind
+`if (!import.meta.hot)`, so the same file runs under plain `tsx` too.
+[`tasks-context.js`](tasks-context.js) exists so context identity survives
+a reload. The constraints on what may live inside
 a hot module are enforced by the loader and documented in
 [docs/ecosystem/dev-tooling.md](../docs/ecosystem/dev-tooling.md#react-refresh).
 

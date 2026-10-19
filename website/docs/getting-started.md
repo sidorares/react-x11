@@ -126,28 +126,88 @@ full model — pseudo-states, size queries, theme tokens, transitions,
 
 ## Hot reloading
 
-React **Fast Refresh** is a supported entry point, `react-x11/refresh`
-(Node ≥ 22.15). Edit a component while the program is running and it
-updates in place — the X connection, the mounted window and component
-state (a task list, half-typed text in an input) all survive. A component
-whose hook signature changed remounts by itself.
+React **Fast Refresh**, without a bundler: edit a component while the
+program runs and it updates in place — the X connection, the window and
+component state (a task list, half-typed text in an input) all survive. A
+component whose hook signature changed remounts by itself.
 
-One import, no changes to the app's entry:
+Export the component rather than mounting it, and hand the file to
+`react-x11 dev`:
 
-```bash
-npm install --save-dev @babel/core @babel/plugin-transform-react-jsx react-refresh hot-module-replacement
-node --enable-source-maps --import react-x11/refresh/register hello.jsx
+```jsx title="app.jsx"
+import React from 'react';
+
+export default function App() {
+  const [count, setCount] = React.useState(0);
+  return (
+    <box style={{ padding: 24, gap: 12, alignItems: 'flex-start' }}>
+      <text style={{ fontSize: 22, color: '#1c4e80' }}>
+        hello from react-x11
+      </text>
+      <box
+        style={{ backgroundColor: '#1c4e80', borderRadius: 6, padding: 10 }}
+        onClick={() => setCount(count + 1)}
+      >
+        <text style={{ color: '#ffffff' }}>clicked {count} times</text>
+      </box>
+    </box>
+  );
+}
 ```
 
-The loader decides per `.jsx` module whether it is a refresh boundary (all
-exports are components) and wires everything itself; `onReload` from
-`react-x11/refresh` is the seam for a tool that wants to observe reloads.
-The constraints — no calls on **named** imports at module top level, and
-identity that must survive a reload (contexts, stores) in its own module
-the reload does not touch — are enforced by the loader with errors that
-name the fix. The full story is in
+```bash
+npx react-x11 dev app.jsx
+```
+
+Click the button a few times, then change the greeting and save: the text
+changes and the count stays. `dev` mounts the file's default export, and
+while the tree renders no `<window>` it shows it in one of its own, titled
+after the file — render a `<window>` and yours takes its place.
+
+The first run asks to install what hot reload is built from — Babel,
+`react-refresh` and `hot-module-replacement`, as dev dependencies, so an app's
+users never download them — with the project's own package manager. It needs
+Node 22.15 or newer; the app itself runs on Node 20.19.
+
+A save reloads in place when the file **exports only components, named with
+a capital** — `export default function App()`, not an anonymous arrow. A
+file that breaks the rule still runs, and `dev` says when it starts that
+saving it will not reload it, and why. Identity that has to survive a
+reload — a context, a store — goes in a module of its own that the reload
+does not touch.
+
+### The same file, without `dev`
+
+`node`, `tsx` and `bun` run a file; they mount nothing, and they supply no
+`<window>`. A file that should also run on its own renders its window and
+mounts itself where no hot reload is running:
+
+```jsx
+import ReactX11 from 'react-x11';
+
+// …the component, now inside a <window title="hello">
+
+if (!import.meta.hot) {
+  const root = await ReactX11.createRoot();
+  root.render(<App />);
+}
+```
+
+Under `dev` the guard is false and `dev` mounts the export; anywhere else
+the file mounts itself. It is `ReactX11.createRoot()` rather than a named
+`createRoot` because the hot loader compiles the file, and at a module's top
+level a **named** import is still undefined — the loader stops with an
+error saying so. Inside a component, named imports are fine.
+
+`dev` is a host for `react-x11/refresh`, which also runs as
+`node --import react-x11/refresh/register main.jsx` for a tool that hosts it
+itself. The file named on that command line is never reloaded, so the
+components go in modules it imports. Both routes, and what is enforced
+where, are in
 **[dev tooling](/docs/reference/ecosystem/dev-tooling#react-refresh)**; a
 running example is `npm run examples:tasks:hot` in the repo.
+
+### Not `bun --hot`
 
 `bun --hot` is not a substitute. Its `import.meta.hot` API belongs to the
 bundler and dev server, not the CLI runtime, where the property is
