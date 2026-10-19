@@ -139,6 +139,34 @@ test('the activation policy is fixed before the first launching call; the name a
   assert.deepEqual(native.of('setAppName'), [['Notes']]);
 });
 
+test('a <Frame> pane launches prohibited, so it is no tile in the Dock', (t) => {
+  const launches = (options) => {
+    const native = fakeNative();
+    appOver(native, options);
+    const order = native.calls.map((c) => c[0]);
+    assert.ok(
+      order.indexOf('initApp') < order.indexOf('listScreens'),
+      `initApp before listScreens, got ${order.join(', ')}`,
+    );
+    return native.of('initApp')[0];
+  };
+  assert.deepEqual(launches({ pane: true }), [
+    { activationPolicy: 'prohibited' },
+  ]);
+  // what a forked pane has: the variable the host sets, and no option
+  const was = process.env.REACT_X11_FRAME;
+  t.after(() => {
+    if (was === undefined) delete process.env.REACT_X11_FRAME;
+    else process.env.REACT_X11_FRAME = was;
+  });
+  process.env.REACT_X11_FRAME = '1';
+  assert.deepEqual(launches({}), [{ activationPolicy: 'prohibited' }]);
+  // a policy the root names is still the root's
+  assert.deepEqual(launches({ cocoa: { activationPolicy: 'accessory' } }), [
+    { activationPolicy: 'accessory' },
+  ]);
+});
+
 test('with neither option the launch is left alone', () => {
   const native = fakeNative();
   appOver(native);

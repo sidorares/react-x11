@@ -178,7 +178,17 @@ export class CocoaApp {
     // policy goes first, through `initApp`'s option (bridge >= 0.5), and
     // only when the root asked for one: a bridge without the option, or a
     // fake, is left alone.
-    const policy = options.cocoa?.activationPolicy;
+    //
+    // A `<Frame>` pane asks for one without being told: 'prohibited'. Its
+    // pixels are the host's to show, it makes no NSWindow (`createWindow`)
+    // and it runs no NSApplication, so nothing of it may be an app the user
+    // sees — and launched Regular, the bridge's default, every pane was a
+    // `node` tile of its own in the Dock and in ⌘-Tab, one per tab of a
+    // browser. Prohibited rather than accessory because a pane must not be
+    // activated either: the host window has the focus and forwards it.
+    const pane = options.pane ?? process.env.REACT_X11_FRAME === '1';
+    const policy =
+      options.cocoa?.activationPolicy ?? (pane ? 'prohibited' : undefined);
     // Under the launcher (src/cocoa/main.js) the app launched before this
     // code ran, so the policy is a switch after the fact, and a Regular
     // launch has already registered its Dock tile. The bridge publishes
@@ -257,7 +267,6 @@ export class CocoaApp {
     // here then (src/cocoa/paneplayer.js); one that does not leaves a pane
     // refusing `src`, its poster shown and `onError` told.
     this._players = new Map();
-    const pane = options.pane ?? process.env.REACT_X11_FRAME === '1';
     if (canPlay(native) && !pane) {
       this.createPlayer = (src, options) => new CocoaPlayer(this, src, options);
     }
@@ -388,7 +397,7 @@ export class CocoaApp {
 
     // Frame-pane mode: this process renders a pane whose pixels a host
     // composites (REACT_X11_FRAME is what the Frame host sets on the fork).
-    this._paneMode = options.pane ?? process.env.REACT_X11_FRAME === '1';
+    this._paneMode = pane;
     this._paneSend = null;
     // the pane's own window, the one the host lays out and forwards to
     this._paneWindow = null;
