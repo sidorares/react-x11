@@ -91,7 +91,8 @@ class PaneLayer {
    * and a smeared strip. The budget is the window's live-resize
    * handshake's (`createRoot({ cocoa: { resizeWait } })`), how long a frame
    * of a new size may take before the old one is shown in its place: 0
-   * stretches always, both ways, as before.
+   * stretches always, both ways, as before. And the app may say otherwise
+   * whatever the budget (`_stretch`).
    *
    * Down the layer the frame is at its size whatever this says. A width
    * moves where a page's lines break, and what comes is a page laid out
@@ -116,14 +117,32 @@ class PaneLayer {
    * decides the rest (`_answered`).
    */
   _anchoredNow() {
+    const stretch = this._stretch();
+    if (stretch !== 'behind') return stretch === 'never';
     const budget = this.app._resizeWait ?? RESIZE_WAIT_MS;
-    if (!(budget > 0)) return false;
     // a size asked longer ago than the budget, and no frame of any since
     const oldest = this._asked[0];
     if (oldest && now() - Math.max(oldest.at, this._answeredAt) > budget) {
       this._behind = true;
     }
     return !this._behind;
+  }
+
+  /**
+   * When the frame the layer holds is stretched to bounds that are not its
+   * size: `'behind'`, across, once the pane falls behind the budget
+   * (`_anchoredNow`); `'never'`, kept at its size and its edge carried over
+   * however late the pane is; `'always'`, both ways, Core Animation's own.
+   * The app's `cocoa.paneStretch` (REACT_X11_COCOA_PANE_STRETCH), and
+   * `'behind'` where it names none, or `'always'` at a budget of 0, which
+   * waits for no frame. An app that says `'never'` was not served by the
+   * budget: as long as AppKit holds the window's edge for a frame, so a
+   * budget a slow page never misses held every step of the drag back.
+   */
+  _stretch() {
+    const stretch = this.app._paneStretch ?? 'behind';
+    if (stretch !== 'behind') return stretch;
+    return (this.app._resizeWait ?? RESIZE_WAIT_MS) > 0 ? 'behind' : 'always';
   }
 
   /**
@@ -138,7 +157,8 @@ class PaneLayer {
    * the frame is stretched, and down it is still at its size
    * (`_anchoredNow`): the whole of each row stretched to the new width,
    * cropped or with its last row carried down. Both rects are the whole
-   * when the frame is the layer's size, and at a budget of 0.
+   * when the frame is the layer's size, and where it is stretched always
+   * (`_stretch`).
    *
    * Anchored by gravity alone, the strip the frame did not cover showed
    * whatever was under the pane, which is the `<Frame>`'s background: in
@@ -159,8 +179,7 @@ class PaneLayer {
     const rect = this._rect;
     let crop = null;
     let edge = null;
-    const budget = this.app._resizeWait ?? RESIZE_WAIT_MS;
-    if (frame && rect && budget > 0) {
+    if (frame && rect && this._stretch() !== 'always') {
       // across at its size while the pane keeps up, and down always; an
       // axis stretched is shown whole, the frame's every column across
       const across = this._anchoredNow();

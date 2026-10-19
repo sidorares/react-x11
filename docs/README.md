@@ -392,11 +392,12 @@ else's app, a `.desktop` launcher, an A/B run.
 
 **The Cocoa backend**
 
-| variable                    | effect                                                                         |
-| --------------------------- | ------------------------------------------------------------------------------ |
-| `REACT_X11_COCOA_PRESENTER` | `surface` (the measured default) or `layers`                                   |
-| `REACT_X11_COCOA_PROMOTE`   | `1`/`0`, forcing layer promotion on or off                                     |
-| `REACT_X11_CALAYERS_PATH`   | load the bridge from a checkout or an extracted tarball instead of the package |
+| variable                       | effect                                                                                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `REACT_X11_COCOA_PRESENTER`    | `surface` (the measured default) or `layers`                                                                                                     |
+| `REACT_X11_COCOA_PROMOTE`      | `1`/`0`, forcing layer promotion on or off                                                                                                       |
+| `REACT_X11_COCOA_PANE_STRETCH` | `behind` (default), `never` or `always`: when a `<Frame>` pane's last frame is stretched while a resize waits on the next ([frame.md](frame.md)) |
+| `REACT_X11_CALAYERS_PATH`      | load the bridge from a checkout or an extracted tarball instead of the package                                                                   |
 
 There are a handful more that exist only to switch off one optimisation
 while measuring it — `REACT_X11_NO_PAINT_CACHE`, `REACT_X11_NO_SCROLL_BLIT`,

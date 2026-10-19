@@ -1327,6 +1327,7 @@ async function main() {
         frameInterval: 8,
         pumpInterval: 4,
         resizeWait: 0,
+        paneStretch: 'never',
         screenPoll: 0,
         exitOnQuit: false,
       },
@@ -1334,6 +1335,8 @@ async function main() {
   ).unmount();
   // @ts-expect-error -- not a presenter
   await createRoot({ cocoa: { presenter: 'metal' } });
+  // @ts-expect-error -- when, not whether
+  await createRoot({ cocoa: { paneStretch: false } });
   // @ts-expect-error -- milliseconds, and 0 for no clock at all
   await createRoot({ cocoa: { screenPoll: 'never' } });
   // the pacing default for every window of a root, both backends

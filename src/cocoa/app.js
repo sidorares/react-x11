@@ -71,6 +71,9 @@ const PUMP_INTERVAL_MS = 8;
 // to 100, docs/windows.md §"Resize"). `createRoot({ cocoa: { resizeWait } })`
 // sets it; 0 is no handshake at all.
 const RESIZE_WAIT_MS = 50;
+// What `createRoot({ cocoa: { paneStretch } })` and
+// REACT_X11_COCOA_PANE_STRETCH take (src/cocoa/panehost.js, `_stretch`).
+const PANE_STRETCH = ['behind', 'never', 'always'];
 // How often the screen layout is re-read while something is watching it, in
 // ms. There is no event to wait for — the bridge keeps its `NSScreen` copy
 // current on macOS's notification and emits nothing (#617) — so
@@ -149,6 +152,24 @@ export class CocoaApp {
       );
     }
     this._resizeWait = resizeWait;
+    // How a `<Frame>` pane's last frame is shown while the frame of the
+    // size its layer was just given is on its way (src/cocoa/panehost.js,
+    // `_stretch`): 'behind' stretches it across once the pane falls behind
+    // `resizeWait`, 'never' keeps it at its size however late the pane is,
+    // and 'always' stretches it both ways. Apart from `resizeWait`, which
+    // is also how long AppKit holds the window's edge for a frame, so a
+    // pane that is never to be stretched would otherwise need a budget
+    // that held the drag back as long.
+    const paneStretch =
+      options.cocoa?.paneStretch ??
+      (process.env.REACT_X11_COCOA_PANE_STRETCH || 'behind');
+    if (!PANE_STRETCH.includes(paneStretch)) {
+      throw new TypeError(
+        'react-x11: cocoa.paneStretch (REACT_X11_COCOA_PANE_STRETCH) is ' +
+          `one of ${PANE_STRETCH.join(', ')} — got ${paneStretch}.`,
+      );
+    }
+    this._paneStretch = paneStretch;
 
     // The activation policy has to be fixed before the app finishes
     // launching — a Regular launch registers a Dock tile, so an agent app
