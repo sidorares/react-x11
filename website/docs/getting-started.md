@@ -164,6 +164,12 @@ changes and the count stays. `dev` mounts the file's default export, and
 while the tree renders no `<window>` it shows it in one of its own, titled
 after the file — render a `<window>` and yours takes its place.
 
+Break something and save, and the error opens in a window: the message, the
+source around the line, and the stack, each line of which opens in your
+editor on a click (`REACT_X11_EDITOR=code` for VS Code; Cursor otherwise). A
+save that does not compile leaves the app running beside it. Fix it and save
+again, and the window goes.
+
 The first run asks to install what hot reload is built from — Babel,
 `react-refresh` and `hot-module-replacement`, as dev dependencies, so an app's
 users never download them — with the project's own package manager. It needs

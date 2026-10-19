@@ -125,7 +125,7 @@ export async function runDev(file, options = {}) {
   // Before anything below loads: a module's source maps are read when it
   // loads, and only once this is on.
   process.setSourceMapsEnabled(true);
-  const { registerRefresh } = await import('../refresh/loader.js');
+  const { onTransform, registerRefresh } = await import('../refresh/loader.js');
   await registerRefresh();
   // The runtime patches React DevTools' global hook and then hands the
   // renderer to it, which has to happen before the first root commits.
@@ -135,6 +135,7 @@ export async function runDev(file, options = {}) {
   const ReactX11 = await import('../index.js');
   const { NOT_IN_WINDOW } = await import('../errors.js');
   const { liveApps } = await import('../trace-registry.js');
+  const { ErrorWindow, describeError } = await import('./errorwindow.js');
 
   // What `node file.jsx …args` would hand the app.
   process.argv = [process.argv[0], path, ...args];
@@ -210,19 +211,55 @@ export async function runDev(file, options = {}) {
   const title = `${basename(path)} — react-x11 dev`;
   let wrapped = false;
   let mixedNoted = false;
+  // What the error window shows: a render error took the app's tree down,
+  // and the app stays down until the next reload tries it again; a compile
+  // error is a save that did not compile, beside an app still running the
+  // module's last version. Both at once shows the compile error, which is
+  // the newer news.
+  let renderFailure = null;
+  let compileFailure = null;
+  // Set when a reload starts while a render error is showing: that reload is
+  // the one to try the app again on. Not the reload that threw — react-refresh
+  // calls the reload listeners in the same batch as the render that failed,
+  // and retrying there would only throw it a second time.
+  let retry = false;
   let root = null;
+  // Two children, always in these places: an error window opening or
+  // closing beside the app is then a sibling coming and going, and the app's
+  // state is untouched by it.
   const tree = () => {
     const app = React.createElement(App);
-    return wrapped
-      ? React.createElement('window', { ...DEV_WINDOW, title }, app)
-      : app;
+    const failure = compileFailure ?? renderFailure;
+    return React.createElement(
+      React.Fragment,
+      null,
+      renderFailure
+        ? null
+        : wrapped
+          ? React.createElement('window', { ...DEV_WINDOW, title }, app)
+          : app,
+      failure
+        ? React.createElement(ErrorWindow, {
+            failure,
+            title: `${basename(failure.filename ?? path)} — error`,
+            // Beside a running app it is a second window, whose closing is
+            // ours to answer: it goes until the next error. Standing in for
+            // the app it is the only one, and closing it ends the app.
+            onCloseRequest: renderFailure
+              ? undefined
+              : () => {
+                  compileFailure = null;
+                  render();
+                },
+          })
+        : null,
+    );
   };
   const render = () => root.render(tree());
-  const mounted = () => (root.app._rootChildren ?? []).length > 0;
 
   root = await (createRoot ?? ReactX11.createRoot)({
     onUncaughtError(error, info) {
-      if (error?.code === NOT_IN_WINDOW && !wrapped) {
+      if (error?.code === NOT_IN_WINDOW && !wrapped && !renderFailure) {
         wrapped = true;
         log(
           `${name} renders no <window>, so it is shown in one of react-x11 ` +
@@ -241,27 +278,65 @@ export async function runDev(file, options = {}) {
         );
         return;
       }
-      console.error(
-        'react-x11 dev: uncaught error' + (info?.componentStack ?? ''),
+      console.error(error);
+      const chain = describeError({
+        kind: 'render',
         error,
+        componentStack: info?.componentStack,
+      }).components;
+      // Already showing one: this came out of the error window itself, or
+      // the tree failed again before a reload — the terminal has it, and a
+      // window answering its own failure by mounting itself again would
+      // never stop.
+      if (renderFailure) return;
+      log(
+        (chain.length > 0 ? `thrown rendering ${chain.join(' › ')}. ` : '') +
+          `Fix it and save: ${name} is mounted again on the next reload.`,
       );
-      setImmediate(() => {
-        if (!mounted()) {
-          log(`fix it and save: ${name} is mounted again on the next reload.`);
-        }
-      });
+      renderFailure = {
+        kind: 'render',
+        error,
+        componentStack: info?.componentStack,
+      };
+      setImmediate(render);
     },
   });
 
-  // After a reload has re-rendered the edited components: take the dev
+  // A save that does not compile: the reload library prints it and keeps the
+  // module's last version, so this is the only place it can be shown. Before
+  // the mount, the import of the file itself throws, and the bin prints it.
+  //
+  // Every reload compiles at least the module it stops at, so this is also
+  // where a reload is first seen.
+  onTransform(({ filename, error }) => {
+    if (error) {
+      compileFailure = { kind: 'compile', error, filename };
+      setImmediate(render);
+      return;
+    }
+    if (renderFailure) retry = true;
+    if (compileFailure?.filename === filename) {
+      compileFailure = null;
+      setImmediate(render);
+    }
+  });
+
+  // After a reload: try an app an error took down again, and take the dev
   // window away from a tree that now brings its own. The other direction
   // needs nothing here — a tree that lost its window throws NOT_IN_WINDOW,
-  // and the handler above wraps it — and neither does a tree an error took
-  // down: react-refresh keeps the roots that failed, and renders them again
-  // on the next reload itself.
+  // and the handler above wraps it.
   const settle = () => {
-    if (!wrapped || !mounted()) return;
-    const { windows, drawn } = rootContent(root.app._rootChildren[0]);
+    if (renderFailure) {
+      if (!retry) return;
+      retry = false;
+      renderFailure = null;
+      render();
+      return;
+    }
+    if (!wrapped) return;
+    const devWindow = (root.app._rootChildren ?? [])[0];
+    if (!devWindow) return;
+    const { windows, drawn } = rootContent(devWindow);
     if (windows > 0 && drawn === 0) {
       wrapped = false;
       mixedNoted = false;

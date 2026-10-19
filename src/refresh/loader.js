@@ -349,6 +349,31 @@ function buildTransformer({ babel, jsxTransform, refreshTransform }, options) {
   };
 }
 
+const transformListeners = new Set();
+
+/**
+ * Called for every hot module this loader compiles, with `{ filename, error }`
+ * — `error` null when it compiled. The seam a host needs for a save that does
+ * not compile: hot-module-replacement catches the error of a reload and only
+ * prints it, and the app keeps running the module's last version, so nothing
+ * else tells the host. `react-x11 dev` shows it in a window. Returns an
+ * unsubscribe.
+ */
+export function onTransform(listener) {
+  transformListeners.add(listener);
+  return () => transformListeners.delete(listener);
+}
+
+function reportTransform(event) {
+  for (const listener of [...transformListeners]) {
+    try {
+      listener(event);
+    } catch (err) {
+      console.error('react-x11/refresh: an onTransform listener threw', err);
+    }
+  }
+}
+
 let registered = false;
 
 /**
@@ -444,10 +469,17 @@ export async function registerRefresh(options = {}) {
       if (hotIgnore(filename)) {
         return nextLoad(url, context);
       }
-      const { code } = transformer.transform(
-        readFileSync(filename, 'utf8'),
-        filename,
-      );
+      let code;
+      try {
+        ({ code } = transformer.transform(
+          readFileSync(filename, 'utf8'),
+          filename,
+        ));
+      } catch (error) {
+        reportTransform({ filename, error });
+        throw error;
+      }
+      reportTransform({ filename, error: null });
       return { format: 'module', source: code, shortCircuit: true };
     },
   });
