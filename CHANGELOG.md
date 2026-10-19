@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.49.0](https://github.com/sidorares/react-x11/compare/v2.48.0...v2.49.0) (2026-10-19)
+
+
+### Features
+
+* react-x11 dev &lt;file&gt; runs an app with hot reload and nothing to set up, mounting its default export, in a window of its own while the tree renders none ([#964](https://github.com/sidorares/react-x11/issues/964)) ([c221861](https://github.com/sidorares/react-x11/commit/c221861816d738d287b968b7f2c9b2ed915bb9da))
+
+
+### Bug Fixes
+
+* **cocoa:** a &lt;Frame&gt; pane launches with the prohibited activation policy, so it is no node tile in the Dock beside its host, where every tab of a browser was one ([#962](https://github.com/sidorares/react-x11/issues/962)) ([bdc41fe](https://github.com/sidorares/react-x11/commit/bdc41fe651b02c34d154c9e590b6c6b21610b19e))
+
 ## [2.48.0](https://github.com/sidorares/react-x11/compare/v2.47.5...v2.48.0) (2026-10-19)
 
 
