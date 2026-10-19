@@ -109,6 +109,14 @@ its host over is that thread's — a worker has no `process.send`. That holds
 under `--import react-x11/cocoa-main` too, which a pane inherits whenever its
 host was started under it.
 
+Nor is a macOS pane an app of its own: it launches with AppKit's
+`prohibited` activation policy, so it has no Dock tile and no ⌘-Tab entry
+and is never the active app — its host's window has the focus and forwards
+what the pane is owed. Launched with the bridge's default, `regular`, every
+pane was another `node` in the Dock beside its host, one for each tab of the
+components' browser example. A root that names `cocoa.activationPolicy`
+itself still has the one it names.
+
 ## Props: a bag of data, and stubs for the functions in it
 
 `props` crosses by **structured clone** — Dates, Maps, TypedArrays and
