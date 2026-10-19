@@ -305,7 +305,8 @@ function buildTransformer({ babel, jsxTransform, refreshTransform }, options) {
     `const $RefreshSig$ = __ReactX11Refresh.createSignatureFunctionForTransform`,
     ...prelude,
   ];
-  // Stacks through hot modules are off by these lines; dev-only.
+  // One statement a line, above the module's own first line: the source map
+  // below starts that many lines down to match.
   const preludeSource = preludeLines.join(';\n') + ';';
 
   let lastModuleInfo = null;
@@ -320,7 +321,7 @@ function buildTransformer({ babel, jsxTransform, refreshTransform }, options) {
     },
     transform(source, filename) {
       lastModuleInfo = null;
-      const { code } = babel.transformSync(source, {
+      const { code, map } = babel.transformSync(source, {
         filename,
         babelrc: false,
         configFile: false,
@@ -331,7 +332,7 @@ function buildTransformer({ babel, jsxTransform, refreshTransform }, options) {
           guardPlugin,
         ],
         retainLines: true,
-        sourceMaps: 'inline',
+        sourceMaps: true,
       });
       const { opaque, names } = lastModuleInfo;
       const exportsArg =
@@ -339,12 +340,29 @@ function buildTransformer({ babel, jsxTransform, refreshTransform }, options) {
           ? 'null'
           : `{ ${names.map((n) => `${JSON.stringify(n)}: ${n}`).join(', ')} }`;
       const footer = `\n;import.meta.hot && __ReactX11Refresh.moduleReady(import.meta.hot, import.meta.url, ${exportsArg});`;
-      return { code: `${preludeSource}\n${code}${footer}` };
+      return {
+        code:
+          `${preludeSource}\n${code}${footer}\n` +
+          inlineSourceMap(map, preludeLines.length),
+      };
     },
   };
 }
 
 let registered = false;
+
+/**
+ * Babel's map for a module, as the comment that carries it, moved `lines`
+ * down: babel describes its own output, and the prelude goes in above that.
+ * An empty line in a map's mappings is a `;`, so the shift is that many of
+ * them. hot-module-replacement, the layer above, composes this map into its
+ * own — which is what a stack trace through a hot module is read through.
+ */
+export function inlineSourceMap(map, lines) {
+  const shifted = { ...map, mappings: ';'.repeat(lines) + map.mappings };
+  const payload = Buffer.from(JSON.stringify(shifted)).toString('base64');
+  return `//# sourceMappingURL=data:application/json;charset=utf-8;base64,${payload}\n`;
+}
 
 /**
  * Which files stay out of the hot graph: every package in node_modules,

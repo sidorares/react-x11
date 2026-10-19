@@ -58,6 +58,37 @@ describe('the transform', () => {
       'user prelude should sit above the module body',
     );
   });
+
+  // Read the way a stack trace is: through Node's own SourceMap, from the
+  // comment the module carries. The prelude goes in above babel's output, so
+  // a map left where babel made it reads every line that many lines off — a
+  // user prelude entry included.
+  for (const prelude of [[], [`globalThis.__WORKBENCH__ = true`]]) {
+    test(`its source map counts the prelude (${4 + prelude.length} lines)`, async () => {
+      const t = await createTransformer({ prelude });
+      const source = `import React from 'react';\n\nexport function fail() {\n  throw new Error('line 4');\n}\n\nexport default function App() {\n  return <box />;\n}\n`;
+      const { code } = t.transform(source, '/tmp/app.jsx');
+      const comments = code.match(
+        /\/\/# sourceMappingURL=data:[^;]+;charset=utf-8;base64,(\S+)/g,
+      );
+      assert.strictEqual(
+        comments?.length,
+        1,
+        'one map, and it is the last thing in the module',
+      );
+      const payload = comments[0].slice(comments[0].indexOf('base64,') + 7);
+      const map = new nodeModule.SourceMap(
+        JSON.parse(Buffer.from(payload, 'base64').toString('utf8')),
+      );
+      const where = (needle) => {
+        const before = code.slice(0, code.indexOf(needle)).split('\n');
+        const entry = map.findEntry(before.length - 1, before.at(-1).length);
+        return entry.originalLine + 1;
+      };
+      assert.strictEqual(where('throw'), 4);
+      assert.strictEqual(where('React.createElement'), 8);
+    });
+  }
 });
 
 describe('the boundary decision (footer exports)', () => {

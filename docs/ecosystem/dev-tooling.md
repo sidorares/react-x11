@@ -204,6 +204,15 @@ injecting the runtime import into every hot module's prelude. The hot
 boundary excludes `node_modules` and react-x11's own sources, so React,
 the renderer and `react-refresh/runtime` stay singletons.
 
+Each layer puts lines of its own above a module — babel's the refresh
+prelude, hot-module-replacement's a preamble — and each says so in its source
+map and composes the map of the layer beneath it. So a stack through a hot
+module points at the source's own line and column, which is what
+click-to-component opens: run Node with `--enable-source-maps`, which
+`dev` turns on itself. The composing half is hot-module-replacement
+4.0.2's, which is why that is the floor; `test/refresh-stack.test.js` fails
+on 4.0.1.
+
 The constraints are enforced errors now, not folklore:
 
 - **A named import called at module top level inside a hot module is a
@@ -241,8 +250,6 @@ What is _not_ enforced, so it is not rediscovered as a bug:
   has for classes. Remember the named-import rule applies to it like
   anything else: call it as `Host.registerElement(...)` through a
   namespace or default import.
-- Stack traces through hot modules are off by the prelude's lines (four,
-  plus your own `prelude` entries). Dev-only.
 - Fast Refresh needs the dev reconciler; `NODE_ENV=production` is a
   registration error. There is no production hot path, by design.
 
