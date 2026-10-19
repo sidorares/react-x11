@@ -6,6 +6,14 @@
 // `data` handler and takes the process with it, or wedges the frame loop,
 // which is worse: it looks like a hang rather than a crash.
 
+/**
+ * The `code` of the error a drawn element at the root of the tree throws
+ * (Reconciler.js, `notAtRoot`). A code because a tool acts on it: `react-x11
+ * dev` mounts a component that renders no `<window>` inside one of its own,
+ * and the message is prose that is free to change.
+ */
+export const NOT_IN_WINDOW = 'NOT_IN_WINDOW';
+
 // container -> the root's onUncaughtError, when it set one
 const perContainer = new WeakMap();
 
