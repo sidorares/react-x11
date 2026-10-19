@@ -306,6 +306,11 @@ export interface RootOptions {
    * the next comes, and past it, it is stretched across to the pane's new
    * width and stays at its size down it; at 0 every one is stretched both
    * ways.
+   * `paneStretch` says when a `<Frame>` pane's last frame is stretched
+   * instead, whatever `resizeWait` is: `'behind'` (the default) as above,
+   * `'never'` keeps it at its size however late the pane's next frame is,
+   * and `'always'` stretches it both ways. `REACT_X11_COCOA_PANE_STRETCH`
+   * says the same from the environment.
    * `screenPoll` is how often the screen layout is re-read while a
    * {@link useScreens} subscriber is mounted, in ms — 500 by default, 0 for
    * never. macOS has no event for a display plugged in, unplugged or
@@ -333,6 +338,7 @@ export interface RootOptions {
     frameInterval?: number;
     pumpInterval?: number;
     resizeWait?: number;
+    paneStretch?: 'behind' | 'never' | 'always';
     screenPoll?: number;
     appName?: string;
     activationPolicy?: 'regular' | 'accessory' | 'prohibited';

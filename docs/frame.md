@@ -367,7 +367,12 @@ size again. A size the pane is never sent, because a newer one replaced it
 while a frame was being painted, is no frame late, and a fast drag of a
 page that keeps up stays at its size rather than taking one look at every
 step and the other at every frame. Each gesture starts out at its size, and
-`resizeWait: 0` stretches always, both ways, as before. And the pane hears that the window is being resized
+`resizeWait: 0` stretches always, both ways, as before. An app can choose
+apart from the budget, which is also how long AppKit holds the window's
+edge for a frame: `createRoot({ cocoa: { paneStretch } })`, or
+`REACT_X11_COCOA_PANE_STRETCH`, is `behind` for all of the above, `never`
+for a last frame kept at its size and its edge carried over however late
+the pane is, and `always` for one stretched both ways. And the pane hears that the window is being resized
 live — AppKit's drag of its edge, from its begin to its end, which a pane
 running no AppKit has no window to hear — with every size and on its own
 where only that changes (`pane-rect`'s `live`, `pane-live`): its window's

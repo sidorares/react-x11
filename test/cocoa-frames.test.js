@@ -2192,6 +2192,117 @@ test('one late frame stretches nothing, two do, and a pane is shown at its size 
   }
 });
 
+test('an app that never stretches a pane keeps its last frame at its size however late the next is, whatever the budget', () => {
+  // The budget is also how long AppKit holds the window's edge for a
+  // frame, so a budget long enough that a slow page never fell behind held
+  // every step of the drag back as long: 'never' is the app saying so
+  // apart from it.
+  let t = 0;
+  setAnimationClock(() => t);
+  try {
+    for (const resizeWait of [50, 0]) {
+      const native = fakeBridge();
+      const host = new CocoaPaneHost(
+        { _native: native, _resizeWait: resizeWait, _paneStretch: 'never' },
+        { _layer: { root: 1 }, scale: 2 },
+      );
+      t = 0;
+      host.setRect({ x: 0, y: 0, width: 400, height: 200 });
+      host.present(1, { width: 400, height: 200 });
+      // asked for 440 at 10, nothing of it by a second later, and two
+      // frames in a row far past the budget: as behind as a pane gets
+      t = 10;
+      host.setRect({ x: 0, y: 0, width: 440, height: 200 });
+      t = 1000;
+      host.setRect({ x: 0, y: 0, width: 480, height: 240 });
+      const [x, w] = sliver(400);
+      const [y, h] = sliver(200);
+      assert.deepEqual(
+        edgesOf(native).at(-1),
+        { crop: null, edge: [x, y, w, h] },
+        `at its size across and down, at a budget of ${resizeWait}`,
+      );
+      t = 1200;
+      host.present(2, { width: 440, height: 200 });
+      t = 1400;
+      host.present(3, { width: 480, height: 240 });
+      t = 1410;
+      host.setRect({ x: 0, y: 0, width: 360, height: 180 });
+      assert.deepEqual(
+        edgesOf(native).at(-1),
+        { crop: [0, 0, 360 / 480, 180 / 240], edge: null },
+        'and cropped, not squeezed, as it shrinks',
+      );
+      host.destroy();
+    }
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
+});
+
+test('an app that always stretches a pane sets no rects, whatever the budget', () => {
+  let t = 0;
+  setAnimationClock(() => t);
+  try {
+    const native = fakeBridge();
+    const host = new CocoaPaneHost(
+      { _native: native, _resizeWait: 50, _paneStretch: 'always' },
+      { _layer: { root: 1 }, scale: 2 },
+    );
+    host.setRect({ x: 0, y: 0, width: 400, height: 200 });
+    host.present(1, { width: 400, height: 200 });
+    // a pane keeping up, which 'behind' would show at its size
+    t = 10;
+    host.setRect({ x: 0, y: 0, width: 440, height: 240 });
+    t = 20;
+    host.present(2, { width: 440, height: 240 });
+    t = 30;
+    host.setRect({ x: 0, y: 0, width: 380, height: 150 });
+    assert.deepEqual(edgesOf(native), [], 'Core Animation’s own, both ways');
+    host.destroy();
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
+});
+
+test('cocoa.paneStretch, or REACT_X11_COCOA_PANE_STRETCH, says when a pane is stretched', async () => {
+  const env = process.env.REACT_X11_COCOA_PANE_STRETCH;
+  const stretchOf = async (options) => {
+    const app = new CocoaApp(fakeBridge(), options);
+    const stretch = app._paneStretch;
+    await app.close();
+    return stretch;
+  };
+  try {
+    delete process.env.REACT_X11_COCOA_PANE_STRETCH;
+    assert.equal(await stretchOf(), 'behind');
+    assert.equal(await stretchOf({ cocoa: { paneStretch: 'never' } }), 'never');
+    process.env.REACT_X11_COCOA_PANE_STRETCH = 'never';
+    assert.equal(await stretchOf(), 'never', 'from the environment');
+    assert.equal(
+      await stretchOf({ cocoa: { paneStretch: 'always' } }),
+      'always',
+      'the root over the environment',
+    );
+    // set and empty is unset, as a shell's `VAR= cmd` writes it
+    process.env.REACT_X11_COCOA_PANE_STRETCH = '';
+    assert.equal(await stretchOf(), 'behind');
+    process.env.REACT_X11_COCOA_PANE_STRETCH = 'off';
+    assert.throws(
+      () => new CocoaApp(fakeBridge()),
+      /REACT_X11_COCOA_PANE_STRETCH.*got off/,
+    );
+    delete process.env.REACT_X11_COCOA_PANE_STRETCH;
+    assert.throws(
+      () => new CocoaApp(fakeBridge(), { cocoa: { paneStretch: true } }),
+      TypeError,
+    );
+  } finally {
+    if (env === undefined) delete process.env.REACT_X11_COCOA_PANE_STRETCH;
+    else process.env.REACT_X11_COCOA_PANE_STRETCH = env;
+  }
+});
+
 test('over the real bridge, the rects a frame is shown by are ones the bridge reads', (t) => {
   // `contentsRect` and `contentsCenter` are @windowkit/appkit 0.27.0's
   // (windowkit/appkit#117). A bridge before them took the props and left
