@@ -10,40 +10,9 @@
 // loader both enable) has already rewritten that Error's stack to point at
 // original source — we only have to parse the stack text and skip the
 // frames inside React/the reconciler itself.
-import { spawn } from 'node:child_process';
-import { dirname, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { setClickToComponentHandler } from './events.js';
 import { selectInDevTools } from './DevToolsIntegration.js';
-
-const STACK_FRAME = /^\s*at\s+(?:(.+?)\s+\()?(.+?):(\d+):(\d+)\)?\s*$/;
-
-// The frames to walk past before the JSX call site itself: React captures
-// the Error inside `jsxDEV`/`createElement`, and an element created by this
-// renderer (or by node internals) is never what a click means. `SELF_DIR` is
-// whichever copy of react-x11 is running — the repo's own `src/` for the
-// examples and tests, an installed `node_modules/react-x11/src` for an app.
-//
-// Everything *else* in `node_modules` is deliberately not skipped here: a
-// frame inside an installed package is a real call site, it is just not one
-// in the application's source, and telling the two apart is what lets
-// `resolveOwnedLocation` climb to the owner that is. Skipping every
-// `node_modules` frame instead would walk straight past the library
-// component and land on whatever application frame happens to be deeper in
-// the render stack — usually the `render()` call at startup, which looks
-// like an answer and isn't.
-const REACT_RUNTIME =
-  /[\\/]node_modules[\\/](react|react-dom|react-reconciler|scheduler)[\\/]/;
-const SELF_DIR = dirname(fileURLToPath(import.meta.url)) + sep;
-
-function isInternalFrame(file) {
-  return (
-    file.startsWith('node:') ||
-    file === '<anonymous>' ||
-    file.startsWith(SELF_DIR) ||
-    REACT_RUNTIME.test(file)
-  );
-}
+import { openInEditor, stackFrames } from './editor.js';
 
 /** The first stack frame outside React/the reconciler/node internals — the
  * JSX call site for whatever element this Error was captured at, wherever it
@@ -52,25 +21,16 @@ function isInternalFrame(file) {
  * Exported because `react-x11/test`'s `sourceOf` answers the same question
  * for a test that a click answers for an editor. */
 export function resolveLocation(debugStack) {
-  const stack = debugStack?.stack;
-  if (!stack) return null;
-  for (const line of stack.split('\n').slice(1)) {
-    const match = line.match(STACK_FRAME);
-    if (!match) continue;
-    const [, functionName, rawFile, lineStr, columnStr] = match;
-    const file = rawFile.startsWith('file://')
-      ? fileURLToPath(rawFile)
-      : rawFile;
-    if (isInternalFrame(file)) continue;
-    return {
-      functionName,
-      file,
-      line: Number(lineStr),
-      column: Number(columnStr),
-      installed: file.includes(`${sep}node_modules${sep}`),
-    };
-  }
-  return null;
+  const frame = stackFrames(debugStack?.stack).find((f) => !f.internal);
+  if (!frame) return null;
+  const { functionName, file, line, column, installed } = frame;
+  return {
+    functionName: functionName ?? undefined,
+    file,
+    line,
+    column,
+    installed,
+  };
 }
 
 /** The nearest source location a click can mean: the clicked element's own
@@ -130,87 +90,6 @@ function logOwnerChain(fiber) {
   if (chain.length > 0) {
     console.log('[click-to-component] owner chain:\n  ' + chain.join('\n  '));
   }
-}
-
-// GUI editors: navigate their registered URI scheme (same idea as
-// https://github.com/sidorares/show-component, minus the browser) instead of
-// spawning their CLI shim. The CLI wrapper (e.g. `cursor -g ...`) round-trips
-// through a shell script that re-detects and re-execs the real app, which is
-// visibly slower than the OS handing the URL straight to the already-running
-// instance via Launch Services (macOS) / xdg-open (Linux).
-const EDITOR_SCHEMES = {
-  cursor: 'cursor',
-  code: 'vscode',
-  vscode: 'vscode',
-  'code-insiders': 'vscode-insiders',
-  'vscode-insiders': 'vscode-insiders',
-  windsurf: 'windsurf',
-};
-
-// Terminal editors have no URI scheme to navigate — spawn them directly.
-const EDITOR_CLI = {
-  vim: (file, line, column) => [
-    'vim',
-    [`+call cursor(${line},${column})`, file],
-  ],
-  nvim: (file, line, column) => [
-    'nvim',
-    [`+call cursor(${line},${column})`, file],
-  ],
-};
-
-const OPEN_URI_COMMAND = process.platform === 'darwin' ? 'open' : 'xdg-open';
-
-function editorUri(scheme, file, line, column) {
-  return `${scheme}://file${encodeURI(file)}:${line}:${column}`;
-}
-
-function openInEditor({ file, line, column }) {
-  const name = process.env.REACT_X11_EDITOR || 'cursor';
-  let bin, args;
-  if (EDITOR_CLI[name]) {
-    [bin, args] = EDITOR_CLI[name](file, line, column);
-  } else {
-    // an unrecognized name is assumed to be a URI scheme itself, so any
-    // editor that registers one works without a matching entry above
-    const scheme = EDITOR_SCHEMES[name] || name;
-    bin = OPEN_URI_COMMAND;
-    args = [editorUri(scheme, file, line, column)];
-  }
-  // stderr is kept (rather than the whole stdio ignored) for one reason:
-  // `open`/`xdg-open` exit non-zero and print *there* when nothing claims
-  // the scheme — an editor that isn't installed, or one whose URL handler
-  // was never registered. Swallowing that is what makes click-to-component
-  // look like it only logs: the location resolves, the console line prints,
-  // and the editor silently never opens.
-  const child = spawn(bin, args, {
-    detached: true,
-    stdio: ['ignore', 'ignore', 'pipe'],
-  });
-  let stderr = '';
-  // ...and unref'd, so keeping it does not keep the process alive: a pipe is
-  // a ref'd handle, and an editor that outlives the app it was launched from
-  // is the normal case, not a reason to hold the event loop open.
-  child.stderr.unref();
-  child.stderr.on('data', (chunk) => {
-    stderr += chunk;
-  });
-  child.on('error', (err) => {
-    console.warn(
-      `react-x11: click-to-component could not launch "${bin}" (${err.code ?? err.message}). ` +
-        'Set REACT_X11_EDITOR to your editor CLI (cursor, code, code-insiders, windsurf, vim, nvim).',
-    );
-  });
-  child.on('exit', (code) => {
-    if (!code) return;
-    console.warn(
-      `react-x11: click-to-component — \`${bin} ${args.join(' ')}\` exited ${code}. ` +
-        (stderr.trim() ? `${stderr.trim()} ` : '') +
-        `Set REACT_X11_EDITOR to the editor you actually use (currently "${name}"; ` +
-        'cursor, code, code-insiders, windsurf, vim, nvim, or any registered URI scheme).',
-    );
-  });
-  child.unref();
 }
 
 /** Briefly tint the clicked node so there is visual confirmation of what was

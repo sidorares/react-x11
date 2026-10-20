@@ -121,7 +121,7 @@
   "peerDependencies": {
     "@babel/core": "^8.0.0",
     "@babel/plugin-transform-react-jsx": "^8.0.0",
-    "hot-module-replacement": "^4.0.1",
+    "hot-module-replacement": "^4.0.2",
     "react": "^19.3.0",
     "react-refresh": "^0.19.0"
   },
@@ -153,7 +153,7 @@
     "eslint": "^9.32.0",
     "eslint-plugin-react": "^7.37.5",
     "globals": "^17.8.0",
-    "hot-module-replacement": "^4.0.1",
+    "hot-module-replacement": "^4.0.2",
     "katex": "^0.19.0",
     "prettier": "^3.6.0",
     "react": "^19.3.0",

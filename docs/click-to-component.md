@@ -51,7 +51,8 @@ when DevTools is absent, which is the usual case.
 
 `REACT_X11_EDITOR` picks the editor (`cursor` by default): `code`,
 `code-insiders`, `windsurf`, `vim`, `nvim`, or any other value, treated as a
-custom URI scheme.
+custom URI scheme. `react-x11 dev`'s error window opens a line the same way,
+through the same variable (`src/editor.js`, shared by both).
 
 ## How it works
 

@@ -122,9 +122,25 @@ each because the bare loader leaves it to the app:
   the copy the file imports, and a file that imports none is told to
   install it.
 
-An error thrown while rendering takes the tree down as it would anywhere;
-fix it and save, and the next reload renders it again. A throw from an
-event handler is reported and dispatch continues. Arguments after the file
+**Errors are shown in a window**, as well as printed:
+
+- **A render error** takes the app's tree down, as it would anywhere, and a
+  window titled `app.jsx — error` stands in for it. It shows the message, the
+  components it was thrown under, the source around the line, and the
+  stack's frames — React's, Node's and react-x11's own counted rather than
+  listed. The next save tries the app again; the save that fixes it brings
+  it back, and an app that throws again is back in the window.
+- **A save that does not compile** opens the same window beside the app,
+  which keeps running the module's last version with its state; it closes
+  once the file compiles, or when you close it.
+- A line in it opens in your editor on a click, the way
+  [click-to-component](../click-to-component.md) does, by
+  `REACT_X11_EDITOR` (`cursor` when it is unset).
+- A throw from an event handler leaves the app running, so it is only
+  printed, and dispatch continues.
+
+Stack lines point at the source's own lines, through every loader layer's
+source map; `dev` turns source maps on for you. Arguments after the file
 are the app's: `react-x11 dev app.jsx --size large` hands the app the
 `process.argv` that `node app.jsx --size large` would. `.jsx` files are
 compiled and hot; `.js` and `.mjs` run as Node runs them, and the `.jsx`
@@ -153,6 +169,18 @@ import App from './app.jsx'; // `export default function App() { ... }`
 
 const root = await ReactX11.createRoot();
 root.render(<App />);
+```
+
+A save that does not compile is otherwise only printed — hot-module-replacement
+catches the error, and the app keeps the module's last version — so a host
+that wants to show it subscribes to the loader:
+
+```js
+import { onTransform } from 'react-x11/refresh/loader';
+
+onTransform(({ filename, error }) => {
+  // error is null when filename compiled
+});
 ```
 
 A tool that needs the loader's options writes its own two-line `--import`
@@ -204,6 +232,15 @@ injecting the runtime import into every hot module's prelude. The hot
 boundary excludes `node_modules` and react-x11's own sources, so React,
 the renderer and `react-refresh/runtime` stay singletons.
 
+Each layer puts lines of its own above a module — babel's the refresh
+prelude, hot-module-replacement's a preamble — and each says so in its source
+map and composes the map of the layer beneath it. So a stack through a hot
+module points at the source's own line and column, which is what
+click-to-component opens: run Node with `--enable-source-maps`, which
+`dev` turns on itself. The composing half is hot-module-replacement
+4.0.2's, which is why that is the floor; `test/refresh-stack.test.js` fails
+on 4.0.1.
+
 The constraints are enforced errors now, not folklore:
 
 - **A named import called at module top level inside a hot module is a
@@ -241,8 +278,6 @@ What is _not_ enforced, so it is not rediscovered as a bug:
   has for classes. Remember the named-import rule applies to it like
   anything else: call it as `Host.registerElement(...)` through a
   namespace or default import.
-- Stack traces through hot modules are off by the prelude's lines (four,
-  plus your own `prelude` entries). Dev-only.
 - Fast Refresh needs the dev reconciler; `NODE_ENV=production` is a
   registration error. There is no production hot path, by design.
 

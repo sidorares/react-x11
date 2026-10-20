@@ -308,7 +308,15 @@ no override-redirect staging (issue #4).
   renderer **only after `registerRefresh()` and the refresh runtime**,
   which patch React DevTools' hook before the renderer is handed to it. And
   it knows a file mounted itself by `liveApps()` growing across the import,
-  not by reading the file.
+  not by reading the file. Its error window (`errorwindow.js`) is the
+  second child of a fragment whose first is the app, so a compile error's
+  window coming and going beside a running app never remounts it; and a
+  render error is retried only on a reload that **started after** it —
+  react-refresh runs the reload listeners in the same batch as the render
+  that threw, and retrying there throws it twice. The loader's
+  `onTransform` is how a reload is seen to start, and how a save that did
+  not compile is seen at all. Stack frames and the editor are
+  `src/editor.js`, a leaf shared with click-to-component.
 
 ## Pre-release: there is nothing to be compatible with
 

@@ -35,3 +35,19 @@ export function createTransformer(options?: RefreshOptions): Promise<{
   matches(pathname: string): boolean;
   transform(source: string, filename: string): { code: string };
 }>;
+
+/** One hot module compiled: `error` is null when it compiled, and what the
+ * compiler threw when it did not. */
+export interface TransformEvent {
+  filename: string;
+  error: Error | null;
+}
+
+/**
+ * Called for every hot module the loader compiles. A save that does not
+ * compile is otherwise only printed — the app keeps running the module's last
+ * version — so this is how a host shows it. Returns an unsubscribe.
+ */
+export function onTransform(
+  listener: (event: TransformEvent) => void,
+): () => void;

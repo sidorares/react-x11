@@ -221,19 +221,75 @@ test(
   },
 );
 
+const WINDOWS = (...titles) =>
+  new RegExp(
+    `WINDOWS ${JSON.stringify(titles).replace(/[[\]().|]/g, '\\$&')}\\n`,
+  );
+const ERROR_WINDOW = 'app.jsx — error';
+const APP_WINDOW = 'app.jsx — react-x11 dev';
+
 test(
-  'a render that throws takes the tree down, and the save that fixes it brings it back',
+  'a render that throws is shown in a window, and the save that fixes it brings the app back',
   { skip },
   async () => {
     const s = devSession({ 'app.jsx': component() });
     try {
       await s.next(RENDER('v1'));
       await s.write('app.jsx', component({ version: 'v2', body: THROWS }));
-      await s.next(/DEV fix it and save: app\.jsx is mounted again/);
-      assert.match(s.stderr, /react-x11 dev: uncaught error[\s\S]*boom/);
+      await s.next(/DEV thrown rendering App\. Fix it and save/);
+      // the app's tree is down, and the error window stands in for it
+      await s.next(WINDOWS(ERROR_WINDOW), 'the error window alone');
+      assert.match(s.stderr, /Error: boom/);
 
       await s.write('app.jsx', component({ version: 'v3' }));
       assert.strictEqual((await s.next(RENDER('v3')))[2], DEV_WINDOW);
+      await s.next(WINDOWS(APP_WINDOW), 'the app back, the error window gone');
+      // tried once per save: the reload that threw does not retry it
+      assert.strictEqual(s.stdout.match(/DEV thrown rendering/g).length, 1);
+      assert.strictEqual(s.stderr.match(/Error: boom/g).length, 1);
+    } finally {
+      s.stop();
+    }
+  },
+);
+
+test(
+  'a first render that throws opens the error window, and a save mounts the app',
+  { skip },
+  async () => {
+    const s = devSession({ 'app.jsx': component({ body: THROWS }) });
+    try {
+      await s.next(WINDOWS(ERROR_WINDOW), 'the error window');
+      await s.write('app.jsx', component({ version: 'v2' }));
+      assert.strictEqual((await s.next(RENDER('v2')))[2], DEV_WINDOW);
+      await s.next(WINDOWS(APP_WINDOW));
+    } finally {
+      s.stop();
+    }
+  },
+);
+
+test(
+  'a save that does not compile is shown beside the running app, which keeps its state',
+  { skip },
+  async () => {
+    const s = devSession({ 'app.jsx': component() });
+    try {
+      const first = await s.next(RENDER('v1'));
+      await s.write(
+        'app.jsx',
+        component({ version: 'v2' }).replace('return', 'return <'),
+      );
+      await s.next(
+        WINDOWS(APP_WINDOW, ERROR_WINDOW),
+        'the error window beside the app',
+      );
+
+      await s.write('app.jsx', component({ version: 'v3' }));
+      // gone once the file compiles, before the reload renders it
+      await s.next(WINDOWS(APP_WINDOW), 'the error window gone');
+      const fixed = await s.next(RENDER('v3'));
+      assert.strictEqual(fixed[1], first[1], 'the app was never unmounted');
     } finally {
       s.stop();
     }

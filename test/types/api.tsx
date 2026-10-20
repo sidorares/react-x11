@@ -18,9 +18,13 @@ import { Surface, decodeImageBytes } from 'react-x11/ntk';
 import type { DecodedImage } from 'react-x11/ntk';
 import type { Context2D, GlAreaNode } from 'react-x11/node';
 import { onReload, performReactRefresh } from 'react-x11/refresh';
-import { registerRefresh, createTransformer } from 'react-x11/refresh/loader';
+import {
+  registerRefresh,
+  createTransformer,
+  onTransform,
+} from 'react-x11/refresh/loader';
 import type { ReloadEvent } from 'react-x11/refresh';
-import type { RefreshOptions } from 'react-x11/refresh/loader';
+import type { RefreshOptions, TransformEvent } from 'react-x11/refresh/loader';
 import type {
   AbortSignalLike,
   FrameRate,
@@ -2084,6 +2088,14 @@ async function _Refresh() {
   const hot: boolean = transformer.matches('/app/App.jsx');
   const { code } = transformer.transform('export {}', '/app/App.jsx');
   void [hot, code, transformer.preludeLineCount];
+
+  const stop = onTransform(({ filename, error }: TransformEvent) => {
+    const failed: string | null = error
+      ? `${filename}: ${error.message}`
+      : null;
+    void failed;
+  });
+  stop();
 }
 
 void _Refresh;
