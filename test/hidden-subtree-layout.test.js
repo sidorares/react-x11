@@ -7,7 +7,7 @@
 // row's height and a scroll).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import React from 'react';
+import React, { Activity } from 'react';
 
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient } from 'ntk';
@@ -212,4 +212,102 @@ test('a box shown again after changes inside it is painted as a repaint paints i
     shown.equals(await read()),
     'the frame is what a full repaint draws',
   );
+});
+
+test('a scroll pane under a hidden <Activity> is not walked, and keeps its offset', async (t) => {
+  // React hides an `<Activity>` (and a suspended `<Suspense>`) through
+  // `hidden`, not the style, so the walk that stops at a `display: 'none'`
+  // box went on into it. The pane was laid out at nothing there: clamped to
+  // its start, it reported a viewport of nothing, and a list built for that
+  // put new rows into a subtree yoga left dirty when it hid it — rows it
+  // never laid out, NaN — and the next frame to walk the whole tree threw on
+  // them. The box sized in numbers around it is what bounds the content
+  // floors to it, which is what leaves the subtree dirty.
+  const pane = React.createRef();
+  const other = React.createRef();
+  const viewports = [];
+  const { render } = await mount(t, (count, hidden) =>
+    h(
+      'window',
+      { width: W, height: H },
+      h(
+        'box',
+        { style: { flexGrow: 1 } },
+        h(
+          'box',
+          { ref: other, style: { height: 40, overflow: 'scroll' } },
+          h('box', { style: { height: 400 } }),
+        ),
+        h(
+          'box',
+          {
+            style: {
+              position: 'absolute',
+              top: 40,
+              left: 0,
+              width: 200,
+              height: 120,
+            },
+          },
+          h(
+            Activity,
+            { mode: hidden ? 'hidden' : 'visible' },
+            h(
+              'box',
+              {
+                ref: pane,
+                style: { flexGrow: 1, overflow: 'scroll' },
+                onViewport: (v) => viewports.push(v),
+              },
+              h(
+                'box',
+                {},
+                Array.from({ length: count }, (_, i) =>
+                  h('text', { key: i }, `row ${i}`),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  const root = (await render(20, false))._reactX11Node;
+  const frame = () => {
+    root._scheduled = false;
+    root.flush();
+  };
+  // a hidden subtree renders at React's offscreen priority, after the
+  // commit `render` resolves on
+  const offscreen = () => new Promise((resolve) => setTimeout(resolve, 30));
+  frame();
+  // React detaches refs as it hides, so the node is held here
+  const node = pane.current;
+  node.scrollTo(60);
+  frame();
+  const at = node.scrollY;
+  assert.ok(at > 0, 'scrolled');
+
+  await render(20, true);
+  await offscreen();
+  frame();
+  await render(40, true);
+  await offscreen();
+  frame();
+  other.current.scrollTo(20);
+  assert.doesNotThrow(frame, 'a frame that walks the whole tree');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(node.scrollY, at, 'hidden, the pane keeps its offset');
+  assert.ok(
+    !viewports.some((v) => v.width === 0 && v.height === 0),
+    'and reports no viewport of nothing',
+  );
+
+  await render(40, false);
+  await offscreen();
+  frame();
+  assert.equal(node.scrollY, at, 'shown where it was left');
+  for (const row of node.children[0].children) {
+    assert.ok(Number.isFinite(row.abs.y), 'every row placed');
+  }
 });

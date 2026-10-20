@@ -251,6 +251,13 @@ something else took focus meanwhile, so a boundary that re-suspends
 mid-edit does not drop the user out of what they were typing. See
 [events.md](events.md#focus-and-visibility) for the rules and the way out.
 
+**Scroll positions come back too.** What a hidden boundary holds is not
+placed while it is hidden — the same as under `display: 'none'` — so a scroll
+pane in it is not clamped to the start of content it no longer lays out,
+reports no `onViewport` or `onScroll` until it is shown, and is shown at the
+offset it was left at. A tab kept mounted under `<Activity>` reopens on the
+row the user was reading.
+
 If a `<window>` is inside the boundary, hiding it **unmaps the real window**.
 The window manager treats the reveal as a new window: it may re-place it,
 restack it, or apply its own geometry, and anything the user did to it can be
