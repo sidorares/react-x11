@@ -127,7 +127,10 @@ export interface WindowState {
   /** Both axes. One axis alone shows up in `states`. */
   readonly maximized: boolean;
   /** What the window manager actually did, not what `<window fullscreen>`
-   *  asked for. */
+   *  asked for — the title bar's button included. On the cocoa backend it
+   *  turns as AppKit's transition begins, before the animation, so chrome
+   *  an app hides in full screen goes while the window grows rather than
+   *  after. */
   readonly fullscreen: boolean;
   /** The raw `_NET_WM_STATE` names, e.g. `['maximized_vert', 'focused']` —
    *  what the window manager put there, where `<window states>` is what was

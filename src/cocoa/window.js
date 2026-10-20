@@ -11,6 +11,15 @@ import { CocoaDropTransport, dragSpec } from './dnd.js';
 import { CocoaLayerPresenter } from './presenter.js';
 import { CocoaPromotion } from './promotion.js';
 
+/** The bridge verb each `_NET_WM_STATE` name maps onto (`setWmState`). */
+const STATE_VERBS = {
+  fullscreen: 'setWindowFullScreen',
+  maximized: 'setWindowZoomed',
+  maximized_vert: 'setWindowZoomed',
+  maximized_horz: 'setWindowZoomed',
+  hidden: 'setWindowMiniaturized',
+};
+
 let nextWindowId = 1;
 // The slack a frame clock allows under its interval, in ms: a timer's drift
 // and no more (`CocoaApp._frameDue`, `_frameWait`, `nextFrameAt`). It lives
@@ -275,6 +284,10 @@ export class CocoaWindow {
   // --- events --------------------------------------------------------------
 
   on(name, fn) {
+    // what a change is measured from: the states when the first listener
+    // came, which it reads for itself with getWmStates
+    if (name === 'statechange' && !this._lastStates)
+      this._lastStates = this.getWmStatesNow();
     let list = this._handlers.get(name);
     if (!list) this._handlers.set(name, (list = []));
     list.push(fn);
@@ -284,6 +297,14 @@ export class CocoaWindow {
       const at = list.indexOf(fn);
       if (at >= 0) list.splice(at, 1);
     };
+  }
+
+  /** ntk's spelling of the function `on` answers, for a listener held by
+   * the function it added (`useWindowState`'s `statechange`). */
+  off(name, fn) {
+    const list = this._handlers.get(name);
+    const at = list ? list.indexOf(fn) : -1;
+    if (at >= 0) list.splice(at, 1);
   }
 
   emit(name, ev) {
@@ -449,31 +470,93 @@ export class CocoaWindow {
   setActions() {}
 
   /**
-   * `_NET_WM_STATE` requests, as far as this backend has verbs for them:
-   * `demands_attention` is the Dock bounce (`requestUserAttention`), held
-   * until the state is removed or the window goes. Every other name resolves
-   * `false` — ntk's own contract for a state the server cannot honour —
-   * because the bridge has no zoom/miniaturize/fullscreen verbs yet
-   * (windowkit/appkit#15 scoped them out); WindowNode swallows the false.
+   * `_NET_WM_STATE` requests, with the verb AppKit has for each:
+   *
+   * | name | verb |
+   * | --- | --- |
+   * | `fullscreen` | the green button's full-screen Space (`setWindowFullScreen`) |
+   * | `maximized`, `maximized_vert`, `maximized_horz` | the zoom to the standard frame (`setWindowZoomed`) — AppKit zooms both axes or neither |
+   * | `hidden` | to the Dock and back (`setWindowMiniaturized`) |
+   * | `demands_attention` | the Dock bounce (`requestUserAttention`), held until the state is removed or the window goes |
+   *
+   * Every other name resolves `false` — ntk's own contract for a state the
+   * server cannot honour — and so does a name whose verb a bridge older than
+   * @windowkit/appkit 0.30.0 does not have; WindowNode swallows the false.
+   * A transition is AppKit's to animate, and what happened comes back as
+   * `statechange` (`_refreshStates`).
    */
   setWmState(names, action = 'add') {
     const list = Array.isArray(names) ? names : [names];
+    const held = action === 'toggle' ? new Set(this.getWmStatesNow()) : null;
+    const wants = (name) => (held ? !held.has(name) : action !== 'remove');
     let honoured = true;
     for (const name of list) {
-      if (name !== 'demands_attention') {
+      if (name === 'demands_attention') {
+        const holding = this._attentionRequest != null;
+        const on = action === 'toggle' ? !holding : action === 'add';
+        if (on && !holding && !this.destroyed) {
+          this._attentionRequest = this.app.requestAttention();
+        } else if (!on && holding) {
+          this.app.cancelAttention(this._attentionRequest);
+          this._attentionRequest = null;
+        }
+        continue;
+      }
+      const verb = STATE_VERBS[name];
+      const fn = verb && this._native[verb];
+      if (typeof fn !== 'function' || this.destroyed) {
         honoured = false;
         continue;
       }
-      const held = this._attentionRequest != null;
-      const wants = action === 'add' || (action === 'toggle' && !held);
-      if (wants && !held && !this.destroyed) {
-        this._attentionRequest = this.app.requestAttention();
-      } else if (!wants && held) {
-        this.app.cancelAttention(this._attentionRequest);
-        this._attentionRequest = null;
-      }
+      // a toggle of an axis reads the pair: zoomed is both or neither
+      const on =
+        held && verb === 'setWindowZoomed'
+          ? !held.has('maximized_vert')
+          : wants(name);
+      fn.call(this._native, this._h, on);
     }
     return Promise.resolve(honoured);
+  }
+
+  /**
+   * What AppKit has done with the window, in `_NET_WM_STATE` names — the
+   * names the X11 and Wayland windows report, so `useWindowState()` and
+   * `onStatesChange` read them the same way: `fullscreen`, the zoom as
+   * `maximized_vert` + `maximized_horz`, the Dock as `hidden`, the key
+   * window as `focused`. Read from the bridge's published window state, so
+   * a worker answers without a hop; `fullscreen` there says where a
+   * transition is going from the moment it starts, which is when an app
+   * hides its chrome. A bridge older than 0.30.0 publishes only `key`.
+   */
+  getWmStatesNow() {
+    const f = this._h != null ? this._native.getWindowFrame?.(this._h) : null;
+    if (!f) return [];
+    const out = [];
+    if (f.fullscreen) out.push('fullscreen');
+    if (f.zoomed) out.push('maximized_vert', 'maximized_horz');
+    if (f.miniaturized) out.push('hidden');
+    if (f.key) out.push('focused');
+    return out;
+  }
+
+  getWmStates() {
+    return Promise.resolve(this.getWmStatesNow());
+  }
+
+  /**
+   * Something that can change the states happened — a full-screen
+   * transition, the Dock, a resize (AppKit says nothing of a zoom but the
+   * resize), the key window moving — so read them again and say so if they
+   * moved. Free for a window nobody asked: no listener, no read.
+   */
+  _refreshStates() {
+    if (this.destroyed || !this._handlers.get('statechange')?.length) return;
+    const next = this.getWmStatesNow();
+    const was = this._lastStates ?? [];
+    this._lastStates = next;
+    if (was.length === next.length && was.every((n, i) => n === next[i]))
+      return;
+    this.emit('statechange', next);
   }
 
   // --- drag and drop (src/cocoa/dnd.js) ------------------------------------
