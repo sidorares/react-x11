@@ -22,6 +22,8 @@
 // name: it runs before the entry is even loaded, and skips the checks.
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isMainThread, SHARE_ENV, Worker } from 'node:worker_threads';
 
 import { loadNative } from './native.js';
@@ -156,6 +158,15 @@ const ENTRY_POINT = new Set([
 // ts-node/esm`, `--experimental-loader ./hooks.mjs`.
 const LOADER_FLAG = /^--(?:import|loader|experimental-loader)(?:=|$)/;
 
+// The module Bun runs an entry from (`startedRunning`): one it writes
+// itself, which imports the entry (measured, Bun 1.4).
+const BUN_MAIN = 'bun:main';
+
+// What Bun parses an entry as, by its extension: a .ts file may hold a
+// `<T>x` cast, which TSX reads as an element, and JSX is allowed in a .js
+// file, where the JSX reader takes any script a plain one would.
+const SCAN_LOADER = { '.tsx': 'tsx', '.ts': 'ts', '.mts': 'ts', '.cts': 'ts' };
+
 /**
  * Why this import should not move the app onto a worker, or null when it
  * should. A pure answer over what the process says about itself, so that
@@ -278,14 +289,14 @@ function compiledExecutable(bun) {
  * and later evaluate an `import()` the entry makes before the loop's first
  * turn, so an app that made one moved and ran its entry twice.
  *
- * Bun reports 1 there from the first line; what tells in Bun is the entry's
- * record in the module cache, which is there once the entry has been
- * evaluated and absent while its imports are (measured, Bun 1.4).
+ * Bun reports no loop there, its `nodeTiming` a stand-in at 1 once
+ * `node:perf_hooks` is loaded, and leaves no frame below a module it
+ * evaluates, so it is read its own way (`bunStartedRunning`).
  */
 function startedRunning(bun, moduleUrl, entry) {
   if (!bun) return !evaluatedFromEntryPoint();
   try {
-    return Boolean(createRequire(moduleUrl).cache?.[entry]?.loaded);
+    return bunStartedRunning(bun, moduleUrl, entry);
   } catch {
     return false;
   }
@@ -293,21 +304,8 @@ function startedRunning(bun, moduleUrl, entry) {
 
 /** Whether this stack, async frames and all, comes from `ENTRY_POINT`. */
 function evaluatedFromEntryPoint() {
-  const { prepareStackTrace, stackTraceLimit } = Error;
-  let sites;
-  try {
-    // Reflect.set: an Error the app has frozen is not a reason to throw
-    // from its import of react-x11
-    Reflect.set(Error, 'stackTraceLimit', Infinity);
-    Reflect.set(Error, 'prepareStackTrace', (_, callSites) => callSites);
-    const held = {};
-    Error.captureStackTrace(held);
-    sites = held.stack;
-  } finally {
-    Reflect.set(Error, 'prepareStackTrace', prepareStackTrace);
-    Reflect.set(Error, 'stackTraceLimit', stackTraceLimit);
-  }
-  if (!Array.isArray(sites)) return false;
+  const sites = callSites();
+  if (!sites) return false;
   for (const site of sites) {
     const file = site.getFileName() ?? '';
     if (ENTRY_POINT.has(file)) return true;
@@ -315,6 +313,105 @@ function evaluatedFromEntryPoint() {
     if (site.isAsync() && !file.startsWith('node:')) return false;
   }
   return false;
+}
+
+/**
+ * `startedRunning` in Bun, read from three things it shows of the entry's
+ * run (each measured, Bun 1.4).
+ *
+ * Its module registry. Bun runs the entry from a module it writes itself,
+ * `bun:main`, which imports it, and `require.cache` lists an ES module once
+ * it has been evaluated: `bun:main` is there once the entry has finished,
+ * top-level awaits and all, and an import made after that is late. Before
+ * then the entry's own record says nothing either way. Bun marks a CommonJS
+ * module `loaded` before its body runs, which read as late from a CommonJS
+ * entry's first line, so it never moved; and an ES module has no record
+ * until it is evaluated, which read as not started for an entry awaiting
+ * its `import()` of react-x11, so it moved and ran a second time on the
+ * worker.
+ *
+ * The stack. Bun's loader evaluates an ES module's imports with no frame
+ * below the module, so a frame below react-x11 is code that loaded it
+ * synchronously. A CommonJS entry is in `require.cache` from its first line,
+ * and on its first run its own wrapper is the outermost frame. Bun runs the
+ * nextTicks and microtasks that first run queues before it evaluates
+ * `bun:main`: a callback there in another module reads as late, and one in
+ * the entry itself as its first run, unless in strict code it ends by
+ * returning its `require()`, which JavaScriptCore makes a tail call that
+ * leaves it no frame. For an ES module entry, a frame below react-x11 is a
+ * CommonJS module the entry imports, on its first run, or a `require()` in
+ * a module's body, and a bundle carries react-x11 inside the entry itself:
+ * each of them the start.
+ *
+ * The entry's static imports. An ES module's body runs once every module it
+ * imports statically has been evaluated: while one has not, the entry has
+ * not run a line and react-x11 is part of its graph, an `import()` that one
+ * of those modules awaits included; once all have, the entry's body is
+ * running or waiting on a top-level await, and asked for react-x11 itself.
+ * Read with Bun's own scanner and resolver, and what they cannot answer
+ * throws, which reads as the start.
+ */
+function bunStartedRunning(bun, moduleUrl, entry) {
+  const cache = createRequire(entry).cache;
+  // the entry has finished
+  if (BUN_MAIN in cache) return true;
+  const outer = outermostFile();
+  // a CommonJS entry: late unless on its first run
+  if (entry in cache) return outer !== undefined && outer !== entry;
+  let own = null;
+  try {
+    own = fileURLToPath(moduleUrl);
+  } catch {
+    // a CommonJS bundle has no import.meta.url
+  }
+  // react-x11 inside the entry, or loaded by code below it on the stack
+  if (own === entry || (outer !== undefined && outer !== own)) return false;
+  // reached by an import: late once the entry's body has started
+  const { imports } = new bun.Transpiler({
+    loader: SCAN_LOADER[path.extname(entry)] ?? 'jsx',
+  }).scan(fs.readFileSync(entry, 'utf8'));
+  const dir = path.dirname(entry);
+  return imports.every(
+    ({ kind, path: specifier }) =>
+      kind !== 'import-statement' || bun.resolveSync(specifier, dir) in cache,
+  );
+}
+
+/**
+ * The file of the outermost frame on this stack that is not native code,
+ * or undefined where the stack cannot be read.
+ */
+function outermostFile() {
+  const sites = callSites();
+  if (!sites) return undefined;
+  for (let i = sites.length - 1; i >= 0; i--) {
+    if (!sites[i].isNative()) return sites[i].getFileName() ?? undefined;
+  }
+  return undefined;
+}
+
+/**
+ * This stack as call sites, every frame of it, or null where it cannot be
+ * read as call sites — an `Error` the app has frozen, say. Raises the stack
+ * trace limit and sets a formatter for as long as it takes, and puts back
+ * the app's own.
+ */
+function callSites() {
+  const { prepareStackTrace, stackTraceLimit } = Error;
+  let sites;
+  try {
+    // Reflect.set: an Error the app has frozen is not a reason to throw
+    // from its import of react-x11
+    Reflect.set(Error, 'stackTraceLimit', Infinity);
+    Reflect.set(Error, 'prepareStackTrace', (_, frames) => frames);
+    const held = {};
+    Error.captureStackTrace(held);
+    sites = held.stack;
+  } finally {
+    Reflect.set(Error, 'prepareStackTrace', prepareStackTrace);
+    Reflect.set(Error, 'stackTraceLimit', stackTraceLimit);
+  }
+  return Array.isArray(sites) ? sites : null;
 }
 
 /**

@@ -560,8 +560,10 @@ does follow it onto a worker; tsx 4.23 does from Node 22.22.3, by its own
 version check. On Node 24 and later tsx follows from tsx 4.21.1 and Node
 24.11.1, and an older one there stops the app as it starts, on
 `ERR_UNKNOWN_FILE_EXTENSION` (measured, tsx 4.20.6): update tsx, or set
-`REACT_X11_THREADED=0`. Bun moves an ES module entry the way Node does, and
-tells a late import its own way ([macos.md](macos.md#the-renderers-half)).
+`REACT_X11_THREADED=0`. Bun moves an ES module entry and a CommonJS one,
+`bun app.mjs` and `bun app.cjs`, and keeps the main thread for an entry
+that imports react-x11 with an `import()`, measured on Bun 1.4; it tells a
+late import its own way ([macos.md](macos.md#the-renderers-half)).
 
 ## Checklist
 

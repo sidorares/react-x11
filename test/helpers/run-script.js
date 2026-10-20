@@ -21,9 +21,18 @@ const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
  * @returns {Promise<{ code: number, error?: Error, stdout: string, stderr: string }>}
  */
 export function runNode(args, env = {}, timeout = 20000) {
+  return run(process.execPath, args, env, timeout);
+}
+
+/** `runNode`, with the `bun` on PATH in node's place. */
+export function runBun(args, env = {}, timeout = 20000) {
+  return run('bun', args, env, timeout);
+}
+
+function run(file, args, env, timeout) {
   return new Promise((resolve) => {
     const child = execFile(
-      process.execPath,
+      file,
       args,
       { cwd: repo, env: { ...process.env, ...env }, timeout },
       (error, stdout, stderr) =>
