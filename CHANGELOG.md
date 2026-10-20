@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.51.0](https://github.com/sidorares/react-x11/compare/v2.50.0...v2.51.0) (2026-10-20)
+
+
+### Features
+
+* **cli:** react-x11 dev turns on click-to-component and connects to React DevTools by default ([#975](https://github.com/sidorares/react-x11/issues/975)) ([b523cfb](https://github.com/sidorares/react-x11/commit/b523cfbe6a369b95cff30964cc26a83c84f2803e))
+* **cocoa:** useWindowState, onStatesChange and &lt;window fullscreen&gt; follow the green button, the zoom and the Dock ([#978](https://github.com/sidorares/react-x11/issues/978)) ([5b497e1](https://github.com/sidorares/react-x11/commit/5b497e1dc9aa806eb47754089929b26ebdf33771))
+
+
+### Bug Fixes
+
+* **layout:** a subtree React hides is not walked either, so a scroll pane under a hidden &lt;Activity&gt; keeps its offset and cannot throw ([#974](https://github.com/sidorares/react-x11/issues/974)) ([f7a90b4](https://github.com/sidorares/react-x11/commit/f7a90b4a287b544b84b748686751a104d0be2637))
+* **website:** the playground loads again, where importing react-x11 threw on a page's process before any demo ran ([#977](https://github.com/sidorares/react-x11/issues/977)) ([584f432](https://github.com/sidorares/react-x11/commit/584f4325803bfa9ab283beabb5b50c2a9b5e0636))
+
 ## [2.50.0](https://github.com/sidorares/react-x11/compare/v2.49.0...v2.50.0) (2026-10-20)
 
 
