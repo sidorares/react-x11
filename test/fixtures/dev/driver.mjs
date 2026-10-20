@@ -34,6 +34,15 @@ await runDev(process.argv[2], {
 });
 console.log('READY');
 
+// The top-level windows by title, printed whenever they change: an error
+// window comes and goes with no render of the app's to report it.
+let windows = null;
+setInterval(() => {
+  const now = JSON.stringify(
+    ((app ?? globalThis.devApp)?._rootChildren ?? []).map((w) => w.props.title),
+  );
+  if (now !== windows) console.log(`WINDOWS ${(windows = now)}`);
+}, 20);
+
 // The mock app holds no socket, and the file watcher is deliberately not
-// persistent; the test ends this process.
-setInterval(() => {}, 60_000);
+// persistent; the interval above keeps it alive, and the test ends it.
