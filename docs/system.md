@@ -187,12 +187,21 @@ two part company routinely — a user hits a maximize hotkey, a tiling WM
 declines a fullscreen request — and an app that mirrors the state in its own
 UI has nowhere else to read it.
 
-Every row but `focused` and `visible` reads `_NET_WM_STATE` off the window,
-so on the **Cocoa** backend there is nothing behind them: `minimized`,
-`maximized`, `fullscreen`, `obscured`, `states` and `desktop` keep their
-initial values and never change. `focused` works there — it comes from the
-focus events, not from a property. The bridge growing zoom/miniaturize verbs
-is what would fill the rest in ([macos.md](macos.md)).
+On the **Cocoa** backend the same rows come from AppKit, in the same
+`_NET_WM_STATE` names (@windowkit/appkit 0.30.0): `fullscreen` is the title
+bar's green button, or `<window fullscreen>`, `maximized` the zoom
+(`maximized_vert` and `maximized_horz` together), `minimized` the Dock
+(`hidden`), and `states` lists `focused` for the key window. `fullscreen`
+turns as AppKit's transition **begins**, before the animation, so a toolbar an
+app hides in full screen goes while the window grows rather than after it:
+
+```jsx
+const { fullscreen } = useWindowState();
+return fullscreen ? <Page /> : [<Toolbar />, <Page />];
+```
+
+`obscured` and `desktop` keep their initial values there — a Space is not a
+numbered workspace — and on a bridge older than 0.30.0 only `focused` moves.
 
 With no argument it reads the window the component is in, inferred the way
 [`useTopLevelWindow()`](filedialog.md) infers it: exact for a one-window app,

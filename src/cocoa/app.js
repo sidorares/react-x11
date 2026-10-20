@@ -1447,6 +1447,9 @@ export class CocoaApp {
         return this._animationEnds.get(ev.id)?.(ev);
       case 'window-live-resize':
         return this._routeLiveResize(ev);
+      case 'window-fullscreen':
+      case 'window-miniaturize':
+        return this._routeWindowState(ev);
       case 'window-created':
         // a worker's window, made on the UI thread after the call that
         // answered its handle
@@ -1611,6 +1614,8 @@ export class CocoaApp {
     // this is the only thing the bridge says about it (`_recheckScreens`).
     this._recheckScreens();
     wnd._nativeResized(ev);
+    // AppKit says nothing of a zoom but the resize it makes
+    if (ev.type === 'window-resize') wnd._refreshStates();
     wnd.emit('resize', {
       width: wnd.width,
       height: wnd.height,
@@ -1674,6 +1679,22 @@ export class CocoaApp {
     // and what lives in the window without being it hears: a `<Frame>`'s
     // pane, which has no window of its own to be resized live
     wnd.emit('liveresize', { live: wnd.liveResizing });
+  }
+
+  /**
+   * `window-fullscreen { fullscreen, phase }` and `window-miniaturize`
+   * (@windowkit/appkit 0.30.0): the title bar's green button, the Dock, and
+   * the same asked for through `setWmState`. The bridge has published the
+   * state already — a full-screen transition's target from its `begin`,
+   * before the animation, which is the moment an app takes its chrome away
+   * — so the window reads it back and says `statechange` if it moved. A
+   * user's own act, so it is input: its render goes out like a click's.
+   */
+  _routeWindowState(ev) {
+    const wnd = this._window(ev);
+    if (!wnd || wnd.destroyed) return;
+    wnd._refreshStates();
+    this._afterInput();
   }
 
   /**
@@ -1759,6 +1780,7 @@ export class CocoaApp {
     const wnd = this._window(ev);
     if (!wnd) return;
     if (name === 'focus') this._lastKeyWindow = wnd;
+    wnd._refreshStates();
     wnd.emit(name, { buttons: 0, time: ev.time });
     this._afterInput();
   }

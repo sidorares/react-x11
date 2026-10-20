@@ -249,18 +249,19 @@ close, `transparent`, `theme`, `frameRate`, `hidden` — works. What a
 **window manager** does is where the two part company, because macOS has no
 separate one to negotiate with, and the honest list is short:
 
-| prop                                                                     | on Cocoa                                                                                                                                   |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `minWidth`/`minHeight`/`maxWidth`/`maxHeight`                            | honoured — they become the window's own min/max size                                                                                       |
-| `resizable`, `decorations`                                               | honoured, but read **once, at creation**: they are `NSWindow` style options rather than hints, so changing either after mount does nothing |
-| `transparent`, `borderRadius`                                            | always available; every window composites, so there is no "if a compositor is running"                                                     |
-| `states: ['demands_attention']`                                          | the Dock bounce, held until the state is removed                                                                                           |
-| every other `_NET_WM_STATE`, and `fullscreen`                            | inert — the bridge has no zoom/miniaturize/fullscreen verbs yet (windowkit/appkit#15)                                                      |
-| `onStatesChange`, and `useWindowState()`'s `states`/`desktop`/`obscured` | never fire — they read `_NET_WM_STATE` and friends off the window, and there is none. `focused` does work                                  |
-| `appId`, `windowType`, `gravity`, the increment and aspect hints         | inert. They are messages to a window manager, and there is not one                                                                         |
-| `transientFor`                                                           | inert today — a stub waiting on `addChildWindow`; a managed `<Dialog>` already floats on its own window                                    |
-| `onClientMessage`                                                        | never fires — X11's ClientMessage has no counterpart                                                                                       |
-| `embeddable`                                                             | means a `<Frame>` pane, and works — but through shared surfaces rather than reparenting ([frame.md](frame.md))                             |
+| prop                                                             | on Cocoa                                                                                                                                   |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `minWidth`/`minHeight`/`maxWidth`/`maxHeight`                    | honoured — they become the window's own min/max size                                                                                       |
+| `resizable`, `decorations`                                       | honoured, but read **once, at creation**: they are `NSWindow` style options rather than hints, so changing either after mount does nothing |
+| `transparent`, `borderRadius`                                    | always available; every window composites, so there is no "if a compositor is running"                                                     |
+| `states: ['demands_attention']`                                  | the Dock bounce, held until the state is removed                                                                                           |
+| `fullscreen`, `states: ['maximized' \| 'hidden']`                | the green button's full-screen Space, the zoom, and the Dock, through `toggleFullScreen:`, `zoom:` and `miniaturize:`                      |
+| every other `_NET_WM_STATE`                                      | inert — `sticky`, `below`, `skip_taskbar`, `shaded` and the rest have no AppKit equivalent                                                 |
+| `onStatesChange`, and `useWindowState()`                         | fire for full screen (from the transition's begin), the zoom, the Dock and the key window; `desktop` and `obscured` never change           |
+| `appId`, `windowType`, `gravity`, the increment and aspect hints | inert. They are messages to a window manager, and there is not one                                                                         |
+| `transientFor`                                                   | inert today — a stub waiting on `addChildWindow`; a managed `<Dialog>` already floats on its own window                                    |
+| `onClientMessage`                                                | never fires — X11's ClientMessage has no counterpart                                                                                       |
+| `embeddable`                                                     | means a `<Frame>` pane, and works — but through shared surfaces rather than reparenting ([frame.md](frame.md))                             |
 
 Inert means **inert, not fatal, and today also silent**: the prop is
 accepted and does nothing, so shared application code stays branch-free. See
@@ -721,10 +722,10 @@ a dialog wants a handler:
 `focused`. `fullscreen` and `alwaysOnTop` are boolean sugar for the two
 everyone reaches for — `fullscreen` and `above` — and they union with
 `states` rather than competing with it. On the [cocoa backend](macos.md)
-`demands_attention` is the one with a verb today — it bounces the Dock icon
-until the app is activated, and stops when the state is removed
-([desktop.md](desktop.md)); the rest are inert there until the bridge grows
-zoom, miniaturize and fullscreen.
+`fullscreen` is the green button's full-screen Space, `maximized` the zoom,
+`hidden` the Dock, and `demands_attention` bounces the Dock icon until the app
+is activated, stopping when the state is removed ([desktop.md](desktop.md));
+the rest have no AppKit equivalent and are inert there.
 
 ```jsx
 <window

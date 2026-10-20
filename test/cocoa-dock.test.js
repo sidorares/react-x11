@@ -227,8 +227,8 @@ test('demands_attention bounces the Dock icon, and dropping the state cancels it
   await tick();
   assert.deepEqual(native.of('cancelUserAttention'), [[1]]);
 
-  // a state the bridge has no verb for is an honest false, not a throw
-  assert.equal(await wnd.setWmState('fullscreen', 'add'), false);
+  // a state AppKit has no verb for is an honest false, not a throw
+  assert.equal(await wnd.setWmState('sticky', 'add'), false);
 });
 
 test('a window destroyed mid-bounce takes its request with it', async () => {
