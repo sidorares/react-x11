@@ -11,12 +11,31 @@
 export type Color = string;
 
 /**
- * A distance in logical pixels: a number, or the same number written
- * `'12px'`. The display scale turns either into device pixels. CSS's
- * relative units (`em`, `rem`, `vw`) are not read yet, and are an error
- * naming the unit rather than a guess.
+ * CSS's relative units, resolved for the node they are written on, in
+ * logical pixels: `em` is its own font size (on `fontSize`, the one it
+ * inherits), `rem` the palette's `fontSize`, and the viewport units the
+ * window it is in — the size a `'@width >= 600'` block asks about. Each is
+ * resolved again when what it is relative to moves. See docs/styling.md,
+ * "Lengths and shorthands".
  */
-export type Pixels = number | `${number}px`;
+export type RelativeLength =
+  `${number}${'em' | 'rem' | 'vw' | 'vh' | 'vmin' | 'vmax'}`;
+
+/**
+ * CSS's length functions over pixels and the relative units, resolved to one
+ * number where the style is: `'calc(1rem + 2px)'`, `'clamp(14px, 2vw,
+ * 20px)'`. A percentage takes part only alone — yoga takes one unit per
+ * value — so `'calc(100% - 16px)'` is an error saying so.
+ */
+export type LengthFunction = `${'calc' | 'min' | 'max' | 'clamp'}(${string})`;
+
+/**
+ * A distance in logical pixels: a number, the same number written `'12px'`,
+ * a relative length or a length function. The display scale turns what it
+ * comes to into device pixels. CSS's other units — `ex`, `ch`, the container
+ * units, print units — are an error naming the unit rather than a guess.
+ */
+export type Pixels = number | `${number}px` | RelativeLength | LengthFunction;
 
 /** A yoga length: pixels, a percentage, or `'auto'`. */
 export type Dimension = Pixels | `${number}%` | 'auto';
@@ -393,7 +412,10 @@ export interface PaintStyle {
   /** Rounds the background, the border and the child clip. Requires uniform
    *  borders — same width and colour on all four sides; a non-uniform border
    *  paints square and ignores the radius. */
-  borderRadius?: Pixels;
+  /** …in pixels, or a percentage of the box's shorter side: a corner here is
+   *  a circle, so `'50%'` is a circle on a square and a pill on anything
+   *  longer, where CSS would draw each corner as an ellipse. */
+  borderRadius?: Pixels | `${number}%`;
   zIndex?: number;
   /**
    * The focus-ring family. Painted *outside* the border box and never seen
@@ -473,7 +495,9 @@ export type FontFeatureSettings =
 export interface TextStyle {
   color?: Color;
   fontFamily?: string;
-  fontSize?: Pixels;
+  /** A size in pixels or relative units; `em` and a percentage are of the
+   *  size this node inherits, as in CSS. */
+  fontSize?: Pixels | `${number}%`;
   fontWeight?: FontWeight;
   fontStyle?: FontStyle;
   /** A variable font's axes, by OpenType tag: `{ wdth: 87.5, slnt: -8 }`.
@@ -502,7 +526,10 @@ export interface TextStyle {
    *  ignored. Compared by value, so an object literal is fine. Inherits. */
   fontFeatureSettings?: FontFeatureSettings;
   textAlign?: TextAlign;
-  lineHeight?: number;
+  /** A multiple of the font's own line height — `1.5`, `'150%'`, `'1.5em'` —
+   *  or a length, `'24px'` or `'1.5rem'`, taken as that multiple of this
+   *  node's font size. `'normal'` is the font's own. */
+  lineHeight?: number | `${number}` | `${number}%` | Pixels | 'normal';
   /** CSS's `text-wrap`. `'nowrap'` measures the text at unbounded width, so
    *  it stays on one line and overflows its box horizontally rather than
    *  wrapping to fit — what a fixed-height row wants, since a wrapped line in

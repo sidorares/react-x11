@@ -5,6 +5,7 @@
 import {
   DEFAULT_FOCUS_RING,
   isColor,
+  radiusOf,
   resolveBorderWidths,
   resolveBorderColors,
 } from '../styles.js';
@@ -138,7 +139,7 @@ export class NodeBoxPaint {
     // stroked centred on the path, like the border, so half the width sits
     // inside the offset gap and half outside it
     const grow = offset + width / 2;
-    const radius = this.style.borderRadius ?? 0;
+    const radius = radiusOf(this.style, this.abs);
     ctx.strokeStyle = outline.color;
     ctx.lineWidth = width;
     ctx.beginPath();
@@ -162,7 +163,8 @@ export class NodeBoxPaint {
     // under an element that covers this pass with opaque pixels, this fill
     // is never seen (`WindowNode._coverFor`)
     if (this.root?._coverChain?.has(this)) return;
-    const { backgroundColor, borderRadius = 0 } = this.style;
+    const { backgroundColor } = this.style;
+    const borderRadius = radiusOf(this.style, this.abs);
     const fill = (style) => {
       ctx.fillStyle = style;
       if (borderRadius > 0) {
@@ -235,7 +237,7 @@ export class NodeBoxPaint {
     if (!value || value === 'none') return;
     const shadows = shadowSpecs(value, this.scale);
     if (!shadows?.length) return;
-    const radius = this.style.borderRadius ?? 0;
+    const radius = radiusOf(this.style, this.abs);
     for (let i = shadows.length - 1; i >= 0; i--) {
       const shadow = shadows[i];
       // CSS's `currentColor`: this node's *resolved* ink, its own `color`
@@ -404,7 +406,7 @@ export class NodeBoxPaint {
   }
 
   _paintBorder(ctx) {
-    const { borderRadius = 0 } = this.style;
+    const borderRadius = radiusOf(this.style, this.abs);
     // Both through the node's resolved direction: a `borderStartWidth` lays
     // out on one side and has to paint on the same one.
     const w = resolveBorderWidths(this.style, this.direction);
@@ -469,7 +471,7 @@ export class NodeBoxPaint {
    * strokes halfway.
    */
   _paintBorderSides(ctx, w, colors) {
-    if (DEV && (this.style.borderRadius ?? 0) > 0 && !warnedSideRadius) {
+    if (DEV && radiusOf(this.style, this.abs) > 0 && !warnedSideRadius) {
       warnedSideRadius = true;
       console.warn(
         'react-x11: borderRadius needs uniform borders — same width and ' +

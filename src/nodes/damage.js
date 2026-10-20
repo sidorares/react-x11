@@ -88,6 +88,7 @@ export const INVALIDATE_REASONS = new Set([
   'theme', // a theme/token change restyled a subtree
   'direction', // the reading direction moved: sides, glyph order, bar edge
   'scale', // a `scale` prop zoomed a subtree: every length in it moved
+  'units', // a font size an `em` length read moved, and the style with it
   'animation', // a transition frame
   'scroll', // scrollTo/scrollBy/scrollIntoView, textarea/textinput panning
   'text', // text content, input value or caret editing

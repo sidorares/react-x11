@@ -7,7 +7,7 @@
 // applies the blits at flush. Every failure falls back to repainting the
 // viewport, so the fast path can cost correctness nothing.
 
-import { EMPTY_STYLE, resolveBorderWidths } from '../styles.js';
+import { EMPTY_STYLE, radiusOf, resolveBorderWidths } from '../styles.js';
 import {
   DAMAGE_SLOP,
   MAX_DAMAGE_RECTS,
@@ -763,7 +763,7 @@ export class WindowScrollBlit {
       blitBorder.right > 0 ||
       blitBorder.bottom > 0 ||
       blitBorder.left > 0 ||
-      node.style.borderRadius > 0
+      radiusOf(node.style, node.abs) > 0
     ) {
       return;
     }
@@ -1101,7 +1101,7 @@ export class WindowScrollBlit {
       bw.right,
       bw.bottom,
       bw.left,
-      node.style?.borderRadius ?? 0,
+      radiusOf(node.style, node.abs),
     );
     if (!rectContains(insetRect(node.abs, inset), vp)) return;
     // A scroll container's children *are* the scrolled content, which is
@@ -1229,7 +1229,7 @@ export class WindowScrollBlit {
   _cornerPins(node, vp, upTo = this) {
     let out = null;
     for (let n = node.parent; n && n !== upTo; n = n.parent) {
-      const radius = n.style?.borderRadius ?? 0;
+      const radius = radiusOf(n.style, n.abs);
       if (!(radius > 0) || !n.abs) continue;
       for (const square of cornerSquares(n.abs, radius)) {
         if (!rectsOverlap(square, vp)) continue;
@@ -1295,7 +1295,7 @@ export class WindowScrollBlit {
           // squares is translation-safe, and so is an element blit that
           // pins the squares it reaches into (`_cornerPins`) — repaired
           // where they are and where the copy dragged them.
-          const radius = child.style?.borderRadius ?? 0;
+          const radius = radiusOf(child.style, child.abs);
           if (radius > 0 && !cornersPinned(child.abs, radius, vp, pinned)) {
             return false;
           }
@@ -1407,7 +1407,7 @@ export class WindowScrollBlit {
           break;
         }
         if (n.clipsChildren()) {
-          const radius = n.style?.borderRadius ?? 0;
+          const radius = radiusOf(n.style, n.abs);
           cover = intersectRects(
             cover,
             radius > 0 ? insetRect(n.abs, radius) : n.abs,

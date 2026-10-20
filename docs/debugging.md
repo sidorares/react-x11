@@ -452,9 +452,9 @@ same screenshots far more than this route did.
 Every internal `invalidate()` call now names why it ran, from a small
 closed set (`INVALIDATE_REASONS` in `src/nodes/damage.js`, which says what
 each one means): `props`, `position`, `style-state`, `shadow`, `outline`,
-`theme`, `direction`, `scale`, `animation`, `scroll`, `text`, `selection`,
-`content`, `measure`, `child-list`, `focus`, `caret`, `resize`, `mount`,
-`expose`, `highlight`, `trace-updates`, `capabilities`, `layout`. The
+`theme`, `direction`, `scale`, `units`, `animation`, `scroll`, `text`,
+`selection`, `content`, `measure`, `child-list`, `focus`, `caret`, `resize`,
+`mount`, `expose`, `highlight`, `trace-updates`, `capabilities`, `layout`. The
 frame's collected reasons are what `REACT_X11_TRACE=requests` frame lines,
 the chrome trace's frame slices, the full-repaint warning and
 `examples/stress/perf.js` print. After a frame they are readable on the

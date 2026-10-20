@@ -55,7 +55,10 @@ test('a length is the number it names, however it is written', () => {
   assert.equal(readLength('borderWidth', 'medium'), 3);
   assert.equal(readLength('outlineWidth', 'thick'), 5);
   // what each property does not take, said by name
-  assert.throws(() => readLength('padding', 'auto'), /expected .*'50%'\)$/);
+  assert.throws(
+    () => readLength('padding', 'auto'),
+    /expected .*'50%', or em, rem, vw or vh\)$/,
+  );
   assert.throws(
     () => readLength('borderWidth', '10%'),
     /does not take a percentage/,
@@ -69,15 +72,20 @@ test('a length is the number it names, however it is written', () => {
 test('a unit no length reads is an error naming it, not parseFloat’s guess', () => {
   // yoga's own setters read every one of these as a number of pixels
   for (const [value, says] of [
-    ['2em', /em is not a unit react-x11 resolves yet/],
-    ['1.5rem', /rem is not a unit/],
-    ['10vw', /vw is not a unit/],
-    ['50cqw', /cqw is not a unit/],
+    ['2ex', /ex is not read — it needs the font's x-height/],
+    ['1ch', /ch is not read/],
+    ['50cqw', /cqw is not read — a container's size is known only after/],
     ['12pt', /pt is a print unit/],
     ['3furlongs', /"furlongs" is not a unit/],
-    ['calc(100% - 8px)', /calc\(\) is not supported/],
-    ['min(10px, 5%)', /min\(\) is not supported/],
     ['10px 20px', /width takes one value/],
+    // yoga takes one unit per value, and a percentage is the layout's
+    ['calc(100% - 8px)', /mixes a percentage with a length/],
+    ['min(10px, 5%)', /mixes a percentage with a length/],
+    ['calc(2px * 3px)', /one side of a multiplication/],
+    ['calc(2px / 0)', /divides by zero/],
+    ['calc(1px +)', /"\)" where a value was expected/],
+    ['round(2.5px)', /round\(\) is not read — calc, min, max and clamp are/],
+    ['var(--gap)', /var\(\) is not read/],
   ]) {
     const message = problem({ width: value });
     assert.match(message ?? '(none)', says, value);
@@ -88,16 +96,14 @@ test('a unit no length reads is an error naming it, not parseFloat’s guess', (
     );
   }
   assert.match(
-    problem({ borderRadius: '50%' }),
-    /a percentage radius is not supported yet/,
-  );
-  assert.match(
     problem({ borderRadius: '4px 8px' }),
     /a radius per corner is not supported/,
   );
   // and the paint lengths and the text ones read the same grammar
   assert.equal(problem({ borderRadius: '6px', outlineOffset: '-2px' }), null);
   assert.equal(problem({ fontSize: '15px', letterSpacing: '0.5px' }), null);
+  // a percentage radius is of the box, and read where it is drawn
+  assert.equal(problem({ borderRadius: '50%' }), null);
 });
 
 test('the funnel reads every length into a number, so the display scale reaches it', () => {
@@ -230,7 +236,7 @@ test('what a border cannot be is said where it is written', () => {
     problem({ border: '1px solid nonsense' }),
     /"nonsense" is neither/,
   );
-  assert.match(problem({ border: '1em solid red' }), /em is not a unit/);
+  assert.match(problem({ border: '1ex solid red' }), /ex is not read/);
   // no currentColor yet, and a border's colour has no default
   assert.match(
     problem({ border: '1px solid' }),
@@ -340,8 +346,8 @@ test('flex reads CSS’s grammar, and a number is still <grow> 1 0', () => {
     /invalid flex "content" in <box style>: "content" is neither a factor nor a basis/,
   );
   assert.match(
-    problem({ flex: '1 2em' }),
-    /invalid flex basis "2em".*em is not/,
+    problem({ flex: '1 2ex' }),
+    /invalid flex basis "2ex".*ex is not read/,
   );
 });
 

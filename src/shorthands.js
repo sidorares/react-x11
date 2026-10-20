@@ -43,6 +43,9 @@ const PERCENT = 1;
 const AUTO = 2;
 /** CSS's `thin`, `medium` and `thick`: a line's width only. */
 const WIDTH_WORDS = 4;
+/** `fontSize`'s percentage, which is CSS's: of the size it inherits — the
+ *  same thing `em` means there — and so a number, never a string. */
+const OF_FONT = 8;
 
 /**
  * Every style property that is a distance on the screen, and what each takes
@@ -51,11 +54,14 @@ const WIDTH_WORDS = 4;
  * same question: which values are lengths.
  *
  * `'auto'` and the percentages are what yoga's own setters take, which is the
- * source of truth for the layout half; the paint half — radius, outline,
- * font size, letter spacing — takes pixels only, since the paint reads a
- * number (`borderRadius: '50%'` used to paint square, silently). Border
- * widths refuse a percentage the way CSS's do; yoga's border setter
- * coerced one to a number.
+ * source of truth for the layout half. Of the paint half, a radius takes a
+ * percentage too — of the box's shorter side, read where the corner is drawn
+ * (`radiusOf` in styles.js), since a corner here is a circle and CSS's
+ * elliptical one is not drawn — and the rest take lengths only. Border widths
+ * refuse a percentage the way CSS's do; yoga's border setter coerced one to a
+ * number.
+ *
+ * Every one of them takes the relative units as well (`RELATIVE`).
  */
 export const LENGTH_FORMS = new Map([
   ['width', PERCENT | AUTO],
@@ -95,10 +101,10 @@ export const LENGTH_FORMS = new Map([
   ['borderLeftWidth', WIDTH_WORDS],
   ['borderStartWidth', WIDTH_WORDS],
   ['borderEndWidth', WIDTH_WORDS],
-  ['borderRadius', 0],
+  ['borderRadius', PERCENT],
   ['outlineWidth', WIDTH_WORDS],
   ['outlineOffset', 0],
-  ['fontSize', 0],
+  ['fontSize', OF_FONT],
   ['letterSpacing', 0],
 ]);
 
@@ -109,34 +115,70 @@ const MEDIUM = WIDTHS.medium;
 const NUMBER_AND_UNIT = /^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)([a-z%]*)$/i;
 /** A string the funnel can hand on as it is: a percentage, or `'auto'`. */
 const AS_WRITTEN = /^(?:[+-]?(?:\d+\.?\d*|\.\d+)%|auto)$/;
+const FUNCTION = /^(calc|min|max|clamp)\(/i;
 
-/** The units CSS has that a react-x11 length does not read yet, named in
- *  the error so it says which one it met rather than "invalid". */
-const RELATIVE_UNITS = new Set([
-  'em',
-  'rem',
-  'ex',
-  'ch',
-  'lh',
-  'rlh',
-  'vw',
-  'vh',
-  'vmin',
-  'vmax',
-  'svw',
-  'svh',
-  'lvw',
-  'lvh',
-  'dvw',
-  'dvh',
-  'cqw',
-  'cqh',
-  'cqi',
-  'cqb',
-  'cqmin',
-  'cqmax',
-]);
-const ABSOLUTE_UNITS = new Set(['pt', 'pc', 'in', 'cm', 'mm', 'q']);
+/**
+ * What a relative length is relative to, as the bits a node records so that
+ * it resolves the length again when that moves (nodes/styling.js):
+ *
+ * - `UNIT_EM` — a font size. `em` is this node's own, and on `fontSize`
+ *   itself the one it inherits, as in CSS; it moves when an ancestor's size
+ *   does, which the text cascade already walks (`_retext`).
+ * - `UNIT_REM` — the palette's `fontSize`, which is the root font size an
+ *   app here has: the size every label that names none is set in. It moves
+ *   when the theme does (`_themeChanged`).
+ * - `UNIT_VIEWPORT` — the window the node is in: the `<window>`, or the
+ *   `<popup>`, the same one a `'@width >= 600'` block asks about, in the
+ *   same logical pixels. It moves on a resize, through the same registry.
+ */
+export const UNIT_EM = 1;
+export const UNIT_REM = 2;
+export const UNIT_VIEWPORT = 4;
+
+/** Each relative unit, as what one of it is in logical pixels. On a desktop
+ *  the small, large and dynamic viewports are the one window. */
+const RELATIVE = {
+  em: (ctx, key) => (key === 'fontSize' ? ctx.parentEm : ctx.em),
+  rem: (ctx) => ctx.rem,
+  vw: (ctx) => ctx.viewport.width / 100,
+  vh: (ctx) => ctx.viewport.height / 100,
+  vmin: (ctx) => Math.min(ctx.viewport.width, ctx.viewport.height) / 100,
+  vmax: (ctx) => Math.max(ctx.viewport.width, ctx.viewport.height) / 100,
+};
+for (const prefix of ['s', 'l', 'd']) {
+  RELATIVE[`${prefix}vw`] = RELATIVE.vw;
+  RELATIVE[`${prefix}vh`] = RELATIVE.vh;
+  RELATIVE[`${prefix}vmin`] = RELATIVE.vmin;
+  RELATIVE[`${prefix}vmax`] = RELATIVE.vmax;
+}
+
+/** The units CSS has that a length here does not read, each with the reason
+ *  — so the error says which one it met, and why, rather than "invalid". */
+const NOT_READ = {
+  ex: "it needs the font's x-height, which nothing measures yet — 0.5em is the usual stand-in",
+  ch: "it needs the font's 0 advance, which nothing measures yet — 0.5em is the usual stand-in",
+  lh: 'a line height relative to itself is circular here — use em',
+  rlh: 'a line height relative to itself is circular here — use rem',
+};
+for (const unit of ['cqw', 'cqh', 'cqi', 'cqb', 'cqmin', 'cqmax']) {
+  NOT_READ[unit] =
+    "a container's size is known only after a layout pass, and a length in " +
+    'it would lay the tree out again on every frame the container moves — a ' +
+    "percentage of the parent, or an '@container' block, says it without that";
+}
+const PRINT_UNITS = new Set(['pt', 'pc', 'in', 'cm', 'mm', 'q']);
+
+/**
+ * A context that resolves every relative unit to 1 and records nothing:
+ * development's, which asks whether a value reads, not what it comes to.
+ */
+export const PROBE = Object.freeze({
+  em: 16,
+  parentEm: 16,
+  rem: 16,
+  viewport: Object.freeze({ width: 100, height: 100 }),
+  deps: 0,
+});
 
 const isToken = (v) =>
   typeof v === 'string' && /^\$[A-Za-z_][A-Za-z0-9_-]*$/.test(v);
@@ -147,15 +189,18 @@ const isColor = (v) => typeof v === 'string' && cssColorStraight(v) !== null;
 function expected(forms) {
   const words = ["a number of logical pixels, like 12 or '12px'"];
   if (forms & PERCENT) words.push("a percentage like '50%'");
+  if (forms & OF_FONT)
+    words.push("a percentage of the inherited size, like '120%'");
   if (forms & AUTO) words.push("'auto'");
   if (forms & WIDTH_WORDS) words.push("'thin', 'medium' or 'thick'");
+  words.push('em, rem, vw or vh');
   return words.join(', or ');
 }
 
 /**
  * A value that does not read. The message says what was written, why it
  * does not read and what would; `in(where)` puts the place it was written
- * where every other style error has it — `invalid width "2em" in <box
+ * where every other style error has it — `invalid width "2ex" in <box
  * style>: …` — once the caller knows the place, which a parser never does.
  */
 export class StyleValueError extends Error {
@@ -208,13 +253,26 @@ const invalid = (key, value, why, forms) =>
 /**
  * One length, as everything downstream reads it: a number of logical pixels,
  * a percentage string, or `'auto'`. Throws naming what was wrong — the unit
- * it does not know, the percentage this property does not take — and
- * `key`'s forms decide which those are.
+ * it does not read, the percentage this property does not take — and `key`'s
+ * forms decide which those are.
+ *
+ * A relative unit — `em`, `rem`, `vw` and the rest — and `calc()`, `min()`,
+ * `max()` and `clamp()` over them are resolved against `ctx`: the node's
+ * font sizes and its window, in logical pixels, each read recording the
+ * dependency on `ctx.deps`. Without one there is nothing to resolve against,
+ * and a relative length is an error: a style reaches the layout through the
+ * funnel, which always has its node, so one that arrives unresolved is a
+ * path that skipped it. Development reads with `PROBE`.
  *
  * `value` is one value: a property that takes several goes through its
  * shorthand reader, which calls this per piece.
  */
-export function readLength(key, value, forms = LENGTH_FORMS.get(key) ?? 0) {
+export function readLength(
+  key,
+  value,
+  forms = LENGTH_FORMS.get(key) ?? 0,
+  ctx = null,
+) {
   if (typeof value === 'number') {
     if (Number.isFinite(value)) return value;
     throw invalid(key, value, 'it is not a finite number', forms);
@@ -225,8 +283,18 @@ export function readLength(key, value, forms = LENGTH_FORMS.get(key) ?? 0) {
   const text = value.trim();
   if (forms & AUTO && text === 'auto') return 'auto';
   if (forms & WIDTH_WORDS && Object.hasOwn(WIDTHS, text)) return WIDTHS[text];
+  if (FUNCTION.test(text)) return readExpression(key, value, forms, ctx);
   const m = NUMBER_AND_UNIT.exec(text);
   if (!m) {
+    const fn = /^([a-z-]+)\(/i.exec(text);
+    if (fn) {
+      throw invalid(
+        key,
+        value,
+        `${fn[1]}() is not read — calc, min, max and clamp are`,
+        forms,
+      );
+    }
     if (splitTop(text, false).length > 1) {
       throw invalid(
         key,
@@ -237,42 +305,27 @@ export function readLength(key, value, forms = LENGTH_FORMS.get(key) ?? 0) {
         forms,
       );
     }
-    if (/^(?:calc|min|max|clamp)\(/i.test(text)) {
-      throw invalid(
-        key,
-        value,
-        `${text.slice(0, text.indexOf('('))}() is not supported — compute ` +
-          'the number in JavaScript',
-        forms,
-      );
-    }
     throw invalid(key, value, null, forms);
   }
-  const unit = m[2].toLowerCase();
-  const n = Number(m[1]);
+  return unitValue(key, value, Number(m[1]), m[2].toLowerCase(), forms, ctx);
+}
+
+/** A number with its unit, resolved: the one place a unit means anything. */
+function unitValue(key, value, n, unit, forms, ctx) {
   if (unit === '' || unit === 'px') return n;
   if (unit === '%') {
-    if (forms & PERCENT) return `${m[1]}%`;
-    throw invalid(
-      key,
-      value,
-      key === 'borderRadius'
-        ? 'a percentage radius is not supported yet — give it in pixels; ' +
-            'one larger than the box holds rounds it to half its shorter ' +
-            'side, so borderRadius: 9999 is a pill, and a circle on a square'
-        : `${key} does not take a percentage`,
-      forms,
-    );
+    if (forms & OF_FONT)
+      return (n * relative('em', key, value, forms, ctx)) / 100;
+    if (forms & PERCENT) return `${n}%`;
+    throw invalid(key, value, `${key} does not take a percentage`, forms);
   }
-  if (RELATIVE_UNITS.has(unit)) {
-    throw invalid(
-      key,
-      value,
-      `${unit} is not a unit react-x11 resolves yet`,
-      forms,
-    );
+  if (Object.hasOwn(RELATIVE, unit)) {
+    return n * relative(unit, key, value, forms, ctx);
   }
-  if (ABSOLUTE_UNITS.has(unit)) {
+  if (Object.hasOwn(NOT_READ, unit)) {
+    throw invalid(key, value, `${unit} is not read — ${NOT_READ[unit]}`, forms);
+  }
+  if (PRINT_UNITS.has(unit)) {
     throw invalid(
       key,
       value,
@@ -284,6 +337,252 @@ export function readLength(key, value, forms = LENGTH_FORMS.get(key) ?? 0) {
   throw invalid(key, value, `"${unit}" is not a unit`, forms);
 }
 
+/** What one of `unit` is, in logical pixels, here. */
+function relative(unit, key, value, forms, ctx) {
+  if (ctx === null) {
+    throw invalid(
+      key,
+      value,
+      `${unit} is resolved for the node it is written on, and this value ` +
+        'reached the layout without being resolved',
+      forms,
+    );
+  }
+  const one = RELATIVE[unit](ctx, key);
+  if (!Number.isFinite(one)) {
+    throw invalid(
+      key,
+      value,
+      `there is no ${unit} to resolve it against`,
+      forms,
+    );
+  }
+  return one;
+}
+
+// ---------------------------------------------------------------------------
+// calc(), min(), max(), clamp().
+//
+// Resolved where the style is, to one number: every term that is a length
+// here becomes logical pixels against the node's context, which is what lets
+// `clamp(14px, 1rem + 0.5vw, 20px)` — fluid type — mean something without a
+// layout pass. A percentage is the exception, because yoga takes one unit per
+// value and what a percentage is of is decided inside the layout: an
+// expression of percentages alone stays one (`calc(100% / 3)` is `'33.3…%'`),
+// and one that mixes a percentage with a length is an error that says so,
+// since `calc(100% - 16px)` cannot be handed to yoga as anything.
+
+/** A value in an expression: a length in pixels, a percentage, or a bare
+ *  number — which a length property reads as pixels, as everywhere here. */
+const LEN = 1;
+const PCT = 2;
+const NUM = 3;
+
+function tokenize(text) {
+  const tokens = [];
+  const re =
+    /\s*(?:([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)([a-z%]*)|([a-z-]+)\(|([()+\-*/,]))/giy;
+  let at = 0;
+  while (at < text.length) {
+    re.lastIndex = at;
+    const m = re.exec(text);
+    if (!m) {
+      if (/^\s*$/.test(text.slice(at))) break;
+      return null;
+    }
+    // a sign belongs to the number only where an operand is expected — after
+    // an operator, an opening parenthesis or a comma, or at the start
+    if (m[1] !== undefined && /^[+-]/.test(m[1])) {
+      const prev = tokens[tokens.length - 1];
+      if (prev && (prev.type === 'value' || prev.op === ')')) {
+        tokens.push({ type: 'op', op: m[1][0] });
+        at = re.lastIndex - m[0].length + m[0].indexOf(m[1]) + 1;
+        continue;
+      }
+    }
+    if (m[1] !== undefined) {
+      tokens.push({ type: 'value', n: Number(m[1]), unit: m[2].toLowerCase() });
+    } else if (m[3] !== undefined) {
+      tokens.push({ type: 'fn', name: m[3].toLowerCase() });
+    } else {
+      tokens.push({ type: 'op', op: m[4] });
+    }
+    at = re.lastIndex;
+  }
+  return tokens;
+}
+
+function readExpression(key, value, forms, ctx) {
+  const bad = (why) => invalid(key, value, why, forms);
+  const tokens = tokenize(value.trim());
+  if (!tokens) throw bad('it is not an expression this reads');
+  let i = 0;
+  const peek = () => tokens[i];
+  const take = (op) => {
+    const t = tokens[i];
+    if (!t || t.type !== 'op' || t.op !== op) {
+      throw bad(`expected "${op}"${t ? '' : ' before the end'}`);
+    }
+    i++;
+  };
+  const mixed = () =>
+    bad(
+      'it mixes a percentage with a length, and yoga takes one unit per ' +
+        'value — what a percentage is of is decided inside the layout. ' +
+        "Pad a '100%' box rather than subtracting from it, or give the room " +
+        'to flexGrow',
+    );
+  // a bare number is pixels where it meets a length, as everywhere here
+  const unify = (a, b) => {
+    if (a.kind === b.kind) return a.kind;
+    if (a.kind === PCT || b.kind === PCT) throw mixed();
+    return LEN;
+  };
+  const operand = (t) => {
+    if (t.unit === '') return { kind: NUM, v: t.n };
+    if (t.unit === '%' && !(forms & OF_FONT)) {
+      if (!(forms & PERCENT)) {
+        throw bad(`${key} does not take a percentage`);
+      }
+      return { kind: PCT, v: t.n };
+    }
+    return { kind: LEN, v: unitValue(key, value, t.n, t.unit, forms, ctx) };
+  };
+  const call = (name) => {
+    const args = [sum()];
+    while (peek()?.op === ',') {
+      i++;
+      args.push(sum());
+    }
+    take(')');
+    if (name === 'calc') {
+      if (args.length !== 1) throw bad('calc() takes one expression');
+      return args[0];
+    }
+    if (name === 'clamp' && args.length !== 3) {
+      throw bad('clamp() takes a minimum, a preferred value and a maximum');
+    }
+    if (args.length < 1) throw bad(`${name}() takes at least one value`);
+    let kind = args[0].kind;
+    for (const arg of args) kind = unify({ kind }, arg);
+    const vs = args.map((a) => a.v);
+    if (name === 'min') return { kind, v: Math.min(...vs) };
+    if (name === 'max') return { kind, v: Math.max(...vs) };
+    return { kind, v: Math.max(vs[0], Math.min(vs[1], vs[2])) };
+  };
+  const factor = () => {
+    const t = tokens[i++];
+    if (!t) throw bad('it ends where a value was expected');
+    if (t.type === 'value') return operand(t);
+    if (t.type === 'fn') {
+      if (!['calc', 'min', 'max', 'clamp'].includes(t.name)) {
+        throw bad(`${t.name}() is not read — calc, min, max and clamp are`);
+      }
+      return call(t.name);
+    }
+    if (t.op === '(') {
+      const inner = sum();
+      take(')');
+      return inner;
+    }
+    throw bad(`"${t.op}" where a value was expected`);
+  };
+  const product = () => {
+    let a = factor();
+    while (peek()?.op === '*' || peek()?.op === '/') {
+      const op = tokens[i++].op;
+      const b = factor();
+      if (op === '*') {
+        if (a.kind !== NUM && b.kind !== NUM) {
+          throw bad('one side of a multiplication has to be a plain number');
+        }
+        a = { kind: a.kind === NUM ? b.kind : a.kind, v: a.v * b.v };
+      } else {
+        if (b.kind !== NUM) throw bad('a division is by a plain number');
+        if (b.v === 0) throw bad('it divides by zero');
+        a = { kind: a.kind, v: a.v / b.v };
+      }
+    }
+    return a;
+  };
+  const sum = () => {
+    let a = product();
+    while (peek()?.op === '+' || peek()?.op === '-') {
+      const op = tokens[i++].op;
+      const b = product();
+      a = { kind: unify(a, b), v: op === '+' ? a.v + b.v : a.v - b.v };
+    }
+    return a;
+  };
+  const result = factor();
+  if (i !== tokens.length) throw bad('there is more after the expression');
+  if (!Number.isFinite(result.v)) throw bad('it does not come to a number');
+  if (result.kind === PCT) return `${Math.round(result.v * 1e4) / 1e4}%`;
+  return result.v;
+}
+
+// ---------------------------------------------------------------------------
+// lineHeight: a multiple of the font's own line height, written any way CSS
+// writes one.
+
+const MULTIPLE = /^\s*[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?\s*$/i;
+
+/**
+ * A `lineHeight` as the multiple the text engines take, or undefined for
+ * `'normal'` — the font's own. CSS's forms all come to one: `1.5`, `'1.5'`,
+ * `'1.5em'` and `'150%'` are the multiple as written, and an absolute length
+ * — `'24px'`, `'1.5rem'`, a `calc()` — is divided by the node's own font size
+ * (`ctx.em`), the one size the multiple is applied to, which is what makes a
+ * design's "16 on 24" the line it asks for.
+ */
+export function readLineHeight(value, ctx = null) {
+  if (typeof value === 'number') {
+    if (Number.isFinite(value) && value >= 0) return value;
+    throw new StyleValueError(
+      'lineHeight',
+      value,
+      'it is not a multiple',
+      LINE_HEIGHT,
+    );
+  }
+  if (typeof value !== 'string') {
+    throw new StyleValueError('lineHeight', value, null, LINE_HEIGHT);
+  }
+  const text = value.trim();
+  if (text === 'normal') return undefined;
+  if (MULTIPLE.test(text)) return readLineHeight(Number(text), ctx);
+  const m = NUMBER_AND_UNIT.exec(text);
+  if (m && m[2].toLowerCase() === 'em')
+    return readLineHeight(Number(m[1]), ctx);
+  if (m && m[2] === '%') return readLineHeight(Number(m[1]) / 100, ctx);
+  let px;
+  try {
+    px = readLength('lineHeight', value, 0, ctx);
+  } catch (err) {
+    throw err instanceof StyleValueError
+      ? new StyleValueError('lineHeight', value, err.why, LINE_HEIGHT)
+      : err;
+  }
+  if (ctx === null) {
+    throw new StyleValueError(
+      'lineHeight',
+      value,
+      'a line height in pixels is resolved against the font size of the ' +
+        'node it is written on',
+      LINE_HEIGHT,
+    );
+  }
+  return readLineHeight(px / ctx.em, ctx);
+}
+
+const LINE_HEIGHT =
+  "a multiple of the font's own line height — 1.5, '150%', '1.5em' — a " +
+  "length like '24px' or '1.5rem', or 'normal'";
+
+/** Whether the funnel has to read a `lineHeight` rather than hand it on. */
+const lineHeightNeedsReading = (value) =>
+  typeof value === 'string' && !MULTIPLE.test(value);
+
 /**
  * `readLength`, or the value as written where it would throw: the funnel's
  * reading. A layout property's applier reads it again and refuses it, which
@@ -291,17 +590,21 @@ export function readLength(key, value, forms = LENGTH_FORMS.get(key) ?? 0) {
  * (`applyLayoutStyle`) — and a paint property's reader passes over what is
  * not a number, as it always has.
  */
-function lengthOrAsWritten(key, value) {
+function lengthOrAsWritten(key, value, ctx) {
   try {
-    return readLength(key, value);
+    return readLength(key, value, undefined, ctx);
   } catch {
     return value;
   }
 }
 
-/** Whether the funnel has to read a length value rather than hand it on. */
-const needsReading = (value) =>
-  typeof value === 'string' && !AS_WRITTEN.test(value);
+/** Whether the funnel has to read a length value rather than hand it on: a
+ *  percentage goes on as it is, except on `fontSize`, where it is the
+ *  inherited size's and comes to a number. */
+const needsReading = (key, value) =>
+  typeof value === 'string' &&
+  (!AS_WRITTEN.test(value) || LENGTH_FORMS.get(key) & OF_FONT) &&
+  value !== 'auto';
 
 const pieces = (value) => splitTop(String(value).trim(), false);
 
@@ -472,7 +775,9 @@ export function needsExpanding(style) {
     if (typeof value !== 'string') continue;
     if (key === 'borderColor') {
       if (isSeveral(value)) return true;
-    } else if (LENGTH_FORMS.has(key) && needsReading(value)) return true;
+    } else if (key === 'lineHeight') {
+      if (lineHeightNeedsReading(value)) return true;
+    } else if (LENGTH_FORMS.has(key) && needsReading(key, value)) return true;
   }
   return false;
 }
@@ -488,7 +793,7 @@ export function needsExpanding(style) {
  * which of its parts was meant is not something to guess. Development has
  * said so where the style was written either way.
  */
-export function expandStyle(style) {
+export function expandStyle(style, ctx = null) {
   const out = {};
   let found = null;
   for (const key of Object.keys(style)) {
@@ -500,8 +805,18 @@ export function expandStyle(style) {
       (found ??= new Set()).add(key);
       continue;
     }
-    if (LENGTH_FORMS.has(key) && needsReading(value)) {
-      out[key] = lengthOrAsWritten(key, value);
+    if (LENGTH_FORMS.has(key) && needsReading(key, value)) {
+      out[key] = lengthOrAsWritten(key, value, ctx);
+      continue;
+    }
+    if (key === 'lineHeight' && lineHeightNeedsReading(value)) {
+      // one that does not read goes on as written, and the text inherits
+      // past it, as it always did with a value it could not use
+      try {
+        out[key] = readLineHeight(value, ctx);
+      } catch {
+        out[key] = value;
+      }
       continue;
     }
     out[key] = value;
@@ -511,7 +826,7 @@ export function expandStyle(style) {
     if (!found.has(key)) continue;
     let longhands;
     try {
-      longhands = expandShorthand(key, style[key]);
+      longhands = expandShorthand(key, style[key], ctx);
     } catch {
       continue;
     }
@@ -531,18 +846,18 @@ export function expandStyle(style) {
  * resolved yet: a token stands for one value of whatever kind the slot
  * wants, and nothing is returned for it.
  */
-export function expandShorthand(key, value, lenient = false) {
+export function expandShorthand(key, value, ctx = null, lenient = false) {
   if (value == null || value === '') return {};
-  if (EDGE_LISTS[key]) return readEdges(key, value, lenient);
-  if (PAIRS[key]) return readPair(key, value, lenient);
-  if (LINES[key]) return readLine(key, value, lenient);
+  if (EDGE_LISTS[key]) return readEdges(key, value, ctx, lenient);
+  if (PAIRS[key]) return readPair(key, value, ctx, lenient);
+  if (LINES[key]) return readLine(key, value, ctx, lenient);
   switch (key) {
     case 'outline':
-      return readOutline(value, lenient);
+      return readOutline(value, ctx, lenient);
     case 'background':
       return readBackground(value, lenient);
     case 'flex':
-      return readFlex(value, lenient);
+      return readFlex(value, ctx, lenient);
     default:
       throw new Error(`react-x11: ${key} is not a shorthand`);
   }
@@ -551,7 +866,7 @@ export function expandShorthand(key, value, lenient = false) {
 /** Development's check of a shorthand as written: the same reading as the
  *  funnel's, tokens standing in for whatever they will resolve to. */
 export function checkShorthand(key, value) {
-  expandShorthand(key, value, true);
+  expandShorthand(key, value, PROBE, true);
 }
 
 /** Whether `key` is read by `checkShorthand` for this value — every
@@ -561,7 +876,7 @@ export const isShorthandValue = (key, value) =>
 
 /** One piece of an edge list or a pair: a length of the longhand's kind, or
  *  for `borderColor`, a colour. */
-function readPiece(shorthand, longhand, piece, lenient) {
+function readPiece(shorthand, longhand, piece, ctx, lenient) {
   if (lenient && mentionsToken(piece)) return undefined;
   if (shorthand === 'borderColor') {
     if (isColor(piece) || !lenient) return piece;
@@ -573,7 +888,7 @@ function readPiece(shorthand, longhand, piece, lenient) {
     );
   }
   try {
-    return readLength(longhand, piece);
+    return readLength(longhand, piece, undefined, ctx);
   } catch (err) {
     // In the funnel the piece goes on as written — one a `$token` resolved
     // to — for the longhand's own reader to refuse, which is what reports
@@ -583,7 +898,7 @@ function readPiece(shorthand, longhand, piece, lenient) {
   }
 }
 
-function readEdges(key, value, lenient) {
+function readEdges(key, value, ctx, lenient) {
   const sides = EDGE_LISTS[key];
   const list = typeof value === 'number' ? [value] : pieces(value);
   if (list.length > 4) {
@@ -595,7 +910,7 @@ function readEdges(key, value, lenient) {
     );
   }
   const read = list.map((piece, i) =>
-    readPiece(key, sides[i] ?? sides[0], piece, lenient),
+    readPiece(key, sides[i] ?? sides[0], piece, ctx, lenient),
   );
   // CSS's rule: a missing side is the one opposite it
   const [top, right = top, bottom = top, left = right] = read;
@@ -607,7 +922,7 @@ function readEdges(key, value, lenient) {
   };
 }
 
-function readPair(key, value, lenient) {
+function readPair(key, value, ctx, lenient) {
   const [first, second] = PAIRS[key];
   const list = typeof value === 'number' ? [value] : pieces(value);
   if (list.length > 2) {
@@ -618,8 +933,8 @@ function readPair(key, value, lenient) {
         second,
     );
   }
-  const a = readPiece(key, first, list[0], lenient);
-  const b = list.length > 1 ? readPiece(key, second, list[1], lenient) : a;
+  const a = readPiece(key, first, list[0], ctx, lenient);
+  const b = list.length > 1 ? readPiece(key, second, list[1], ctx, lenient) : a;
   return { [first]: a, [second]: b };
 }
 
@@ -628,7 +943,7 @@ function readPair(key, value, lenient) {
  * colour, each at most once and in any order: `'1px solid $border'`,
  * `'dashed red 2px'`, `'none'`. A number is the width.
  */
-function readParts(key, value, lenient) {
+function readParts(key, value, ctx, lenient) {
   const parts = {
     width: undefined,
     style: undefined,
@@ -644,7 +959,7 @@ function readParts(key, value, lenient) {
         "'2px dashed $accent' — or 'none'",
     );
   if (typeof value === 'number') {
-    parts.width = readLength(`${key} width`, value, WIDTH_WORDS);
+    parts.width = readLength(`${key} width`, value, WIDTH_WORDS, ctx);
     if (parts.width < 0) throw bad('a width cannot be negative');
     return parts;
   }
@@ -668,9 +983,13 @@ function readParts(key, value, lenient) {
       } else parts.style = word;
       continue;
     }
-    if (Object.hasOwn(WIDTHS, word) || NUMBER_AND_UNIT.test(piece)) {
+    if (
+      Object.hasOwn(WIDTHS, word) ||
+      NUMBER_AND_UNIT.test(piece) ||
+      FUNCTION.test(piece)
+    ) {
       if (parts.width !== undefined) throw bad('it names two widths');
-      parts.width = readLength(`${key} width`, piece, WIDTH_WORDS);
+      parts.width = readLength(`${key} width`, piece, WIDTH_WORDS, ctx);
       if (parts.width < 0) throw bad('a width cannot be negative');
       continue;
     }
@@ -684,9 +1003,9 @@ function readParts(key, value, lenient) {
   return parts;
 }
 
-function readLine(key, value, lenient) {
+function readLine(key, value, ctx, lenient) {
   const [widthKey, colorKey] = LINES[key];
-  const parts = readParts(key, value, lenient);
+  const parts = readParts(key, value, ctx, lenient);
   if (parts.none) return { [widthKey]: 0 };
   return {
     [widthKey]: parts.width ?? MEDIUM,
@@ -695,8 +1014,8 @@ function readLine(key, value, lenient) {
   };
 }
 
-function readOutline(value, lenient) {
-  const parts = readParts('outline', value, lenient);
+function readOutline(value, ctx, lenient) {
+  const parts = readParts('outline', value, ctx, lenient);
   if (parts.none) return { outlineWidth: 0 };
   if (parts.style === 'dashed') {
     throw new StyleValueError(
@@ -777,7 +1096,7 @@ const FACTOR = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i;
  * is a length or `auto`, before them or after: `'1 1 0'`, `'2 200px'`,
  * `'0 0 auto'`, `'240px'`.
  */
-function readFlex(value, lenient) {
+function readFlex(value, ctx, lenient) {
   const bad = (why) =>
     new StyleValueError(
       'flex',
@@ -820,10 +1139,14 @@ function readFlex(value, lenient) {
     // a word that is no length at all is a flex value nobody wrote — `'fill'`
     // — and is said of `flex`; a length in a unit the grammar does not read
     // is said of the basis, naming the unit
-    if (piece !== 'auto' && !NUMBER_AND_UNIT.test(piece)) {
+    if (
+      piece !== 'auto' &&
+      !NUMBER_AND_UNIT.test(piece) &&
+      !FUNCTION.test(piece)
+    ) {
       throw bad(`"${piece}" is neither a factor nor a basis`);
     }
-    basis = readLength('flex basis', piece, LENGTH_FORMS.get('flexBasis'));
+    basis = readLength('flex basis', piece, LENGTH_FORMS.get('flexBasis'), ctx);
     basisAt = i;
   }
   if (factors.length > 2) throw bad('it names three factors');
@@ -886,7 +1209,7 @@ export function borderProblem(style) {
       if (typeof value !== 'string' && typeof value !== 'number') continue;
       let parts;
       try {
-        parts = readParts(key, value, true);
+        parts = readParts(key, value, PROBE, true);
       } catch {
         continue; // its own check names it
       }

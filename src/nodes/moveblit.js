@@ -16,7 +16,7 @@
 // mistake it can make is not firing.
 
 import { cssColorStraight } from 'ntk/color';
-import { EMPTY_STYLE, resolveBorderWidths } from '../styles.js';
+import { EMPTY_STYLE, radiusOf, resolveBorderWidths } from '../styles.js';
 import { isPaintedColor } from './boxpaint.js';
 import { DAMAGE_SLOP, FULL_DAMAGE, addDamageRect } from './damage.js';
 import { NodePaint } from './paint.js';
@@ -100,7 +100,7 @@ function cornerSquares(box, radius) {
  * Null when nothing is left.
  */
 function clipBoxOf(node) {
-  const radius = node.style?.borderRadius ?? 0;
+  const radius = radiusOf(node.style, node.abs);
   return innerPixels(radius > 0 ? insetRect(node.abs, radius) : node.abs);
 }
 
@@ -166,7 +166,7 @@ export class NodeMoveBlit {
       const style = node.style ?? EMPTY_STYLE;
       if (style.display === 'none') return null;
       if (style.opacity !== undefined && !(style.opacity >= 1)) return null;
-      const radius = style.borderRadius ?? 0;
+      const radius = radiusOf(style, node.abs);
       let own = null;
       if (isOpaqueColor(style.backgroundColor)) {
         own = node.abs;
@@ -581,7 +581,7 @@ export class WindowMoveBlit {
         if (ring > 0) {
           const inner = insetRect(
             n.abs,
-            Math.max(ring, style.borderRadius ?? 0) + DAMAGE_SLOP,
+            Math.max(ring, radiusOf(style, n.abs)) + DAMAGE_SLOP,
           );
           const outer = insetRect(n.abs, -DAMAGE_SLOP);
           for (const piece of outside(outer, inner)) over(piece);

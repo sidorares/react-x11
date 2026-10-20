@@ -21,8 +21,84 @@ import {
   containerAnswers,
   resolveQueries,
 } from '../styles.js';
+import { readLength, UNIT_EM, UNIT_REM, UNIT_VIEWPORT } from '../shorthands.js';
+import { DEFAULT_TEXT_STYLE } from '../styles.js';
 import { CUSTOM_SEMANTIC_NAMES } from './kinds.js';
 import { DEV, shallowEqual } from './util.js';
+
+/**
+ * What a relative length on one node resolves against — `em`, `rem` and the
+ * viewport units (src/shorthands.js, `RELATIVE`) — in logical pixels, the
+ * unit everything an app writes is in. Lazy: a style written in pixels asks
+ * none of it, and pays one allocation. Each answer it gives is recorded in
+ * `deps`, which is how the node knows to resolve the style again when that
+ * answer moves (`_noteUnits`).
+ *
+ * `style` is the one being resolved, not the one in force: a `padding:
+ * '1em'` beside a `fontSize: '20px'` is 20, whichever the style had before.
+ */
+class Units {
+  constructor(node, style) {
+    this.node = node;
+    this.style = style;
+    this.deps = 0;
+    this.parentEmRead = undefined;
+    this.emRead = undefined;
+  }
+
+  /** The font size this node inherits — what `em` is on `fontSize`
+   *  itself, as in CSS. Device pixels down the cascade, at this node's
+   *  scale, so one divide brings it back. */
+  get parentEm() {
+    this.deps |= UNIT_EM;
+    if (this.parentEmRead === undefined) {
+      const node = this.node;
+      this.parentEmRead = node.inheritedTextStyle.size / (node.scale || 1);
+    }
+    return this.parentEmRead;
+  }
+
+  /** This node's own font size — its `fontSize`, read against what it
+   *  inherits where that is relative, or the inherited one. Depends on the
+   *  inheritance only when it reads it. */
+  get em() {
+    if (this.emRead === undefined) {
+      const size = this.style.fontSize;
+      let own;
+      if (size != null && size !== '') {
+        try {
+          own = readLength('fontSize', size, undefined, this);
+        } catch {
+          // the text inherits past a size it cannot read, and so does `em`
+        }
+      }
+      this.emRead = typeof own === 'number' && own >= 0 ? own : this.parentEm;
+    }
+    return this.emRead;
+  }
+
+  /** The palette's `fontSize`: the root font size here, the size every label
+   *  that names none of its own is set in. */
+  get rem() {
+    this.deps |= UNIT_REM;
+    return this.node.theme?.fontSize ?? DEFAULT_TEXT_STYLE.size;
+  }
+
+  /** The window this node is in, as a size query sees it. Before the window
+   *  has been laid out, the size it asked for, where it named one; the
+   *  size-query registry resolves the style again when the real one lands. */
+  get viewport() {
+    this.deps |= UNIT_VIEWPORT;
+    const node = this.node;
+    const root = node.root ?? (node.isWindow ? node : null);
+    if (root?.querySize) return root.querySize;
+    const props = root?.props;
+    return {
+      width: typeof props?.width === 'number' ? props.width : 0,
+      height: typeof props?.height === 'number' ? props.height : 0,
+    };
+  }
+}
 
 /**
  * A style property passed flat used to be silently dropped — it was neither
@@ -45,6 +121,9 @@ function assertNoFlatStyleProps(props, kind, semantic) {
 // it. `<window width>` is the X window's width; `<box width>` would be yoga
 // style, and there is no element where a name means both.
 const NO_SEMANTIC_NAMES = new Set();
+
+/** What a style that read no relative length read: nothing. */
+const NO_UNITS = Object.freeze({ deps: 0, parentEmRead: undefined });
 
 /** A node's own style, installed onto `Node.prototype` by node.js. */
 export class NodeStyling {
@@ -81,15 +160,9 @@ export class NodeStyling {
     // window size queries fold into the base before state blocks, so a
     // `:hover` inside the wide layout still wins over the wide layout
     const kinds = queryKinds(this._baseStyle);
+    // whether a resize re-resolves this node is decided at the end, once the
+    // style has said whether it reads the window through a viewport unit
     const queried = (kinds & QUERY_SIZE) !== 0;
-    if (queried !== this._queried) {
-      this._queried = queried;
-      const root = this.root;
-      if (root?._sizeQueryNodes) {
-        if (queried) root._sizeQueryNodes.add(this);
-        else root._sizeQueryNodes.delete(this);
-      }
-    }
     // `@supports` blocks keep their own registry: what re-resolves them is
     // the server's answer changing, not a resize
     // Registered unconditionally rather than on change: a `<window>`'s own
@@ -166,20 +239,90 @@ export class NodeStyling {
       }
     }
     this._stateful = hasStateStyles(this._baseStyle);
+    const merged = this._stateful
+      ? resolveStyleStates(this._baseStyle, this.states)
+      : this._baseStyle;
     // The scale multiplies *after* every merge — state blocks, queries,
-    // the flex shorthand — so each of those keeps thinking in the logical
-    // pixels the app wrote, and device pixels exist only downstream of
-    // this line (src/scale.js).
-    return this._retarget(
-      scaleResolvedStyle(
-        resolveComputedStyle(
-          this._stateful
-            ? resolveStyleStates(this._baseStyle, this.states)
-            : this._baseStyle,
-        ),
-        this.scale,
-      ),
+    // the shorthands, the relative units — so each of those keeps thinking
+    // in the logical pixels the app wrote, and device pixels exist only
+    // downstream of this line (src/scale.js).
+    this._unitsNow = null;
+    const target = scaleResolvedStyle(
+      resolveComputedStyle(merged, this._unitsMaker()),
+      this.scale,
     );
+    const units = this._unitsNow ?? NO_UNITS;
+    // what a loop's relative end reads (`_syncLoops`) is read through the
+    // same context, during the swap
+    // …and the basis is in place before the swap, which may walk the text
+    // cascade back through this node (`_emMoved`)
+    this._units = units;
+    this._noteUnits(units, queried, false);
+    const out = this._retarget(target);
+    this._units = null;
+    this._noteUnits(units, queried, true);
+    return out;
+  }
+
+  /**
+   * Record what this node's style read to resolve its relative lengths, and
+   * join or leave what moves each: the size-query registry for the window's
+   * size (a viewport unit asks the same question an `'@width'` block does,
+   * and is answered by the same re-resolution on a resize); the text cascade
+   * for the inherited font size (`_retext` walks it, and stops at a node
+   * whose resolution was never cached — so a node that reads it caches one);
+   * and the theme walk for the palette's (`_themeChanged`).
+   */
+  /** What makes this node's unit context, for `resolveComputedStyle` to
+   *  call only when a style has something to read; the one it made is
+   *  `_unitsNow`. Made once per node, rather than a context per style. */
+  _unitsMaker() {
+    return (this._makeUnits ??= (style) =>
+      (this._unitsNow = new Units(this, style)));
+  }
+
+  _noteUnits(units, sizeQueried, settled) {
+    this._unitDeps = units.deps;
+    this._emBasis = units.parentEmRead;
+    this._sizeQueried = sizeQueried;
+    const asks = sizeQueried || (units.deps & UNIT_VIEWPORT) !== 0;
+    if (asks !== this._queried) {
+      this._queried = asks;
+      const root = this.root;
+      if (root?._sizeQueryNodes) {
+        if (asks) root._sizeQueryNodes.add(this);
+        else root._sizeQueryNodes.delete(this);
+      }
+    }
+    // asked of the style the swap put in force, never the one before it
+    if (settled && units.deps & UNIT_EM && this._resolvedText === undefined) {
+      this.resolvedTextStyle();
+    }
+  }
+
+  /**
+   * Resolve the style again because something a relative length read moved
+   * — the font size this node inherits — with no commit to do it. The rest
+   * is the tail a re-resolution outside a commit always has
+   * (`_restyled`), plus the claim a commit would have made.
+   */
+  _unitsMoved() {
+    if (this.destroyed) return;
+    const before = this.style;
+    this._syncStyle(this.props);
+    const moved = this._restyled(
+      before,
+      'resolved against a font size that moved',
+    );
+    if (moved) this._invalidateLayout('units');
+    else if (this.style !== before) this.root?.invalidate(false, this, 'units');
+  }
+
+  /** Whether the font size this node inherits is not the one its relative
+   *  lengths were resolved against. */
+  _emMoved() {
+    if (!(this._unitDeps & UNIT_EM)) return false;
+    return this.inheritedTextStyle.size / (this.scale || 1) !== this._emBasis;
   }
 
   /**
@@ -194,12 +337,24 @@ export class NodeStyling {
     // the node has a state block of its own (`_outlineExtent`)
     this._clearPaintBounds();
     if (!this._stateful || this.destroyed) return;
+    const merged = resolveStyleStates(this._baseStyle, this.states);
+    this._unitsNow = null;
     const next = scaleResolvedStyle(
-      resolveComputedStyle(resolveStyleStates(this._baseStyle, this.states)),
+      resolveComputedStyle(merged, this._unitsMaker()),
       this.scale,
     );
     if (shallowEqual(next, this._targetStyle)) return;
+    const units = this._unitsNow;
+    this._units = units;
     this._retarget(next);
+    this._units = null;
+    // a state block reads what the base did and may read more — a radius in
+    // `rem` on `:hover` — and a node keeps answering to all of it
+    if (units !== null) {
+      units.deps |= this._unitDeps;
+      units.parentEmRead ??= this._emBasis;
+      this._noteUnits(units, this._sizeQueried, true);
+    }
     // a state block may only set paint properties, so the node's own region
     // is the whole of what changed
     this.root?.invalidate(false, this, 'style-state');
