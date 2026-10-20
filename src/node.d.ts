@@ -624,6 +624,11 @@ export declare class Node {
    * with none of its own is set in. An element that draws text inherits
    * exactly what `<text>` inherits by asking. */
   resolvedTextStyle(): TextStyle;
+  /** A colour from this node's style as one a context can paint: the value
+   * itself, or — for `currentColor` — the node's ink, the colour
+   * `resolvedTextStyle()` resolves. Everything core paints from a style
+   * colour asks here; an element painting one of its own should too. */
+  resolveColor<T>(value: T): T | string;
   /** The flattened `style` prop with the active state blocks overlaid.
    * Everything that paints or lays out reads this, never `props`. */
   readonly style: Style;

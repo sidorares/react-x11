@@ -661,7 +661,8 @@ export class WindowPaint {
    * Shape extension's hard 1-bit edge.
    */
   _paintWindowBackground(ctx, damage, width, height) {
-    const { backgroundColor, borderRadius = 0 } = this.style;
+    const { borderRadius = 0 } = this.style;
+    const backgroundColor = this.resolveColor(this.style.backgroundColor);
     if (DEV && this.style.boxShadow) devWarnWindowShadow(this.kind);
     // A `backgroundImage` works wherever a `backgroundColor` does, which is
     // the rule worth having — over the whole window, in window coordinates,

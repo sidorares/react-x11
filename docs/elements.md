@@ -112,9 +112,12 @@ content. `flex: 'auto'` grows and shrinks from the content's own size, and
 - `backgroundColor` — any CSS color string (`'#2980b9'`,
   `'rgba(0,0,0,.5)'`, `'red'`); `background` sets it and a gradient
   (`backgroundImage`) in one
+- any colour may be `'currentColor'`, the node's ink — its own `color` or
+  the one it inherits, followed when it moves
+  ([styling.md](styling.md#currentcolor))
 - `borderWidth`, `borderColor`, `borderRadius`, `borderStyle`
   (`'solid'` default, `'dashed'`), or `border: '1px solid $border'` for the
-  first three
+  first three — `border: '1px solid'` is drawn in `currentColor`
 - per-side borders: `borderTopWidth`/`Right`/`Bottom`/`Left` override
   `borderWidth` the way `paddingLeft` overrides `padding`, and
   `borderTopColor`/… fall back to `borderColor`; `borderBottom: '1px solid

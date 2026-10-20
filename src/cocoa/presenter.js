@@ -502,7 +502,9 @@ export function propBoxProps(node, app, scale, parentOrigin, order) {
   const style = node.style ?? {};
   const border = typeof style.borderWidth === 'number' ? style.borderWidth : 0;
   const colour = (value) =>
-    value ? (app._parseColor(String(value)) ?? [0, 0, 0, 0]) : [0, 0, 0, 0];
+    value
+      ? (app._parseColor(String(node.resolveColor(value))) ?? [0, 0, 0, 0])
+      : [0, 0, 0, 0];
   return {
     frame: [
       (abs.x - parentOrigin.x) / scale,

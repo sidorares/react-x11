@@ -94,10 +94,11 @@ things differ from CSS on purpose, and say so:
   style is `'solid'` rather than CSS's `none`, because `borderWidth` alone
   has always drawn here. `'none'` is a width of 0 — `border: 'none'`,
   `outline: 'none'`.
-- **A border needs a colour.** There is no `currentColor` yet, and a border
-  colour has no default, so `border: '1px solid'` would paint nothing; it is
-  an error in development unless the style names a border colour somewhere,
-  a state block included.
+- **A line with no colour is [`currentColor`](#currentcolor)**, the node's
+  ink, as in CSS — but the weakest thing in the style rather than whatever
+  came last: a colour the style names for that side anywhere else is the one
+  it takes, so `borderBottom: '1px solid'` beside `borderColor: '$border'`
+  is a `$border` line wherever each is written.
 - **A box has one `borderStyle`.** `border`'s style is the box's, and a
   side's only speaks when `border` named none; two shorthands naming
   different ones are an error unless `borderStyle` says which.
@@ -473,7 +474,7 @@ scenario in `npm run bench`, which prices it.
 
 `<x> <y> [blur] [spread] [colour]`, comma-separated for several, painted
 first-on-top like CSS's. The colour may be left out, which means the node's
-own `color`. A blurred shadow is a real gaussian — RENDER's convolution over
+own `color` — [`currentColor`](#currentcolor), which may be written out too. A blurred shadow is a real gaussian — RENDER's convolution over
 a coverage surface — cached by size, radius and blur, so a list of identical
 cards renders one and composites it many times.
 
@@ -781,6 +782,52 @@ strings (`fontSize: '20'`), as they always could, and a size is a
 `lineHeight` is not one — it multiplies the font's own line height, so
 `'24px'` is still an error. Before, a size in px set no text at all and the
 others threw from inside a frame.
+
+### `currentColor`
+
+The ink as a colour: `currentColor` is the node's own `color`, or the one it
+inherits. It goes wherever a colour does — `backgroundColor`, `borderColor`
+and each side of it, `outlineColor`, a `boxShadow`'s colour, a gradient stop,
+and inside `border`, `outline` and `background` — and a line those
+shorthands give no colour is drawn in it, as in CSS:
+
+```jsx
+<box style={{ color: theme.textMuted, ':hover': { color: theme.accent } }}>
+  <box style={{ borderBottom: '2px solid' }}>
+    <text>Inbox</text>
+  </box>
+</box>
+```
+
+The label and its underline turn together, and nothing re-renders. It is
+CSS's keyword in any case CSS takes it (`currentcolor` reads too), and on
+`color` itself it is the colour inherited — CSS's `inherit`.
+
+It stays the keyword in the node's style, which is CSS's computed value, and
+becomes a colour where it is painted, so it follows the ink wherever the ink
+moves: a `:hover` on a row above, a theme swap, a `color` transition frame by
+frame. A node painting in it repaints when its ink moves, bounded to that
+node, and a box does too although it draws no text; one that paints nothing
+in it still costs nothing when the ink above it moves. A `<popup>` written
+under the row inherits the ink like any other child and repaints with it.
+
+Two places it cannot simply follow:
+
+- **A transition runs between the colours at the swap.** `borderColor`
+  going from `'#d0d0d0'` to `'currentColor'` under a `transition` fades to
+  the ink as it is when the style changes, and lands on the keyword, which
+  follows the ink from then on. An ink moving under a `currentColor` that
+  stayed is not a change of the property and does not transition: the border
+  is the new ink at once. To fade it, transition `color`, and the border
+  rides along.
+- **A loop cannot end in it.** A loop's ends are fixed for as long as it
+  runs, so `animation: { borderColor: { to: 'currentColor', … } }` is an
+  error saying so. Loop `color` instead, and write the border in
+  `currentColor`.
+
+An element of your own that paints a colour from its style asks
+`node.resolveColor(value)` for it
+([extending.md](extending.md#text-of-your-own)).
 
 ## A font file of your own
 
@@ -1356,7 +1403,9 @@ into.
 
 The easing is a fixed ease-out cubic. A transition starts from **what is on
 screen**, not from the declared value, so interrupting one reverses from
-where it got to rather than jumping to the end first.
+where it got to rather than jumping to the end first. One to or from
+[`currentColor`](#currentcolor) runs between the colours as they are at the
+change.
 
 The animation _is_ the repaint loop: the window keeps asking its frame clock
 for frames while any transition is unfinished, and stops the frame the last
@@ -1736,6 +1785,14 @@ can be looked at without stopping the compositor for the whole session. See
   where `useControl` already returns `hover`/`focused`/`pressed` as state
   ([components.md](components.md#basic-controls)). `<Checkbox>` does exactly
   that, because its well is a sibling of the label the press lands on.
+- **`currentColor` resolves where it is painted, not in the style.**
+  Resolving it where a `$token` resolves, once per style swap, would have
+  made every reader of a colour simpler and every inherited change wrong: a
+  `:hover { color }` on a row restyles no node under it, so an ink baked
+  into their styles would be stale in every one. So the style keeps the
+  keyword, as CSS's computed value does, and every reader — the paint on
+  each backend, a Cocoa layer's properties, the blits deciding what a box
+  covers — asks `resolveColor`.
 - **Sticky sticks to a pane that scrolls, not to anything that clips.** CSS
   makes every `overflow` but `visible` a scroll container, so a header
   inside a card with `overflow: hidden` sticks to the card — which never

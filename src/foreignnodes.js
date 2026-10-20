@@ -482,10 +482,17 @@ export class ForeignNode extends Node {
   _applyBackground() {
     const wnd = this.socket?.window;
     if (typeof wnd?.setBackgroundPixel !== 'function') return;
-    const pixel = pixelFor(this.style.backgroundColor);
+    const pixel = pixelFor(this.resolveColor(this.style.backgroundColor));
     if (pixel === null || pixel === this._backgroundPixel) return;
     this._backgroundPixel = pixel;
     wnd.setBackgroundPixel(pixel);
+  }
+
+  /** …which a `currentColor` takes from the ink, and the ink can move with
+   *  no commit here. */
+  _inkMoved() {
+    super._inkMoved();
+    this._applyBackground();
   }
 
   /** The client's window is a window of the display system over this one,

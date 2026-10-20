@@ -147,6 +147,14 @@ And what you read:
   off the node rather than caching one for the tree.
 - `this.resolvedTextStyle()` — the text style this node resolves to, ready to
   hand to `app.fonts.layout` (below).
+- `this.resolveColor(value)` — a colour from this node's style as one a
+  context can paint: the value itself, or for
+  [`currentColor`](styling.md#currentcolor) the node's ink. Every colour
+  core paints goes through it, so a colour of yours read off `this.style`
+  should too — `ctx.strokeStyle = this.resolveColor(this.style.borderColor)`
+  — or it paints nothing where the app wrote the keyword. A node whose
+  style paints in `currentColor` repaints when its ink moves, without being
+  asked.
 - `this.direction` — which way this node reads, resolved: `'ltr'` or
   `'rtl'`, never `'inherit'`. Yoga has already mirrored the boxes, so this
   is for what you draw _inside_ one — which side a mark sits on, which way

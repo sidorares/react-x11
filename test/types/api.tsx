@@ -52,6 +52,7 @@ import type {
   Screen,
   ScreenColorBackend,
   Screens,
+  StyleColor,
   SystemLocale,
   WindowState,
   WindowStateName,
@@ -397,6 +398,25 @@ createStyles({
 
 // @ts-expect-error — a border's width is layout, so it may not go in a state block
 createStyles({ bad: { ':hover': { border: '1px solid red' } } });
+
+// currentColor, the ink, wherever a style takes a colour — and a line with
+// no colour of its own is drawn in it
+const ink: StyleColor = 'currentColor';
+createStyles({
+  tab: {
+    color: '$textMuted',
+    borderBottom: '2px solid',
+    ':hover': { color: '$accent', borderBottomColor: 'currentColor' },
+  },
+  swatch: {
+    backgroundColor: ink,
+    borderColor: '#ccc currentColor',
+    outline: '2px currentColor',
+    boxShadow: '0 1px 2px currentColor',
+    backgroundImage: 'linear-gradient(currentColor, transparent)',
+  },
+  inherits: { color: 'currentColor' },
+});
 
 // @ts-expect-error — a radius is pixels; a percentage is not read yet
 createStyles({ bad: { borderRadius: '50%' } });

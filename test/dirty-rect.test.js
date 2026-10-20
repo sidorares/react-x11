@@ -1452,3 +1452,237 @@ test('content a layout loop shrinks under a scrolled pane repaints what the clam
   assertBoundedAndExact(frames);
   assert.ok(offsets.size >= 4, `the clamp moved the offset: ${[...offsets]}`);
 });
+
+// --- an ink an ancestor moved ------------------------------------------------
+//
+// A border, a fill or a shadow in `currentColor` is drawn in the node's ink,
+// and the ink is inherited: a `:hover { color }` on a row moves it under every
+// node in the row without restyling one of them. The row's own claim covers
+// its subtree on this surface, so the first test pins the bound and the
+// pixels and that the node said so itself; the second is where saying so is
+// the only thing that repaints it — a `<popup>` written under the row, which
+// inherits the row's ink and paints into a window of its own.
+
+const INK = '#202020';
+const HOVER_INK = '#d03030';
+
+/** The pixel at window coordinates (x, y), as `#rrggbb`. */
+function pixelAt(image, x, y) {
+  const i = (y * image.width + x) * 4;
+  const hex = (v) => v.toString(16).padStart(2, '0');
+  return `#${hex(image.data[i])}${hex(image.data[i + 1])}${hex(image.data[i + 2])}`;
+}
+
+test("a parent's :hover { color } repaints a currentColor border, bounded and pixel-exact", async () => {
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const rowRef = React.createRef();
+    const lineRef = React.createRef();
+    await mount(
+      x11Root,
+      h(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+        h(
+          'box',
+          { style: { flexGrow: 1, padding: 6, gap: 3 } },
+          h(
+            'box',
+            {
+              ref: rowRef,
+              style: {
+                height: ROW_H,
+                flexDirection: 'row',
+                color: INK,
+                ':hover': { color: HOVER_INK },
+              },
+            },
+            h('box', {
+              ref: lineRef,
+              style: { width: 60, border: '2px solid' },
+            }),
+          ),
+          // more of the window, for the bound to leave alone
+          h('box', { style: { flexGrow: 1, backgroundColor: '#e6e9ef' } }),
+        ),
+      ),
+    );
+    const row = rowRef.current;
+    const line = lineRef.current;
+    const root = row.root;
+    const edge = { x: Math.round(line.abs.x) + 1, y: Math.round(line.abs.y) };
+    // who claimed what, for the frame the hover asks for
+    const claims = [];
+    root.invalidate = function (layoutChanged, damage, reason, ...rest) {
+      claims.push({ damage, reason });
+      return Object.getPrototypeOf(this).invalidate.call(
+        this,
+        layoutChanged,
+        damage,
+        reason,
+        ...rest,
+      );
+    };
+
+    const { damage, partial, diff } = await paintBothWays(app, root, () =>
+      row.setStyleState(':hover', true),
+    );
+    delete root.invalidate;
+    // the premise: the border is drawn in the ink the row moved to
+    assert.equal(pixelAt(partial, edge.x, edge.y), HOVER_INK);
+    assert.ok(damage, 'an ink change bounds the repaint');
+    assert.ok(
+      damage.height <= ROW_H + 4,
+      `expected the row, ~${ROW_H}px tall, got ${damage.height}`,
+    );
+    assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
+    // …and the line said so itself, bounded to itself: the claim a
+    // presenter re-rastering by node acts on
+    assert.ok(
+      claims.some((c) => c.damage === line && c.reason === 'ink'),
+      `the line claimed its own repaint: ${claims.map((c) => c.reason)}`,
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('a popup under the row repaints its currentColor border, and nothing else in it', async () => {
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const rowRef = React.createRef();
+    const lineRef = React.createRef();
+    await mount(
+      x11Root,
+      h(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+        h(
+          'box',
+          {
+            ref: rowRef,
+            style: {
+              height: ROW_H,
+              color: INK,
+              ':hover': { color: HOVER_INK },
+            },
+          },
+          h(
+            'popup',
+            {
+              x: 0,
+              y: 0,
+              width: W,
+              height: H,
+              style: {
+                padding: 10,
+                gap: 10,
+                backgroundColor: '#ffffff',
+              },
+            },
+            h('box', {
+              ref: lineRef,
+              style: { width: 60, height: 20, border: '2px solid' },
+            }),
+            // drawn in a colour of its own, so the ink is nothing to it
+            h('box', {
+              style: { flexGrow: 1, borderWidth: 2, borderColor: '#0984e3' },
+            }),
+          ),
+        ),
+      ),
+    );
+    const row = rowRef.current;
+    const line = lineRef.current;
+    const popup = line.root;
+    assert.notEqual(popup, row.root, 'the premise: a window of its own');
+    // its first frame, whole, so what follows is the change alone
+    popup._scheduled = false;
+    popup.needsPaint = true;
+    popup._damage = null;
+    popup.flush();
+    await settled(app);
+    popup._scheduled = false;
+
+    const edge = { x: Math.round(line.abs.x) + 1, y: Math.round(line.abs.y) };
+    const { damage, partial, diff } = await paintBothWays(app, popup, () =>
+      row.setStyleState(':hover', true),
+    );
+    assert.equal(
+      pixelAt(partial, edge.x, edge.y),
+      HOVER_INK,
+      'the border in the popup is drawn in the row’s new ink',
+    );
+    assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
+    assert.ok(damage, 'bounded, not the whole popup');
+    assert.ok(
+      damage.width <= line.abs.width + 4 &&
+        damage.height <= line.abs.height + 4,
+      `expected the bordered box, got ${damage.width}x${damage.height}`,
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('a popup filled with currentColor follows the row’s ink, and so does the server’s copy', async () => {
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const rowRef = React.createRef();
+    const innerRef = React.createRef();
+    await mount(
+      x11Root,
+      h(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+        h(
+          'box',
+          {
+            ref: rowRef,
+            style: {
+              height: ROW_H,
+              color: INK,
+              ':hover': { color: HOVER_INK },
+            },
+          },
+          h(
+            'popup',
+            {
+              x: 0,
+              y: 0,
+              width: W,
+              height: H,
+              style: { backgroundColor: 'currentColor' },
+            },
+            h('box', { ref: innerRef, style: { width: 10, height: 10 } }),
+          ),
+        ),
+      ),
+    );
+    const row = rowRef.current;
+    const popup = innerRef.current.root;
+    popup._scheduled = false;
+    popup.needsPaint = true;
+    popup._damage = null;
+    popup.flush();
+    await settled(app);
+    popup._scheduled = false;
+    const pixelBefore = popup._backgroundPixel;
+
+    const { partial, diff } = await paintBothWays(app, popup, () =>
+      row.setStyleState(':hover', true),
+    );
+    assert.equal(pixelAt(partial, W - 5, H - 5), HOVER_INK);
+    assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
+    assert.notEqual(
+      popup._backgroundPixel,
+      pixelBefore,
+      'what a resize exposes is the new ink too',
+    );
+  } finally {
+    await app.close();
+  }
+});

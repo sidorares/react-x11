@@ -137,7 +137,7 @@ export class WindowCapabilities {
    * whatever it skipped would show the last frame's pixels.
    */
   _windowBackground() {
-    const own = this.style.backgroundColor;
+    const own = this.resolveColor(this.style.backgroundColor);
     if (isColor(own)) return own;
     const palette = this.theme.background;
     return isColor(palette) ? palette : 'white';
