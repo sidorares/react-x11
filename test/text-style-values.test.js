@@ -3,7 +3,9 @@
 // A `fontStyle` of `7` threw from inside ntk's face matching, and a
 // `lineHeight` of `'24px'` made a paragraph NaN pixels tall, which the
 // layout pass throws on: both from a frame, both uncaught. A `fontSize` of
-// `'20px'` did not throw; it set no text at all. Development now says so
+// `'20px'` did not throw; it set no text at all — it is a length now, read
+// as 20, and a unit no length reads (`'1.2em'`) is the error. Development
+// now says so
 // where the style is written, and what reaches the text anyway — a token, a
 // production build — is not the property: the text inherits past it, as
 // CSS inherits past a declaration it cannot parse.
@@ -44,7 +46,10 @@ test('a text value no engine can set type with is an error at the commit', async
     [{ fontStyle: 'bold' }, /invalid fontStyle "bold"/],
     [{ lineHeight: '24px' }, /invalid lineHeight "24px".*lineHeight: 1\.5/],
     [{ lineHeight: -3 }, /invalid lineHeight -3/],
-    [{ fontSize: '20px' }, /invalid fontSize "20px".*fontSize: 14/],
+    [
+      { fontSize: '1.2em' },
+      /invalid fontSize "1\.2em" in <text style>: em is not a unit/,
+    ],
     [{ fontSize: -1 }, /invalid fontSize -1/],
     [{ fontWeight: 1200 }, /invalid fontWeight 1200/],
     [{ fontFamily: 7 }, /invalid fontFamily 7/],
@@ -63,6 +68,11 @@ test('what the engines read is not a mistake, numeric strings included', async (
       fontFamily: 'monospace',
       lineHeight: '1.5',
     }),
+    [],
+  );
+  // a length in px is the number it names, as it is everywhere else
+  assert.deepEqual(
+    await commitErrors({ fontSize: '20px', letterSpacing: '0.5px' }),
     [],
   );
   // and unset, the way a conditional writes it
@@ -97,7 +107,7 @@ test('what reaches the text anyway is inherited past, and the frame goes on', as
           {
             width: 300,
             height: 200,
-            theme: { tilt: 7, tall: '24px', big: '20px', wide: 'wide' },
+            theme: { tilt: 7, tall: '24px', big: '2em', wide: 'wide' },
             style: { fontSize: 18 },
           },
           h(

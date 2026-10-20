@@ -330,8 +330,8 @@ test('across a scale boundary the spacing is re-expressed, like the size', async
 test('a value that is not one says what to write', () => {
   const bad = [
     [
-      { letterSpacing: '2px' },
-      /invalid letterSpacing "2px".*a number of pixels/,
+      { letterSpacing: '0.1em' },
+      /invalid letterSpacing "0\.1em".*em is not a unit.*a number of logical pixels/,
     ],
     [{ fontVariantNumeric: 'tabular' }, /invalid fontVariantNumeric "tabular"/],
     // two from one group contradict each other, so CSS refuses the pair
@@ -350,6 +350,8 @@ test('a value that is not one says what to write', () => {
   // the ones that are, a token and unset among them
   createStyles({
     spaced: { letterSpacing: -0.33 },
+    // a length in px is the number it names
+    written: { letterSpacing: '1.5px' },
     themed: { letterSpacing: '$tracking' },
     unset: { letterSpacing: undefined, fontVariantNumeric: undefined },
     figures: { fontVariantNumeric: 'lining-nums tabular-nums slashed-zero' },

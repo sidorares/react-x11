@@ -1,6 +1,8 @@
 // Style props → yoga setters (layout) and paint metadata. Flat, ink-style
 // props: <box flexDirection="row" padding={8} backgroundColor="#eee">.
-// Numbers are pixels; strings like '50%' / 'auto' pass through to yoga.
+// Lengths are logical pixels — a number, or a string like '12px' that the
+// funnel reads into one — and '50%' / 'auto' pass through to yoga; CSS's
+// shorthands expand into the longhands here (src/shorthands.js).
 // The engine is ours (`./yoga.js`) — the enum tables below are built at
 // module scope, which is what that module's synchronous half is for.
 import { cssColorStraight } from 'ntk/color';
@@ -12,6 +14,19 @@ import {
   GRID_CONTAINER_PROPS,
   GRID_ITEM_PROPS,
 } from './grid.js';
+import {
+  LENGTH_FORMS,
+  LINE_STYLES,
+  SHORTHAND_PROPS,
+  SHORTHANDS_OF,
+  borderProblem,
+  checkShorthand,
+  expandStyle,
+  isShorthandValue,
+  locate,
+  needsExpanding,
+  readLength,
+} from './shorthands.js';
 import { Yoga, layoutLoaded } from './yoga.js';
 
 const FLEX_DIRECTION = {
@@ -83,28 +98,6 @@ const DISPLAY = {
   grid: Yoga.DISPLAY_FLEX,
   none: Yoga.DISPLAY_NONE,
 };
-
-/**
- * CSS's `flex` shorthand, as the three properties it sets. A number is
- * `flex: <grow> 1 0` — "take this share of what is left, from a base size of
- * nothing" — which is what `flex: 1` means everywhere it is written; the two
- * keywords are CSS's own, `'auto'` for "grow and shrink from my content" and
- * `'none'` for "do neither".
- *
- * It is here rather than in `LAYOUT_APPLIERS` because a shorthand is not a
- * yoga property: it expands into three of them before the diff runs, so
- * `{ flex: 1, flexBasis: 'auto' }` resolves the way CSS does — the longhand
- * after the shorthand wins — and the applier for each still sees a plain
- * value changing.
- */
-const FLEX_SHORTHAND = {
-  none: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
-  auto: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto' },
-};
-
-const isFlexShorthand = (v) =>
-  (typeof v === 'number' && Number.isFinite(v) && v >= 0) ||
-  (typeof v === 'string' && v in FLEX_SHORTHAND);
 
 const OVERFLOW = {
   visible: Yoga.OVERFLOW_VISIBLE,
@@ -218,6 +211,22 @@ const LAYOUT_APPLIERS = {
   borderStartWidth: (n, v) => n.setBorder(Yoga.EDGE_START, v),
   borderEndWidth: (n, v) => n.setBorder(Yoga.EDGE_END, v),
 };
+
+// Every length a setter is handed goes through the length grammar first, so
+// what yoga is asked to take is what the grammar says a length is — at a
+// commit, in a frame, and in development's check, which asks these same
+// appliers (`layoutRefusal`). Yoga's own string handling is `parseFloat`
+// with a `%` check: it read `'2em'` as two pixels, and its border setter
+// coerced a string to a number, so `'2px'` was NaN. By here the funnel has
+// read every length it could into a number (`resolveComputedStyle`), so a
+// string is a percentage, `'auto'`, or one the grammar refuses — which this
+// throws, naming its unit.
+for (const key of LENGTH_FORMS.keys()) {
+  const set = LAYOUT_APPLIERS[key];
+  if (set === undefined) continue;
+  LAYOUT_APPLIERS[key] = (n, v) =>
+    set(n, typeof v === 'string' ? readLength(key, v) : v);
+}
 
 // Props that only affect painting, not geometry.
 //
@@ -564,13 +573,19 @@ export const STATE_KEYS = [
 // could set `padding` or `fontSize` would reflow the tree on pointer move,
 // which is both a jitter bug and the end of the "hover is a repaint, not a
 // React render" property that makes this worth having at all.
-const STATE_PROPS = new Set([...PAINT_PROPS, 'color']);
+// The two shorthands that are paint all the way down — `background` sets a
+// colour and a gradient, `outline` a ring's width and colour — are legal here
+// for the same reason their longhands are. `border` is not: its width is
+// layout.
+const STATE_PROPS = new Set([...PAINT_PROPS, 'color', 'background', 'outline']);
 
 const STYLE_PROPS = new Set([
   ...Object.keys(LAYOUT_APPLIERS),
-  // the one layout property that is not a yoga property: a shorthand for
-  // three of them, expanded by `resolveComputedStyle`
-  'flex',
+  // CSS's shorthands — `flex`, `border` and its sides, `inset`, `outline`,
+  // `background`, the logical pairs — which no setter and no paint reads:
+  // `resolveComputedStyle` expands them into the longhands first
+  // (src/shorthands.js)
+  ...SHORTHAND_PROPS,
   ...PAINT_PROPS,
   ...TEXT_LAYOUT_PROPS,
   ...TEXT_PAINT_PROPS,
@@ -878,6 +893,45 @@ const COLOR_PROPS = new Set([
  * (`isColor`), since a theme is not a call site.
  */
 function validateValue(key, value, where) {
+  // A shorthand — or a longhand written with several values, `padding:
+  // '8px 16px'` — is read the way the funnel will expand it, a `$token`
+  // standing in for one value of whatever it resolves to. A whole token is
+  // one value of a shape nobody knows yet, and is answered by the frame.
+  if (isShorthandValue(key, value)) {
+    if (isToken(value)) return;
+    try {
+      checkShorthand(key, value);
+    } catch (err) {
+      throw locate(err, where);
+    }
+    return;
+  }
+  // A length written as a string is read into the number it means before
+  // anything below looks at it, so `'12px'` passes where 12 does and `'2em'`
+  // is an error naming its unit — yoga's own setters read it as 2.
+  if (
+    LENGTH_FORMS.has(key) &&
+    typeof value === 'string' &&
+    value !== '' &&
+    !isToken(value) &&
+    !mentionsToken(value)
+  ) {
+    try {
+      value = readLength(key, value);
+    } catch (err) {
+      throw locate(err, where);
+    }
+  }
+  if (key === 'borderStyle') {
+    if (value == null || LINE_STYLES.has(value) || isToken(value)) return;
+    throw new Error(
+      `react-x11: invalid borderStyle ${JSON.stringify(value)} in ${where} ` +
+        `(expected ${[...LINE_STYLES].map((v) => `'${v}'`).join(' or ')}` +
+        (value === 'none' || value === 'hidden'
+          ? ' — a box with no border is borderWidth: 0)'
+          : ')'),
+    );
+  }
   const text = TEXT_VALUE_CHECKS.get(key);
   if (text !== undefined) {
     // unset, the way a conditional writes it
@@ -977,14 +1031,12 @@ function validateValue(key, value, where) {
     isToken(value) || mentionsToken(value) ? null : layoutRefusal(key, value);
   if (refused) {
     // an enum's own message lists the choices; yoga's names only itself
-    if (refused.message.startsWith('react-x11:')) {
-      refused.message += `\n  in ${where}`;
-      throw refused;
-    }
+    if (refused.message.startsWith('react-x11:')) throw locate(refused, where);
     const auto = layoutRefusal(key, 'auto') === null ? ", or 'auto'" : '';
     throw new Error(
       `react-x11: invalid ${key} ${JSON.stringify(value)} in ${where} ` +
-        `(expected a number of pixels or a percentage like '50%'${auto})`,
+        "(expected a number of logical pixels, like 12 or '12px', or a " +
+        `percentage like '50%'${auto})`,
     );
   }
   const grid = GRID_VALUES.has(key);
@@ -1017,7 +1069,97 @@ const isAlgorithm = (v) =>
   (typeof v === 'string' && ALGORITHM_NAME.test(v)) ||
   (isOptionBag(v) && typeof v.name === 'string' && ALGORITHM_NAME.test(v.name));
 
-function validateStyle(style, where) {
+const CORNERS =
+  'corners are not rounded one at a time yet; borderRadius rounds all four';
+const PICTURE =
+  'a box paints a colour and a gradient; a picture is an <image>, fitted ' +
+  'with objectFit';
+
+/**
+ * The CSS and React Native names an app reaches for that are not properties
+ * here, and what to write instead. Each is the property somebody coming from
+ * the web or from React Native writes first — the ones a typo's distance
+ * cannot find, because the right answer is a different word.
+ */
+const INSTEAD = {
+  font:
+    'the font shorthand is not supported; write fontSize, fontFamily, ' +
+    'fontWeight, fontStyle and lineHeight',
+  paddingHorizontal:
+    "that is React Native's name; write paddingInline (start and end), or " +
+    'paddingLeft and paddingRight',
+  paddingVertical: "that is React Native's name; write paddingBlock",
+  marginHorizontal:
+    "that is React Native's name; write marginInline (start and end), or " +
+    'marginLeft and marginRight',
+  marginVertical: "that is React Native's name; write marginBlock",
+  insetInline: 'write start and end',
+  insetBlock: 'write top and bottom',
+  borderTopLeftRadius: CORNERS,
+  borderTopRightRadius: CORNERS,
+  borderBottomLeftRadius: CORNERS,
+  borderBottomRightRadius: CORNERS,
+  boxSizing: 'every box is border-box here, so there is nothing to set',
+  whiteSpace: "write textWrap: 'nowrap' to keep text on one line",
+  placeItems: 'write alignItems and justifyItems',
+  placeContent: 'write alignContent and justifyContent',
+  placeSelf: 'write alignSelf and justifySelf',
+  backgroundSize: PICTURE,
+  backgroundPosition: PICTURE,
+  backgroundRepeat: PICTURE,
+  textDecoration: 'text decorations are not supported',
+};
+
+/** Edit distance, for "did you mean": two names one or two keystrokes
+ *  apart, which is what a typo is. */
+function editDistance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(
+        prev[j] + 1,
+        row[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+/**
+ * What to say after "unknown style property": the camelCase spelling of a
+ * kebab-case name, what to write instead of a name with no property here,
+ * or the nearest property names. Empty when none of those finds anything —
+ * a name nothing is near is better left unanswered than guessed at.
+ */
+function unknownPropertyHint(key) {
+  const camel = key.includes('-')
+    ? key.replace(/-([a-z])/g, (_, c) => c.toUpperCase())
+    : key;
+  if (camel !== key && STYLE_PROPS.has(camel)) {
+    return ` — style names are camelCase: ${camel}`;
+  }
+  if (Object.hasOwn(INSTEAD, camel)) return ` — ${INSTEAD[camel]}`;
+  const lower = camel.toLowerCase();
+  const reach = camel.length <= 5 ? 1 : 2;
+  const near = [];
+  for (const name of STYLE_PROPS) {
+    if (Math.abs(name.length - camel.length) > reach) continue;
+    const d =
+      name.toLowerCase() === lower
+        ? 0
+        : editDistance(lower, name.toLowerCase());
+    if (d <= reach) near.push([d, name]);
+  }
+  if (near.length === 0) return '';
+  near.sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]));
+  const names = near.slice(0, 3).map(([, name]) => name);
+  return ` — did you mean ${names.join(' or ')}?`;
+}
+
+function validateStyle(style, where, nested = false) {
   for (const key of Object.keys(style)) {
     if (isQuery(key)) {
       if (!parseQuery(key)) {
@@ -1029,7 +1171,7 @@ function validateStyle(style, where) {
             `"@supports ${SUPPORTS_FEATURES.join('" / "@supports ')}")`,
         );
       }
-      validateStyle(style[key] ?? {}, `${where} ${key}`);
+      validateStyle(style[key] ?? {}, `${where} ${key}`, true);
       continue;
     }
     if (isState(key)) {
@@ -1054,7 +1196,10 @@ function validateStyle(style, where) {
       continue;
     }
     if (!STYLE_PROPS.has(key)) {
-      throw new Error(`react-x11: unknown style property "${key}" in ${where}`);
+      throw new Error(
+        `react-x11: unknown style property "${key}" in ${where}` +
+          unknownPropertyHint(key),
+      );
     }
     // The one style value that describes motion rather than a state, so the
     // one whose mistakes are invisible: a loop with a bad `to` does not draw
@@ -1090,13 +1235,13 @@ function validateStyle(style, where) {
           'this node reads, like { span: 2 })',
       );
     }
-    if (key === 'flex' && !isFlexShorthand(style[key])) {
-      throw new Error(
-        `react-x11: invalid flex ${JSON.stringify(style[key])} in ${where} ` +
-          '(expected a number — flex: 1 is flexGrow: 1, flexShrink: 1, ' +
-          "flexBasis: 0 — or 'auto' / 'none')",
-      );
-    }
+  }
+  // what no single value can be wrong about on its own: a border with no
+  // colour anywhere in the style, two line styles on one box. Once, on the
+  // whole style — a query block's border may take its colour from the base.
+  if (!nested) {
+    const problem = borderProblem(style);
+    if (problem) throw new Error(`${problem}\n  in ${where}`);
   }
 }
 
@@ -1216,6 +1361,11 @@ const NOT_ANIMATABLE = new Set([
   // 2.5, is no grid at all, and a track list is a string
   ...GRID_CONTAINER_PROPS,
   ...GRID_ITEM_PROPS,
+  // A shorthand never reaches a running style — the funnel has expanded it
+  // into longhands, which are what animate — so a loop on one would run a
+  // property nobody reads. A `transition` keyed by one still reaches its
+  // longhands (`transitionFor`).
+  ...SHORTHAND_PROPS,
 ]);
 
 export const isAnimatableProp = (name) =>
@@ -1224,13 +1374,22 @@ export const isAnimatableProp = (name) =>
 /**
  * `transition: 150` — every animatable property that changes, over 150ms.
  * `transition: { backgroundColor: 150 }` — only these, with their own
- * durations. Returns a lookup of prop -> ms, or null.
+ * durations. Returns the duration in ms, or 0.
+ *
+ * A duration keyed by a shorthand is its longhands', the nearest shorthand
+ * first, as in CSS: `transition: { border: 150 }` fades a `borderColor`
+ * that `border: '1px solid …'` set, and `{ padding: 200 }` moves each side a
+ * `padding: '8px 16px'` expanded into. The longhand's own entry wins.
  */
 export function transitionFor(style, prop) {
   const t = style.transition;
   if (t == null || !isAnimatableProp(prop)) return 0;
   if (typeof t === 'number') return t;
-  return t[prop] ?? 0;
+  if (t[prop] != null) return t[prop];
+  for (const shorthand of SHORTHANDS_OF.get(prop) ?? []) {
+    if (t[shorthand] != null) return t[shorthand];
+  }
+  return 0;
 }
 
 /**
@@ -1305,6 +1464,22 @@ const parsedAnimations = new WeakMap();
 /** What one property's loop may say. */
 const LOOP_OPTIONS = ['from', 'to', 'duration', 'easing', 'alternate', 'delay'];
 
+/**
+ * One end of a loop on a length, read the way the style's own value is:
+ * `'12px'` travels as 12. A percentage stays one, since two of them have a
+ * midpoint of their own; a value the grammar refuses is left as written, for
+ * the midpoint check to name.
+ */
+function loopEnd(prop, value) {
+  if (!LENGTH_FORMS.has(prop) || typeof value !== 'string') return value;
+  if (isToken(value) || mentionsToken(value)) return value;
+  try {
+    return readLength(prop, value);
+  } catch {
+    return value;
+  }
+}
+
 function parseAnimation(spec, where) {
   if (typeof spec !== 'object' || spec === null || Array.isArray(spec)) {
     throw new Error(
@@ -1368,8 +1543,8 @@ function parseAnimation(spec, where) {
     }
     entries.push({
       prop,
-      from: entry.from,
-      to: entry.to,
+      from: loopEnd(prop, entry.from),
+      to: loopEnd(prop, entry.to),
       duration: entry.duration,
       easing,
       ease: EASINGS[easing],
@@ -1407,7 +1582,10 @@ export function animationsOf(style, where = 'a style', scale = 1) {
         ...(typeof entry.to === 'number' && { to: entry.to * scale }),
       };
     }
-    const from = entry.from === undefined ? style[entry.prop] : entry.from;
+    const from =
+      entry.from === undefined
+        ? loopEnd(entry.prop, style[entry.prop])
+        : entry.from;
     if (from === undefined) {
       throw new Error(
         `react-x11: animation for "${entry.prop}" in ${where} has no "from" ` +
@@ -1661,14 +1839,23 @@ export const TRANSITION_CONTROL_POINTS = EASING_CONTROL_POINTS['ease-out'];
  * hoisted style. It is the same substitution either way, so the value that
  * *is* a token keeps its fast path and the value that *mentions* one goes
  * through the regexp.
+ *
+ * A whole token is `$name` and nothing else. A value that only *starts* with
+ * one is a mention — `padding: '$gutter 0'`, `border: '$hairline solid
+ * $border'` — which the shorthands made ordinary; reading it as one token
+ * looked up a theme entry called `gutter 0`.
  */
-const isToken = (v) => typeof v === 'string' && v.charCodeAt(0) === 36; /* $ */
+const WHOLE_TOKEN = /^\$[A-Za-z_][A-Za-z0-9_-]*$/;
+const isToken = (v) =>
+  typeof v === 'string' &&
+  v.charCodeAt(0) === 36 /* $ */ &&
+  WHOLE_TOKEN.test(v);
 /** `$name`, anywhere in a string. Deliberately the same grammar as a whole
  * token, so `'$accent'` and `'linear-gradient($accent, #000)'` cannot
  * disagree about what a name is. */
 const TOKEN_IN_VALUE = /\$[A-Za-z_][A-Za-z0-9_-]*/g;
 const mentionsToken = (v) =>
-  typeof v === 'string' && v.charCodeAt(0) !== 36 && v.includes('$');
+  typeof v === 'string' && v.includes('$') && !isToken(v);
 
 /** The nested blocks a token can hide in, one level down: a state block or
  *  a query block, whose values are style values, and `animation`, whose
@@ -1847,11 +2034,13 @@ function unknownToken(token, theme, where) {
 export { validateStyle };
 
 /**
- * The style the layout is actually run from: the `flex` shorthand expanded,
- * and the defaults `overflow: 'scroll'` implies folded in. Both are things a
+ * The style the layout is actually run from: the shorthands expanded into
+ * their longhands, every length read into a number (src/shorthands.js), and
+ * the defaults `overflow: 'scroll'` implies folded in. All three are things a
  * style *means* rather than things it says, and doing them here — once, on
- * the resolved object — is what lets everything downstream stay a flat diff
- * of yoga properties.
+ * the resolved object, after the state blocks and the queries have merged
+ * into it — is what lets everything downstream stay a flat diff of yoga
+ * properties, and the display scale multiply numbers only.
  *
  * Returns `style` itself when there is nothing to add, so identity comparisons
  * upstream keep meaning "the style did not change".
@@ -1871,27 +2060,14 @@ export { validateStyle };
  *   since the content stops counting towards any of their heights.
  */
 export function resolveComputedStyle(style) {
+  const expands = needsExpanding(style);
   const scrolls = style.overflow === 'scroll';
-  const loops = style.animation == null ? null : animationsOf(style);
-  if (style.flex === undefined && !scrolls && !loops) return style;
-  const out = {};
-  if (style.flex !== undefined) {
-    const expansion =
-      typeof style.flex === 'number'
-        ? { flexGrow: style.flex, flexShrink: 1, flexBasis: 0 }
-        : FLEX_SHORTHAND[style.flex];
-    if (!expansion) {
-      throw new Error(
-        `react-x11: invalid flex ${JSON.stringify(style.flex)} ` +
-          "(expected a number, 'auto' or 'none')",
-      );
-    }
-    Object.assign(out, expansion);
-  }
-  // after the expansion, so a longhand written beside the shorthand wins
-  for (const key of Object.keys(style)) {
-    if (key !== 'flex') out[key] = style[key];
-  }
+  if (!expands && !scrolls && style.animation == null) return style;
+  // the loops read the expanded style, so a `from` they default to is the
+  // longhand's value, in pixels, whatever the style wrote it as
+  const out = expands ? expandStyle(style) : { ...style };
+  const loops = out.animation == null ? null : animationsOf(out);
+  if (!expands && !scrolls && !loops) return style;
   if (scrolls) {
     if (out.minWidth === undefined) out.minWidth = 0;
     if (out.minHeight === undefined) out.minHeight = 0;
@@ -1923,51 +2099,12 @@ export function resolveComputedStyle(style) {
  * factors are ratios, `opacity` and `zIndex` are not lengths, and
  * `boxShadow` is a string whose lengths are scaled where it is parsed
  * (src/decorations.js), because its parse is memoized on the raw string.
+ *
+ * The keys of `LENGTH_FORMS` (src/shorthands.js): a property is scaled
+ * exactly when it is one the length grammar reads, because those are the
+ * same question asked twice — and two lists of it drifted.
  */
-export const SCALED_LENGTH_PROPS = [
-  'width',
-  'height',
-  'minWidth',
-  'minHeight',
-  'maxWidth',
-  'maxHeight',
-  'flexBasis',
-  'top',
-  'right',
-  'bottom',
-  'left',
-  'start',
-  'end',
-  'margin',
-  'marginTop',
-  'marginRight',
-  'marginBottom',
-  'marginLeft',
-  'marginStart',
-  'marginEnd',
-  'padding',
-  'paddingTop',
-  'paddingRight',
-  'paddingBottom',
-  'paddingLeft',
-  'paddingStart',
-  'paddingEnd',
-  'gap',
-  'rowGap',
-  'columnGap',
-  'borderWidth',
-  'borderTopWidth',
-  'borderRightWidth',
-  'borderBottomWidth',
-  'borderLeftWidth',
-  'borderStartWidth',
-  'borderEndWidth',
-  'borderRadius',
-  'outlineWidth',
-  'outlineOffset',
-  'fontSize',
-  'letterSpacing',
-];
+export const SCALED_LENGTH_PROPS = Object.freeze([...LENGTH_FORMS.keys()]);
 
 const SCALED_LENGTHS = new Set(SCALED_LENGTH_PROPS);
 
@@ -1979,9 +2116,11 @@ const SCALED_LENGTHS = new Set(SCALED_LENGTH_PROPS);
  * (`_syncStyle` → `resolveComputedStyle` → here → `_retarget`), so yoga,
  * every `this.style.borderRadius ?? 0` at a paint site, and the font size
  * the text stack shapes at are all *already* device pixels and none of them
- * ever multiplies again. Numbers scale; `'50%'`, `'auto'` and every other
- * string mean the same thing at any density and pass through; `hitSlop`
- * scales inside its number-or-per-side shape.
+ * ever multiplies again. Numbers scale — and every length is a number by
+ * now, since `resolveComputedStyle` read `'12px'` into 12, which is what
+ * keeps a px string the size it says at 2x; `'50%'` and `'auto'` mean the
+ * same thing at any density and pass through; `hitSlop` scales inside its
+ * number-or-per-side shape.
  *
  * Never mutates: `flattenStyle` hands back the app's own hoisted object
  * when it can, and scaling it in place would corrupt the next render.

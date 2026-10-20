@@ -449,7 +449,7 @@ test("flex: 'none' and flex: 'auto' are CSS's two keywords", async () => {
 test('an unknown flex value says what the three are', async () => {
   assert.throws(
     () => createStyles({ bad: { flex: 'fill' } }),
-    /invalid flex "fill" in styles\.bad .*expected a number/s,
+    /invalid flex "fill" in styles\.bad\b.*expected a number/s,
   );
 });
 

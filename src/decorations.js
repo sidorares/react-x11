@@ -50,9 +50,11 @@ const HORIZONTAL = new Set(['left', 'right']);
 /**
  * Split on `,` or on whitespace, but only at the top level: a stop is
  * `rgba(0, 0, 0, .4)` as often as it is `#333`, and every naive split on
- * this vocabulary gets that wrong.
+ * this vocabulary gets that wrong. The shorthands split by it too
+ * (src/shorthands.js) — `border: '1px solid rgba(0, 0, 0, .1)'` is three
+ * values, not six.
  */
-function splitTop(text, byComma) {
+export function splitTop(text, byComma) {
   const out = [];
   let depth = 0;
   let start = 0;

@@ -215,7 +215,7 @@ test('a query block that starts matching mid-frame drops what the layout refuses
   });
   assert.ok(
     errors.some((e) =>
-      /invalid width "hidden" \(Invalid value hidden for setWidth\) in <box style>, applied when a query block started matching/.test(
+      /invalid width "hidden" \(expected [^)]*\) in <box style>, applied when a query block started matching/.test(
         e,
       ),
     ),
@@ -223,6 +223,37 @@ test('a query block that starts matching mid-frame drops what the layout refuses
   );
   assert.ok(
     errors.some((e) => /invalid flexDirection "sideways"/.test(e)),
+    errors.join('\n'),
+  );
+});
+
+test('a token that resolves to a unit no length reads is refused in a frame, not read as pixels', async () => {
+  // yoga's own setter read `'20em'` as 20: the box was twenty pixels wide
+  // and nothing said why. The appliers read through the length grammar.
+  const errors = await capturing(async () => {
+    const { app, root, uncaught } = await mount(
+      h(
+        'window',
+        { width: 200, height: 100, theme: { wide: '20em' } },
+        h('box', {
+          style: { width: 50, height: 20, '@width >= 300': { width: '$wide' } },
+        }),
+      ),
+    );
+    await resize(app, 400);
+    assert.deepEqual(
+      uncaught.map((e) => e.message),
+      [],
+    );
+    assert.strictEqual(nodeOf(app).children[0].abs.width, 400, 'dropped');
+    await root.unmount();
+  });
+  assert.ok(
+    errors.some((e) =>
+      /invalid width "20em": em is not a unit react-x11 resolves yet .* in <box style>, applied when a query block started matching/.test(
+        e,
+      ),
+    ),
     errors.join('\n'),
   );
 });

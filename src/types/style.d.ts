@@ -10,11 +10,45 @@
  */
 export type Color = string;
 
+/**
+ * A distance in logical pixels: a number, or the same number written
+ * `'12px'`. The display scale turns either into device pixels. CSS's
+ * relative units (`em`, `rem`, `vw`) are not read yet, and are an error
+ * naming the unit rather than a guess.
+ */
+export type Pixels = number | `${number}px`;
+
 /** A yoga length: pixels, a percentage, or `'auto'`. */
-export type Dimension = number | `${number}%` | 'auto';
+export type Dimension = Pixels | `${number}%` | 'auto';
 
 /** A yoga length that has no `auto` form. */
-export type Length = number | `${number}%`;
+export type Length = Pixels | `${number}%`;
+
+/** A border's or an outline's width: pixels, or CSS's three keywords —
+ *  `'thin'` 1, `'medium'` 3, `'thick'` 5. */
+export type LineWidth = Pixels | 'thin' | 'medium' | 'thick';
+
+/**
+ * CSS's one-to-four rule, as one string: `'8px 16px'` is top and bottom,
+ * then right and left; `'1px 2px 3px'` is top, the sides, bottom. Typed as a
+ * first value and whatever follows; the rest is checked when the style is.
+ */
+export type Edges<T extends string | number> = T | `${T} ${string}`;
+
+/** A first value and a second, the second the first when left out:
+ *  `gap: '4px 8px'` is a row gap and a column gap. */
+export type Pair<T extends string | number> = T | `${T} ${T}`;
+
+/**
+ * A line — `border` and its sides, `outline` — as CSS writes it: a width, a
+ * style and a colour in any order, each at most once, or `'none'`.
+ * `'1px solid $border'`, `'2px dashed #c0392b'`. A number is the width. A
+ * width left out is CSS's `'medium'`, 3px; the style is `'solid'` or
+ * `'dashed'` (an outline is solid only); and since there is no
+ * `currentColor` here yet, a line nobody gives a colour paints nothing and
+ * is an error saying so.
+ */
+export type Line = number | 'none' | (string & {});
 
 export type FlexDirection = 'row' | 'row-reverse' | 'column' | 'column-reverse';
 
@@ -146,9 +180,19 @@ export interface LayoutStyle {
    * CSS's shorthand: `flex: 1` is `flexGrow: 1, flexShrink: 1,
    * flexBasis: 0` — take this share of what is left, from a base size of
    * nothing. `'auto'` grows and shrinks from the content's own size,
-   * `'none'` does neither. A longhand written beside it wins.
+   * `'none'` does neither, `'initial'` shrinks only. And CSS's long form —
+   * `'1 1 0'`, `'0 0 240px'`, `'2 200px'`, `'240px'`. A longhand written
+   * beside it wins.
    */
-  flex?: number | 'auto' | 'none';
+  flex?:
+    | number
+    | 'auto'
+    | 'none'
+    | 'initial'
+    | `${number}`
+    | Length
+    | `${number} ${string}`
+    | `${Length} ${number}`;
   flexGrow?: number;
   /** How eagerly this item gives up the space it has **above its content**;
    *  `1` by default, as in CSS. It never shrinks past what is inside it —
@@ -216,16 +260,23 @@ export interface LayoutStyle {
    *  the scheme's to read: how close to the scroll pane's edge the box may
    *  come, for sticky, where a percentage is of the pane's size. The same
    *  holds for the other five. */
-  top?: Length;
-  right?: Length;
-  bottom?: Length;
-  left?: Length;
-  margin?: Dimension;
+  top?: Dimension;
+  right?: Dimension;
+  bottom?: Dimension;
+  left?: Dimension;
+  /** CSS's `inset`: `top`, `right`, `bottom` and `left` in one, by the
+   *  one-to-four rule — `inset: 0` pins all four edges. */
+  inset?: Edges<Dimension>;
+  /** One value for all four sides, or CSS's one-to-four rule:
+   *  `'0 auto'`, `'8px 16px 4px'`. A side written beside it wins. */
+  margin?: Edges<Dimension>;
   marginTop?: Dimension;
   marginRight?: Dimension;
   marginBottom?: Dimension;
   marginLeft?: Dimension;
-  padding?: Length;
+  /** One value for all four sides, or CSS's one-to-four rule:
+   *  `'8px 16px'`. A side written beside it wins, wherever it is written. */
+  padding?: Edges<Length>;
   paddingTop?: Length;
   paddingRight?: Length;
   paddingBottom?: Length;
@@ -236,29 +287,55 @@ export interface LayoutStyle {
    * override their physical counterparts even in LTR, the way CSS's
    * `padding-inline-start` overrides `padding-left`.
    */
-  start?: Length;
-  end?: Length;
+  start?: Dimension;
+  end?: Dimension;
   marginStart?: Dimension;
   marginEnd?: Dimension;
   paddingStart?: Length;
   paddingEnd?: Length;
-  gap?: number;
-  rowGap?: number;
-  columnGap?: number;
+  /** CSS's logical pairs: `paddingInline` is `paddingStart` then
+   *  `paddingEnd`, `paddingBlock` is `paddingTop` then `paddingBottom` —
+   *  one value for both, or two. */
+  paddingInline?: Pair<Length>;
+  paddingBlock?: Pair<Length>;
+  marginInline?: Pair<Dimension>;
+  marginBlock?: Pair<Dimension>;
+  /** One gap for both directions, or CSS's two: `'4px 8px'` is the row gap,
+   *  then the column gap. */
+  gap?: Pair<Length>;
+  rowGap?: Length;
+  columnGap?: Length;
   aspectRatio?: number;
   display?: Display;
   overflow?: Overflow;
-  borderWidth?: number;
+  /**
+   * CSS's `border`: a width, a style and a colour in one —
+   * `'1px solid $border'`. It sets `borderWidth`, `borderStyle` and
+   * `borderColor`, and each of those written beside it wins. Layout, since
+   * the width is: not legal in a state block, where `borderColor` is.
+   */
+  border?: Line;
+  /** One side's width and colour — `borderBottom: '1px solid $border'` is a
+   *  row's rule. A side's style is the box's: one `borderStyle` per box. */
+  borderTop?: Line;
+  borderRight?: Line;
+  borderBottom?: Line;
+  borderLeft?: Line;
+  /** …and the logical sides, which win over the physical ones. */
+  borderStart?: Line;
+  borderEnd?: Line;
+  /** One width for all four sides, or CSS's one-to-four rule. */
+  borderWidth?: Edges<LineWidth>;
   /** Per-side widths override `borderWidth` the way `paddingTop` overrides
    *  `padding`. Layout properties: yoga sees each edge, so a 3px left bar
    *  insets content on the left only. */
-  borderTopWidth?: number;
-  borderRightWidth?: number;
-  borderBottomWidth?: number;
-  borderLeftWidth?: number;
+  borderTopWidth?: LineWidth;
+  borderRightWidth?: LineWidth;
+  borderBottomWidth?: LineWidth;
+  borderLeftWidth?: LineWidth;
   /** The logical sides, which win over the physical ones. */
-  borderStartWidth?: number;
-  borderEndWidth?: number;
+  borderStartWidth?: LineWidth;
+  borderEndWidth?: LineWidth;
   direction?: Direction;
 }
 
@@ -269,6 +346,13 @@ export interface LayoutStyle {
  * on pointer move.
  */
 export interface PaintStyle {
+  /**
+   * CSS's `background`, as much of it as a box paints: a colour, a
+   * `linear-gradient(…)`, or both — `'#f5f6fa'`,
+   * `'linear-gradient($accent, $accentActive) $accent'`. `'none'` takes both
+   * away. A `url()` is an `<image>` here, not a background.
+   */
+  background?: Color;
   backgroundColor?: Color;
   /**
    * A gradient behind the node, in the box the layout gave it:
@@ -294,6 +378,8 @@ export interface PaintStyle {
    * `<window>`/`<popup>`, which own no pixels outside themselves.
    */
   boxShadow?: string;
+  /** One colour for all four sides, or CSS's one-to-four rule:
+   *  `'$border transparent'`. */
   borderColor?: Color;
   /** Per-side colours fall back to `borderColor`. Paint properties, legal in
    *  state blocks like it. */
@@ -307,7 +393,7 @@ export interface PaintStyle {
   /** Rounds the background, the border and the child clip. Requires uniform
    *  borders — same width and colour on all four sides; a non-uniform border
    *  paints square and ignores the radius. */
-  borderRadius?: number;
+  borderRadius?: Pixels;
   zIndex?: number;
   /**
    * The focus-ring family. Painted *outside* the border box and never seen
@@ -317,10 +403,14 @@ export interface PaintStyle {
    * A focusable node draws one on `:focus-visible` with no styling at all;
    * these override it, and `outlineWidth: 0` opts out.
    */
-  outlineWidth?: number;
+  /** CSS's `outline`: a width and a colour — `'2px solid $accent'` — or
+   *  `'none'`, which is `outlineWidth: 0`, the way a focusable node opts out
+   *  of its ring. Drawn solid. */
+  outline?: Line;
+  outlineWidth?: LineWidth;
   outlineColor?: Color;
   /** The gap between the border box and the ring. Default 1. */
-  outlineOffset?: number;
+  outlineOffset?: Pixels;
   /**
    * How opaque the node is **with everything inside it**, from 0 to 1: the
    * subtree is drawn once and composited at this alpha, so a card, its
@@ -383,7 +473,7 @@ export type FontFeatureSettings =
 export interface TextStyle {
   color?: Color;
   fontFamily?: string;
-  fontSize?: number;
+  fontSize?: Pixels;
   fontWeight?: FontWeight;
   fontStyle?: FontStyle;
   /** A variable font's axes, by OpenType tag: `{ wdth: 87.5, slnt: -8 }`.
@@ -402,7 +492,7 @@ export interface TextStyle {
    *  last on a line included, and negative to tighten. Spaced text drops the
    *  optional ligatures (`liga`, `clig`, `dlig`, `hlig`) unless
    *  `fontFeatureSettings` names them. Inherits. */
-  letterSpacing?: number;
+  letterSpacing?: Pixels;
   /** Which figures: `'tabular-nums'` gives every digit one width, so a
    *  number that changes holds its width while it does. The friendly names
    *  for features `fontFeatureSettings` can also set by tag, and it wins
