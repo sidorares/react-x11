@@ -2,7 +2,11 @@
 // floors, laying the root out, deferring floors during a live resize and
 // catching up after, and refitting the window to what it holds.
 
-import { exactLayoutConfig, measuringExactly } from '../../styles.js';
+import {
+  exactLayoutConfig,
+  measuringExactly,
+  setLayoutValue,
+} from '../../styles.js';
 import { availableArea } from '../../screens.js';
 import { Yoga } from '../../yoga.js';
 import {
@@ -185,7 +189,14 @@ export class WindowSize {
           this._floorsStale.add(boundary.parent);
         }
         // its children's floors are written from here; a sized box's own
-        // extent is its style's, and stands
+        // extent is its style's, and stands, and one its content sizes is
+        // measured with them (`_ownExtent`), or left unmeasured with them
+        if (typeof boundary.style.width !== 'number') {
+          boundary._floorW = undefined;
+        }
+        if (typeof boundary.style.height !== 'number') {
+          boundary._floorH = undefined;
+        }
         this._floorsStale.add(boundary);
         collectFloorStale(boundary, this._floorsStale, found, false);
       }
@@ -453,9 +464,10 @@ export class WindowSize {
   /**
    * One boundary's floors, measured with it laid out alone — the passes
    * `_measureContentSpans` runs over the whole tree, run over the box: its
-   * size is its style's in either, so the space everything inside it is
-   * laid out in is the same. `probe` is the height measurement's check for
-   * leaves whose width moved, stopped at the box, whose own extent stands.
+   * size is the same in either (`isFloorBoundary`), its style's or its
+   * content's, so the space everything inside it is laid out in is the
+   * same. `probe` is the height measurement's check for leaves whose width
+   * moved, stopped at the box, whose own extent stands.
    */
   _measureBoundary(boundary, axis, probe = false) {
     // on copies of its boxes (exactcopy.js): the tree's own are left as the
@@ -473,43 +485,106 @@ export class WindowSize {
     if (axis === 'width') {
       const shrunk = [];
       setMeasuringShrink(boundary, axis, shrunk);
-      // its own extent is its style's, so what it holds is read only where
-      // a floor is written from it, as down the window's columns
-      const read = NO_UNREAD_WIDTHS || this._readEveryWidth;
+      // nothing reads its own extent, so what it holds is read only where a
+      // floor is written from it, as down the window's columns — where its
+      // width is its style's: one that is its content's is as wide as the
+      // leaves in it, stretched or not, and a leaf left unshaped answers 0
+      const read =
+        NO_UNREAD_WIDTHS ||
+        this._readEveryWidth ||
+        typeof boundary.style.width !== 'number';
       const unread = [];
       if (!read) markUnreadLeaves(boundary, unread);
-      this._scopedFloorPasses += 1;
       try {
-        yoga.calculateLayout(undefined, undefined, dir);
+        this._layOutBoundary(boundary, undefined, dir);
       } finally {
         for (const leaf of unread) leaf._widthUnread = false;
       }
-      contentSpan(boundary, axis, null, this, read);
+      const span = contentSpan(boundary, axis, null, this, read);
+      if (typeof boundary.style.width !== 'number') {
+        this._ownExtent(boundary, axis, span);
+      }
       restoreShrink(shrunk);
       return;
     }
-    this._scopedFloorPasses += 1;
-    yoga.calculateLayout(undefined, undefined, dir);
+    this._layOutBoundary(boundary, undefined, dir);
     if (probe) {
       const hit = { marked: false, owed: false };
       probeHeightFloors(boundary, this, hit, boundary);
       if (hit.marked) {
         this._writeFloors('height');
-        this._scopedFloorPasses += 1;
-        yoga.calculateLayout(undefined, undefined, dir);
+        this._layOutBoundary(boundary, undefined, dir);
       }
     }
     const intrinsic = new Map();
     captureLeafHeights(boundary, intrinsic);
-    const frozen = [];
+    // …and the box's own, as the pass over the window pins it with
+    // everything else under a node being measured: one its content sizes
+    // would be measured again in the collapse, and a row that wraps take
+    // every item onto one line
+    const frozen = [boundary];
+    yoga.setWidth(yoga.getComputedWidth());
     freezeWidths(boundary, frozen);
     const shrunk = [];
     setMeasuringShrink(boundary, axis, shrunk);
-    this._scopedFloorPasses += 1;
-    yoga.calculateLayout(undefined, 0, dir);
-    contentSpan(boundary, axis, intrinsic, this);
+    this._layOutBoundary(boundary, 0, dir, true);
+    const span = contentSpan(boundary, axis, intrinsic, this);
+    if (typeof boundary.style.height !== 'number') {
+      this._ownExtent(boundary, axis, span);
+    }
     restoreWidths(frozen);
     restoreShrink(shrunk);
+  }
+
+  /** A boundary its content sizes has an extent its content gives, as any
+   *  box does (`contentSpan`): nothing reads it, absolute as the box is, and
+   *  it is written here as the pass over the window would have written it,
+   *  rather than left at what the content measured before it changed. */
+  _ownExtent(boundary, axis, span) {
+    const yoga = boundary.yoga;
+    if (axis === 'width') {
+      boundary._floorW = declaresOwnMinimum(boundary, axis)
+        ? yoga.getComputedWidth()
+        : span;
+    } else {
+      boundary._floorH = declaresOwnMinimum(boundary, axis)
+        ? yoga.getComputedHeight()
+        : span;
+      boundary._floorAtW = yoga.getComputedWidth();
+    }
+    this._floorsMeasured += 1;
+  }
+
+  /**
+   * One pass over a boundary alone, laid out as yoga lays an absolute box
+   * out where it sits. A size its style names is the size it is laid out
+   * at. Along an axis it names none, it is measured at what its content
+   * asks for and laid out again at exactly that: the second pass is where a
+   * percentage inside it resolves, against the size the first one found,
+   * and squeezes what stands beside it — which a box laid out once, at no
+   * size, never does. `height` is what the pass offers down a box with a
+   * height of its own: 0 in the collapse. One as tall as its content is
+   * offered nothing in the collapse over the window either, since yoga
+   * bounds an absolute box by nothing down, and offered 0 here it would be
+   * squashed to its padding, and what gives way in it with it. `pinned`
+   * says its width is held where the last pass left it, as the collapse
+   * holds every width (`freezeWidths`).
+   */
+  _layOutBoundary(boundary, height, dir, pinned = false) {
+    const yoga = boundary.yoga;
+    const style = boundary.style;
+    const across = !pinned && typeof style.width !== 'number';
+    const down = typeof style.height !== 'number';
+    this._scopedFloorPasses += 1;
+    yoga.calculateLayout(undefined, down ? undefined : height, dir);
+    if (!across && !down) return;
+    // on the copy (`onExactCopy`), and taken off again for the next pass
+    if (across) yoga.setWidth(yoga.getComputedWidth());
+    if (down) yoga.setHeight(yoga.getComputedHeight());
+    this._scopedFloorPasses += 1;
+    yoga.calculateLayout(undefined, undefined, dir);
+    if (across) setLayoutValue(yoga, 'width', style.width);
+    if (down) setLayoutValue(yoga, 'height', style.height);
   }
 
   /** The floors on the children of every node found stale, from the extents

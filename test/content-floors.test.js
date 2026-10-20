@@ -20,6 +20,7 @@ import { createStyles } from '../src/styles.js';
 import { registerElement, unregisterElement } from '../src/host.js';
 import { Node } from '../src/node.js';
 import { spineScope } from '../src/nodes/window/spine.js';
+import { isFloorBoundary } from '../src/nodes/window/floors.js';
 import { createMockApp, flushFrames, spinWheel } from './helpers/mock-app.js';
 import { renderX11, screen, cleanup } from '../src/testing/index.js';
 
@@ -1738,6 +1739,140 @@ test('every scoped measurement is the one the whole tree gives', async () => {
       );
     }
     assert.ok(took >= 3, `${took} of the frames were scoped`);
+    await scoped.root.unmount();
+    await whole.root.unmount();
+  });
+});
+
+// --- a box that sizes itself from what it holds -------------------------------
+//
+// A label hung off a point — the row count a list shows while it scrolls, a
+// badge on a card — is absolute and names no size, and a change to its text
+// was measured with the whole tree. It holds the change in as well as a card
+// does wherever every pass lays it out at the same size: its content's, which
+// yoga gives an absolute box with no bound from the box it hangs in down, and
+// none across under a row. Under a column it is offered the column's width to
+// wrap in, and that is another number in each pass, so it stays the tree's;
+// so does one a maximum holds, or one pinned at both edges.
+
+/** What each hung box holds: a row of a label and a box a share of the
+ *  row's width, a paragraph — a second one past a length, so the box's
+ *  own height moves — and a box that clips a paragraph and a label, which
+ *  the collapse squashes to nothing where it is offered no room. */
+const hungContent = (n) => [
+  h(
+    'box',
+    { key: 'row', style: { flexDirection: 'row' } },
+    h('label', { length: n }),
+    box({ width: `${n / 4}%`, height: 2 }),
+  ),
+  h('paragraph', { key: 'p' }),
+  n >= 100 ? h('paragraph', { key: 'more' }) : null,
+  h(
+    'box',
+    { key: 'clip', style: { overflow: 'hidden' } },
+    h('paragraph'),
+    h('label', { length: n }),
+  ),
+];
+
+const hungTree = ({ a = 40, b = 40, c = 40, d = 40, e = 40, f = 40 } = {}) =>
+  box(
+    { padding: 6, flexGrow: 1 },
+    // a point the box hangs up from, as a list's count hangs off its pane
+    box(
+      { flexDirection: 'row', width: 0, height: 0, alignSelf: 'center' },
+      box({ position: 'absolute', bottom: 0, padding: 4 }, ...hungContent(a)),
+    ),
+    box(
+      { flexDirection: 'row', width: 60, height: 30 },
+      box(
+        { position: 'absolute', left: 5, top: 10, padding: 2 },
+        ...hungContent(b),
+      ),
+    ),
+    // a width of its own, under a column, and the height of its content
+    box(
+      { height: 30 },
+      box(
+        { position: 'absolute', top: 0, width: 80, padding: 2 },
+        ...hungContent(d),
+      ),
+    ),
+    // the tree's: wrapped to its column
+    box(
+      { width: 70, height: 30 },
+      box({ position: 'absolute', top: 0, padding: 2 }, ...hungContent(c)),
+    ),
+    // …held under a maximum
+    box(
+      { flexDirection: 'row', height: 30 },
+      box({ position: 'absolute', maxWidth: 60 }, ...hungContent(e)),
+    ),
+    // …and pinned at both edges
+    box(
+      { flexDirection: 'row', width: 70, height: 30 },
+      box({ position: 'absolute', left: 4, right: 4 }, ...hungContent(f)),
+    ),
+  );
+
+test('a change inside a box sized by its content, hung under a row, measures the box alone', async () => {
+  await withTestElements(async () => {
+    const { app, root, node } = await mount(hungTree(), { height: 400 });
+    const hung = node.children[0].children.map((holder) => holder.children[0]);
+    assert.deepStrictEqual(
+      hung.map((box) => isFloorBoundary(box)),
+      [true, true, true, false, false, false],
+      'under a row, or a width of its own; not wrapped, held or pinned',
+    );
+    for (const step of [{ a: 70 }, { a: 70, b: 5 }, { a: 70, b: 5, d: 90 }]) {
+      const passes = node._layoutPasses;
+      const scoped = node._scopedFloorPasses;
+      await rerender(app, root, hungTree(step), { height: 400 });
+      const label = JSON.stringify(step);
+      assert.strictEqual(node._layoutPasses - passes, 1, `${label}: one pass`);
+      assert.ok(node._scopedFloorPasses > scoped, `${label}: alone`);
+    }
+    await root.unmount();
+  });
+});
+
+test('every box sized by its content measures what the whole tree does', async () => {
+  // The differential for the test above: one window measures what each
+  // change is confined to, the other the whole tree, and every box and every
+  // extent comes out the same. It fails where a box laid out alone is not the
+  // size the tree lays it out at — wrapped to a column, held under a maximum
+  // or between two insets, squashed by a collapse that offered it a height
+  // of 0, or narrowed by leaves left unshaped in the width pass.
+  await withTestElements(async () => {
+    const steps = [
+      { a: 70 },
+      { a: 200 },
+      { a: 3, b: 160 },
+      { a: 3, b: 160, d: 150 },
+      { a: 3, b: 160, d: 150, c: 150 },
+      { a: 80, b: 20, d: 10, c: 150 },
+      { a: 80, b: 20, d: 10, c: 150, e: 140 },
+      { a: 80, b: 20, d: 10, c: 150, e: 140, f: 160 },
+      { a: 10, b: 20, d: 10, c: 150, e: 140, f: 160 },
+    ];
+    const windowProps = { height: 400 };
+    const scoped = await mount(hungTree(), windowProps);
+    const whole = await mount(hungTree(), windowProps);
+    let took = 0;
+    for (const step of steps) {
+      const before = scoped.node._scopedFloorPasses;
+      await rerender(scoped.app, scoped.root, hungTree(step), windowProps);
+      if (scoped.node._scopedFloorPasses > before) took++;
+      whole.node._floorsUnscoped = true;
+      await rerender(whole.app, whole.root, hungTree(step), windowProps);
+      assertSameMeasurement(
+        scoped.node,
+        whole.node,
+        `the frame after ${JSON.stringify(step)}`,
+      );
+    }
+    assert.ok(took >= 4, `${took} of the frames were scoped`);
     await scoped.root.unmount();
     await whole.root.unmount();
   });

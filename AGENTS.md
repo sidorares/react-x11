@@ -1628,17 +1628,29 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   - `_floorsDirty` is what keeps this off the input path — `invalidate()`
     sets it for every layout change **except a scroll**, which moves no yoga
     node.
-  - **a change inside a box that sizes itself is measured in that box
-    alone** (`_floorsScope`, `isFloorBoundary`): an absolutely positioned
-    box with a numeric width and height is out of its parent's flow and laid
-    out at those numbers by every pass, so what changed inside it is
-    measured by laying it out on its own, and the window's real pass is all
-    the rest of the tree pays. It rests on every layout change naming its
-    node: `invalidate()` records the source (`_floorsSources`), so **anything
-    else that sets `_floorsDirty` must add its node there or set
-    `_floorsUnscoped`**, which measures the whole tree. Yoga's dirty record
-    is checked for anything changed outside the boxes (`dirtyOutside`), and
-    `REACT_X11_NO_SCOPED_FLOORS=1` turns it off.
+  - **a change inside a box that sizes itself is measured in that box alone**
+    (`_floorsScope`, `isFloorBoundary`): an absolutely positioned box that
+    every pass lays out at one size is out of its parent's flow, so what
+    changed inside it is measured by laying it out on its own, and the
+    window's real pass is all the rest of the tree pays. The size is a number
+    its style names, or its content's along an axis it names none — which yoga
+    gives an absolute box with no bound from its containing block down, and
+    across only under a row: under a column it wraps to the column's width,
+    another number in each pass, and an inset at both ends, a ratio, a minimum
+    or a maximum size it from outside its content too. Laid out alone, such a
+    box goes through what yoga does to it in the tree (`_layOutBoundary`):
+    measured at its content's size, then laid out again at that size, which is
+    where a percentage inside it resolves; offered no height in the collapse,
+    where 0 would squash it; held at its width there, like every other width;
+    and every leaf in it read in the width pass, since it is as wide as they
+    are. A label hung off a point — the count a scrolling list shows — is the
+    case it is for, and a differential over random trees found each of those.
+    It rests on every layout change naming its node: `invalidate()` records
+    the source (`_floorsSources`), so **anything else that sets `_floorsDirty`
+    must add its node there or set `_floorsUnscoped`**, which measures the
+    whole tree. Yoga's dirty record is checked for anything changed outside
+    the boxes (`dirtyOutside`), and `REACT_X11_NO_SCOPED_FLOORS=1` turns it
+    off.
   - **so is a change down a column whose height is its content's**
     (`src/nodes/window/spine.js`): a document, a log, a transcript — one
     scroll pane, one column, thousands of blocks. The change is measured from
@@ -1676,9 +1688,10 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     alone: a row's items, the children of a node that is read, and the root
     when the window's minimum is its content's. A box measured alone is
     read by nothing — a spine root's own width is no floor (only heights
-    travel up a spine) and a box that sizes itself has its style's — so a
-    root that is a leaf, a document in a scroller, is laid out at its
-    column's width and not shaped. A leaf none of that reaches is still
+    travel up a spine) and a box that sizes itself has its style's, or is
+    read whole where its content is its width — so a root that is a leaf, a
+    document in a scroller, is laid out at its column's width and not
+    shaped. A leaf none of that reaches is still
     laid out, so it is left unshaped (`_widthUnread`: the measure wrapper
     answers a zero size) only where its answer cannot reach anything read
     — every box above it as wide as something other than its content (a
