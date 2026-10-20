@@ -359,8 +359,46 @@ createStyles({
   rigid: { flex: 'none', flexShrink: 0 },
 });
 
+// …and CSS's long form, a grow, a shrink and a basis
+createStyles({
+  basis: { flex: '0 0 240px' },
+  shares: { flex: '2 1' },
+  sizedShare: { flex: '1 200px' },
+});
+
 // @ts-expect-error — 'fill' is not one of them
 createStyles({ bad: { flex: 'fill' } });
+
+// CSS's shorthands: the one-to-four rule, a line, the logical pairs, and a
+// length in px wherever a length goes
+createStyles({
+  card: {
+    padding: '8px 16px',
+    margin: '0 auto',
+    border: '1px solid $border',
+    borderBottom: '2px solid $accent',
+    borderWidth: '1px 2px',
+    borderColor: '$border transparent',
+    borderRadius: '6px',
+    background: 'linear-gradient($accent, $accentActive) $accent',
+    gap: '4px 8px',
+    paddingInline: 12,
+    marginBlock: '4px 0',
+    width: '240px',
+    ':hover': { background: '$surfaceHover', outline: '2px solid $accent' },
+    ':focus-visible': { outline: 'none' },
+  },
+  pinned: { position: 'absolute', inset: 0 },
+});
+
+// @ts-expect-error — a border's width is layout, so it may not go in a state block
+createStyles({ bad: { ':hover': { border: '1px solid red' } } });
+
+// @ts-expect-error — a radius is pixels; a percentage is not read yet
+createStyles({ bad: { borderRadius: '50%' } });
+
+// @ts-expect-error — rem is not a unit a length reads yet
+createStyles({ bad: { width: '10rem' } });
 
 // @ts-expect-error — 'sideways' is not a flexDirection
 createStyles({ bad: { flexDirection: 'sideways' } });
@@ -387,8 +425,11 @@ createStyles({
 // @ts-expect-error — the keyword is 'tabular-nums'
 createStyles({ bad: { fontVariantNumeric: 'tabular' } });
 
-// @ts-expect-error — letter spacing is a number of pixels, not a CSS length
-createStyles({ bad: { letterSpacing: '2px' } });
+// letter spacing is a length like any other: pixels, written either way
+createStyles({ spaced: { letterSpacing: '0.5px', fontSize: '15px' } });
+
+// @ts-expect-error — em is not a unit a length reads yet
+createStyles({ bad: { letterSpacing: '0.1em' } });
 
 // @ts-expect-error — a feature's value is on, off or an alternate
 createStyles({ bad: { fontFeatureSettings: { tnum: 'on' } } });

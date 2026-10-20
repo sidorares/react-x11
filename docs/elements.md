@@ -23,7 +23,12 @@ blocks and `createStyles`.
 
 ## Layout properties (all drawn elements + windows)
 
-Numbers are pixels, strings like `'50%'` / `'auto'` pass through to yoga.
+Lengths are logical pixels — a number, or the same number written `'12px'`
+— and `'50%'` / `'auto'` pass through to yoga where it takes them. A unit
+CSS has and react-x11 does not read yet (`em`, `rem`, `vw`) is an error
+naming it. CSS's shorthands are read too — `padding: '8px 16px'`,
+`border: '1px solid $border'`, `inset: 0`; see
+[styling.md](styling.md#lengths-and-shorthands).
 
 - **Size**: `width`, `height`, `minWidth`, `minHeight`, `maxWidth`,
   `maxHeight`, `aspectRatio`. `<image>` and `<svg>` keep their aspect ratio
@@ -35,7 +40,7 @@ Numbers are pixels, strings like `'50%'` / `'auto'` pass through to yoga.
   `flexBasis`, `gap`, `rowGap`, `columnGap`
 - **Position**: `position` (`relative`, `absolute`, `static`, `sticky`, or
   one registered with `registerPosition`), `top`, `right`, `bottom`,
-  `left`, `start`, `end`. Under `sticky` the insets are how close to the
+  `left`, `start`, `end`, and `inset` for all four. Under `sticky` the insets are how close to the
   nearest scroll pane's edges the box may come, not offsets — see
   [styling.md](styling.md#sticky-positioning) and
   [custom positions](styling.md#custom-positions)
@@ -49,7 +54,9 @@ Numbers are pixels, strings like `'50%'` / `'auto'` pass through to yoga.
   flexbox, and a child's `layoutItem` is what it tells that layout — see
   [styling.md](styling.md#custom-layouts)
 - **Spacing**: `margin`, `marginTop/Right/Bottom/Left`, `padding`,
-  `paddingTop/Right/Bottom/Left`
+  `paddingTop/Right/Bottom/Left`, and the logical pairs `paddingInline`,
+  `paddingBlock`, `marginInline`, `marginBlock`. `margin` and `padding` take
+  CSS's one-to-four values as one string: `'0 auto'`, `'8px 16px'`
 - **Visibility**: `display` (`flex`, `grid`, `none`), `overflow` (`visible`,
   `hidden`, `scroll`)
 
@@ -96,18 +103,22 @@ always had.
 share of what is left, from a base size of nothing" — which is what makes it
 the right thing for a pane that should fill its window rather than its
 content. `flex: 'auto'` grows and shrinks from the content's own size, and
-`flex: 'none'` does neither. A longhand written beside it wins, so
+`flex: 'none'` does neither. CSS's long form reads too — `'1 1 0'`,
+`'0 0 240px'`, `'2 200px'`. A longhand written beside it wins, so
 `{ flex: 1, flexBasis: 'auto' }` reads the way it does in CSS.
 
 ## Paint properties
 
 - `backgroundColor` — any CSS color string (`'#2980b9'`,
-  `'rgba(0,0,0,.5)'`, `'red'`)
+  `'rgba(0,0,0,.5)'`, `'red'`); `background` sets it and a gradient
+  (`backgroundImage`) in one
 - `borderWidth`, `borderColor`, `borderRadius`, `borderStyle`
-  (`'solid'` default, `'dashed'`)
+  (`'solid'` default, `'dashed'`), or `border: '1px solid $border'` for the
+  first three
 - per-side borders: `borderTopWidth`/`Right`/`Bottom`/`Left` override
   `borderWidth` the way `paddingLeft` overrides `padding`, and
-  `borderTopColor`/… fall back to `borderColor`. A blockquote's bar is
+  `borderTopColor`/… fall back to `borderColor`; `borderBottom: '1px solid
+$border'` sets one side's pair. A blockquote's bar is
   `borderLeftWidth: 3` on the quote box, not a 3px sibling; a table rule is
   `borderBottomWidth: 1` on the row. `borderRadius` requires uniform
   borders — a non-uniform border paints square
@@ -119,7 +130,7 @@ content. `flex: 'auto'` grows and shrinks from the content's own size, and
 - `outlineWidth`, `outlineColor`, `outlineOffset` — the focus ring, painted
   outside the border box and invisible to yoga, so it never moves what it
   surrounds. A focusable node draws one on `:focus-visible` without being
-  asked; `outlineWidth: 0` opts out
+  asked; `outlineWidth: 0` — or `outline: 'none'` — opts out
   ([styling.md](styling.md#the-focus-ring))
 - `opacity` — how opaque the node is **with everything inside it**, from 0
   to 1: the subtree is drawn once and composited at that alpha, so a card, its

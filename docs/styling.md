@@ -30,6 +30,87 @@ _matching a rule against a tree_; what remains is a handful of properties
 that travel down it, which is the part that makes a theme, a caption block
 or a dimmed row expressible at all.
 
+## Lengths and shorthands
+
+A length is a distance in **logical pixels**: `12` and `'12px'` are the same
+value, and the display scale turns either into device pixels (see
+[scale.md](scale.md)). Where the layout takes them, `'50%'` and `'auto'`
+mean what they mean in CSS; a border's or an outline's width also takes
+`'thin'`, `'medium'` and `'thick'` (1, 3 and 5).
+
+CSS's other units are not read yet, and a value written in one is an error
+that names the unit — `invalid width "2em" in <box style>: em is not a unit
+react-x11 resolves yet`. So is `calc()`, and so is a second value where a
+property takes one. Yoga's own setters used to `parseFloat` whatever they
+were handed, so `'2em'` was quietly two pixels.
+
+```jsx
+<box
+  style={{
+    padding: '8px 16px',
+    margin: '0 auto',
+    border: '1px solid $border',
+    borderBottom: '2px solid $accent',
+    background: 'linear-gradient($surface, $background) $surface',
+    ':focus-visible': { outline: '2px solid $accent' },
+  }}
+/>
+```
+
+CSS's shorthands are read the way CSS reads them, and expand into the
+longhands before anything else sees the style:
+
+| shorthand                                         | sets                                                                                      |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `padding`, `margin`                               | the four sides, by CSS's one-to-four rule — `'8px 16px'`, `'0 auto'`, `'1 2 3'`           |
+| `inset`                                           | `top`, `right`, `bottom`, `left`, the same way — `inset: 0`                               |
+| `borderWidth`, `borderColor`                      | the four sides' widths or colours, the same way                                           |
+| `paddingInline`, `marginInline`                   | `…Start` and `…End`: one value for both, or two                                           |
+| `paddingBlock`, `marginBlock`                     | `…Top` and `…Bottom`, the same way                                                        |
+| `gap`                                             | `rowGap` and `columnGap` — `'4px 8px'` is the row gap first, as in CSS                    |
+| `border`                                          | `borderWidth`, `borderStyle`, `borderColor`: `'1px solid $border'`                        |
+| `borderTop`/`Right`/`Bottom`/`Left`/`Start`/`End` | that side's width and colour: `borderBottom: '1px solid $border'`                         |
+| `outline`                                         | `outlineWidth` and `outlineColor`; `'none'` is `outlineWidth: 0`                          |
+| `background`                                      | `backgroundColor` and `backgroundImage` — a colour, a gradient, or both                   |
+| `flex`                                            | `flexGrow`, `flexShrink`, `flexBasis` — `1`, `'auto'`, `'none'`, `'1 1 0'`, `'0 0 240px'` |
+
+A `$token` may stand for any one value inside them — `padding: '$gutter 0'`,
+`border: '$hairline solid $border'` — and resolves before the value is read.
+
+**The more specific property wins, wherever it is written.** A longhand
+beats its shorthand, a side beats all four sides, and a pair beats all four
+too: `paddingTop` beside `padding: '8px 16px'` is the top padding whether it
+comes before or after it in the style. That is the rule `paddingLeft` beside
+`padding: 8` has always followed, and it is not CSS's, which goes by order.
+A flattened style array has no order left to go by — a longhand and its
+shorthand end up as two keys of one object — and "the specific one wins" is
+the rule you can read off a style without knowing how it was assembled.
+
+A part a shorthand leaves out is left unset rather than reset to CSS's
+initial value, since a longhand written beside it would win anyway. Three
+things differ from CSS on purpose, and say so:
+
+- **A line with no width is `medium`, 3px**, as in CSS; but a line with no
+  style is `'solid'` rather than CSS's `none`, because `borderWidth` alone
+  has always drawn here. `'none'` is a width of 0 — `border: 'none'`,
+  `outline: 'none'`.
+- **A border needs a colour.** There is no `currentColor` yet, and a border
+  colour has no default, so `border: '1px solid'` would paint nothing; it is
+  an error in development unless the style names a border colour somewhere,
+  a state block included.
+- **A box has one `borderStyle`.** `border`'s style is the box's, and a
+  side's only speaks when `border` named none; two shorthands naming
+  different ones are an error unless `borderStyle` says which.
+
+What is not here says what to write instead: `font` (the longhands),
+`paddingHorizontal` (React Native's name — `paddingInline`), a per-corner
+radius (`borderRadius` rounds all four), `border-radius` (style names are
+camelCase), and a misspelt name gets the nearest real ones. `background` and
+`outline` are paint all the way down, so a state block may set them;
+`border` sets a width, which is layout, so it may not. A `transition` keyed
+by a shorthand reaches the longhands it expands into —
+`transition: { border: 150 }` fades the `borderColor` a `border` set.
+
 ## What it fixes on `<window>`
 
 `width`/`height` on a `<window>` are the real X window's geometry — the user
@@ -306,8 +387,9 @@ there is no `dir="auto"` equivalent yet.
 </box>
 ```
 
-A side width overrides the `borderWidth` shorthand exactly the way
-`paddingLeft` overrides `padding`, and a side colour
+A side width overrides `borderWidth` exactly the way `paddingLeft`
+overrides `padding`, `borderBottom: '1px solid $border'` sets one side's
+width and colour together, and a side colour
 (`borderTopColor`/`Right`/`Bottom`/`Left`) falls back to `borderColor`.
 `borderStartWidth`/`borderStartColor` and their `End` counterparts are the
 [logical](#the-logical-edges) pair, and they win over the physical side. The
@@ -689,13 +771,16 @@ box is not something a descendant has. `<Icon>`'s `size` does not inherit either
 drawing rather than a letter, so it takes its default from the palette's
 `fontSize` and stays put when a label around it shrinks.
 
-**A value that is not one inherits.** `fontSize: '20px'`, `fontStyle: 7`,
+**A value that is not one inherits.** `fontSize: '1.2em'`, `fontStyle: 7`,
 `fontWeight: 1200` or `lineHeight: '24px'` is an error at the commit in
 development, naming the property; where one gets past that — a `$token`, or
 a production build — the text sets as though it had not been written, the way
 CSS inherits past a declaration it cannot parse. Numbers may be numeric
-strings (`fontSize: '20'`), as they always could. Before, the first set no
-text at all and the others threw from inside a frame.
+strings (`fontSize: '20'`), as they always could, and a size is a
+[length](#lengths-and-shorthands) like any other: `fontSize: '20px'` is 20.
+`lineHeight` is not one — it multiplies the font's own line height, so
+`'24px'` is still an error. Before, a size in px set no text at all and the
+others threw from inside a frame.
 
 ## A font file of your own
 
@@ -1263,7 +1348,11 @@ same unit lerp as numbers — `'-40%'` to `'100%'` is a value travelling across
 whatever contains it, with nothing measuring the container. A value with no
 meaningful midpoint — an enum like `flexDirection`, `auto`, a percentage
 against a pixel value — snaps instead, and `zIndex` is excluded on purpose:
-restacking every frame is not an animation.
+restacking every frame is not an animation. A duration keyed by a
+[shorthand](#lengths-and-shorthands) is its longhands', the longhand's own
+entry winning: `{ border: 150 }` fades the colour `border: '1px solid …'`
+set, and `{ padding: 200 }` moves each side `padding: '8px 16px'` expanded
+into.
 
 The easing is a fixed ease-out cubic. A transition starts from **what is on
 screen**, not from the declared value, so interrupting one reverses from
@@ -1692,6 +1781,19 @@ can be looked at without stopping the compositor for the whole session. See
   gradient or shadow at all rather than half of one, and the inherited ink
   for text. On X11 it used to throw from the frame, where no error boundary
   could catch it, and the other backends painted it black.
+
+- **The more specific property wins, not the later one.** CSS resolves a
+  longhand against its shorthand by order. A flattened style has no order
+  left — `[base, { padding: '8px 16px' }]` and `{ paddingTop: 0, … }` are
+  keys of one object by the time anything reads them — so a longhand beats
+  its shorthand and a side beats all four, wherever each is written. It is
+  the rule `paddingLeft` beside `padding: 8` always followed.
+- **A length is pixels, and a unit nothing reads is an error.** `'12px'` is
+  12 — scaled for the display like any number, where it used to reach yoga
+  as a string the scale skipped and the border setter read as NaN — and
+  `'2em'` names its unit rather than becoming 2. The relative units are a
+  question of what they are relative to, and are left for when that is
+  answered here rather than guessed at.
 
 ## Elements that are not styled
 
