@@ -516,6 +516,15 @@ export class NodeCascade {
         if (localTextStyleChanged(this.style, before)) {
           this._textContentChanged();
         }
+        // …and so does the layout half. A token in a layout value —
+        // `padding: '$gutter'` — resolves right here, on attach or on a
+        // palette swap, and yoga was last handed the style the constructor
+        // had, with its tokens stripped. Same tail as `_sizeQueriesChanged`
+        // and `_rescaled`; without it a themed gutter reached `this.style`
+        // and the paint, and the layout kept the un-themed value.
+        if (this.yoga && this.style !== before) {
+          applyLayoutStyle(this.yoga, this.style, before);
+        }
         if (!mounting) this.root?.invalidate(true, null, 'theme');
       }
       // The palette is the floor under the cascade, so a theme swap moves the
