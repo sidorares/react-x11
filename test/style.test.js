@@ -926,9 +926,13 @@ test('a hoisted style resolves $tokens against the nearest theme', async () => {
   assert.strictEqual(box.style.backgroundColor, '#ffffff');
   assert.strictEqual(box.style.padding, 12, 'tokens are not colour-only');
   assert.strictEqual(box.children[0].style.color, '#2d3436');
+  // The box's own width says nothing about its padding; the child inside is
+  // what moves when the resolved value reaches yoga. The token resolves on
+  // attach, after the constructor handed yoga the stripped style, and
+  // nothing applied it again — the width check passed through all of that.
   assert.strictEqual(
-    box.abs.width,
-    100 - 0,
+    box.children[0].abs.x,
+    12,
     'the resolved padding reached yoga',
   );
 
