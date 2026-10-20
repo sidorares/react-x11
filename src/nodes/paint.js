@@ -4,6 +4,7 @@
 
 import { isPlaced } from '../layouts.js';
 import { Surface } from '../offscreen.js';
+import { radiusOf } from '../styles.js';
 import { isPaintedColor } from './boxpaint.js';
 import { DAMAGE_SLOP } from './damage.js';
 import { DRAWN_KINDS } from './kinds.js';
@@ -357,7 +358,7 @@ export class NodePaint {
     // a context with no `roundRect` has always clipped a rounded box to its
     // rectangle, the way `_roundedPath` degrades
     const radius =
-      typeof ctx.roundRect === 'function' ? (this.style.borderRadius ?? 0) : 0;
+      typeof ctx.roundRect === 'function' ? radiusOf(this.style, this.abs) : 0;
     if (radius > 0 && this._paintRoundedChildren(ctx, order, radius)) return;
     const clip = this._childrenCanOverflow();
     if (clip) {
@@ -661,8 +662,8 @@ export class WindowPaint {
    * Shape extension's hard 1-bit edge.
    */
   _paintWindowBackground(ctx, damage, width, height) {
-    const { borderRadius = 0 } = this.style;
     const backgroundColor = this.resolveColor(this.style.backgroundColor);
+    const borderRadius = radiusOf(this.style, { width, height });
     if (DEV && this.style.boxShadow) devWarnWindowShadow(this.kind);
     // A `backgroundImage` works wherever a `backgroundColor` does, which is
     // the rule worth having — over the whole window, in window coordinates,

@@ -1041,14 +1041,31 @@ skip it, and what moves on which Node, is in
   turn the loop while they load an ES module entry, so no ES module entry
   moved there, and 24 and later evaluate an `import()` the entry makes
   before the loop turns, so an app that awaited one moved and ran its entry
-  twice. Bun reports 1 there from the first line, and tells by the entry's
-  record in the module cache, absent until the entry has run (measured).
+  twice.
   The loader rule is tsx's: it keeps its hooks to the main thread on Node 20
   and 22, and a worker without them stops on the first `.jsx` or `.ts` file
   it loads (measured, 20.20 and 22.16). No loader can be asked before the
   move, so there any `--import` or `--loader`, on the command line or in
   `NODE_OPTIONS`, keeps the app where it is, and the launcher moves one
   whose loader follows.
+  Bun has neither to read: it reports no loop, and leaves no frame below a
+  module it evaluates. The entry's record in its module cache, which it
+  went by before, was wrong both ways: Bun marks a CommonJS module loaded
+  before its body runs, so `bun app.cjs` never moved, and an ES module has
+  no record until it is evaluated, so an entry that ran a line and then
+  awaited its `import()` of react-x11 moved and ran that line again on the
+  worker. It reads three things instead (measured, Bun 1.4). `bun:main`,
+  the module Bun writes to run the entry from, is in `require.cache` once
+  the entry has finished, top-level awaits and all, so an import after
+  that is late. Code below react-x11 on the stack loaded it synchronously,
+  as Bun's loader leaves no frame below an ES module's imports: a CommonJS
+  entry is on its first run while its own wrapper is the outermost frame,
+  and a CommonJS module an ES module entry imports is part of the entry's
+  graph. And an ES module's body runs only once every module it imports
+  statically has been evaluated: while one of the entry's is not in
+  `require.cache` — read with Bun's own scanner and resolver — react-x11 is
+  part of its graph, and once all are, the entry's body has started and
+  the `import()` is its own.
 - **`react-x11/cocoa-main`** (`src/cocoa/main.js`) is the same move asked
   for by name — `node --import react-x11/cocoa-main app.js`,
   `bun --preload react-x11/cocoa-main app.jsx` — before the entry is loaded
@@ -1165,7 +1182,8 @@ skip it, and what moves on which Node, is in
   answer synchronously and keep passing on the pump;
   `test/cocoa-threaded.test.js` drives the same app over a fake in a
   worker's shapes, `test/cocoa-relaunch.test.js` pins when the move
-  happens and the worker's side of the hand-off, and
+  happens, under Bun too where `bun` is on PATH, and the worker's side of
+  the hand-off, and
   `test/cocoa-threaded-launch.test.js` runs real apps with the real bridge
   — moved by the import, by the launcher, kept on the pump, and one that
   never makes a root (it skips without a bridge that has `runMain`).
@@ -1213,6 +1231,15 @@ What it does not do yet, each noted where it lives:
   failure has run nothing of the app's on the worker, so the main thread
   could carry on in its place, if `WORKER_START` told such a failure from
   the rest.
+- Under Bun, react-x11 required from a callback before the entry has
+  finished reads as the entry's first run, and the app moves and runs that
+  code again on the worker: from a nextTick or a microtask a CommonJS
+  entry queues in its own file, or from a timer while an ES module entry
+  waits on a top-level await. Bun runs a CommonJS entry's nextTicks and
+  microtasks before it evaluates `bun:main`, and its stack does not tell a
+  callback's frame from a module's own. A callback that ends by returning
+  its `require()`, in strict code, leaves no frame at all — JavaScriptCore
+  makes that a tail call — and reads as late.
 
 ### What changes for an app
 

@@ -416,7 +416,7 @@ export class NodeAnimation {
     const specs =
       target.animation == null
         ? null
-        : animationsOf(target, 'a style', this.scale);
+        : animationsOf(target, 'a style', this.scale, this._units);
     if (!specs && !this._loops) return false;
     this._loops = specs;
     if (!specs) this.root?._forgetLoopNode(this);

@@ -407,12 +407,15 @@ const theme = {
 };
 ```
 
-- **The non-colour tokens do not map onto react-x11 style.** Sizes are `rem`
-  strings where react-x11 wants pixel numbers, easings are `cubic-bezier()`
-  strings where react-x11 takes named easings, and shadows reference
-  `var(--shadow-color)` and have no equivalent at all. Treat this as a colour
-  library that happens to carry other tokens; convert what you use and ignore
-  the animation and shadow tokens entirely.
+- **The sizes read in a style; the palette's own entries are numbers.**
+  Open Props sizes are `rem` strings, which a style takes as written —
+  `padding: OP['--size-3']` is `1rem` — and `rem` here is the palette's
+  `fontSize`, which the theme above sets to Open Props' own 16, so the scale
+  comes out as it does on the web. The palette entries are another matter:
+  the widgets do arithmetic with `radius` and `fontSize`, so those are
+  converted to numbers, as above. Easings are `cubic-bezier()` strings where
+  react-x11 takes named easings, and shadows reference `var(--shadow-color)`
+  and have no equivalent at all; ignore the animation and shadow tokens.
 - Key names include the `--` prefix, so it is bracket access everywhere;
   camelCase aliases exist too (`OP.gray0`).
 - Unlike Radix there are no separate dark scales — a dark theme is your own

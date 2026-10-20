@@ -86,6 +86,7 @@
 import { cssColorStraight } from 'ntk/color';
 
 import { FULL_DAMAGE, addDamageRect } from './nodes/damage.js';
+import { radiusOf } from './styles.js';
 import {
   innerPixels,
   intersectRects,
@@ -1200,7 +1201,7 @@ export class GlOverlay {
     }
     const area = this.area;
     // a rounded surface clips its children to an arc, and the arc stays put
-    if ((area.style?.borderRadius ?? 0) > 0) return false;
+    if (radiusOf(area.style, area.abs) > 0) return false;
     // the whole pixels of the surface's box: a fractional edge is an
     // antialiased clip, and that does not move either
     const box = innerPixels(area.abs);

@@ -12,6 +12,7 @@ import {
   resolvedTextDelta,
   TEXT_REMEASURE,
 } from '../styles.js';
+import { UNIT_EM, UNIT_REM } from '../shorthands.js';
 import { Yoga } from '../yoga.js';
 import { scaleOf } from '../scale.js';
 import { baseTheme } from '../palette.js';
@@ -373,6 +374,11 @@ export class NodeCascade {
     const before = this._resolvedText;
     if (before === undefined) return 0;
     this._resolvedText = undefined;
+    // A length in `em` is a length in the font size this node inherits,
+    // which is what this walk exists because of — so a node that wrote one
+    // resolves its style again here, before its own text is, since a
+    // `fontSize: '1.5em'` is part of what that text is set in.
+    if (this._emMoved()) this._unitsMoved();
     const after = this.resolvedTextStyle();
     const cost = resolvedTextDelta(before, after);
     if (cost !== 0) {
@@ -531,7 +537,9 @@ export class NodeCascade {
       // and the server's copy of that colour has to follow with it — otherwise
       // the next resize fills the new area in the old scheme.
       if (this.isWindow) this._syncWindowBackground();
-      if (this._usesTokens) {
+      // A relative length reads the palette too: `rem` is its `fontSize`,
+      // and `em` is what that size became by the time it reached this node.
+      if (this._usesTokens || this._unitDeps & (UNIT_REM | UNIT_EM)) {
         const before = this.style;
         this._syncStyle(this.props, mounting);
         // a token change reaches the node without React re-rendering it, so

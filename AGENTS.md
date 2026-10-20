@@ -258,6 +258,34 @@ no override-redirect staging (issue #4).
   than it says: `resolveComputedStyle` (the `flex` shorthand, and the
   defaults `overflow: 'scroll'` implies) and `applyLayoutDefaults` (the yoga
   defaults that are not CSS's — `flexShrink`, see the gotcha below).
+- `src/shorthands.js` — CSS's shorthands and the one grammar every length
+  in a style is read by (docs/styling.md, "Lengths and shorthands"). Pure:
+  `resolveComputedStyle` expands with it, development validates with the
+  same readers, and the yoga length appliers read through it too, so a
+  commit, a frame and the check where a style is written cannot disagree
+  about what a length is — yoga's own setters `parseFloat` a string, which
+  read `'2em'` as 2 and a border's `'2px'` as NaN. Five things are easy to
+  undo:
+  - **the more specific property wins, wherever it is written** — a
+    longhand beats its shorthand, a side beats all four
+    (`SHORTHAND_ORDER`). CSS goes by order, and a flattened style has none.
+  - **every length ends a number before the scale**: `scaleResolvedStyle`
+    multiplies numbers only, and the layout's fast paths read any string as
+    a percentage, so a `'12px'` handed on as written is six logical pixels
+    at 2x and a share of something everywhere else.
+  - **a relative length records what it read**. `em`, `rem` and the
+    viewport units resolve against a context the node builds lazily
+    (`Units`, nodes/styling.js), and the bits it sets are how the node is
+    resolved again: the size-query registry for the window, the theme walk
+    for the palette's size, and `_retext` for the inherited one. That last
+    walk stops at a node whose text resolution was never cached, so a node
+    that reads `em` caches one (`_noteUnits`) — a box with `padding: '1em'`
+    that skipped it kept the padding of the first font size it saw.
+  - **`rem` is the palette's `fontSize`**, 14 by default, and the nearest
+    palette's — not the web's 16. It is the root font size an app here has.
+  - **a radius is read through `radiusOf`**, since a percentage is of the
+    box and a `'50%'` reaching a `> 0` test is a square box. A new reader
+    of `borderRadius` goes through it, in paint and in damage alike.
 - `src/decorations.js` — the two style values that are a small language
   rather than a number: `backgroundImage`'s `linear-gradient(...)` and
   `boxShadow` (#345). Pure — strings in, geometry out — so the renderer half

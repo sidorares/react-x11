@@ -8,7 +8,7 @@
 // shape, the hand-off is shared memory and an EventEmitter, and the
 // worker's start is a child process whose worker never asks for AppKit.
 import assert from 'node:assert';
-import { fork } from 'node:child_process';
+import { fork, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,7 +19,7 @@ import { inspect } from 'node:util';
 
 import { relaunchVeto, WORKER_START } from '../src/cocoa/relaunch.js';
 import { RELAUNCH, requestAppKit } from '../src/cocoa/threaded.js';
-import { runNode } from './helpers/run-script.js';
+import { runBun, runNode } from './helpers/run-script.js';
 
 const app = {
   isMainThread: true,
@@ -226,6 +226,158 @@ test('a worker that stops before its import of react-x11 says why, and the proce
   assert.strictEqual(run.stdout, 'the exit handler ran to its end\n');
 });
 
+// Bun, where one is on PATH: what it shows of an entry's run is measured on
+// 1.4 (src/cocoa/relaunch.js, `bunStartedRunning`).
+const noBun = (() => {
+  const { stdout } = spawnSync('bun', ['--version'], { encoding: 'utf8' });
+  const [major, minor] = String(stdout).split('.').map(Number);
+  const recent = major > 1 || (major === 1 && minor >= 4);
+  return !recent && 'needs bun 1.4 or later on PATH';
+})();
+
+test(
+  'in Bun, an import evaluated as the app starts is not late, and one the app makes once its own code has run is',
+  { skip: noBun },
+  async () => {
+    // A static import, an ES module entry's or a CommonJS entry's first
+    // run, comes before the entry's own code, so the worker repeats nothing
+    // the app did; an import() comes after, and the worker would run it
+    // again. Bun has no event loop to read, and the entry's record in its
+    // module cache said the opposite both ways: a CommonJS entry is marked
+    // loaded before its body runs, so it never moved, and an ES module
+    // entry has no record until it is evaluated, so one that awaited its
+    // import of react-x11 moved and ran a second time. This decides the
+    // move, so it runs on any OS.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rx11-bun-start-'));
+    try {
+      const relaunch = new URL('../src/cocoa/relaunch.js', import.meta.url);
+      const files = {
+        // Reads the stack with an app's own settings in place, a limit of
+        // one frame and a formatter, and says whether they are as it left
+        // them. One, not none: Bun's Error.captureStackTrace reads a limit
+        // of 0 as no limit at all. An Error the app froze keeps whatever
+        // it has.
+        'probe.mjs':
+          "import { writeSync } from 'node:fs';\n" +
+          `import { describeProcess } from ${JSON.stringify(relaunch.href)};\n` +
+          'if (!Object.isFrozen(Error)) {\n' +
+          '  Error.stackTraceLimit = 1;\n' +
+          '  Error.prepareStackTrace = (error) => `${error}`;\n' +
+          '}\n' +
+          'const app = [Error.stackTraceLimit, Error.prepareStackTrace];\n' +
+          'const { late } = describeProcess(import.meta.url);\n' +
+          'const kept =\n' +
+          '  Error.stackTraceLimit === app[0] && Error.prepareStackTrace === app[1];\n' +
+          'writeSync(1, JSON.stringify({ late, kept }));\n',
+        'static.mjs': "import './probe.mjs';\n",
+        'nested.mjs': "import './static.mjs';\n",
+        'pause.mjs': 'await new Promise((r) => setTimeout(r, 10));\n',
+        'behind.mjs': "import './pause.mjs';\nimport './probe.mjs';\n",
+        'static.cjs': "require('./probe.mjs');\n",
+        'nested.cjs': "require('./static.cjs');\n",
+        'via.mjs': "import './static.cjs';\n",
+        'typed.ts':
+          "import type { T } from './types';\nimport './probe.mjs';\n",
+        'unlink.mjs': "import { rmSync } from 'node:fs';\nrmSync(Bun.main);\n",
+        'gone.mjs': "import './unlink.mjs';\nimport './probe.mjs';\n",
+        'freeze.mjs': 'Object.freeze(Error);\n',
+        'frozen.mjs': "import './freeze.mjs';\nimport './probe.mjs';\n",
+        'frozen.cjs': "Object.freeze(Error);\nrequire('./probe.mjs');\n",
+        'first.mjs': 'globalThis.started = true;\n',
+        'awaits.mjs': "import './first.mjs';\nawait import('./probe.mjs');\n",
+        // the cast is TypeScript's, and TSX would read it as an element
+        'awaits.ts':
+          "import type { T } from './types';\nimport 'node:path';\n" +
+          'const one = <number>1;\n' +
+          "await import('./probe.mjs');\n",
+        'unread.mjs': "Object.freeze(Error);\nawait import('./probe.mjs');\n",
+        'waiting.mjs':
+          "setTimeout(() => import('./probe.mjs'), 5);\n" +
+          'await new Promise((r) => setTimeout(r, 500));\n',
+        // a callback that only returns its call leaves no frame of its own
+        // in strict code, where JavaScriptCore makes it a tail call
+        'returns.mjs':
+          "import { createRequire } from 'node:module';\n" +
+          'const require = createRequire(import.meta.url);\n' +
+          "setTimeout(() => require('./probe.mjs'), 5);\n" +
+          'await new Promise((r) => setTimeout(r, 500));\n',
+        'timer.mjs': "setTimeout(() => import('./probe.mjs'), 10);\n",
+        'timer.cjs': "setTimeout(() => require('./probe.mjs'), 10);\n",
+        'dynamic.cjs': "import('./probe.mjs');\n",
+        'tick.cjs': "process.nextTick(() => require('./probe.mjs'));\n",
+        'ticks.cjs': "require('./tick.cjs');\n",
+      };
+      for (const [name, source] of Object.entries(files)) {
+        fs.writeFileSync(path.join(dir, name), source);
+      }
+      const cases = [
+        ['a static import', 'static.mjs', false],
+        ['a static import of a static import', 'nested.mjs', false],
+        [
+          'a static import behind a module with a top-level await',
+          'behind.mjs',
+          false,
+        ],
+        ['a require() of a CommonJS entry', 'static.cjs', false],
+        ['a require() of a require()', 'nested.cjs', false],
+        [
+          'a require() of a module an ES module entry imports',
+          'via.mjs',
+          false,
+        ],
+        ['a static import of a TypeScript entry', 'typed.ts', false],
+        // a bundle carries react-x11 inside the entry
+        ['the entry itself', 'probe.mjs', false],
+        // what Bun cannot answer reads as the start, as a static import is
+        ['a static import, with the entry gone from disk', 'gone.mjs', false],
+        ['a static import, with Error frozen', 'frozen.mjs', false],
+        [
+          'a require() of a CommonJS entry, with Error frozen',
+          'frozen.cjs',
+          false,
+        ],
+        ['an import() the entry awaits', 'awaits.mjs', true],
+        ['an import() a TypeScript entry awaits', 'awaits.ts', true],
+        ['an import() the entry awaits, with Error frozen', 'unread.mjs', true],
+        [
+          'an import() from a timer, during a top-level await',
+          'waiting.mjs',
+          true,
+        ],
+        [
+          'a require() a timer returns, during a top-level await',
+          'returns.mjs',
+          true,
+        ],
+        ['an import() from a timer', 'timer.mjs', true],
+        ['a require() from a timer', 'timer.cjs', true],
+        ['an import() of a CommonJS entry', 'dynamic.cjs', true],
+        // Bun runs a CommonJS entry's nextTicks before it has evaluated the
+        // module it runs the entry from
+        [
+          'a require() from a nextTick a module of the entry queued',
+          'ticks.cjs',
+          true,
+        ],
+      ];
+      const runs = await Promise.all(
+        cases.map(([, entry]) => runBun([path.join(dir, entry)])),
+      );
+      cases.forEach(([how, , late], i) => {
+        const run = runs[i];
+        assert.strictEqual(run.code, 0, `${how}: ${run.stderr}`);
+        assert.deepStrictEqual(
+          JSON.parse(run.stdout),
+          { late, kept: true },
+          how,
+        );
+      });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
 // The move for real, which needs macOS and a bridge that can run AppKit's
 // loop — anywhere else nothing moves and there is nothing to keep.
 const bridge = await (async () => {
@@ -366,6 +518,65 @@ test(
         /process\.chdir\(\) is not supported in workers/,
       );
       assert.doesNotMatch(run.stderr, /the entry’s body ran/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'under Bun, a CommonJS entry moves onto a worker as it requires react-x11, and one that awaits its import of react-x11 keeps the main thread and runs once',
+  { skip: noMove || noBun },
+  async () => {
+    // Both as they were reported, moved by the import for real: the
+    // CommonJS entry kept the main thread, and the entry that awaits its
+    // import moved and printed its first line twice, once on each thread.
+    // A static import moved, and still does.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rx11-bun-move-'));
+    try {
+      const index = new URL('../src/index.js', import.meta.url);
+      const report =
+        'writeSync(1, `${JSON.stringify({ isMainThread })}\\n`);\n';
+      const files = {
+        'app.cjs':
+          `require(${JSON.stringify(fileURLToPath(index))});\n` +
+          "const { writeSync } = require('node:fs');\n" +
+          "const { isMainThread } = require('node:worker_threads');\n" +
+          report,
+        'awaits.mjs':
+          "import { writeSync } from 'node:fs';\n" +
+          "import { isMainThread } from 'node:worker_threads';\n" +
+          "writeSync(1, 'the entry’s first line\\n');\n" +
+          `await import(${JSON.stringify(index.href)});\n` +
+          report,
+        'static.mjs':
+          `import ${JSON.stringify(index.href)};\n` +
+          "import { writeSync } from 'node:fs';\n" +
+          "import { isMainThread } from 'node:worker_threads';\n" +
+          report,
+      };
+      for (const [name, source] of Object.entries(files)) {
+        fs.writeFileSync(path.join(dir, name), source);
+      }
+      // the runner's mark would keep each where it is by itself, and so
+      // would either switch in the environment this suite runs in
+      const env = {
+        NODE_TEST_CONTEXT: '',
+        REACT_X11_THREADED: '',
+        REACT_X11_BACKEND: '',
+      };
+      const [cjs, awaits, esm] = await Promise.all(
+        Object.keys(files).map((name) => runBun([path.join(dir, name)], env)),
+      );
+      assert.strictEqual(cjs.code, 0, cjs.stderr);
+      assert.strictEqual(cjs.stdout, '{"isMainThread":false}\n');
+      assert.strictEqual(awaits.code, 0, awaits.stderr);
+      assert.strictEqual(
+        awaits.stdout,
+        'the entry’s first line\n{"isMainThread":true}\n',
+      );
+      assert.strictEqual(esm.code, 0, esm.stderr);
+      assert.strictEqual(esm.stdout, '{"isMainThread":false}\n');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

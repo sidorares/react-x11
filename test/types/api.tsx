@@ -418,11 +418,8 @@ createStyles({
   inherits: { color: 'currentColor' },
 });
 
-// @ts-expect-error — a radius is pixels; a percentage is not read yet
-createStyles({ bad: { borderRadius: '50%' } });
-
-// @ts-expect-error — rem is not a unit a length reads yet
-createStyles({ bad: { width: '10rem' } });
+// @ts-expect-error — a print unit is not a length here
+createStyles({ bad: { width: '10pt' } });
 
 // @ts-expect-error — 'sideways' is not a flexDirection
 createStyles({ bad: { flexDirection: 'sideways' } });
@@ -452,8 +449,33 @@ createStyles({ bad: { fontVariantNumeric: 'tabular' } });
 // letter spacing is a length like any other: pixels, written either way
 createStyles({ spaced: { letterSpacing: '0.5px', fontSize: '15px' } });
 
-// @ts-expect-error — em is not a unit a length reads yet
-createStyles({ bad: { letterSpacing: '0.1em' } });
+// …and relative to the font it spaces
+createStyles({ tracked: { letterSpacing: '0.02em' } });
+
+// @ts-expect-error — ex is not a unit a length reads
+createStyles({ bad: { letterSpacing: '0.5ex' } });
+
+// the relative units, and the length functions over them
+createStyles({
+  fluid: {
+    fontSize: 'clamp(14px, 1rem + 0.5vw, 20px)',
+    lineHeight: '24px',
+    padding: '0.5em 1em',
+    width: '50vw',
+    maxHeight: '80vh',
+    marginInline: 'calc(1rem + 2px)',
+    borderRadius: '50%',
+    gap: '1rem',
+  },
+  heading: { fontSize: '1.5em', lineHeight: '120%' },
+  label: { fontSize: '90%', lineHeight: 'normal' },
+});
+
+// @ts-expect-error — a container's size is not a unit a length reads
+createStyles({ bad: { width: '50cqw' } });
+
+// @ts-expect-error — a radius per corner is not one radius
+createStyles({ bad: { borderRadius: '4px 8px' } });
 
 // @ts-expect-error — a feature's value is on, off or an alternate
 createStyles({ bad: { fontFeatureSettings: { tnum: 'on' } } });
