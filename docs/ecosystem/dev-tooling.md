@@ -31,7 +31,7 @@ hooks and profiler data. The integration lives in
 `src/DevToolsIntegration.js` and costs nothing when off.
 
 ```sh
-npm i -D react-devtools-core ws
+npm i -D react-devtools-core
 
 # terminal 1 — standalone UI, listens on :8097
 npx react-devtools
@@ -117,6 +117,14 @@ each because the bare loader leaves it to the app:
   against, and runs the project's package manager — from its lockfile, else
   the one that launched `dev`, else npm — when you say yes, then starts
   again. With no terminal to ask on it prints the command and exits.
+- **It connects to [React DevTools](#react-devtools)** whenever
+  `npx react-devtools` is running, started before the app or after it —
+  wherever `react-devtools-core` is installed. Where it is not, and a
+  DevTools UI is listening when `dev` starts, `dev` prints the install
+  command. `REACT_X11_DEVTOOLS=0` turns it off.
+- **It turns on [click-to-component](../click-to-component.md).**
+  Alt+Click (Option+Click on macOS) an element and its JSX line opens in
+  your editor. `REACT_X11_CLICK_TO_COMPONENT=0` turns it off.
 - **It runs the project's react-x11.** A second copy of the renderer is a
   root nobody refreshes, so a global or npx-cached `react-x11` hands over to
   the copy the file imports, and a file that imports none is told to

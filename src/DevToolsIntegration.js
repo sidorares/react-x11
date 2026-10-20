@@ -1,7 +1,8 @@
 // Opt-in React DevTools bridge. Enabled by setting REACT_X11_DEVTOOLS=1 in
-// the environment; requires the `react-devtools-core` and `ws` dev
-// dependencies. Start the standalone UI first (`npx react-devtools`), then
-// run the app: REACT_X11_DEVTOOLS=1 npm run examples:dashboard
+// the environment, and on by default under `react-x11 dev`; requires the
+// `react-devtools-core` dev dependency. Run the standalone UI
+// (`npx react-devtools`) and the app, in either order:
+// REACT_X11_DEVTOOLS=1 npm run examples:dashboard
 //
 // Most of what DevTools can do costs this file nothing: the component tree,
 // props/state/hooks, and every edit the frontend makes go through the
@@ -12,12 +13,14 @@
 // Each of those is an agent listener or an option below.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { setInspectHandler } from './events.js';
 import { flattenStyle, isStyleProp, STYLE_PROP_NAMES } from './styles.js';
 
 let api = null;
+let prepared = null;
 let connected = false;
 
 // ---------------------------------------------------------------------------
@@ -107,9 +110,16 @@ export function createStorage(persist) {
 /**
  * Install the DevTools global hook. Must run before the first React commit
  * so mounted roots are observed — Reconciler.js awaits this at module load
- * when REACT_X11_DEVTOOLS is set.
+ * when REACT_X11_DEVTOOLS is set — and before React Refresh patches the
+ * hook, which `react-x11 dev` calls it early for: the backend installs no
+ * hook where one exists, and Refresh's is a stub. Once per process.
  */
-export async function prepare() {
+export function prepare() {
+  prepared ??= install();
+  return prepared;
+}
+
+async function install() {
   try {
     // Each hook's source location is read off a stack captured at the hook
     // dispatch, and V8 keeps ten frames — fewer than a loader leaves
@@ -122,9 +132,6 @@ export async function prepare() {
     // react-devtools-core's backend bundle expects browser-ish globals
     global.self ??= global;
     global.window ??= global;
-    if (!global.WebSocket) {
-      global.WebSocket = (await import('ws')).default;
-    }
     // The update-tracing overlay schedules its redraws on animation
     // frames, which Node does not have; without these the first traced
     // commit throws inside the backend. Unref'd, because an overlay must
@@ -162,6 +169,7 @@ export async function prepare() {
     const mod = await import('react-devtools-core');
     // v7 exposes the API on the default export under node ESM interop
     api = mod.default?.initialize ? mod.default : mod;
+    HostSocket = hostSocketClass();
     // The hook settings the user last chose in the DevTools UI — console
     // patching and friends. `initialize()` takes them, `onSettingsUpdated`
     // (below) records them, so a setting survives a restart.
@@ -170,7 +178,7 @@ export async function prepare() {
     api = null;
     console.warn(
       'react-x11: REACT_X11_DEVTOOLS is set but devtools could not be loaded. ' +
-        'Install react-devtools-core and ws. Original error: ' +
+        'Install react-devtools-core. Original error: ' +
         err.message,
     );
   }
@@ -254,6 +262,80 @@ export function reloadAndProfile(recordChangeDescriptions, recordTimeline) {
 // Connect
 // ---------------------------------------------------------------------------
 
+// The backend keeps trying to connect for as long as the process lives — a
+// timer every two seconds while no UI is listening, and an open socket while
+// one is — and either is enough to keep a Node process up after the app's
+// last window closed. Under `react-x11 dev`, where it is on by default, that
+// was every session hanging on close. Neither is reachable from the options:
+// so the backend's own code runs in a scope where the timers it starts are
+// unref'd and the sockets it opens are, too. The scope is entered where the
+// backend is — our connect call, its socket's close and error handlers that
+// schedule the retry, and the timers it set in the scope — and swaps the
+// globals only for that synchronous stretch, so the app's own `setTimeout`
+// and `WebSocket` are never the ones changed.
+let HostSocket = null;
+
+function inBackend(fn) {
+  const { setTimeout: appSetTimeout, WebSocket: appWebSocket } = globalThis;
+  globalThis.setTimeout = (callback, ...rest) => {
+    const timer = appSetTimeout(
+      typeof callback === 'function'
+        ? (...args) => inBackend(() => callback(...args))
+        : callback,
+      ...rest,
+    );
+    timer?.unref?.();
+    return timer;
+  };
+  if (HostSocket) globalThis.WebSocket = HostSocket;
+  try {
+    return fn();
+  } finally {
+    globalThis.setTimeout = appSetTimeout;
+    globalThis.WebSocket = appWebSocket;
+  }
+}
+
+/**
+ * The backend's WebSocket: `ws`, from react-devtools-core's own
+ * dependencies, with its socket unref'd once open and its close and error
+ * handlers run in the backend's scope. Falls back to the platform's
+ * WebSocket, which works and holds the process open.
+ */
+function hostSocketClass() {
+  let WS;
+  try {
+    WS = createRequire(import.meta.resolve('react-devtools-core'))('ws');
+  } catch {
+    return globalThis.WebSocket ?? null;
+  }
+  class Socket extends WS {
+    constructor(...args) {
+      super(...args);
+      this.on('open', () => this._socket?.unref?.());
+    }
+  }
+  for (const name of ['onclose', 'onerror']) {
+    const base = Object.getOwnPropertyDescriptor(WS.prototype, name);
+    if (!base?.set) continue;
+    Object.defineProperty(Socket.prototype, name, {
+      configurable: true,
+      get() {
+        return base.get.call(this);
+      },
+      set(handler) {
+        base.set.call(
+          this,
+          typeof handler === 'function'
+            ? (...args) => inBackend(() => handler(...args))
+            : handler,
+        );
+      },
+    });
+  }
+  return Socket;
+}
+
 /** Connect the backend to the standalone DevTools app and register the
  * renderer. Called by Reconciler.js right after the renderer is created. */
 export function connect(renderer) {
@@ -261,39 +343,41 @@ export function connect(renderer) {
   connected = true;
   const profiling = readProfilingOnStart();
 
-  api.connectToDevTools({
-    isAppActive: () => true,
-    host: process.env.REACT_X11_DEVTOOLS_HOST || 'localhost',
-    port: Number(process.env.REACT_X11_DEVTOOLS_PORT) || 8097,
-    // The style editor: `style` is a react-x11 style prop (an object, or a
-    // nested array of them), which is the shape DevTools' own resolver
-    // expects to be handed flat. `validAttributes` is what it offers to
-    // add to an element.
-    resolveRNStyle: resolveStyle,
-    nativeStyleEditorValidAttributes: STYLE_PROP_NAMES,
-    // Hook settings (console patching and so on) are the user's, not the
-    // run's: keep them where the next run will find them.
-    onSettingsUpdated: (settings) => {
-      try {
-        global.localStorage?.setItem(
-          HOOK_SETTINGS_KEY,
-          JSON.stringify(settings),
-        );
-      } catch {
-        // an unwritable store is not worth a warning per keystroke
-      }
-    },
-    // The backend's own check for this asks whether synchronous XHR works,
-    // which is a browser question — the honest answer for a node process
-    // that can re-exec itself is yes.
-    isReloadAndProfileSupported: true,
-    isProfiling: profiling != null,
-    onReloadAndProfile: reloadAndProfile,
-    onReloadAndProfileFlagsReset: () => {
-      delete process.env.REACT_X11_DEVTOOLS_PROFILING;
-      delete process.env.REACT_X11_DEVTOOLS_SESSION;
-    },
-  });
+  inBackend(() =>
+    api.connectToDevTools({
+      isAppActive: () => true,
+      host: process.env.REACT_X11_DEVTOOLS_HOST || 'localhost',
+      port: Number(process.env.REACT_X11_DEVTOOLS_PORT) || 8097,
+      // The style editor: `style` is a react-x11 style prop (an object, or a
+      // nested array of them), which is the shape DevTools' own resolver
+      // expects to be handed flat. `validAttributes` is what it offers to
+      // add to an element.
+      resolveRNStyle: resolveStyle,
+      nativeStyleEditorValidAttributes: STYLE_PROP_NAMES,
+      // Hook settings (console patching and so on) are the user's, not the
+      // run's: keep them where the next run will find them.
+      onSettingsUpdated: (settings) => {
+        try {
+          global.localStorage?.setItem(
+            HOOK_SETTINGS_KEY,
+            JSON.stringify(settings),
+          );
+        } catch {
+          // an unwritable store is not worth a warning per keystroke
+        }
+      },
+      // The backend's own check for this asks whether synchronous XHR works,
+      // which is a browser question — the honest answer for a node process
+      // that can re-exec itself is yes.
+      isReloadAndProfileSupported: true,
+      isProfiling: profiling != null,
+      onReloadAndProfile: reloadAndProfile,
+      onReloadAndProfileFlagsReset: () => {
+        delete process.env.REACT_X11_DEVTOOLS_PROFILING;
+        delete process.env.REACT_X11_DEVTOOLS_SESSION;
+      },
+    }),
+  );
 
   // No argument: react-reconciler 0.33 takes none, and the object this used
   // to pass was discarded in silence. The renderer's name and version now

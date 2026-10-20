@@ -22,7 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import React from 'react';
 import { createMockApp } from './helpers/mock-app.js';
-import { fakeDevTools, unrefFurtherTimers } from './helpers/fake-devtools.js';
+import { fakeDevTools } from './helpers/fake-devtools.js';
 
 /** Every hook in the tree the backend sent back, nested ones included. */
 function flatten(hooks, out = []) {
@@ -45,7 +45,6 @@ test('hook sources survive a stack too short to reach the call site', async (t) 
     delete process.env.REACT_X11_DEVTOOLS_PORT;
     delete process.env.REACT_X11_DEVTOOLS_STATE;
     Error.stackTraceLimit = limitBefore;
-    unrefFurtherTimers();
     await devtools.close();
     await fs.rm(stateDir, { recursive: true, force: true });
   });

@@ -17,6 +17,10 @@ Commands:
                  export is mounted, inside a window of its own when it
                  renders none; a file that mounts its own root runs as it is.
                  Arguments after the file are the app's.
+                 Alt+Click (Option+Click on macOS) an element to open its
+                 source; REACT_X11_CLICK_TO_COMPONENT=0 turns that off.
+                 Connects to React DevTools (npx react-devtools) whenever
+                 it runs; REACT_X11_DEVTOOLS=0 turns that off.
 
 Options:
   -h, --help     Show this help.

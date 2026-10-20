@@ -6,7 +6,7 @@ bridge.
 ## Setup
 
 ```sh
-npm i -D react-devtools-core ws   # already dev deps of this repo
+npm i -D react-devtools-core   # already a dev dep of this repo
 
 # terminal 1 — the standalone UI (listens on :8097)
 npx react-devtools
@@ -15,9 +15,12 @@ npx react-devtools
 REACT_X11_DEVTOOLS=1 npm run examples:dashboard
 ```
 
-Order matters only in that the standalone should be listening when the app
-starts (the backend retries, so starting the app first also works after a
-few seconds).
+Either order works: the backend retries every two seconds, so an app
+started first attaches a moment after the UI comes up. Under
+`npx react-x11 dev` the bridge is on by default wherever
+`react-devtools-core` is installed — run `npx react-devtools` and the app
+shows up, `REACT_X11_DEVTOOLS=0` turns it off — and where it is not
+installed while a UI is listening, `dev` says what to install.
 
 What you get:
 
@@ -134,6 +137,20 @@ rules out a single executable ([packaging.md](packaging.md)). The ordering
 guarantee is the same: a commit can only follow a root, and there is no way
 to get one without awaiting the install. It connects the backend and
 registers the renderer via `injectIntoDevTools`.
+
+The backend never stops trying to connect — a retry timer while no UI
+listens, an open socket while one does — and either kept the process up
+after the app's last window closed. Its code runs in a scope
+(`inBackend`) where the timers it starts and the sockets it opens are
+unref'd, entered at our connect call, at its socket's close and error
+handlers, and at the timers it armed there; the globals are swapped only
+for that synchronous stretch, so the app's own `setTimeout` and
+`WebSocket` are untouched. The socket is `ws` from react-devtools-core's
+own dependencies, which is why `ws` is not a separate install.
+
+Under `react-x11 dev` the hook is installed earlier, before React Refresh
+loads: Refresh installs a stub hook where it finds none, the backend
+installs none where it finds one, and the stub cannot connect.
 
 Notes for maintainers:
 

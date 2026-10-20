@@ -5,8 +5,8 @@ import { WebSocketServer } from 'ws';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function fakeDevTools() {
-  const server = new WebSocketServer({ port: 0 });
+export async function fakeDevTools({ port = 0 } = {}) {
+  const server = new WebSocketServer({ port });
   await new Promise((resolve) => server.on('listening', resolve));
   const received = [];
   let socket = null;
@@ -40,18 +40,5 @@ export async function fakeDevTools() {
       socket?.close();
       await new Promise((resolve) => server.close(resolve));
     },
-  };
-}
-
-/** A backend whose socket closes reconnects forever (handleClose ->
- * scheduleRetry), which is what an app wants and what would keep a test
- * process alive after the last assertion. Unref every timer from here on,
- * so the retries continue without being a reason to stay up. */
-export function unrefFurtherTimers() {
-  const realSetTimeout = global.setTimeout;
-  global.setTimeout = (fn, ms, ...rest) => {
-    const timer = realSetTimeout(fn, ms, ...rest);
-    timer.unref?.();
-    return timer;
   };
 }
