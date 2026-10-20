@@ -27,12 +27,26 @@
 //    missing, names them with the versions the loader is written against, and
 //    installs them with the project's own package manager when the developer
 //    says yes. Without a terminal to ask on it prints the command instead.
+//  - **It turns click-to-component on.** Alt+Click (Option+Click on macOS)
+//    opens the JSX line an element came from (docs/click-to-component.md):
+//    a development tool, and this is the command a developer runs, so it is
+//    on unless REACT_X11_CLICK_TO_COMPONENT=0 says otherwise. Set here, in
+//    the environment, because that is where the renderer reads it when the
+//    first root is made — and where a toolchain restart inherits it from.
+//  - **It connects to React DevTools** whenever `npx react-devtools` is
+//    running, before or after the app started, the way a browser with the
+//    extension does: on by default where react-devtools-core is installed,
+//    unless REACT_X11_DEVTOOLS=0. Where it is not, and a DevTools UI is
+//    listening at start, it says what to install. Prepared before React
+//    Refresh loads, because Refresh installs a stub hook where it finds none,
+//    and the backend installs none where it finds one.
 //  - **It runs the project's react-x11.** A second copy of the renderer is a
 //    second React root nobody refreshes, so a global or npx-cached
 //    `react-x11` hands over to the copy the file itself imports.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import * as nodeModule from 'node:module';
+import { connect } from 'node:net';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -120,6 +134,18 @@ export async function runDev(file, options = {}) {
   if ((await ensureToolchain({ projectDir, log })) === 'installed') {
     restart();
     return null;
+  }
+
+  process.env.REACT_X11_CLICK_TO_COMPONENT ??= '1';
+  if (process.env.REACT_X11_DEVTOOLS === undefined) {
+    if (resolves('react-devtools-core')) {
+      process.env.REACT_X11_DEVTOOLS = '1';
+    } else {
+      suggestDevTools({ projectDir, log });
+    }
+  }
+  if (envFlag(process.env.REACT_X11_DEVTOOLS)) {
+    await (await import('../DevToolsIntegration.js')).prepare();
   }
 
   // Before anything below loads: a module's source maps are read when it
@@ -384,6 +410,48 @@ function rootContent(node) {
     } else drawn++;
   }
   return { windows, drawn };
+}
+
+/** Whether `specifier` resolves from react-x11, which is where it is
+ * imported from. */
+function resolves(specifier) {
+  try {
+    import.meta.resolve(specifier);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The renderer's rule for a switch: set, and not `0`. */
+function envFlag(value) {
+  return Boolean(value) && value !== '0';
+}
+
+/**
+ * Where react-devtools-core is missing: if a DevTools UI is listening (one
+ * TCP connect, in the background, never holding the process), say what to
+ * install for the app to show up in it. Silent otherwise — no DevTools
+ * running is the usual case, not one to print about.
+ */
+function suggestDevTools({ projectDir, log }) {
+  const host = process.env.REACT_X11_DEVTOOLS_HOST || 'localhost';
+  const port = Number(process.env.REACT_X11_DEVTOOLS_PORT) || 8097;
+  const socket = connect({ host, port });
+  socket.unref();
+  socket.setTimeout(1000, () => socket.destroy());
+  socket.on('error', () => {});
+  socket.on('connect', () => {
+    socket.destroy();
+    const line = shellLine(
+      installCommand(packageManagerFor(projectDir), ['react-devtools-core']),
+    );
+    log(
+      `React DevTools is listening on ${host}:${port}, and this project ` +
+        'cannot connect to it without react-devtools-core. Install it, and ' +
+        `the next run shows up there:\n\n  ${line}\n`,
+    );
+  });
 }
 
 /** The react-x11 package `path` imports, or null when it imports none. */

@@ -378,17 +378,17 @@ else's app, a `.desktop` launcher, an A/B run.
 
 **Development and diagnostics**
 
-| variable                         | effect                                                                                            |
-| -------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `REACT_X11_DEVTOOLS=1`           | connect to a running `react-devtools` (see devtools.md)                                           |
-| `REACT_X11_DEVTOOLS_HOST`        | devtools host (default `localhost`)                                                               |
-| `REACT_X11_DEVTOOLS_PORT`        | devtools port (default `8097`)                                                                    |
-| `REACT_X11_DEBUG_LAYOUT=1`       | outline every laid-out node, color-coded by tree depth                                            |
-| `REACT_X11_DEBUG_PAINT=1`        | stroke each frame's damage rects in a rotating colour; `=full` also warns on full-window repaints |
-| `REACT_X11_TRACE`                | record the X11 protocol — see [debugging.md](debugging.md) for the grammar                        |
-| `REACT_X11_CLICK_TO_COMPONENT=1` | Alt+Click opens the clicked element's source, using `cursor` (see click-to-component.md)          |
-| `REACT_X11_EDITOR`               | editor CLI for click-to-component — setting this alone also enables it                            |
-| `REACT_X11_STRICT_TOKENS=1`      | a `$token` the theme does not define is fatal instead of dropped                                  |
+| variable                         | effect                                                                                                                                           |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `REACT_X11_DEVTOOLS=1`           | connect to a running `react-devtools` (see devtools.md); on by default under `react-x11 dev`, `=0` turns it off                                  |
+| `REACT_X11_DEVTOOLS_HOST`        | devtools host (default `localhost`)                                                                                                              |
+| `REACT_X11_DEVTOOLS_PORT`        | devtools port (default `8097`)                                                                                                                   |
+| `REACT_X11_DEBUG_LAYOUT=1`       | outline every laid-out node, color-coded by tree depth                                                                                           |
+| `REACT_X11_DEBUG_PAINT=1`        | stroke each frame's damage rects in a rotating colour; `=full` also warns on full-window repaints                                                |
+| `REACT_X11_TRACE`                | record the X11 protocol — see [debugging.md](debugging.md) for the grammar                                                                       |
+| `REACT_X11_CLICK_TO_COMPONENT=1` | Alt+Click opens the clicked element's source, using `cursor` (see click-to-component.md); on by default under `react-x11 dev`, `=0` turns it off |
+| `REACT_X11_EDITOR`               | editor CLI for click-to-component — setting this alone also enables it                                                                           |
+| `REACT_X11_STRICT_TOKENS=1`      | a `$token` the theme does not define is fatal instead of dropped                                                                                 |
 
 **The Cocoa backend**
 

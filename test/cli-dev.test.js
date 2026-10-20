@@ -11,9 +11,11 @@ import assert from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fakeDevTools } from './helpers/fake-devtools.js';
 import {
   DevError,
   ensureToolchain,
@@ -21,6 +23,15 @@ import {
   packageManagerFor,
   reactX11For,
 } from '../src/cli/dev.js';
+
+// A port nobody listens on, so the sessions run with DevTools on — the
+// command's default — without reaching a DevTools the developer has open.
+const NO_DEVTOOLS = await new Promise((resolve) => {
+  const probe = createServer().listen(0, () => {
+    const { port } = probe.address();
+    probe.close(() => resolve(String(port)));
+  });
+});
 
 const supported = typeof nodeModule.registerHooks === 'function';
 const skip = supported ? false : 'module.registerHooks needs Node >= 22.15';
@@ -65,7 +76,7 @@ let sessions = 0;
  * — with that directory as the working one, so the command names the files
  * the way a developer would see them.
  */
-function devSession(files, entry = 'app.jsx', args = []) {
+function devSession(files, entry = 'app.jsx', args = [], env = {}) {
   const dir = join(
     repo,
     'test/fixtures',
@@ -79,6 +90,17 @@ function devSession(files, entry = 'app.jsx', args = []) {
   const child = spawn(process.execPath, [driver, join(dir, entry), ...args], {
     cwd: dir,
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      REACT_X11_CLICK_TO_COMPONENT: undefined,
+      REACT_X11_DEVTOOLS: undefined,
+      REACT_X11_DEVTOOLS_PORT: NO_DEVTOOLS,
+      REACT_X11_DEVTOOLS_STATE: join(
+        tmpdir(),
+        `react-x11-dev-dt-${process.pid}.json`,
+      ),
+      ...env,
+    },
   });
   let stdout = '';
   let stderr = '';
@@ -153,6 +175,8 @@ test(
       const first = await s.next(RENDER('v1'), 'the first render');
       assert.strictEqual(first[2], DEV_WINDOW);
       assert.match(s.stdout, /DEV app\.jsx renders no <window>/);
+      // on by default under dev
+      assert.match(s.stdout, /click-to-component enabled/);
       // the render that found no window committed nothing: one mount
       assert.strictEqual(s.stdout.match(/RENDER /g).length, 1);
 
@@ -375,6 +399,78 @@ test(
       await s.next(RENDER('v1'));
     } finally {
       s.stop();
+    }
+  },
+);
+
+/** `promise`, or `fallback` once `ms` have passed. */
+const within = (promise, ms, fallback) =>
+  Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(resolve, ms, fallback)),
+  ]);
+
+test(
+  'React DevTools started after the app attaches to it, and saving still reloads',
+  { skip },
+  async () => {
+    const devtools = await fakeDevTools();
+    await devtools.close();
+    // the port the app will retry, and nothing listening there yet
+    const s = devSession({ 'app.jsx': component() }, 'app.jsx', [], {
+      REACT_X11_DEVTOOLS_PORT: String(devtools.port),
+    });
+    let late = null;
+    try {
+      const first = await s.next(RENDER('v1'), 'the first render');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      late = await fakeDevTools({ port: devtools.port });
+      assert.strictEqual(
+        await within(
+          late.connected.then(() => 'connected'),
+          10_000,
+          'none',
+        ),
+        'connected',
+      );
+      await late.waitFor('operations');
+      // Refresh patches the hook DevTools installed, not one of its own
+      await s.write('app.jsx', component({ version: 'v2' }));
+      const second = await s.next(RENDER('v2'), 'the hot re-render');
+      assert.strictEqual(second[1], first[1], 'useState survives the reload');
+    } finally {
+      s.stop();
+      await late?.close();
+    }
+  },
+);
+
+test(
+  'REACT_X11_CLICK_TO_COMPONENT=0 and REACT_X11_DEVTOOLS=0 turn the two off, an editor named or not',
+  { skip },
+  async () => {
+    const devtools = await fakeDevTools();
+    const s = devSession({ 'app.jsx': component() }, 'app.jsx', [], {
+      REACT_X11_CLICK_TO_COMPONENT: '0',
+      REACT_X11_EDITOR: 'code',
+      REACT_X11_DEVTOOLS: '0',
+      REACT_X11_DEVTOOLS_PORT: String(devtools.port),
+    });
+    try {
+      // installing it logs before the root is made, so ahead of this
+      await s.next(RENDER('v1'), 'the first render');
+      assert.doesNotMatch(s.stdout, /click-to-component/);
+      assert.strictEqual(
+        await within(
+          devtools.connected.then(() => 'connected'),
+          2500,
+          'none',
+        ),
+        'none',
+      );
+    } finally {
+      s.stop();
+      await devtools.close();
     }
   },
 );

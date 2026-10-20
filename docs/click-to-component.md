@@ -8,6 +8,8 @@ installed-feature log line says whichever one applies to your platform.
 
 ## Setup
 
+Under `react-x11 dev` it is already on. Elsewhere:
+
 ```sh
 REACT_X11_EDITOR=code npm run examples:tasks   # naming an editor enables it
 # or, to use the default (cursor):
@@ -57,7 +59,9 @@ through the same variable (`src/editor.js`, shared by both).
 ## How it works
 
 `src/ClickToComponent.js`, installed from `Reconciler.js` when either
-`REACT_X11_CLICK_TO_COMPONENT` or `REACT_X11_EDITOR` is set. No
+`REACT_X11_CLICK_TO_COMPONENT` or `REACT_X11_EDITOR` is set, and
+`REACT_X11_CLICK_TO_COMPONENT` is not `0` — the way to turn it off under
+`react-x11 dev`, which sets it to `1` when it is unset. No
 babel/jsx-source plugin, no build-time instrumentation:
 
 - every host node already carries a reference to the fiber that created it

@@ -592,16 +592,15 @@ let integrationsSettled = false;
 function loadIntegrations() {
   if (integrationsSettled) return null;
   if (
-    !process.env.REACT_X11_DEVTOOLS &&
-    !process.env.REACT_X11_CLICK_TO_COMPONENT &&
-    !process.env.REACT_X11_EDITOR &&
+    !envFlag('REACT_X11_DEVTOOLS') &&
+    !clickToComponentWanted() &&
     !process.env.REACT_X11_TRACE
   ) {
     return null;
   }
   if (integrations) return integrations;
   integrations = (async () => {
-    if (process.env.REACT_X11_DEVTOOLS) {
+    if (envFlag('REACT_X11_DEVTOOLS')) {
       // Install the DevTools hook before any React commit, and register the
       // renderer with the standalone DevTools app.
       const devtools = await import('./DevToolsIntegration.js');
@@ -609,12 +608,7 @@ function loadIntegrations() {
       devtools.connect(Renderer);
     }
 
-    if (
-      process.env.REACT_X11_CLICK_TO_COMPONENT ||
-      process.env.REACT_X11_EDITOR
-    ) {
-      // Naming an editor already means you want the feature on — no need to
-      // also set REACT_X11_CLICK_TO_COMPONENT=1 just to pick one.
+    if (clickToComponentWanted()) {
       const clickToComponent = await import('./ClickToComponent.js');
       clickToComponent.install();
     }
@@ -630,6 +624,28 @@ function loadIntegrations() {
     integrationsSettled = true;
   })();
   return integrations;
+}
+
+/**
+ * Whether to install click-to-component. Naming an editor already means you
+ * want the feature on — no need to also set REACT_X11_CLICK_TO_COMPONENT=1
+ * just to pick one — and `0` turns it off whatever else is set, which is
+ * the way out of `react-x11 dev`, where it is on by default and
+ * REACT_X11_EDITOR also picks the error window's editor.
+ */
+function clickToComponentWanted() {
+  if (process.env.REACT_X11_CLICK_TO_COMPONENT === '0') return false;
+  return (
+    envFlag('REACT_X11_CLICK_TO_COMPONENT') ||
+    Boolean(process.env.REACT_X11_EDITOR)
+  );
+}
+
+/** A switch in the environment: set, and not `0` — the way out of a
+ * default `react-x11 dev` turns on. */
+function envFlag(name) {
+  const value = process.env[name];
+  return Boolean(value) && value !== '0';
 }
 
 /**

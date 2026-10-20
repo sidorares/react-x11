@@ -464,6 +464,10 @@ npx react-devtools                                # 1. start the standalone UI
 REACT_X11_DEVTOOLS=1 npm run examples:dashboard   # 2. run any example with the bridge on
 ```
 
+Under `npx react-x11 dev` the bridge is on by default (with
+`react-devtools-core` installed): run `npx react-devtools`, before or after,
+and the app shows up.
+
 The component tree, props and hook state show up live in the DevTools
 window, and editing any of them re-renders the app. Hovering an element in
 the tree tints its rect in the app's window; the toolbar's crosshair picks
@@ -498,7 +502,7 @@ Alt+Click any rendered element (Option+Click on macOS, either backend) to
 open the JSX line that created it in your editor. `REACT_X11_EDITOR` picks
 the CLI and enables the feature in one go; `REACT_X11_CLICK_TO_COMPONENT=1`
 does the same with the default editor
-(`cursor`). See [docs/click-to-component.md](docs/click-to-component.md).
+(`cursor`), and `npx react-x11 dev` turns it on by default. See [docs/click-to-component.md](docs/click-to-component.md).
 
 ## TypeScript
 

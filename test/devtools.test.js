@@ -18,7 +18,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { createMockApp } from './helpers/mock-app.js';
-import { fakeDevTools, unrefFurtherTimers } from './helpers/fake-devtools.js';
+import { fakeDevTools } from './helpers/fake-devtools.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -33,7 +33,6 @@ test('the DevTools backend drives the overlays, the picker and the style editor'
     delete process.env.REACT_X11_DEVTOOLS;
     delete process.env.REACT_X11_DEVTOOLS_PORT;
     delete process.env.REACT_X11_DEVTOOLS_STATE;
-    unrefFurtherTimers();
     await devtools.close();
     await fs.rm(stateDir, { recursive: true, force: true });
   });
@@ -217,6 +216,63 @@ test('reload-and-profile re-execs the app with its flags intact', async () => {
       '1',
       'the app that comes back has DevTools enabled whatever launched it',
     );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+// The backend retries every two seconds while no UI listens and holds a
+// socket open while one does, forever; neither may keep the process up once
+// the app is gone — `react-x11 dev` turns DevTools on by default, and every
+// session hung on close.
+test('an app with DevTools on exits once it is gone, a UI listening or not', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'react-x11-dt-exit-'));
+  const index = new URL('../src/index.js', import.meta.url).href;
+  const mock = new URL('./helpers/mock-app.js', import.meta.url).href;
+  const react = import.meta.resolve('react');
+  const script = path.join(dir, 'app.mjs');
+  await fs.writeFile(
+    script,
+    `const { default: React } = await import(${JSON.stringify(react)});
+     const { createRoot } = await import(${JSON.stringify(index)});
+     const { createMockApp } = await import(${JSON.stringify(mock)});
+     const root = await createRoot({ app: createMockApp() });
+     root.render(React.createElement('window', { title: 'x' }));
+     setTimeout(() => root.unmount(), Number(process.env.LINGER));\n`,
+  );
+  const run = (port, linger) => {
+    const child = spawn(process.execPath, [script], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      env: {
+        ...process.env,
+        REACT_X11_DEVTOOLS: '1',
+        REACT_X11_DEVTOOLS_PORT: String(port),
+        REACT_X11_DEVTOOLS_STATE: path.join(dir, 'devtools.json'),
+        LINGER: String(linger),
+      },
+      stdio: 'inherit',
+    });
+    const exited = new Promise((resolve) => child.on('close', resolve));
+    const timeout = sleep(8000).then(() => {
+      child.kill();
+      return 'still running';
+    });
+    return Promise.race([exited, timeout]);
+  };
+  try {
+    const devtools = await fakeDevTools();
+    try {
+      const exit = run(devtools.port, 1500);
+      assert.strictEqual(
+        await Promise.race([devtools.connected.then(() => 'connected'), exit]),
+        'connected',
+      );
+      assert.strictEqual(await exit, 0, 'connected');
+    } finally {
+      await devtools.close();
+    }
+    // the port is free again: past a failed attempt or two, and a retry armed
+    assert.strictEqual(await run(devtools.port, 2500), 0, 'retrying');
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
