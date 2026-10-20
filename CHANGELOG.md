@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.50.0](https://github.com/sidorares/react-x11/compare/v2.49.0...v2.50.0) (2026-10-20)
+
+
+### Features
+
+* **styles:** CSS's shorthands are read the way CSS reads them, and a length is the number it names however it is written ([#967](https://github.com/sidorares/react-x11/issues/967)) ([2e8425d](https://github.com/sidorares/react-x11/commit/2e8425d556896c5b2df1a1afc66eedb51cb835ef))
+* **styles:** currentColor is the node's ink wherever a colour is written, and a line with no colour is drawn in it ([#973](https://github.com/sidorares/react-x11/issues/973)) ([fcb3c45](https://github.com/sidorares/react-x11/commit/fcb3c45dd8d97a39b185a6b03e467922b3dcaf69))
+* **styles:** em, rem, the viewport units and calc resolve for the node they are written on, and again when what they are relative to moves ([#971](https://github.com/sidorares/react-x11/issues/971)) ([8dc788b](https://github.com/sidorares/react-x11/commit/8dc788b05ce477da896116fe264e7a5e305fb38c))
+
+
+### Bug Fixes
+
+* **cocoa:** under Bun, a CommonJS entry moves onto a worker as it requires react-x11, where it never moved, and an entry that awaits its import of react-x11 keeps the main thread, where it moved and ran twice ([#972](https://github.com/sidorares/react-x11/issues/972)) ([13ea33b](https://github.com/sidorares/react-x11/commit/13ea33b2527fdc09ae91ed59ff1c1866b3521b53))
+* **refresh:** a stack through a hot module points at the source's own line, babel's map shifted past the prelude and hot-module-replacement 4.0.2 composing it ([#965](https://github.com/sidorares/react-x11/issues/965)) ([b5daf8a](https://github.com/sidorares/react-x11/commit/b5daf8a606ffe55f9a59c8852956e46ccc9be140))
+* **styles:** a $token in a layout property reaches the layout, where it used to stop at the paint ([#968](https://github.com/sidorares/react-x11/issues/968)) ([3dacb50](https://github.com/sidorares/react-x11/commit/3dacb5029746e5cc1b8c97499f2b725602404816))
+
+
+### Performance Improvements
+
+* **floors:** an absolute box its content sizes, hung under a row, holds a change inside it in, so a &lt;Table&gt;'s scroll count measures the pill alone and costs 0.6 ms of a frame where it measured the whole table in 8 ([#969](https://github.com/sidorares/react-x11/issues/969)) ([f696549](https://github.com/sidorares/react-x11/commit/f696549e3254aa28a2c00367803f6eda6a3f05f4))
+
 ## [2.49.0](https://github.com/sidorares/react-x11/compare/v2.48.0...v2.49.0) (2026-10-19)
 
 
