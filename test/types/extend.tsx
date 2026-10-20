@@ -231,6 +231,14 @@ class SparklineNode extends Node {
     return _ink;
   }
 
+  // …and a colour of its style as one to paint: `currentColor` is the ink
+  stroke(): string | undefined {
+    const edge: string | undefined = this.resolveColor(this.style.borderColor);
+    const ink: string = this.resolveColor('currentColor');
+    void ink;
+    return edge;
+  }
+
   // The focus half of the same surface (#252): an element takes focus as a
   // click would, and reads where focus is.
   activate(): SparklineNode {

@@ -5,6 +5,7 @@
 import {
   applyLayoutStyle,
   isColor,
+  paintsCurrentColor,
   textStyleFrom,
   DEFAULT_TEXT_STYLE,
   localTextStyleChanged,
@@ -378,8 +379,17 @@ export class NodeCascade {
     // resolves its style again here, before its own text is, since a
     // `fontSize: '1.5em'` is part of what that text is set in.
     if (this._emMoved()) this._unitsMoved();
-    const cost = resolvedTextDelta(before, this.resolvedTextStyle());
-    if (cost !== 0) this._textStyleMoved(cost);
+    const after = this.resolvedTextStyle();
+    const cost = resolvedTextDelta(before, after);
+    if (cost !== 0) {
+      this._textStyleMoved(cost);
+      // A node painting in `currentColor` resolved its ink to do it, so the
+      // walk reaches it — and its own style says nothing about the change,
+      // which was written on an ancestor or in its own `color`.
+      if (before.color !== after.color && paintsCurrentColor(this.style)) {
+        this._inkMoved();
+      }
+    }
     return cost;
   }
 
@@ -409,6 +419,19 @@ export class NodeCascade {
     } else {
       this.root?.invalidate(false, this, 'text');
     }
+  }
+
+  /**
+   * The ink moved under a node that paints something in it — a border, a
+   * fill, a gradient stop or a shadow in `currentColor`. A repaint of the
+   * node, bounded to it, and a box needs it although it draws no text
+   * (`BoxNode._textStyleMoved`): the ancestor whose `color` moved claimed
+   * its own box, which covers this one on a surface but names no node to a
+   * retained presenter re-rastering by node, and no other window to a
+   * `<popup>` written under it.
+   */
+  _inkMoved() {
+    this.root?.invalidate(false, this, 'ink');
   }
 
   /**
@@ -641,4 +664,11 @@ export class WindowCascade {
   /** Like a `<box>`: a window fills and never letters, so it is the top of
    * the cascade rather than a reader of it. */
   _textStyleMoved() {}
+
+  /** …except a fill in `currentColor`, which the server keeps a copy of for
+   *  what a resize exposes. */
+  _inkMoved() {
+    this._syncWindowBackground();
+    this.invalidate(false, null, 'ink');
+  }
 }

@@ -18,13 +18,18 @@ import { createRoot } from '../src/index.js';
 import {
   flattenStyle,
   resolveComputedStyle,
+  resolveStyleStates,
   scaleResolvedStyle,
   transitionFor,
   validateStyle,
   SCALED_LENGTH_PROPS,
   isStyleProp,
 } from '../src/styles.js';
-import { LENGTH_FORMS, readLength } from '../src/shorthands.js';
+import {
+  LENGTH_FORMS,
+  expandShorthand,
+  readLength,
+} from '../src/shorthands.js';
 import { loadLayout } from '../src/yoga.js';
 import { createMockApp, flushFrames } from './helpers/mock-app.js';
 
@@ -237,17 +242,10 @@ test('what a border cannot be is said where it is written', () => {
     /"nonsense" is neither/,
   );
   assert.match(problem({ border: '1ex solid red' }), /ex is not read/);
-  // no currentColor yet, and a border's colour has no default
-  assert.match(
-    problem({ border: '1px solid' }),
-    /names no colour, and would paint nothing.*border: '1px solid \$border'/,
-  );
-  // …unless the style names one somewhere — a longhand, a side, a state
-  assert.equal(problem({ border: '1px solid', borderColor: 'red' }), null);
-  assert.equal(
-    problem({ border: '1px', ':hover': { borderColor: 'red' } }),
-    null,
-  );
+  // a line with no colour is drawn in currentColor, as in CSS
+  assert.equal(problem({ border: '1px solid' }), null);
+  assert.equal(problem({ outline: '2px' }), null);
+  assert.equal(problem({ border: '1px solid currentColor' }), null);
   assert.equal(problem({ border: '1px solid $border' }), null);
   // one box, one line style
   assert.match(
@@ -266,6 +264,69 @@ test('what a border cannot be is said where it is written', () => {
     problem({ borderStyle: 'none' }),
     /expected 'solid' or 'dashed' — a box with no border is borderWidth: 0/,
   );
+});
+
+test('a line with no colour is currentColor, unless the style names one for it', () => {
+  // CSS's reset, for the one part a line cannot be drawn without
+  assert.deepEqual(expand({ border: '1px solid' }), {
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'currentColor',
+  });
+  assert.deepEqual(expand({ borderBottom: '2px' }), {
+    borderBottomWidth: 2,
+    borderBottomColor: 'currentColor',
+  });
+  assert.deepEqual(expand({ outline: 'thin' }), {
+    outlineWidth: 1,
+    outlineColor: 'currentColor',
+  });
+  // the keyword written out is a colour like any other, in any case
+  assert.deepEqual(expand({ border: 'CurrentColor 1px' }), {
+    borderWidth: 1,
+    borderColor: 'CurrentColor',
+  });
+  assert.deepEqual(expand({ background: 'currentcolor' }), {
+    backgroundColor: 'currentcolor',
+  });
+  // …and is the weakest thing in the style: a colour named for the side —
+  // the four-side longhand a side falls back to, a list, a state block —
+  // is the one the line takes, which is what such a style meant before
+  assert.deepEqual(expand({ borderBottom: '1px solid', borderColor: 'red' }), {
+    borderBottomWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'red',
+  });
+  assert.deepEqual(
+    expand({ borderBottom: '1px', borderColor: 'red blue' }).borderBottomColor,
+    'red',
+  );
+  assert.deepEqual(expand({ border: '2px', borderTopColor: 'blue' }), {
+    borderWidth: 2,
+    borderTopColor: 'blue',
+    borderColor: 'currentColor',
+  });
+  assert.equal(
+    expand({ outline: '2px', outlineColor: '$accent' }).outlineColor,
+    '$accent',
+  );
+  const hover = { border: '1px solid', ':hover': { borderColor: 'red' } };
+  assert.equal(
+    resolveComputedStyle(resolveStyleStates(hover, { ':hover': true }))
+      .borderColor,
+    'red',
+  );
+  assert.equal(expand(hover).borderColor, 'currentColor');
+  // no line, no colour to need
+  assert.deepEqual(expand({ border: 'none' }), { borderWidth: 0 });
+  assert.deepEqual(expand({ border: 0 }), { borderWidth: 0 });
+  assert.deepEqual(expand({ outline: '0 solid' }), { outlineWidth: 0 });
+  // the shorthand alone says what it means alone
+  assert.deepEqual(expandShorthand('borderTop', '1px dashed'), {
+    borderTopWidth: 1,
+    borderTopColor: 'currentColor',
+    borderStyle: 'dashed',
+  });
 });
 
 test('outline and background', () => {

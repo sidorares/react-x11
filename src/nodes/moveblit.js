@@ -168,7 +168,7 @@ export class NodeMoveBlit {
       if (style.opacity !== undefined && !(style.opacity >= 1)) return null;
       const radius = radiusOf(style, node.abs);
       let own = null;
-      if (isOpaqueColor(style.backgroundColor)) {
+      if (isOpaqueColor(node.resolveColor(style.backgroundColor))) {
         own = node.abs;
         holes.push(...cornerSquares(node.abs, radius));
       } else {

@@ -11,9 +11,11 @@ import {
   transitionFor,
   interpolate,
   ease,
+  isColor,
   isLayoutProp,
   TEXT_LAYOUT_PROPS,
 } from '../styles.js';
+import { isCurrentColor } from '../currentcolor.js';
 import { GRID_CONTAINER_PROPS, GRID_ITEM_PROPS } from '../grid.js';
 import { isPlaced } from '../layouts.js';
 import { desktopSettings, watchDesktopSettings } from '../desktopsettings.js';
@@ -85,11 +87,16 @@ export class NodeAnimation {
     // transitions start on later changes, which is CSS's rule too.
     if (this._placed) {
       for (const prop of Object.keys(target)) {
-        const to = target[prop];
-        const from = displayed[prop];
+        let to = target[prop];
+        let from = displayed[prop];
         if (from === to || from === undefined) continue;
         const duration = transitionFor(target, prop);
         if (duration <= 0) continue;
+        if (isCurrentColor(from) || isCurrentColor(to)) {
+          from = this._swapInk(prop, from, displayed);
+          to = this._swapInk(prop, to, target);
+          if (from === to) continue;
+        }
         if (interpolate(from, to, 0.5) === null) continue; // no midpoint: snap
         const entry = {
           from,
@@ -258,6 +265,27 @@ export class NodeAnimation {
       }
     }
     return this.style;
+  }
+
+  /**
+   * A `currentColor` end of a transition as the colour it is at the swap:
+   * the ink `style` gives this node, or on `color` itself the ink it
+   * inherits. The keyword has no midpoint of its own, so the transition
+   * runs between the two colours as they are now — and lands on the style,
+   * where the keyword follows the ink again. An ink that moves mid-flight
+   * is caught up with at the end, not chased: a `color` that should carry
+   * a border with it is the property to transition.
+   */
+  _swapInk(prop, value, style) {
+    if (!isCurrentColor(value)) return value;
+    const inherited = this.inheritedTextStyle.color;
+    if (prop === 'color') return inherited;
+    // the displayed style's ink is cached; the target's is not yet
+    return style === this.style
+      ? this.resolvedTextStyle().color
+      : isColor(style.color)
+        ? style.color
+        : inherited;
   }
 
   _animatedValues() {

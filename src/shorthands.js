@@ -30,12 +30,18 @@
 // - **An omitted part is left unset, not reset.** CSS resets every longhand
 //   a shorthand leaves out; here the longhand beside it would win anyway (the
 //   first rule), so a reset could only ever reach a property nobody named.
-//   Two exceptions, both CSS's: a border or an outline with no width is
+//   Three exceptions, all CSS's: a border or an outline with no width is
 //   `medium`, 3px — a border with no width draws nothing here, where CSS
-//   would draw one — and `none` is a width of 0, the way `border: none` and
-//   `outline: none` are written to take one away.
+//   would draw one — `none` is a width of 0, the way `border: none` and
+//   `outline: none` are written to take one away, and a line with no colour
+//   is `currentColor`. That last one is the weakest thing in the style: a
+//   colour the style names for the same side anywhere else — `borderColor`
+//   beside `borderBottom: '1px solid'` — is the one it takes
+//   (`expandStyle`), which is what such a style meant before there was a
+//   `currentColor` to fall back on.
 import { cssColorStraight } from 'ntk/color';
 
+import { isCurrentColor } from './currentcolor.js';
 import { parseLinearGradient, splitTop } from './decorations.js';
 
 /** What a length property takes besides pixels. */
@@ -183,7 +189,13 @@ export const PROBE = Object.freeze({
 const isToken = (v) =>
   typeof v === 'string' && /^\$[A-Za-z_][A-Za-z0-9_-]*$/.test(v);
 const mentionsToken = (v) => typeof v === 'string' && v.includes('$');
-const isColor = (v) => typeof v === 'string' && cssColorStraight(v) !== null;
+/** A colour as the grammar reads one: anything ntk parses, and CSS's
+ *  `currentColor`, which the paint resolves to the node's ink. */
+const isColor = (v) =>
+  typeof v === 'string' && (cssColorStraight(v) !== null || isCurrentColor(v));
+
+/** What a line the shorthand gives no colour is drawn in. */
+const CURRENT_COLOR = 'currentColor';
 
 /** What a length property takes, said the way the errors say it. */
 function expected(forms) {
@@ -822,20 +834,47 @@ export function expandStyle(style, ctx = null) {
     out[key] = value;
   }
   if (found === null) return out;
+  let implied = null;
   for (const key of SHORTHAND_ORDER) {
     if (!found.has(key)) continue;
     let longhands;
     try {
-      longhands = expandShorthand(key, style[key], ctx);
+      longhands = readShorthand(key, style[key], ctx, false);
     } catch {
       continue;
     }
+    const colorKey = impliedColorKey(key, longhands);
+    if (colorKey !== null) (implied ??= []).push(colorKey);
     for (const longhand of Object.keys(longhands)) {
       const value = longhands[longhand];
       if (value !== undefined && out[longhand] == null) out[longhand] = value;
     }
   }
+  // A line that named no colour is drawn in `currentColor` — after every
+  // other shorthand has had its say, since it is the weakest thing in the
+  // style: a colour named for that side anywhere, a side falling back to
+  // `borderColor` included, is the one the line takes.
+  for (const colorKey of implied ?? []) {
+    if (out[colorKey] != null) continue;
+    if (colorKey !== 'outlineColor' && out.borderColor != null) continue;
+    out[colorKey] = CURRENT_COLOR;
+  }
   return out;
+}
+
+/**
+ * The colour key a line left to `currentColor`, or null: a border, a side
+ * or an outline that drew a line and named no colour for it. `none`, or a
+ * width of 0, draws no line and needs none.
+ */
+function impliedColorKey(key, longhands) {
+  const [widthKey, colorKey] =
+    key === 'outline' ? ['outlineWidth', 'outlineColor'] : (LINES[key] ?? []);
+  if (colorKey === undefined || !(colorKey in longhands)) return null;
+  if (longhands[colorKey] !== undefined || longhands[widthKey] === 0) {
+    return null;
+  }
+  return colorKey;
 }
 
 /**
@@ -847,6 +886,17 @@ export function expandStyle(style, ctx = null) {
  * wants, and nothing is returned for it.
  */
 export function expandShorthand(key, value, ctx = null, lenient = false) {
+  const longhands = readShorthand(key, value, ctx, lenient);
+  // a token may be the colour a lenient reading skipped, so only a value
+  // read whole says a line has none
+  const colorKey = lenient ? null : impliedColorKey(key, longhands);
+  if (colorKey !== null) longhands[colorKey] = CURRENT_COLOR;
+  return longhands;
+}
+
+/** …as written: a line's colour left out is left out, for the funnel to
+ *  weigh against the rest of the style (`expandStyle`). */
+function readShorthand(key, value, ctx, lenient) {
   if (value == null || value === '') return {};
   if (EDGE_LISTS[key]) return readEdges(key, value, ctx, lenient);
   if (PAIRS[key]) return readPair(key, value, ctx, lenient);
@@ -1165,16 +1215,6 @@ function readFlex(value, ctx, lenient) {
 // ---------------------------------------------------------------------------
 // Whole-style checks: what no single value can be wrong about on its own.
 
-const BORDER_COLOR_KEYS = [
-  'borderColor',
-  'borderTopColor',
-  'borderRightColor',
-  'borderBottomColor',
-  'borderLeftColor',
-  'borderStartColor',
-  'borderEndColor',
-];
-
 /** Every block of a style a value can sit in: the style itself, and its
  *  state and query blocks, one level down. */
 function* blocksOf(style) {
@@ -1186,37 +1226,26 @@ function* blocksOf(style) {
 }
 
 /**
- * What development says about a style's borders taken together, or null:
- *
- * - a border that names no colour anywhere in the style paints nothing here —
- *   there is no `currentColor` yet, and a box's `borderColor` has no default;
- * - a box has one `borderStyle`, so two shorthands naming different ones
- *   cannot both be drawn.
+ * What development says about a style's borders taken together, or null: a
+ * box has one `borderStyle`, so two shorthands naming different ones cannot
+ * both be drawn.
  */
 export function borderProblem(style) {
-  let colorless = null;
-  let hasColor = false;
   for (const block of blocksOf(style)) {
-    for (const key of BORDER_COLOR_KEYS) {
-      if (block[key] != null && block[key] !== '') hasColor = true;
-    }
     // one block is one box's style at one moment; two blocks are two
     // moments, which may draw the line two ways
     let styleKey = null;
     let lineStyle = null;
     for (const key of Object.keys(LINES)) {
       const value = block[key];
-      if (typeof value !== 'string' && typeof value !== 'number') continue;
+      if (typeof value !== 'string') continue;
       let parts;
       try {
         parts = readParts(key, value, PROBE, true);
       } catch {
         continue; // its own check names it
       }
-      if (parts.none) continue;
-      if (parts.color !== undefined || mentionsToken(value)) hasColor = true;
-      else if (parts.width !== 0) colorless ??= [key, value];
-      if (parts.style === undefined) continue;
+      if (parts.none || parts.style === undefined) continue;
       if (
         lineStyle !== null &&
         parts.style !== lineStyle &&
@@ -1232,16 +1261,6 @@ export function borderProblem(style) {
       styleKey ??= key;
       lineStyle ??= parts.style;
     }
-  }
-  if (colorless && !hasColor) {
-    const [key, value] = colorless;
-    return (
-      `react-x11: ${key} ${JSON.stringify(value)} names no colour, and would ` +
-      "paint nothing — there is no currentColor here yet, and a border's " +
-      `colour has no default. Name one: ${key}: '${
-        typeof value === 'number' ? `${value}px` : value
-      } $border'`
-    );
   }
   return null;
 }

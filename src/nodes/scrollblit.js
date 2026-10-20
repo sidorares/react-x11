@@ -648,7 +648,10 @@ export class NodeScrollBlit {
   _paintsNothingOwn() {
     if (this.kind !== 'box' || this.isScroller?.()) return false;
     const style = this.style ?? EMPTY_STYLE;
-    if (isPaintedColor(style.backgroundColor) || style.backgroundImage) {
+    if (
+      isPaintedColor(this.resolveColor(style.backgroundColor)) ||
+      style.backgroundImage
+    ) {
       return false;
     }
     if (style.opacity !== undefined && style.opacity < 1) return false;

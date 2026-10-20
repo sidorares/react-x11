@@ -539,6 +539,27 @@ test('an overlapping sibling above the viewport keeps the full repaint', async (
   assert.strictEqual(blits(wnd).length, 0, 'its pixels must not be dragged');
 });
 
+test('…and so does one filled in currentColor, which is a fill like any other', async () => {
+  const { wnd, ref } = await mount({
+    windowProps: { style: { color: '#ffcc00' } },
+    extra: h('box', {
+      style: {
+        position: 'absolute',
+        left: 150,
+        top: 150,
+        width: 100,
+        height: 40,
+        backgroundColor: 'currentColor',
+      },
+    }),
+  });
+  await tick();
+  wnd.calls.length = 0;
+  ref.current.scrollTo(48);
+  await tick();
+  assert.strictEqual(blits(wnd).length, 0, 'its pixels must not be dragged');
+});
+
 test('an ntk without scrollRegion gets the old behavior untouched', async () => {
   const { wnd, root, ref } = await mount();
   await tick();

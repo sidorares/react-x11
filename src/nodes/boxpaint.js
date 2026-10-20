@@ -9,6 +9,7 @@ import {
   resolveBorderWidths,
   resolveBorderColors,
 } from '../styles.js';
+import { isCurrentColor } from '../currentcolor.js';
 import {
   blurKernel,
   gradientSpec,
@@ -63,6 +64,19 @@ let warnedSideRadius = false;
 /** Box decorations, installed onto `Node.prototype` by node.js. */
 export class NodeBoxPaint {
   /**
+   * A colour from this node's style as a colour a context can paint: the
+   * value itself, or — for CSS's `currentColor` — this node's resolved ink,
+   * its own `color` over what it inherits. Everything that paints a style
+   * colour asks here, on every backend, so the keyword means one thing
+   * wherever it is written; a registered element painting a colour of its
+   * own style asks the same. A node whose style paints in the keyword
+   * repaints when its ink moves (`_inkMoved`).
+   */
+  resolveColor(value) {
+    return isCurrentColor(value) ? this.resolvedTextStyle().color : value;
+  }
+
+  /**
    * The focus ring this node would draw: its own `outline*` style, falling
    * back to the theme's focus-ring tokens for anything it leaves out. Null
    * when the node is not focusable and set no outline of its own, and when
@@ -81,7 +95,9 @@ export class NodeBoxPaint {
     if (!(resolved > 0)) return null;
     return {
       width: resolved,
-      color: style.outlineColor ?? theme?.focusRing ?? DEFAULT_FOCUS_RING.color,
+      color: this.resolveColor(
+        style.outlineColor ?? theme?.focusRing ?? DEFAULT_FOCUS_RING.color,
+      ),
       offset:
         style.outlineOffset ??
         theme?.focusRingOffset ??
@@ -163,7 +179,7 @@ export class NodeBoxPaint {
     // under an element that covers this pass with opaque pixels, this fill
     // is never seen (`WindowNode._coverFor`)
     if (this.root?._coverChain?.has(this)) return;
-    const { backgroundColor } = this.style;
+    const backgroundColor = this.resolveColor(this.style.backgroundColor);
     const borderRadius = radiusOf(this.style, this.abs);
     const fill = (style) => {
       ctx.fillStyle = style;
@@ -204,7 +220,11 @@ export class NodeBoxPaint {
     const spec = gradientSpec(value, this.scale);
     if (!spec) return null;
     const { x, y, width, height } = rect;
-    const key = `${value}|${x},${y},${width},${height}`;
+    // a stop in `currentColor` is the ink, which can move under a value
+    // that did not, so the ink is part of what the gradient is keyed by
+    const inked = spec.stops.some((stop) => isCurrentColor(stop.color));
+    const ink = inked ? this.resolvedTextStyle().color : '';
+    const key = `${value}|${x},${y},${width},${height}|${ink}`;
     if (this._gradient?.key === key) return this._gradient.value;
     const line = linearGradientGeometry(spec, rect);
     if (!line) return null;
@@ -215,7 +235,7 @@ export class NodeBoxPaint {
       line.y1,
     );
     for (const [offset, color] of line.stops)
-      gradient.addColorStop(offset, color);
+      gradient.addColorStop(offset, inked ? this.resolveColor(color) : color);
     this._gradient = { key, value: gradient };
     return gradient;
   }
@@ -411,6 +431,10 @@ export class NodeBoxPaint {
     // out on one side and has to paint on the same one.
     const w = resolveBorderWidths(this.style, this.direction);
     const colors = resolveBorderColors(this.style, this.direction);
+    colors.top = this.resolveColor(colors.top);
+    colors.right = this.resolveColor(colors.right);
+    colors.bottom = this.resolveColor(colors.bottom);
+    colors.left = this.resolveColor(colors.left);
     const uniform =
       w.top === w.right &&
       w.top === w.bottom &&

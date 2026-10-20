@@ -11,6 +11,14 @@
 export type Color = string;
 
 /**
+ * A colour in a style: any {@link Color}, or `'currentColor'` — the node's
+ * ink, its own `color` or the one it inherits, followed wherever it moves.
+ * See
+ * {@link https://github.com/sidorares/react-x11/blob/master/docs/styling.md#currentcolor currentColor}.
+ */
+export type StyleColor = 'currentColor' | (string & {});
+
+/**
  * CSS's relative units, resolved for the node they are written on, in
  * logical pixels: `em` is its own font size (on `fontSize`, the one it
  * inherits), `rem` the palette's `fontSize`, and the viewport units the
@@ -63,9 +71,8 @@ export type Pair<T extends string | number> = T | `${T} ${T}`;
  * style and a colour in any order, each at most once, or `'none'`.
  * `'1px solid $border'`, `'2px dashed #c0392b'`. A number is the width. A
  * width left out is CSS's `'medium'`, 3px; the style is `'solid'` or
- * `'dashed'` (an outline is solid only); and since there is no
- * `currentColor` here yet, a line nobody gives a colour paints nothing and
- * is an error saying so.
+ * `'dashed'` (an outline is solid only); and a colour left out is
+ * `currentColor`, unless the style names one for that side elsewhere.
  */
 export type Line = number | 'none' | (string & {});
 
@@ -371,8 +378,8 @@ export interface PaintStyle {
    * `'linear-gradient($accent, $accentActive) $accent'`. `'none'` takes both
    * away. A `url()` is an `<image>` here, not a background.
    */
-  background?: Color;
-  backgroundColor?: Color;
+  background?: StyleColor;
+  backgroundColor?: StyleColor;
   /**
    * A gradient behind the node, in the box the layout gave it:
    * `'linear-gradient(#2b5876, #4e4376)'`, `'linear-gradient(135deg, $accent,
@@ -399,16 +406,16 @@ export interface PaintStyle {
   boxShadow?: string;
   /** One colour for all four sides, or CSS's one-to-four rule:
    *  `'$border transparent'`. */
-  borderColor?: Color;
+  borderColor?: StyleColor;
   /** Per-side colours fall back to `borderColor`. Paint properties, legal in
    *  state blocks like it. */
-  borderTopColor?: Color;
-  borderRightColor?: Color;
-  borderBottomColor?: Color;
-  borderLeftColor?: Color;
+  borderTopColor?: StyleColor;
+  borderRightColor?: StyleColor;
+  borderBottomColor?: StyleColor;
+  borderLeftColor?: StyleColor;
   /** …and the logical sides, matching `borderStartWidth`/`borderEndWidth`. */
-  borderStartColor?: Color;
-  borderEndColor?: Color;
+  borderStartColor?: StyleColor;
+  borderEndColor?: StyleColor;
   /** Rounds the background, the border and the child clip. Requires uniform
    *  borders — same width and colour on all four sides; a non-uniform border
    *  paints square and ignores the radius. */
@@ -430,7 +437,7 @@ export interface PaintStyle {
    *  of its ring. Drawn solid. */
   outline?: Line;
   outlineWidth?: LineWidth;
-  outlineColor?: Color;
+  outlineColor?: StyleColor;
   /** The gap between the border box and the ring. Default 1. */
   outlineOffset?: Pixels;
   /**
@@ -493,7 +500,7 @@ export type FontFeatureSettings =
 
 /** Text properties. All affect measurement except `color`. */
 export interface TextStyle {
-  color?: Color;
+  color?: StyleColor;
   fontFamily?: string;
   /** A size in pixels or relative units; `em` and a percentage are of the
    *  size this node inherits, as in CSS. */
@@ -565,7 +572,7 @@ export interface TextStyle {
 
 /** What a pseudo-state block may change: paint properties, plus `color`. */
 export interface StateStyle extends PaintStyle {
-  color?: Color;
+  color?: StyleColor;
 }
 
 /** How far outside the box the pointer still counts as hitting it. A number

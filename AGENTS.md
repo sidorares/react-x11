@@ -1834,6 +1834,19 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   last because CoreGraphics takes unassociated alpha too. Note that
   opaque colours are identical either way, so a test with `#000000` and
   `#ffffff` cannot tell the two apart.
+- **A style colour is read through `node.resolveColor`.** `currentColor`
+  stays the keyword in `node.style` — CSS's computed value — and becomes the
+  ink where it is painted (src/currentcolor.js), because the ink moves under
+  styles nobody restyles: a `:hover { color }` on a row. So a new reader of
+  `backgroundColor`, a border colour or `outlineColor` — a backend's layer
+  properties, a blit deciding what a box covers — asks `resolveColor`. One
+  that reads the style straight gets a value no parser reads, and fails
+  quietly in the worst direction: the scroll blit would take a box filled in
+  `currentColor` for one that paints nothing, and drag its pixels. The
+  repaint when the ink moves is the cascade's (`_retext` → `_inkMoved`, for
+  a style `paintsCurrentColor` says paints in it), and it matters most where
+  the ancestor's own claim cannot reach: a `<popup>` under the row, and a
+  retained presenter that re-rasters by node.
 - **A subtree's paint reach is cached, and every change to it has to be
   announced.** `_subtreeBounds()` — the rect a bounded frame culls against,
   and the one every damage claim is measured from — is computed once and

@@ -7,7 +7,12 @@
 // module scope, which is what that module's synchronous half is for.
 import { cssColorStraight } from 'ntk/color';
 
-import { parseBoxShadow, parseLinearGradient } from './decorations.js';
+import { isCurrentColor, mentionsCurrentColor } from './currentcolor.js';
+import {
+  parseBoxShadow,
+  parseLinearGradient,
+  shadowSpecs,
+} from './decorations.js';
 import { OBJECT_FITS } from './nodes/fit.js';
 import {
   validateGridValue,
@@ -876,6 +881,29 @@ const COLOR_PROPS = new Set([
   'color',
 ]);
 
+/** …and the ones a node paints with, as against `color`, the ink itself. */
+const PAINTED_COLOR_PROPS = [...COLOR_PROPS].filter((key) => key !== 'color');
+
+/**
+ * Whether this style paints anything in the node's ink — a colour that is
+ * `currentColor`, a gradient stop that is, or a shadow that names no colour
+ * of its own. Such a node repaints when its ink moves, which nothing in its
+ * own style says (`NodeCascade._retext`): a `:hover { color }` on the row
+ * around it is where the change was written.
+ *
+ * Asked only once the ink has moved, of a node that has resolved one, so a
+ * style swap pays nothing for it.
+ */
+export function paintsCurrentColor(style) {
+  for (const key of PAINTED_COLOR_PROPS) {
+    if (isCurrentColor(style[key])) return true;
+  }
+  if (mentionsCurrentColor(style.backgroundImage)) return true;
+  const shadow = style.boxShadow;
+  if (typeof shadow !== 'string' || shadow === 'none') return false;
+  return Boolean(shadowSpecs(shadow)?.some((s) => s.color === null));
+}
+
 /**
  * The style values that are a small language rather than a number — a
  * gradient, a shadow, and grid's track lists, areas and lines — and
@@ -972,10 +1000,13 @@ function validateValue(key, value, where) {
     // or `''`, which has always painted nothing
     if (value == null || value === '') return;
     if (isColor(value) || isToken(value) || mentionsToken(value)) return;
+    // the node's own ink, resolved where it is painted — and on `color`
+    // itself, the ink it inherits, which is what CSS makes of it there
+    if (isCurrentColor(value)) return;
     throw new Error(
       `react-x11: invalid ${key} ${JSON.stringify(value)} in ${where} ` +
-        "(expected a CSS colour — '#2980b9', 'tomato', 'rgba(0, 0, 0, 0.5)' " +
-        "or 'transparent' — or a $token)",
+        "(expected a CSS colour — '#2980b9', 'tomato', 'rgba(0, 0, 0, 0.5)', " +
+        "'transparent' or 'currentColor' — or a $token)",
     );
   }
   if (key === 'letterSpacing') {
@@ -1258,9 +1289,8 @@ function validateStyle(style, where, nested = false) {
       );
     }
   }
-  // what no single value can be wrong about on its own: a border with no
-  // colour anywhere in the style, two line styles on one box. Once, on the
-  // whole style — a query block's border may take its colour from the base.
+  // what no single value can be wrong about on its own: two line styles on
+  // one box. Once, on the whole style, which is where its blocks are.
   if (!nested) {
     const problem = borderProblem(style);
     if (problem) throw new Error(`${problem}\n  in ${where}`);
@@ -1635,6 +1665,15 @@ export function animationsOf(
     // resolves the tokens and comes back through here with real values.
     const resolved = from === entry.from ? entry : { ...entry, from };
     if (unresolvedValue(from) || unresolvedValue(entry.to)) return resolved;
+    if (isCurrentColor(from) || isCurrentColor(entry.to)) {
+      throw new Error(
+        `react-x11: animation for "${entry.prop}" in ${where} runs to or ` +
+          'from currentColor, which a loop cannot hold still: its ends are ' +
+          'fixed for as long as it runs, and currentColor is whatever the ink ' +
+          'is. Name the colour — or loop `color` instead, and the ' +
+          `${entry.prop} written as currentColor follows it every frame.`,
+      );
+    }
     if (interpolate(from, entry.to, 0.5) === null) {
       throw new Error(
         `react-x11: animation for "${entry.prop}" in ${where} has no ` +

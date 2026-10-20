@@ -37,6 +37,8 @@
 import { cssColorStraight } from 'ntk/color';
 import { shadowReach, shadowSigma } from 'ntk/shadow-math';
 
+import { isCurrentColor } from './currentcolor.js';
+
 /** A number, with or without the `px` CSS wants and this vocabulary does not. */
 const LENGTH = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:px)?$/i;
 /** …and the same thing as a percentage, which colour stops also take. */
@@ -209,14 +211,16 @@ function readStop(part, value) {
   return { color: stopColor(part, value), position: null };
 }
 
-/** A stop's colour, which RENDER is handed as written — and ntk throws on
- *  one it cannot parse from inside the frame, where nothing can catch it. */
+/** A stop's colour, which RENDER is handed as written once a `currentColor`
+ *  is resolved (`_backgroundGradient`) — and ntk throws on one it cannot
+ *  parse from inside the frame, where nothing can catch it. */
 function stopColor(color, value) {
   if (isColorOrToken(color)) return color;
   throw new Error(
     `react-x11: backgroundImage ${JSON.stringify(value)} has a colour stop ` +
       `that is not a colour ("${color}"; expected one like '#2980b9', ` +
-      "'tomato' or 'rgba(0, 0, 0, .4)', or a $token, before its position)",
+      "'tomato', 'rgba(0, 0, 0, .4)' or 'currentColor', or a $token, before " +
+      'its position)',
   );
 }
 
@@ -225,10 +229,15 @@ function stopColor(color, value) {
  * One that mentions a `$token` is let through where the style is written,
  * since the token means nothing yet; the paint parses the value it resolves
  * to, and a colour that is still not one drops the whole decoration there
- * rather than throwing (see "memoized parsing" below).
+ * rather than throwing (see "memoized parsing" below). `currentColor` is
+ * the node's ink, which only the paint knows (`Node.resolveColor`).
  */
 function isColorOrToken(color) {
-  return color.includes('$') || cssColorStraight(color) !== null;
+  return (
+    color.includes('$') ||
+    cssColorStraight(color) !== null ||
+    isCurrentColor(color)
+  );
 }
 
 /**
@@ -351,7 +360,8 @@ function resolveStopOffsets(stops, length) {
  * renderer draws the list back to front.
  *
  * `color` may be null, which is CSS's `currentColor` — the node's own ink,
- * which the caller resolves because only it knows the cascade.
+ * which the caller resolves because only it knows the cascade. The keyword
+ * written out reads as null too, so a shadow has one way to say it.
  *
  * Throws on `inset` and on anything unparseable; see the note at the top of
  * this file for why a shadow that silently does the wrong thing is worse
@@ -396,7 +406,7 @@ function readShadow(part, value) {
   }
   const [dx, dy, blur = 0, spread = 0] = lengths;
   if (blur < 0) throw bad('has a negative blur radius');
-  return { dx, dy, blur, spread, color };
+  return { dx, dy, blur, spread, color: isCurrentColor(color) ? null : color };
 }
 
 /**

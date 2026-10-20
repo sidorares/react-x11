@@ -86,6 +86,7 @@ export const INVALIDATE_REASONS = new Set([
   'shadow', // a boxShadow got smaller: where it *was* still owes a repaint
   'outline', // …and the same for an outline a style swap took away
   'theme', // a theme/token change restyled a subtree
+  'ink', // the ink under a currentColor moved: its `color` or an ancestor's
   'direction', // the reading direction moved: sides, glyph order, bar edge
   'scale', // a `scale` prop zoomed a subtree: every length in it moved
   'units', // a font size an `em` length read moved, and the style with it
