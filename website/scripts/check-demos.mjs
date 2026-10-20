@@ -27,10 +27,18 @@ if (!fs.existsSync(bundle)) {
 
 // Same reasons as check-bundle.mjs: the bundle ships its own Buffer and only
 // installs it when there is no global one, which is the browser's situation,
-// and the page it runs in is not cross-origin isolated.
+// and the page it runs in is not cross-origin isolated — and it loads under
+// the page's `process/browser`, node's own put back once it has.
 delete globalThis.Buffer;
 delete globalThis.SharedArrayBuffer;
-const RX = await import(pathToFileURL(bundle));
+const nodeProcess = globalThis.process;
+delete globalThis.process;
+let RX;
+try {
+  RX = await import(pathToFileURL(bundle));
+} finally {
+  globalThis.process = nodeProcess;
+}
 
 const fontDir = path.join(path.dirname(bundle), 'fonts');
 await RX.setupFonts({
