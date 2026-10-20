@@ -39,8 +39,20 @@ delete globalThis.Buffer;
 // module that made one at load (ntk's font prewarm did) passed every gate
 // here and threw before the playground drew anything.
 delete globalThis.SharedArrayBuffer;
-
-const rx = await import(pathToFileURL(bundle));
+// And no node `process`: the bundle installs `process/browser` when there is
+// none, whose `versions` names no node and whose `argv` is empty. Code the
+// bundle runs as it loads read `process.versions.node.split` (the cocoa
+// relaunch's facts), passed here against node's own and threw before the
+// playground drew anything. Put back once it has loaded: the rest of this
+// script is node's.
+const nodeProcess = globalThis.process;
+delete globalThis.process;
+let rx;
+try {
+  rx = await import(pathToFileURL(bundle));
+} finally {
+  globalThis.process = nodeProcess;
+}
 
 // --- shape -----------------------------------------------------------------
 assert.strictEqual(typeof rx.reactX11.createRoot, 'function', 'createRoot');

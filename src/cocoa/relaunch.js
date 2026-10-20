@@ -246,8 +246,10 @@ export function describeProcess(moduleUrl) {
     platform: process.platform,
     env: process.env,
     execArgv: process.execArgv,
-    // Node's major version; Bun answers with one of its own choosing
-    node: bun ? null : Number(process.versions.node.split('.')[0]),
+    // Node's major version; Bun answers with one of its own choosing, and a
+    // web page's `process` (the playground's) names no node at all — read
+    // here before any veto, so a throw would end every import of react-x11
+    node: bun ? null : Number(process.versions?.node?.split('.')[0]) || null,
     entry: typeof entry === 'string' && fs.existsSync(entry) ? entry : null,
     compiled: compiledExecutable(bun),
     late: startedRunning(bun, moduleUrl, entry),
