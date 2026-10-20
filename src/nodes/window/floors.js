@@ -233,24 +233,24 @@ export function collectFloorStale(node, stale, found, sweep) {
 }
 
 /**
- * Whether `node` is a box its content cannot size and its surroundings cannot
- * size either — an edge a floor measurement may stop at
+ * Whether `node` is a box its surroundings cannot size and nothing around it
+ * reads the size of — an edge a floor measurement may stop at
  * (`WindowNode._floorsScope`).
  *
- * Absolutely positioned, with a width and a height its style names as
- * numbers: it is out of its parent's flow, so nothing measured inside it
- * reaches anything above it (`contentSpan` skips it, and no floor is written
- * on it), and every pass lays it out at those numbers wherever it sits, so
- * what is inside it is measured the same in a pass over the window and in a
- * pass over it alone. Nothing in its own box resolves against its parent —
- * a percentage of padding would — and neither it nor its parent is a layout
- * host, whose children are measured tree by tree.
+ * Absolutely positioned, and the same size in every pass wherever it sits
+ * (`sizedAlike`): it is out of its parent's flow, so nothing measured inside
+ * it reaches anything above it (`contentSpan` skips it, and no floor is
+ * written on it), and what is inside it is measured the same in a pass over
+ * the window and in a pass over it alone. Nothing in its own box resolves
+ * against its parent — a percentage of padding would — and neither it nor
+ * its parent is a layout host, whose children are measured tree by tree.
  *
- * A card on a graph, a popover laid out inside the window, a sized overlay:
- * the boxes a change inside is most often confined to. An in-flow box with a
- * size of its own would do as well along its cross axis, but on its main
- * axis a flex line can grow it past its width or shrink it under a minimum
- * the author named, and that is a question about its siblings.
+ * A card on a graph, a popover laid out inside the window, a sized overlay,
+ * a badge or a label hung off a point: the boxes a change inside is most
+ * often confined to. An in-flow box with a size of its own would do as well
+ * along its cross axis, but on its main axis a flex line can grow it past
+ * its width or shrink it under a minimum the author named, and that is a
+ * question about its siblings.
  */
 export function isFloorBoundary(node) {
   const style = node.style;
@@ -259,17 +259,62 @@ export function isFloorBoundary(node) {
     !node.isWindow &&
     style.position === 'absolute' &&
     style.display !== 'none' &&
-    typeof style.width === 'number' &&
-    typeof style.height === 'number' &&
     typeof style.minWidth !== 'string' &&
     typeof style.minHeight !== 'string' &&
     typeof style.maxWidth !== 'string' &&
     typeof style.maxHeight !== 'string' &&
     !PADDINGS.some((key) => typeof style[key] === 'string') &&
     node._host === null &&
-    (node.parent?._host ?? null) === null
+    (node.parent?._host ?? null) === null &&
+    sizedAlike(node, 'width') &&
+    sizedAlike(node, 'height')
   );
 }
+
+/**
+ * Whether every pass lays this absolute box out at the same size along
+ * `axis`, whatever its containing block is offered: a number its style
+ * names, or the size of what is inside it.
+ *
+ * Yoga measures an absolute box that names no size at its content's
+ * max-content size, with no bound from the box it is placed in — down, and
+ * across under a row. Under a column it is offered the column's width to
+ * wrap in, and that is another number in each pass (none in the width
+ * pass, the real one in the heights'), so what is inside it would be
+ * measured at whatever width the pass gave it, and not at the one a pass
+ * over it alone does. Nor may anything else bound it on that axis: an edge
+ * pinned at both ends sizes it from its containing block, a ratio from the
+ * other axis, and a minimum or a maximum is applied after its content was
+ * measured — yoga lays out the height of a box held under a `maxWidth` at
+ * the width it had before it was held, and a box laid out alone at the
+ * width it was held to.
+ */
+function sizedAlike(node, axis) {
+  const style = node.style;
+  const across = axis === 'width';
+  const size = across ? style.width : style.height;
+  if (typeof size === 'number') return true;
+  if (size !== undefined && size !== 'auto') return false;
+  if (
+    (across ? style.minWidth : style.minHeight) !== undefined ||
+    (across ? style.maxWidth : style.maxHeight) !== undefined ||
+    style.aspectRatio !== undefined
+  ) {
+    return false;
+  }
+  // two insets across are both ends in one direction or the other
+  let insets = 0;
+  for (const key of across ? INSETS_ACROSS : INSETS_DOWN) {
+    if (style[key] !== undefined) insets++;
+  }
+  if (insets > 1) return false;
+  return (
+    !across || (node.parent != null && mainAxisOf(node.parent) === 'width')
+  );
+}
+
+const INSETS_ACROSS = ['left', 'right', 'start', 'end'];
+const INSETS_DOWN = ['top', 'bottom'];
 
 const PADDINGS = [
   'padding',
