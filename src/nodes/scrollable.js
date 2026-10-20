@@ -247,7 +247,10 @@ export const Scrollable = (Base) =>
         // NaN, which a scroll pane in there measured its content from and
         // threw on, out of the frame. The box itself has its empty rect;
         // what is inside is placed when it is shown and laid out again.
-        if (this.style.display !== 'none') {
+        // Both routes to it: the style, and the `hidden` React sets for
+        // `<Activity>` and `<Suspense>` (`setHidden`), which reaches yoga
+        // without touching the style.
+        if (this.style.display !== 'none' && !this.hidden) {
           this._absolutizeChildren(
             this.abs.x,
             this.abs.y,
