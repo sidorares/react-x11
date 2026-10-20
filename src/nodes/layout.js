@@ -5,7 +5,7 @@
 import { Yoga } from '../yoga.js';
 import { callHandler } from '../errors.js';
 import { DAMAGE_SLOP, layoutDiff } from './damage.js';
-import { resolveBorderWidths } from '../styles.js';
+import { radiusOf, resolveBorderWidths } from '../styles.js';
 import { insetRect, intersectRects, outerPixels, outside } from './rects.js';
 import { DEV } from './util.js';
 
@@ -612,25 +612,17 @@ export class NodeLayout {
     // (`roundedCorners`), so a resize that moves that moves all four
     // corners — and their outline and shadow with them — and the ones at the
     // edges that held are in no band along the edges that moved.
-    const radius = style.borderRadius ?? 0;
+    // A percentage radius moves with the box for the same reason: it is a
+    // share of the shorter side (`radiusOf`), read off each rect.
     const now = this.abs;
-    if (
-      radius > 0 &&
-      Math.min(radius, old.width / 2, old.height / 2) !==
-        Math.min(radius, now.width / 2, now.height / 2)
-    ) {
-      return null;
-    }
+    const corner = (rect) =>
+      Math.min(radiusOf(style, rect), rect.width / 2, rect.height / 2);
+    const radius = Math.max(radiusOf(style, old), radiusOf(style, now));
+    if (radius > 0 && corner(old) !== corner(now)) return null;
     const bw = resolveBorderWidths(style, this.direction);
     const reach =
-      Math.max(
-        style.borderRadius ?? 0,
-        bw.top,
-        bw.right,
-        bw.bottom,
-        bw.left,
-        grow,
-      ) + DAMAGE_SLOP;
+      Math.max(radius, bw.top, bw.right, bw.bottom, bw.left, grow) +
+      DAMAGE_SLOP;
     const bands = [];
     const oldBottom = old.y + old.height;
     const newBottom = now.y + now.height;

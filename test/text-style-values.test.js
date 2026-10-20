@@ -4,7 +4,7 @@
 // `lineHeight` of `'24px'` made a paragraph NaN pixels tall, which the
 // layout pass throws on: both from a frame, both uncaught. A `fontSize` of
 // `'20px'` did not throw; it set no text at all — it is a length now, read
-// as 20, and a unit no length reads (`'1.2em'`) is the error. Development
+// as 20, and a unit no length reads (`'1.2ex'`) is the error. Development
 // now says so
 // where the style is written, and what reaches the text anyway — a token, a
 // production build — is not the property: the text inherits past it, as
@@ -44,11 +44,15 @@ test('a text value no engine can set type with is an error at the commit', async
       /invalid fontStyle 7 in <text style> \(expected 'normal'/,
     ],
     [{ fontStyle: 'bold' }, /invalid fontStyle "bold"/],
-    [{ lineHeight: '24px' }, /invalid lineHeight "24px".*lineHeight: 1\.5/],
+    [{ lineHeight: 'tall' }, /invalid lineHeight "tall".*'150%'/],
+    [
+      { lineHeight: '24ex' },
+      /invalid lineHeight "24ex" in <text style>: ex is not read/,
+    ],
     [{ lineHeight: -3 }, /invalid lineHeight -3/],
     [
-      { fontSize: '1.2em' },
-      /invalid fontSize "1\.2em" in <text style>: em is not a unit/,
+      { fontSize: '1.2ex' },
+      /invalid fontSize "1\.2ex" in <text style>: ex is not read/,
     ],
     [{ fontSize: -1 }, /invalid fontSize -1/],
     [{ fontWeight: 1200 }, /invalid fontWeight 1200/],
@@ -107,7 +111,7 @@ test('what reaches the text anyway is inherited past, and the frame goes on', as
           {
             width: 300,
             height: 200,
-            theme: { tilt: 7, tall: '24px', big: '2em', wide: 'wide' },
+            theme: { tilt: 7, tall: '24ex', big: '2ex', wide: 'wide' },
             style: { fontSize: 18 },
           },
           h(

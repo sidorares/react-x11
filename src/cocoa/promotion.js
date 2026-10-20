@@ -42,7 +42,7 @@ import { now } from '../nodes/animation.js';
 import { BoxNode } from '../nodes/box.js';
 import { addDamageRect, damageToPaint } from '../nodes/damage.js';
 import { intersectRects } from '../nodes/rects.js';
-import { resolveBorderWidths } from '../styles.js';
+import { radiusOf, resolveBorderWidths } from '../styles.js';
 import {
   LayerAnimations,
   RASTER_PAD,
@@ -841,7 +841,7 @@ export class CocoaPromotion {
         cut &&
         !parent.isWindow &&
         parent.clipsChildren?.() &&
-        !(parent.style?.borderRadius > 0)
+        !(radiusOf(parent.style, parent.abs) > 0)
       ) {
         const inner = insetRect(parent.abs, borderReach(parent));
         // a clip with round corners cut again is no one box's shape: the
@@ -872,13 +872,15 @@ export class CocoaPromotion {
         !cut.clip &&
         !parent.isWindow &&
         parent.clipsChildren?.() &&
-        typeof parent.style?.borderRadius === 'number' &&
-        parent.style.borderRadius > 0 &&
-        !containsRect(insetRect(parent.abs, parent.style.borderRadius), bounds)
+        radiusOf(parent.style, parent.abs) > 0 &&
+        !containsRect(
+          insetRect(parent.abs, radiusOf(parent.style, parent.abs)),
+          bounds,
+        )
       ) {
         const border = borderReach(parent);
         cut.clip = insetRect(parent.abs, border);
-        cut.radius = Math.max(0, parent.style.borderRadius - border);
+        cut.radius = Math.max(0, radiusOf(parent.style, parent.abs) - border);
         roundCut = true;
         bounds = intersectRects(bounds, cut.clip);
         if (!bounds) {
@@ -906,11 +908,8 @@ export class CocoaPromotion {
             return false;
         }
         if (parent.clipsChildren?.() && !roundCut) {
-          const radius = parent.style?.borderRadius;
-          const clip =
-            typeof radius === 'number' && radius > 0
-              ? insetRect(parent.abs, radius)
-              : parent.abs;
+          const radius = radiusOf(parent.style, parent.abs);
+          const clip = radius > 0 ? insetRect(parent.abs, radius) : parent.abs;
           if (!containsRect(clip, bounds)) return false;
         }
       }

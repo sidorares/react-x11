@@ -24,10 +24,12 @@ blocks and `createStyles`.
 ## Layout properties (all drawn elements + windows)
 
 Lengths are logical pixels — a number, or the same number written `'12px'`
-— and `'50%'` / `'auto'` pass through to yoga where it takes them. A unit
-CSS has and react-x11 does not read yet (`em`, `rem`, `vw`) is an error
-naming it. CSS's shorthands are read too — `padding: '8px 16px'`,
-`border: '1px solid $border'`, `inset: 0`; see
+— and `'50%'` / `'auto'` pass through to yoga where it takes them. `em`,
+`rem`, `vw`/`vh`/`vmin`/`vmax` and `calc()`/`min()`/`max()`/`clamp()` over
+them resolve to pixels for the node they are written on, and again when what
+they are relative to moves; a unit CSS has and react-x11 does not read (`ex`,
+`cqw`, `pt`) is an error naming it. CSS's shorthands are read too —
+`padding: '8px 16px'`, `border: '1px solid $border'`, `inset: 0`; see
 [styling.md](styling.md#lengths-and-shorthands).
 
 - **Size**: `width`, `height`, `minWidth`, `minHeight`, `maxWidth`,

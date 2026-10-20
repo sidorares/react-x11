@@ -38,11 +38,60 @@ value, and the display scale turns either into device pixels (see
 mean what they mean in CSS; a border's or an outline's width also takes
 `'thin'`, `'medium'` and `'thick'` (1, 3 and 5).
 
-CSS's other units are not read yet, and a value written in one is an error
-that names the unit — `invalid width "2em" in <box style>: em is not a unit
-react-x11 resolves yet`. So is `calc()`, and so is a second value where a
-property takes one. Yoga's own setters used to `parseFloat` whatever they
-were handed, so `'2em'` was quietly two pixels.
+### Relative units
+
+Every length also takes CSS's relative units, resolved for the node it is
+written on into the same logical pixels:
+
+| unit                       | one of it is                                                                                                          | resolved again when             |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `em`                       | the node's own font size — and on `fontSize` itself, the size it inherits, so `'1.5em'` is half again its parent's    | an ancestor's font size changes |
+| `rem`                      | the palette's `fontSize`: the size every label that names none is set in, 14 by default                               | the theme changes               |
+| `vw`, `vh`, `vmin`, `vmax` | a hundredth of the window the node is in — the `<window>` or `<popup>`, the size a `'@width >= 600'` block asks about | the window is resized           |
+
+A **percentage on `fontSize`** is of the inherited size, as `em` is. A
+**percentage `borderRadius`** is of the box's shorter side: a corner here is
+a circle, so `'50%'` is a circle on a square and a pill on anything longer,
+where CSS would draw each corner as an ellipse. Everywhere else a percentage
+is the layout's, as before.
+
+`calc()`, `min()`, `max()` and `clamp()` over any of these resolve to one
+number where the style is — `'calc(1rem + 2px)'`, and fluid type as
+`fontSize: 'clamp(14px, 1rem + 0.5vw, 20px)'`. A **percentage takes part
+only alone** (`'calc(100% / 3)'`): yoga takes one unit per value, and what a
+percentage is of is decided inside the layout, so `'calc(100% - 16px)'` is an
+error that says so. Pad a `'100%'` box rather than subtracting from it, or
+give the room to `flexGrow`.
+
+`lineHeight` takes all of CSS's forms and comes to the multiple the text
+engines take: `1.5`, `'150%'` and `'1.5em'` are that multiple, and a length
+— `'24px'`, `'1.75rem'` — is divided by the node's own font size, which is
+what makes a design's "16 on 24" the line it asks for.
+
+What a relative length costs is the re-resolution, and only on the nodes that
+wrote one: a node records what its style read — the inherited size, the
+palette's, the window's — and is resolved again by the walk that already
+carries that change (the text cascade, the theme walk, the size-query
+registry). A style written in pixels reads none of them. Inside an
+`'auto'`-sized window a viewport unit makes the content depend on the window
+that depends on the content; like a size query, it settles where the two
+agree, so size such a window or keep the viewport units out of it.
+
+Some of CSS's units are **not read**, and a value in one is an error naming
+the unit and why — `invalid width "2ex" in <box style>: ex is not read — it
+needs the font's x-height`:
+
+- `ex` and `ch`, which need font metrics nothing measures yet (`0.5em` is the
+  usual stand-in);
+- the container units, `cqw` and the rest: a container's size is known only
+  after a layout pass, and a length in it would lay the tree out again on
+  every frame the container moves — a percentage of the parent, or an
+  `'@container'` block, says the same without that;
+- the print units, `pt`, `mm`, `in`: lengths here are logical pixels, which
+  the display scale turns into device ones.
+
+So is a second value where a property takes one. Yoga's own setters used to
+`parseFloat` whatever they were handed, so `'2ex'` was quietly two pixels.
 
 ```jsx
 <box
@@ -771,16 +820,16 @@ box is not something a descendant has. `<Icon>`'s `size` does not inherit either
 drawing rather than a letter, so it takes its default from the palette's
 `fontSize` and stays put when a label around it shrinks.
 
-**A value that is not one inherits.** `fontSize: '1.2em'`, `fontStyle: 7`,
-`fontWeight: 1200` or `lineHeight: '24px'` is an error at the commit in
+**A value that is not one inherits.** `fontSize: '1.2ex'`, `fontStyle: 7`,
+`fontWeight: 1200` or `lineHeight: 'tall'` is an error at the commit in
 development, naming the property; where one gets past that — a `$token`, or
 a production build — the text sets as though it had not been written, the way
 CSS inherits past a declaration it cannot parse. Numbers may be numeric
 strings (`fontSize: '20'`), as they always could, and a size is a
-[length](#lengths-and-shorthands) like any other: `fontSize: '20px'` is 20.
-`lineHeight` is not one — it multiplies the font's own line height, so
-`'24px'` is still an error. Before, a size in px set no text at all and the
-others threw from inside a frame.
+[length](#lengths-and-shorthands) like any other: `fontSize: '20px'` is 20,
+and `'1.5em'` or `'150%'` is half again the size inherited. A `lineHeight`
+in a length — `'24px'` — is that multiple of the node's own size. Before, a
+size in px set no text at all and the others threw from inside a frame.
 
 ## A font file of your own
 
@@ -1791,9 +1840,15 @@ can be looked at without stopping the compositor for the whole session. See
 - **A length is pixels, and a unit nothing reads is an error.** `'12px'` is
   12 — scaled for the display like any number, where it used to reach yoga
   as a string the scale skipped and the border setter read as NaN — and
-  `'2em'` names its unit rather than becoming 2. The relative units are a
-  question of what they are relative to, and are left for when that is
-  answered here rather than guessed at.
+  `'2ex'` names its unit rather than becoming 2.
+- **`rem` is the palette's `fontSize`, not 16.** CSS's root font size is
+  whatever the document's root says, and here that is the theme: the size
+  every label nobody styled is set in. So spacing written in `rem` follows a
+  theme that sets a bigger type size, as the palette's own radii and
+  paddings already do, and an app porting web numbers that assume 16 sets
+  `fontSize: 16` on its theme. The nearest palette is the one read, the way
+  a `$token` is — a `<ThemeProvider value={{ fontSize: 12 }}>` around a
+  dense panel re-bases it.
 
 ## Elements that are not styled
 

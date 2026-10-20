@@ -227,6 +227,14 @@ export class Node {
     // the layout that threw, with the style value that named it: flexbox
     // until the style names a different one
     this._layoutAbandoned = null;
+    // what the style's relative lengths read, and the context they read it
+    // through during a swap (`_noteUnits` in styling.js)
+    this._unitDeps = 0;
+    this._emBasis = undefined;
+    this._units = null;
+    this._unitsNow = null;
+    this._makeUnits = null;
+    this._sizeQueried = false;
     this._syncStyle(props);
     this.yoga = yoga ? createLayoutNode() : null;
     if (this.yoga) {

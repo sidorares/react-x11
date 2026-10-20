@@ -95,7 +95,7 @@ test('a value the layout cannot take is an error at the commit that names it', a
   for (const [style, message] of [
     [{ width: 'hidden' }, /invalid width "hidden" in <box style> \(expected/],
     [{ width: true }, /invalid width true/],
-    [{ padding: 'auto' }, /invalid padding "auto".*like '50%'\)/],
+    [{ padding: 'auto' }, /invalid padding "auto".*like '50%', or em/],
     [{ flexDirection: 'sideways' }, /invalid flexDirection "sideways"/],
     // …and inside a query block that does not match yet, which is the one
     // that used to wait for a resize to throw from the frame
@@ -228,13 +228,13 @@ test('a query block that starts matching mid-frame drops what the layout refuses
 });
 
 test('a token that resolves to a unit no length reads is refused in a frame, not read as pixels', async () => {
-  // yoga's own setter read `'20em'` as 20: the box was twenty pixels wide
+  // yoga's own setter read `'20ex'` as 20: the box was twenty pixels wide
   // and nothing said why. The appliers read through the length grammar.
   const errors = await capturing(async () => {
     const { app, root, uncaught } = await mount(
       h(
         'window',
-        { width: 200, height: 100, theme: { wide: '20em' } },
+        { width: 200, height: 100, theme: { wide: '20ex' } },
         h('box', {
           style: { width: 50, height: 20, '@width >= 300': { width: '$wide' } },
         }),
@@ -250,7 +250,7 @@ test('a token that resolves to a unit no length reads is refused in a frame, not
   });
   assert.ok(
     errors.some((e) =>
-      /invalid width "20em": em is not a unit react-x11 resolves yet .* in <box style>, applied when a query block started matching/.test(
+      /invalid width "20ex": ex is not read — .* in <box style>, applied when a query block started matching/.test(
         e,
       ),
     ),

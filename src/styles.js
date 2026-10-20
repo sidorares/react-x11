@@ -17,6 +17,7 @@ import {
 import {
   LENGTH_FORMS,
   LINE_STYLES,
+  PROBE,
   SHORTHAND_PROPS,
   SHORTHANDS_OF,
   borderProblem,
@@ -26,6 +27,7 @@ import {
   locate,
   needsExpanding,
   readLength,
+  readLineHeight,
 } from './shorthands.js';
 import { Yoga, layoutLoaded } from './yoga.js';
 
@@ -917,10 +919,30 @@ function validateValue(key, value, where) {
     !mentionsToken(value)
   ) {
     try {
-      value = readLength(key, value);
+      // relative units resolve against the probe: the question here is
+      // whether the value reads, and what it comes to is the node's to say
+      value = readLength(key, value, undefined, PROBE);
     } catch (err) {
       throw locate(err, where);
     }
+    // a percentage radius is of the box, and read where the corner is drawn
+    if (key === 'borderRadius') return;
+  }
+  if (key === 'lineHeight') {
+    if (
+      value == null ||
+      value === '' ||
+      isToken(value) ||
+      mentionsToken(value)
+    ) {
+      return;
+    }
+    try {
+      readLineHeight(value, PROBE);
+    } catch (err) {
+      throw locate(err, where);
+    }
+    return;
   }
   if (key === 'borderStyle') {
     if (value == null || LINE_STYLES.has(value) || isToken(value)) return;
@@ -1204,7 +1226,7 @@ function validateStyle(style, where, nested = false) {
     // The one style value that describes motion rather than a state, so the
     // one whose mistakes are invisible: a loop with a bad `to` does not draw
     // anything wrong, it simply never moves.
-    if (key === 'animation') animationsOf(style, where);
+    if (key === 'animation') animationsOf(style, where, 1, PROBE);
     validateValue(key, style[key], where);
     if (key === 'container' && !isContainerDeclaration(style[key])) {
       throw new Error(
@@ -1470,11 +1492,11 @@ const LOOP_OPTIONS = ['from', 'to', 'duration', 'easing', 'alternate', 'delay'];
  * midpoint of their own; a value the grammar refuses is left as written, for
  * the midpoint check to name.
  */
-function loopEnd(prop, value) {
+function loopEnd(prop, value, units) {
   if (!LENGTH_FORMS.has(prop) || typeof value !== 'string') return value;
   if (isToken(value) || mentionsToken(value)) return value;
   try {
-    return readLength(prop, value);
+    return readLength(prop, value, undefined, units);
   } catch {
     return value;
   }
@@ -1543,8 +1565,8 @@ function parseAnimation(spec, where) {
     }
     entries.push({
       prop,
-      from: loopEnd(prop, entry.from),
-      to: loopEnd(prop, entry.to),
+      from: entry.from,
+      to: entry.to,
       duration: entry.duration,
       easing,
       ease: EASINGS[easing],
@@ -1560,7 +1582,12 @@ function parseAnimation(spec, where) {
  * and both ends checked for a midpoint. Null when there are none, so the
  * common case allocates nothing.
  */
-export function animationsOf(style, where = 'a style', scale = 1) {
+export function animationsOf(
+  style,
+  where = 'a style',
+  scale = 1,
+  units = null,
+) {
   const spec = style.animation;
   if (spec == null) return null;
   let parsed = parsedAnimations.get(spec);
@@ -1570,6 +1597,16 @@ export function animationsOf(style, where = 'a style', scale = 1) {
   }
   if (parsed.length === 0) return null;
   return parsed.map((entry) => {
+    // The declared ends, read the way the style's own value is: `'12px'`
+    // travels as 12, and a relative length — `'2em'`, `'50vw'` — as what
+    // it comes to for this node, which is why it is read here rather than
+    // in the parse the declaration is cached by.
+    if (LENGTH_FORMS.has(entry.prop)) {
+      const from = loopEnd(entry.prop, entry.from, units);
+      const to = loopEnd(entry.prop, entry.to, units);
+      if (from !== entry.from || to !== entry.to)
+        entry = { ...entry, from, to };
+    }
     // The display scale, only where the caller says the style is already in
     // device pixels (`_syncLoops` passes the node's). The declared ends are
     // logical like everything an app writes; a `from` *defaulted* from the
@@ -1584,7 +1621,7 @@ export function animationsOf(style, where = 'a style', scale = 1) {
     }
     const from =
       entry.from === undefined
-        ? loopEnd(entry.prop, style[entry.prop])
+        ? loopEnd(entry.prop, style[entry.prop], units)
         : entry.from;
     if (from === undefined) {
       throw new Error(
@@ -2035,8 +2072,11 @@ export { validateStyle };
 
 /**
  * The style the layout is actually run from: the shorthands expanded into
- * their longhands, every length read into a number (src/shorthands.js), and
- * the defaults `overflow: 'scroll'` implies folded in. All three are things a
+ * their longhands, every length read into a number (src/shorthands.js) — a
+ * relative one against `units`, the node's font sizes and window, which
+ * records what it read so the node can resolve it again when one moves
+ * (nodes/styling.js) — and the defaults `overflow: 'scroll'` implies folded
+ * in. All three are things a
  * style *means* rather than things it says, and doing them here — once, on
  * the resolved object, after the state blocks and the queries have merged
  * into it — is what lets everything downstream stay a flat diff of yoga
@@ -2059,14 +2099,24 @@ export { validateStyle };
  *   the window got. Zeroing the basis fixes the whole ancestor chain at once,
  *   since the content stops counting towards any of their heights.
  */
-export function resolveComputedStyle(style) {
+export function resolveComputedStyle(style, units = null) {
   const expands = needsExpanding(style);
   const scrolls = style.overflow === 'scroll';
   if (!expands && !scrolls && style.animation == null) return style;
+  // `units` may be a function that makes the context, which is then made
+  // only for a style that has a length to read or a loop to resolve: a
+  // style written in pixels — nearly every one — allocates none
+  const ctx =
+    typeof units === 'function'
+      ? expands || style.animation != null
+        ? units(style)
+        : null
+      : units;
   // the loops read the expanded style, so a `from` they default to is the
   // longhand's value, in pixels, whatever the style wrote it as
-  const out = expands ? expandStyle(style) : { ...style };
-  const loops = out.animation == null ? null : animationsOf(out);
+  const out = expands ? expandStyle(style, ctx) : { ...style };
+  const loops =
+    out.animation == null ? null : animationsOf(out, 'a style', 1, ctx);
   if (!expands && !scrolls && !loops) return style;
   if (scrolls) {
     if (out.minWidth === undefined) out.minWidth = 0;
@@ -2483,13 +2533,6 @@ const TEXT_VALUE_CHECKS = new Map([
     'fontFamily',
     [isFontFamily, "a family's name, like 'Inter' or 'monospace'"],
   ],
-  [
-    'lineHeight',
-    [
-      (v) => lineHeightOf(v) !== undefined,
-      "a multiple of the font's own line height, like lineHeight: 1.5",
-    ],
-  ],
 ]);
 
 /** Resolved text style (TextLayout base style) from props + inherited. */
@@ -2625,6 +2668,24 @@ export function resolveBorderColors(style, direction) {
     sides[start] = style.borderStartColor;
   if (style.borderEndColor !== undefined) sides[end] = style.borderEndColor;
   return sides;
+}
+
+/**
+ * A box's corner radius in the pixels its rect is in: a number as it is, and
+ * a percentage of the box's **shorter side** — the one circle a corner here
+ * can be, where CSS's would be an ellipse taking each side's share — so
+ * `'50%'` is a circle on a square and a pill on anything longer. Read where
+ * the corner is drawn and where its damage is measured, from the rect the
+ * box has then; every reader of a radius goes through here, since a
+ * percentage reaching a `> 0` test is a square box.
+ */
+export function radiusOf(style, rect) {
+  const r = style?.borderRadius;
+  if (typeof r === 'number') return r;
+  if (typeof r !== 'string' || !rect || !r.trimEnd().endsWith('%')) return 0;
+  const share = Number.parseFloat(r);
+  if (!Number.isFinite(share)) return 0;
+  return (Math.min(rect.width, rect.height) * share) / 100;
 }
 
 export function resolveHitSlop(value) {
