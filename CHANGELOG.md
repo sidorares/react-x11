@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.51.1](https://github.com/sidorares/react-x11/compare/v2.51.0...v2.51.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **cocoa:** native &lt;Switch&gt; and &lt;Slider&gt; draw under the macOS 26 design, on @windowkit/appkit 0.30.1 ([#979](https://github.com/sidorares/react-x11/issues/979)) ([dd8cac0](https://github.com/sidorares/react-x11/commit/dd8cac022a44087d4edbc1aa58520213541227a1))
+
 ## [2.51.0](https://github.com/sidorares/react-x11/compare/v2.50.0...v2.51.0) (2026-10-20)
 
 
