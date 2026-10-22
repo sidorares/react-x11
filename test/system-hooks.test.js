@@ -47,10 +47,20 @@ import {
 import { useKeyboardState } from '../src/keyboardstatehooks.js';
 import {
   DEFAULTS,
+  beginDesktopSettings,
   desktopSettings,
+  endDesktopSettings,
+  fromGnomePortal,
   fromXSettings,
   setDesktopSettingsForTests,
+  watchDesktopSettings,
 } from '../src/desktopsettings.js';
+import {
+  _resetDesktopIntegration,
+  setDesktopIntegration,
+} from '../src/desktopintegration.js';
+import { transportAvailable, until, withBus } from './helpers/with-bus.js';
+import { fakeSettingsPortal } from './helpers/fake-settings.js';
 import { useDesktopSettings } from '../src/desktopsettingshooks.js';
 import {
   directionOf,
@@ -71,6 +81,10 @@ import {
 } from '../src/testing/index.js';
 
 const h = React.createElement;
+
+const needsBroker = (await transportAvailable())
+  ? {}
+  : { skip: 'dbus-native is not installed (expected on Node < 22.12)' };
 
 // ---------------------------------------------------------------------------
 // useScreens — the RandR walk
@@ -932,6 +946,165 @@ describe('desktop interaction settings', () => {
     setDesktopSettingsForTests(app, { doubleClickMs: 100 });
     await userEvent.doubleClick(getByTestName('target'));
     assert.deepEqual(details, [1, 2]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The Wayland backend's source: GNOME's namespaces on the settings portal
+// ---------------------------------------------------------------------------
+
+const GNOME = {
+  'org.gnome.desktop.interface': {
+    'cursor-blink': true,
+    'cursor-blink-time': 1200,
+    'enable-animations': true,
+    'clock-format': '24h',
+  },
+  'org.gnome.desktop.peripherals.mouse': {
+    'double-click': 250,
+    'drag-threshold': 8,
+  },
+};
+
+describe('desktop settings from the portal', () => {
+  test('the GNOME keys, and the same full-cycle conversion', () => {
+    const values = fromGnomePortal(GNOME);
+    assert.equal(values.caretBlink, true);
+    assert.equal(values.caretBlinkMs, 600);
+    assert.equal(values.doubleClickMs, 250);
+    assert.equal(values.dragThreshold, 8);
+    assert.equal(values.animations, true);
+    // GNOME has no key for it, so GTK's constant is not guessed at
+    assert.equal(values.doubleClickDistance, DEFAULTS.doubleClickDistance);
+    assert.equal(values.source, 'portal');
+  });
+
+  test('only an explicit false turns blinking or animation off', () => {
+    const off = fromGnomePortal({
+      'org.gnome.desktop.interface': {
+        'cursor-blink': false,
+        'enable-animations': false,
+      },
+    });
+    assert.equal(off.caretBlink, false);
+    assert.equal(off.animations, false);
+    // half the keys is still an answer, and the rest keep the defaults
+    assert.equal(off.dragThreshold, DEFAULTS.dragThreshold);
+    assert.equal(off.source, 'portal');
+
+    const junk = fromGnomePortal({
+      'org.gnome.desktop.interface': { 'cursor-blink-time': 'fast' },
+      'org.gnome.desktop.peripherals.mouse': { 'drag-threshold': -1 },
+    });
+    assert.equal(junk.caretBlink, true);
+    assert.equal(junk.caretBlinkMs, DEFAULTS.caretBlinkMs);
+    assert.equal(junk.dragThreshold, DEFAULTS.dragThreshold);
+  });
+
+  test('a portal without the GNOME namespaces has not answered', () => {
+    assert.equal(fromGnomePortal({}), null);
+    assert.equal(fromGnomePortal(null), null);
+  });
+
+  describe('on the bus', { concurrency: 1, ...needsBroker }, () => {
+    afterEach(_resetDesktopIntegration);
+
+    test('a Wayland app reads them at startup and follows changes', async () => {
+      await withBus(async (address) => {
+        const portal = await fakeSettingsPortal(address, {}, GNOME);
+        const app = { backend: 'wayland' };
+        try {
+          beginDesktopSettings(app);
+          let changes = 0;
+          watchDesktopSettings(app, () => changes++);
+          await until(
+            () => desktopSettings(app).source === 'portal',
+            'the portal to answer',
+          );
+          assert.equal(desktopSettings(app).caretBlinkMs, 600);
+          assert.equal(desktopSettings(app).dragThreshold, 8);
+          assert.equal(changes, 1);
+
+          portal.changeIn(
+            'org.gnome.desktop.peripherals.mouse',
+            'drag-threshold',
+            12,
+          );
+          await until(
+            () => desktopSettings(app).dragThreshold === 12,
+            'the change to arrive',
+          );
+          assert.equal(changes, 2);
+
+          // the interface namespace carries the clock too, and that is not a
+          // reason to re-read, let alone to re-render
+          const before = desktopSettings(app);
+          const reads = portal.reads;
+          portal.changeIn('org.gnome.desktop.interface', 'clock-format', '12h');
+          await new Promise((r) => setTimeout(r, 60));
+          assert.equal(portal.reads, reads);
+          assert.equal(desktopSettings(app), before);
+          assert.equal(changes, 2);
+
+          // torn down with its root: a later change reaches nobody
+          endDesktopSettings(app);
+          portal.changeIn('org.gnome.desktop.interface', 'cursor-blink', false);
+          await new Promise((r) => setTimeout(r, 60));
+          assert.equal(changes, 2);
+        } finally {
+          endDesktopSettings(app);
+          await portal.stop();
+        }
+      });
+    });
+
+    test('a portal without them leaves the defaults', async () => {
+      await withBus(async (address) => {
+        const portal = await fakeSettingsPortal(address, { 'color-scheme': 1 });
+        const app = { backend: 'wayland' };
+        try {
+          beginDesktopSettings(app);
+          await until(() => portal.reads > 0, 'the read');
+          await new Promise((r) => setTimeout(r, 30));
+          assert.equal(desktopSettings(app), DEFAULTS);
+        } finally {
+          endDesktopSettings(app);
+          await portal.stop();
+        }
+      });
+    });
+
+    test('`desktop: false` does not ask', async () => {
+      await withBus(async (address) => {
+        const portal = await fakeSettingsPortal(address, {}, GNOME);
+        const app = { backend: 'wayland' };
+        try {
+          setDesktopIntegration(false);
+          beginDesktopSettings(app);
+          await new Promise((r) => setTimeout(r, 60));
+          assert.equal(portal.reads, 0);
+          assert.equal(desktopSettings(app), DEFAULTS);
+        } finally {
+          endDesktopSettings(app);
+          await portal.stop();
+        }
+      });
+    });
+
+    test('an X11 app does not ask the portal', async () => {
+      await withBus(async (address) => {
+        const portal = await fakeSettingsPortal(address, {}, GNOME);
+        const { app } = await renderX11(h('box'), { backend: 'mock' });
+        try {
+          await new Promise((r) => setTimeout(r, 60));
+          assert.equal(portal.reads, 0);
+          assert.equal(desktopSettings(app).source, null);
+        } finally {
+          cleanup();
+          await portal.stop();
+        }
+      });
+    });
   });
 });
 

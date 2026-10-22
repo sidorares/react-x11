@@ -8,7 +8,8 @@
 //
 //   `appearance`  the light/dark, accent, contrast and reduced-motion ladder
 //                 (src/appearance.js) — the settings portal, then macOS, then
-//                 XSETTINGS
+//                 XSETTINGS — and, on the Wayland backend, the interaction
+//                 settings read off the same portal (src/desktopsettings.js)
 //   `a11y`        the AT-SPI bridge, started from `createRoot()`
 //                 (src/a11y.js, docs/accessibility.md)
 //   `globalMenu`  a `MenuBar` handing its menu to the panel instead of drawing
