@@ -16,6 +16,7 @@ import React from 'react';
 import {
   BusUnavailableError,
   closeBus,
+  loadTransport,
   resolveAddress,
   sessionBus,
   systemBus,
@@ -259,6 +260,34 @@ describe('never-throwing', { ...needsBroker }, () => {
 });
 
 describe('against a broker', { ...needsBroker }, () => {
+  test('an error while the name is made ready answers null, and never reaches the process', async () => {
+    // The connect's own 'error' listener came off once the socket was up,
+    // and the death listener went on only after the name-ready round trip:
+    // an 'error' in between had no listener at all, and an unlistened
+    // 'error' throws. Bun's reader thread failing on the connection — as
+    // dbus-native 0.16.0's did under the EINTR storm WebAssembly
+    // compilation sets off, which is exactly when an app first dials — took
+    // the process down from here.
+    const dbus = await loadTransport();
+    const createClient = dbus.createClient;
+    dbus.createClient = (...args) => {
+      const client = createClient.apply(dbus, args);
+      client.connection.once('connect', () =>
+        setImmediate(() =>
+          client.connection.emit('error', new Error('reader thread failed')),
+        ),
+      );
+      return client;
+    };
+    try {
+      await withBus(async () => {
+        assert.equal(await sessionBus(), null);
+      });
+    } finally {
+      dbus.createClient = createClient;
+    }
+  });
+
   test('lazy: the first acquisition is what dials', async () => {
     await withBus(async (address, broker) => {
       assert.equal(broker.liveClients, 0, 'importing dialled nothing');
