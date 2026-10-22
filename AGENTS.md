@@ -347,6 +347,13 @@ no override-redirect staging (issue #4).
   `onTransform` is how a reload is seen to start, and how a save that did
   not compile is seen at all. Stack frames and the editor are
   `src/editor.js`, a leaf shared with click-to-component.
+  `react-x11 create <dir>` (`create.js`) writes a new app, and
+  `src/cli/create-react-x11/` is `npm create react-x11`: a package of its
+  own, excluded from react-x11's `files`, whose bin is one import of
+  `react-x11/create` — a bin has to be a file of its package, so it cannot
+  be a manifest alone. Its checked-in version is a placeholder:
+  `release-please.yml` stamps react-x11's version on it, and pins the
+  dependency to that exact version, when it publishes the two together.
 
 ## Pre-release: there is nothing to be compatible with
 

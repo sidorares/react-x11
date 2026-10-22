@@ -2297,3 +2297,13 @@ function _Taskbar() {
   return null;
 }
 void _Taskbar;
+
+// ---- react-x11/create: the scaffolder behind `npm create react-x11` ----
+import { CreateError, createApp, runCreate } from 'react-x11/create';
+{
+  const dir: string = createApp('my-app', { install: false, manager: 'pnpm' });
+  const code: number = runCreate(['my-app'], { command: 'create-react-x11' });
+  void [dir, code, CreateError];
+  // @ts-expect-error — not a package manager this knows how to run
+  createApp('my-app', { manager: 'cargo' });
+}

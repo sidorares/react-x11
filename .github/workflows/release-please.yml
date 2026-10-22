@@ -47,6 +47,17 @@ jobs:
         if: ${{ steps.release.outputs.release_created }}
       - run: npm publish --access public
         if: ${{ steps.release.outputs.release_created }}
+      # create-react-x11 is `npm create react-x11`: one import of
+      # react-x11/create, published at the same version and pinned to it, so
+      # create-react-x11@X writes exactly what react-x11@X's `create` does.
+      # It is its own trusted publisher entry on npmjs.com, naming this file.
+      - name: Publish create-react-x11
+        if: ${{ steps.release.outputs.release_created }}
+        working-directory: src/cli/create-react-x11
+        run: |
+          VERSION=$(node -p "require('../../../package.json').version")
+          npm pkg set version="$VERSION" dependencies.react-x11="$VERSION"
+          npm publish --access public
 
   canary:
     if: ${{ github.event_name == 'workflow_dispatch' }}
@@ -73,3 +84,9 @@ jobs:
           npm version --no-git-tag-version "$VERSION"
           echo "Publishing react-x11@$VERSION from $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
       - run: npm publish --access public --tag canary
+      - name: Publish create-react-x11 canary
+        working-directory: src/cli/create-react-x11
+        run: |
+          VERSION=$(node -p "require('../../../package.json').version")
+          npm pkg set version="$VERSION" dependencies.react-x11="$VERSION"
+          npm publish --access public --tag canary
