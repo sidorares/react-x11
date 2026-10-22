@@ -365,3 +365,35 @@ test('without slack, the buffers are the size shown', () => {
   assert.deepEqual([gbm.width, gbm.height], [1176, 790]);
   assert.equal(gbm.generation, generation + 1, 'made again');
 });
+
+test('with slack, a small surface whose size changes inside the same buffers keeps them, and every swap has a descriptor or a wl_buffer', async () => {
+  // A tooltip, a caret, a popup a few dozen pixels on a side: `slackFor`
+  // rounds both sides up to the same 128, too large for the "the buffers
+  // hold it" test, so each change of size asked for buffers of the size
+  // they already were. GBM keeps those, and their generation; the chain
+  // dropped its wl_buffers anyway, and the next swap — a buffer GBM had
+  // already exported, so no descriptor — was imported with none.
+  const { chain, gbm, dmabuf, log } = slackChain();
+  chain.surfaceFor(60, 20, { slack: true });
+  assert.deepEqual([gbm.width, gbm.height], [128, 128]);
+  const releaseAll = () => {
+    for (const entry of chain.buffers.values()) entry.wlBuffer.emit('release');
+  };
+  for (let i = 0; i < 3; i++) {
+    assert.equal(await chain.swap('all'), true);
+    releaseAll();
+  }
+  const generation = gbm.generation;
+  for (const w of [70, 64, 90, 61]) {
+    chain.surfaceFor(w, 20, { slack: true });
+    assert.equal(await chain.swap('all'), true, `presented at ${w}`);
+    releaseAll();
+  }
+  assert.equal(gbm.generation, generation, 'the same buffers throughout');
+  assert.equal(dmabuf.imports, 2, 'each imported once');
+  assert.ok(
+    log.filter((l) => l[0] === 'add').every((l) => Number.isInteger(l[1])),
+    'never an import without a descriptor',
+  );
+  assert.equal(chain.error, null);
+});
