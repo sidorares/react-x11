@@ -67,6 +67,8 @@ const MODE_RRECT = 3;
 const MODE_GRADIENT = 4;
 /** A texture read through a projection: `vParams` is (s/w, t/w, 1/w). */
 const MODE_PROJECTIVE = 5;
+/** A pattern: an image laid down from the fragment's device position. */
+const MODE_PATTERN = 6;
 
 /**
  * The stencil buffer, shared between two uses: bit 7 is the clip (set where
@@ -132,6 +134,12 @@ uniform highp vec2 uViewport;
 uniform int uGradKind;
 uniform vec4 uGradA;
 uniform vec4 uGradB;
+// a pattern: device position to its pixels (the inverse transform it is
+// filled under, a b c d and then e f), its size, and which axes repeat (1 x,
+// 2 y) and whether its rows run bottom up (4: a render target)
+uniform highp vec4 uPatInv;
+uniform highp vec4 uPatOff;
+uniform int uPatFlags;
 
 float sdRoundBox(vec2 p, vec2 b, float r) {
   vec2 q = abs(p) - b + r;
@@ -167,6 +175,28 @@ void main() {
     // Interpolated across the quad in the plane of the screen, s/w, t/w and
     // 1/w are each exact, and so is their quotient: a texture in perspective.
     gl_FragColor = vColor * sampleTex(vParams.xy / vParams.z);
+  } else if (uMode == 6) {
+    // A pattern, from the fragment's device position as a gradient is, so
+    // any shape can be filled with one: back through the transform it was
+    // filled under to its own pixels, wrapped along the axes it repeats on
+    // and clear off the ones it does not, and read at the centre of the
+    // texel it lands in, so a tile drawn at its own size lands pixel for
+    // pixel — a grid's dots do not smear across a seam.
+    highp vec2 p = vec2(gl_FragCoord.x, uViewport.y - gl_FragCoord.y);
+    highp vec2 q = vec2(uPatInv.x * p.x + uPatInv.z * p.y + uPatOff.x,
+                        uPatInv.y * p.x + uPatInv.w * p.y + uPatOff.y);
+    highp vec2 size = uPatOff.zw;
+    highp vec2 t = q / size;
+    float flags = float(uPatFlags);
+    if (mod(flags, 2.0) >= 1.0) t.x = fract(t.x);
+    if (mod(floor(flags / 2.0), 2.0) >= 1.0) t.y = fract(t.y);
+    if (t.x < 0.0 || t.x >= 1.0 || t.y < 0.0 || t.y >= 1.0) {
+      gl_FragColor = vec4(0.0);
+    } else {
+      t = (floor(t * size) + 0.5) / size;
+      if (flags >= 4.0) t.y = 1.0 - t.y;
+      gl_FragColor = vColor * sampleTex(t);
+    }
   } else {
     // Gradients are evaluated per fragment from its device position, so any
     // shape — a cover quad over a path included — can be filled with one.
@@ -415,6 +445,43 @@ export function parseFont(font) {
  */
 const fontIds = new WeakMap();
 let nextFontId = 1;
+const REPETITIONS = new Set(['repeat', 'repeat-x', 'repeat-y', 'no-repeat']);
+
+/**
+ * A pattern: an image or a surface, and the axes it repeats along. Its
+ * texture is looked up as it is filled rather than made here, so a surface
+ * drawn on again after the pattern was made fills with what it holds then,
+ * as a canvas pattern of a canvas does.
+ */
+class Pattern {
+  constructor(source, repetition) {
+    this.source = source;
+    this.repetition = repetition;
+    /** its own transform, under the one it is filled with (`setTransform`) */
+    this.m = null;
+  }
+
+  setTransform(m) {
+    this.m = m
+      ? [m.a ?? 1, m.b ?? 0, m.c ?? 0, m.d ?? 1, m.e ?? 0, m.f ?? 0]
+      : null;
+  }
+}
+
+function invert(m) {
+  const det = m[0] * m[3] - m[1] * m[2];
+  if (!det) return null;
+  const a = m[3] / det;
+  const b = -m[1] / det;
+  const c = -m[2] / det;
+  const d = m[0] / det;
+  return [a, b, c, d, -(a * m[4] + c * m[5]), -(b * m[4] + d * m[5])];
+}
+
+/** A paint that is not a colour: drawn from the fragment's position. */
+const isPaint = (style) =>
+  style instanceof Gradient || style instanceof Pattern;
+
 function fontKey(font) {
   let id = fontIds.get(font);
   if (!id) fontIds.set(font, (id = `f${nextFontId++}`));
@@ -571,6 +638,9 @@ export class WaylandContext2D {
       uGradKind: u('uGradKind'),
       uGradA: u('uGradA'),
       uGradB: u('uGradB'),
+      uPatInv: u('uPatInv'),
+      uPatOff: u('uPatOff'),
+      uPatFlags: u('uPatFlags'),
     };
     shared.buffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, shared.buffer);
@@ -847,9 +917,23 @@ export class WaylandContext2D {
     return new Gradient('radial', [x0, y0, r0, x1, y1, r1]);
   }
 
-  createPattern() {
-    // Patterns need a repeating texture mode; not yet.
-    return null;
+  /**
+   * A pattern of `image` — an ImageData, an ntk `Image`, a surface or a
+   * render target. Null for one with nothing in it, as canvas answers for an
+   * image it cannot use; `repetition` is canvas's, null and `''` meaning
+   * `'repeat'`, and anything else a `SyntaxError`.
+   */
+  createPattern(image, repetition) {
+    const rep =
+      repetition == null || repetition === '' ? 'repeat' : String(repetition);
+    if (!REPETITIONS.has(rep)) {
+      throw new SyntaxError(
+        `createPattern: ${JSON.stringify(rep)} is not a repetition — ` +
+          "expected 'repeat', 'repeat-x', 'repeat-y' or 'no-repeat'.",
+      );
+    }
+    if (!((image?.width | 0) > 0 && (image?.height | 0) > 0)) return null;
+    return new Pattern(image, rep);
   }
 
   // ---- paths ------------------------------------------------------------
@@ -1088,7 +1172,7 @@ export class WaylandContext2D {
 
   _rect(x, y, w, h, radius, style, strokeWidth) {
     if (!(w > 0 && h > 0)) return;
-    if (style instanceof Gradient) {
+    if (isPaint(style)) {
       if (radius <= 0 && strokeWidth === 0)
         return this._gradientQuad(x, y, w, h, style);
       // rounded/stroked gradient: stencil the shape, cover with the gradient
@@ -1226,8 +1310,40 @@ export class WaylandContext2D {
     }
   }
 
+  /** Bind a gradient or a pattern for the next quads; false where there is
+   *  nothing to draw with — a pattern of an image that has gone. */
+  _usePaint(paint) {
+    if (paint instanceof Pattern) return this._usePattern(paint);
+    this._useGradient(paint);
+    return true;
+  }
+
+  /** Bind a pattern's texture, and the way from a device pixel to one of
+   *  its own, as the current batch's uniforms. */
+  _usePattern(pat) {
+    const src = this._textureFor(pat.source);
+    if (!src) return false;
+    const inv = invert(pat.m ? mul(this._m, pat.m) : this._m);
+    if (!inv) return false;
+    const gl = this.gl;
+    this._flush();
+    this._mode = MODE_PATTERN;
+    this._texture = src.tex;
+    this._swizzle = src.swizzle;
+    const rep = pat.repetition;
+    const flags =
+      (rep === 'repeat' || rep === 'repeat-x' ? 1 : 0) +
+      (rep === 'repeat' || rep === 'repeat-y' ? 2 : 0) +
+      (src.flipY ? 4 : 0);
+    gl.useProgram(this._program);
+    gl.uniform4f(this._loc.uPatInv, inv[0], inv[1], inv[2], inv[3]);
+    gl.uniform4f(this._loc.uPatOff, inv[4], inv[5], src.w, src.h);
+    gl.uniform1i(this._loc.uPatFlags, flags);
+    return true;
+  }
+
   _gradientQuad(x, y, w, h, grad) {
-    this._useGradient(grad);
+    if (!this._usePaint(grad)) return;
     const m = this._m;
     const alpha = this.globalAlpha;
     this._quad(
@@ -1277,7 +1393,7 @@ export class WaylandContext2D {
     // only once the device has been claimed.
     this._claim();
     let color = null;
-    if (!(style instanceof Gradient)) {
+    if (!isPaint(style)) {
       color = this._color(style);
       if (color[3] === 0) return;
       if (this._fillCoverage(polys, rule, bounds, color)) return;
@@ -1297,15 +1413,18 @@ export class WaylandContext2D {
     const { x, y, w, h } = bounds;
     const saved = this._m;
     this._m = IDENTITY;
-    if (style instanceof Gradient) {
-      this._m = saved; // gradient endpoints are in user space
-      this._useGradient(style);
+    if (isPaint(style)) {
+      this._m = saved; // a gradient's endpoints, a pattern's origin: user space
+      const painted = this._usePaint(style);
       this._m = IDENTITY;
       const a = this.globalAlpha;
+      // a pattern with nothing to draw with still covers, clear, so the
+      // counts the winding pass left are zeroed as the cover always does
+      if (!painted) this._setMode(MODE_SOLID, null, SWIZZLE_RGBA);
       this._quad(
         [x, y, x + w, y, x + w, y + h, x, y + h],
         UV_UNIT,
-        [a, a, a, a],
+        painted ? [a, a, a, a] : CLEAR,
         ZERO4,
       );
     } else {

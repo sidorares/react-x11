@@ -524,3 +524,131 @@ test('a context draws more quads than it first had room for', { skip }, () => {
   ctx.destroy();
   target.destroy();
 });
+
+// ---- patterns ---------------------------------------------------------------
+
+/** A 2×2 straight-RGBA image: red, green / blue, white. */
+function quadTile() {
+  return {
+    width: 2,
+    height: 2,
+    data: new Uint8ClampedArray([
+      255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+    ]),
+  };
+}
+
+const RED = [255, 0, 0, 255];
+const GREEN = [0, 255, 0, 255];
+const BLUE = [0, 0, 255, 255];
+const WHITE = [255, 255, 255, 255];
+const NONE = [0, 0, 0, 0];
+
+test(
+  'a repeating pattern tiles its image across a fill, pixel for pixel',
+  { skip },
+  () => {
+    const { ctx } = makeContext(env);
+    fresh(ctx);
+    ctx.fillStyle = ctx.createPattern(quadTile(), 'repeat');
+    ctx.fillRect(0, 0, 8, 8);
+    assert.deepEqual(pixel(ctx, 0, 0), RED);
+    assert.deepEqual(pixel(ctx, 1, 0), GREEN);
+    assert.deepEqual(pixel(ctx, 0, 1), BLUE);
+    assert.deepEqual(pixel(ctx, 1, 1), WHITE);
+    assert.deepEqual(pixel(ctx, 6, 0), RED, 'repeated along x');
+    assert.deepEqual(pixel(ctx, 1, 7), WHITE, 'and along y');
+    assert.deepEqual(pixel(ctx, 9, 9), NONE, 'and only inside the fill');
+  },
+);
+
+test('repeat-x and no-repeat repeat only where they say', { skip }, () => {
+  const { ctx } = makeContext(env);
+  fresh(ctx);
+  ctx.fillStyle = ctx.createPattern(quadTile(), 'repeat-x');
+  ctx.fillRect(0, 0, 8, 8);
+  assert.deepEqual(pixel(ctx, 4, 1), BLUE, 'along x');
+  assert.deepEqual(pixel(ctx, 4, 2), NONE, 'not along y');
+  fresh(ctx);
+  ctx.fillStyle = ctx.createPattern(quadTile(), 'no-repeat');
+  ctx.fillRect(0, 0, 8, 8);
+  assert.deepEqual(pixel(ctx, 1, 1), WHITE);
+  assert.deepEqual(pixel(ctx, 2, 0), NONE);
+  assert.deepEqual(pixel(ctx, 0, 2), NONE);
+});
+
+test('a pattern is laid down in the space it is filled in', { skip }, () => {
+  const { ctx } = makeContext(env);
+  fresh(ctx);
+  ctx.fillStyle = ctx.createPattern(quadTile(), 'repeat');
+  ctx.translate(1, 0);
+  ctx.fillRect(0, 0, 4, 2);
+  assert.deepEqual(pixel(ctx, 1, 0), RED, 'its origin moved with the fill');
+  assert.deepEqual(pixel(ctx, 2, 0), GREEN);
+});
+
+test('a pattern fills a path', { skip }, () => {
+  const { ctx } = makeContext(env);
+  fresh(ctx);
+  ctx.fillStyle = ctx.createPattern(quadTile(), 'repeat');
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(SIZE, 0);
+  ctx.lineTo(0, SIZE);
+  ctx.closePath();
+  ctx.fill();
+  assert.deepEqual(pixel(ctx, 4, 4), RED, 'inside, on the tile');
+  assert.deepEqual(pixel(ctx, 5, 5), WHITE);
+  assert.deepEqual(pixel(ctx, 60, 60), NONE, 'and nothing outside');
+});
+
+test(
+  'a surface a context drew into is a pattern the right way up',
+  { skip },
+  () => {
+    const tile = new GLTarget(env.gpu.gl, {
+      width: 4,
+      height: 4,
+      stencil: true,
+    });
+    const on = new WaylandContext2D(env.gpu.gl, {
+      fontManager: null,
+      target: tile,
+    });
+    on.init();
+    on.begin(4, 4);
+    on.clearRect(0, 0, 4, 4);
+    on.fillStyle = '#ff0000';
+    on.fillRect(0, 0, 1, 1); // one dot, top left
+    on.end();
+    const { ctx } = makeContext(env);
+    fresh(ctx);
+    const pattern = ctx.createPattern(tile, 'repeat');
+    assert.ok(pattern, 'a render target makes a pattern');
+    ctx.fillStyle = pattern;
+    ctx.fillRect(0, 0, 8, 8);
+    assert.deepEqual(pixel(ctx, 0, 0), RED);
+    assert.deepEqual(pixel(ctx, 4, 4), RED, 'every tile');
+    assert.deepEqual(pixel(ctx, 0, 3), NONE, 'not flipped');
+    on.destroy();
+    tile.destroy();
+  },
+);
+
+test(
+  'createPattern answers null for an image with nothing in it, and throws for a repetition it does not know',
+  { skip },
+  () => {
+    const { ctx } = makeContext(env);
+    assert.equal(
+      ctx.createPattern(
+        { width: 0, height: 0, data: new Uint8ClampedArray() },
+        'repeat',
+      ),
+      null,
+    );
+    assert.throws(() => ctx.createPattern(quadTile(), 'sideways'), SyntaxError);
+    assert.ok(ctx.createPattern(quadTile(), null), 'null is repeat');
+    assert.ok(ctx.createPattern(quadTile(), ''), 'and so is the empty string');
+  },
+);

@@ -52,24 +52,24 @@ appeared" proves nothing. Three checks that do:
 
 ## What runs
 
-| piece              | file                                                     | what it does                                                                                      |
-| ------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| connection         | `connection.js`                                          | fd-capable transport (native or bun:ffi), vendored protocol JSON                                  |
-| shell              | `window.js`                                              | xdg toplevels and popups, deferred `ack_configure`, fractional scale                              |
-| GPU presentation   | `swapchain.js`, `dmabuf.js`, `glcontext.js`, `target.js` | backing target → per-buffer damage → dma-buf                                                      |
-| 2d context         | `context2d.js`, `glyphatlas.js`                          | rects/rounded rects (SDF), paths (coverage masks, stencil), exact clips, gradients, images, text  |
-| `<glarea>`         | `glarea.js`                                              | a rect of the window's backing target as the area's GL surface; composited panes for its children |
-| input              | `seat.js`, `xkb.js`, `keysymnames.js`, `input.js`        | pointer frames, keymap parsing, key repeat, routing                                               |
-| touch and tablet   | `touch.js`, `tablet.js`                                  | `wl_touch` and `zwp_tablet_v2`, emulating the pointer; raw touches                                |
-| decorations        | `decorations.js`, `ssd.js`                               | xdg-decoration or KDE's, to hand the frame to the compositor; the client-side frame where neither |
-| layer surfaces     | `layershell.js`                                          | docks, panels, wallpapers, overlays — wlr-layer-shell                                             |
-| screen capture     | `screencopy.js`, `shm.js`                                | wlr-screencopy / ext-image-copy-capture into `wl_shm`; the eyedropper                             |
-| offscreen surfaces | `surface.js`, `device.js`                                | the paint cache and scroll blits, over a render target; a held context works                      |
-| clipboard          | `clipboard.js`, `fdutil.js`                              | `wl_data_device` + primary selection, over pipes                                                  |
-| screens            | `outputs.js`                                             | `wl_output` + xdg_output into `screens.js`: `useScreens()`, the cap                               |
-| input methods      | `textinput.js`                                           | `zwp_text_input_v3`: the compositor's IME into the composition events                             |
-| the app            | `app.js`, `backendwindow.js`, `framewatch.js`            | what `createRoot({ backend: 'wayland' })` renders through                                         |
-| tests              | `test/wayland/`                                          | an in-process compositor, and the pure parts                                                      |
+| piece              | file                                                     | what it does                                                                                               |
+| ------------------ | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| connection         | `connection.js`                                          | fd-capable transport (native or bun:ffi), vendored protocol JSON                                           |
+| shell              | `window.js`                                              | xdg toplevels and popups, deferred `ack_configure`, fractional scale                                       |
+| GPU presentation   | `swapchain.js`, `dmabuf.js`, `glcontext.js`, `target.js` | backing target → per-buffer damage → dma-buf                                                               |
+| 2d context         | `context2d.js`, `glyphatlas.js`                          | rects/rounded rects (SDF), paths (coverage masks, stencil), exact clips, gradients, patterns, images, text |
+| `<glarea>`         | `glarea.js`                                              | a rect of the window's backing target as the area's GL surface; composited panes for its children          |
+| input              | `seat.js`, `xkb.js`, `keysymnames.js`, `input.js`        | pointer frames, keymap parsing, key repeat, routing                                                        |
+| touch and tablet   | `touch.js`, `tablet.js`                                  | `wl_touch` and `zwp_tablet_v2`, emulating the pointer; raw touches                                         |
+| decorations        | `decorations.js`, `ssd.js`                               | xdg-decoration or KDE's, to hand the frame to the compositor; the client-side frame where neither          |
+| layer surfaces     | `layershell.js`                                          | docks, panels, wallpapers, overlays — wlr-layer-shell                                                      |
+| screen capture     | `screencopy.js`, `shm.js`                                | wlr-screencopy / ext-image-copy-capture into `wl_shm`; the eyedropper                                      |
+| offscreen surfaces | `surface.js`, `device.js`                                | the paint cache and scroll blits, over a render target; a held context works                               |
+| clipboard          | `clipboard.js`, `fdutil.js`                              | `wl_data_device` + primary selection, over pipes                                                           |
+| screens            | `outputs.js`                                             | `wl_output` + xdg_output into `screens.js`: `useScreens()`, the cap                                        |
+| input methods      | `textinput.js`                                           | `zwp_text_input_v3`: the compositor's IME into the composition events                                      |
+| the app            | `app.js`, `backendwindow.js`, `framewatch.js`            | what `createRoot({ backend: 'wayland' })` renders through                                                  |
+| tests              | `test/wayland/`                                          | an in-process compositor, and the pure parts                                                               |
 
 ### Running the examples
 
