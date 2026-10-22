@@ -354,7 +354,9 @@ the window's frame clock.
 
 Every one of these has an option or a prop that says the same thing in code;
 the variable exists for the cases where you cannot edit the call — someone
-else's app, a `.desktop` launcher, an A/B run.
+else's app, a `.desktop` launcher, an A/B run. `npx react-x11 help` prints
+every one the renderer reads, the diagnostic switches included, grouped and
+with what each does.
 
 **Choosing a backend and a display**
 

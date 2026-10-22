@@ -1,15 +1,19 @@
 #!/usr/bin/env node
-// react-x11's command line, the `bin` of the package. One command so far:
+// react-x11's command line, the `bin` of the package:
 //
 //   react-x11 dev <file> [args…]   hot reload with nothing to set up (./dev.js)
+//   react-x11 help                 the usage, then every REACT_X11_* variable
+//                                  the renderer reads (./env.js)
 //
 // Arguments before the file belong to the command, and everything after it
 // to the app, which sees them in process.argv as `node <file> …args` would
 // have handed them over.
 import { readFileSync } from 'node:fs';
 import { DevError, runDev } from './dev.js';
+import { formatEnvironment } from './env.js';
 
 const USAGE = `Usage: react-x11 dev <file> [args…]
+       react-x11 help
 
 Commands:
   dev <file>     Run <file> with hot reload: saving it, or a .jsx module it
@@ -21,6 +25,8 @@ Commands:
                  source; REACT_X11_CLICK_TO_COMPONENT=0 turns that off.
                  Connects to React DevTools (npx react-devtools) whenever
                  it runs; REACT_X11_DEVTOOLS=0 turns that off.
+  help           Show this help, then every REACT_X11_* environment
+                 variable the renderer reads, with what it does.
 
 Options:
   -h, --help     Show this help.
@@ -34,8 +40,21 @@ function version() {
 
 /** An exit code to finish with, or undefined while the app runs. */
 async function main([command, ...rest]) {
-  if (command === '-h' || command === '--help' || command === 'help') {
+  if (command === '-h' || command === '--help') {
     process.stdout.write(USAGE);
+    return 0;
+  }
+  if (command === 'help') {
+    // A terminal's own width, within reason; 80 for a pipe or a file.
+    const columns = process.stdout.isTTY ? process.stdout.columns : 80;
+    const width = Math.min(100, Math.max(60, columns || 80));
+    // Colour where the terminal has it — hasColors() reads NO_COLOR and
+    // FORCE_COLOR — and into a pipe only when FORCE_COLOR asks for it.
+    const force = process.env.FORCE_COLOR;
+    const color = process.stdout.isTTY
+      ? process.stdout.hasColors()
+      : force !== undefined && force !== '0' && force !== 'false';
+    process.stdout.write(`${USAGE}\n${formatEnvironment(width, { color })}`);
     return 0;
   }
   if (command === '-v' || command === '--version') {
