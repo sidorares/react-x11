@@ -72,7 +72,11 @@ npx react-x11 dev app.jsx
 A new app comes set up for it: `npm create react-x11@latest my-app` (or
 `npx react-x11 create my-app`) writes `src/App.jsx`, an entry for a plain
 run, and a `dev` script, with the toolchain below already in its
-devDependencies.
+devDependencies. Beside them go `DESIGN.md`, the app's design brief, and
+`AGENTS.md`, which tells a coding agent how react-x11 differs from
+react-dom, where the docs installed with the package are, and how to check
+its work by rendering the app to a PNG in light and dark
+(`--no-agents-md` leaves it out).
 
 ### `react-x11 dev` {#react-x11-dev}
 

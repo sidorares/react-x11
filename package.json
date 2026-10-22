@@ -1,6 +1,6 @@
 {
   "name": "react-x11",
-  "version": "2.51.1",
+  "version": "2.52.0",
   "description": "react renderer with X11 as a target",
   "main": "./src/index.js",
   "bin": {
@@ -8,7 +8,9 @@
   },
   "files": [
     "src",
-    "!src/cli/create-react-x11"
+    "!src/cli/create-react-x11",
+    "docs/*.md",
+    "docs/*/*.md"
   ],
   "scripts": {
     "test": "node --import tsx --test --test-timeout=60000",

@@ -9,6 +9,14 @@
 // in devDependencies, so the first `npm run dev` does not stop to ask for it.
 // Every version comes from this copy of react-x11's own manifest, which is
 // what keeps a generated app on the majors the loader is written against.
+//
+// Beside the code it writes the two files a coding agent reads first:
+// AGENTS.md (react-x11 is not react-dom, the rules that throw, where the
+// installed docs are, how to look at what it built) and DESIGN.md (the app's
+// design brief, and the desktop conventions in react-x11's terms), plus a
+// CLAUDE.md that imports AGENTS.md for Claude Code, which reads only its own
+// name. Their text is ./templates/*.template.md — named so that no agent
+// working on this repo takes them for instructions of its own.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { writeFileSync } from 'node:fs';
@@ -30,14 +38,32 @@ export class CreateError extends Error {
   }
 }
 
-const usage = (command) => `Usage: ${command} <dir> [--no-install]
+const usage = (
+  command,
+) => `Usage: ${command} <dir> [--no-install] [--no-agents-md]
 
 Writes a new react-x11 app into <dir> and installs its dependencies.
 
 Options:
-  --no-install   Write the files only.
-  -h, --help     Show this help.
+  --no-install     Write the files only.
+  --no-agents-md   Leave out AGENTS.md and CLAUDE.md, what coding agents
+                   read. DESIGN.md, the app's design brief, is still written.
+  -h, --help       Show this help.
 `;
+
+const FLAGS = new Set(['--no-install', '--no-agents-md']);
+
+/** A template from ./templates, with its `{{name}}`s filled in. */
+function template(file, values) {
+  const text = readFileSync(
+    fileURLToPath(new URL(`./templates/${file}`, import.meta.url)),
+    'utf8',
+  );
+  return text.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+    if (!(key in values)) throw new Error(`${file}: no value for ${match}`);
+    return values[key];
+  });
+}
 
 // Files a fresh checkout or an editor leaves behind, which do not make a
 // directory anyone's project yet.
@@ -65,7 +91,12 @@ export function packageNameFor(name) {
 }
 
 /** The new app's files, as a map from path to contents. */
-export function appFiles({ name, title = name, manager = 'npm' }) {
+export function appFiles({
+  name,
+  title = name,
+  manager = 'npm',
+  agentsMd = true,
+}) {
   const { version, peerDependencies, devDependencies } = OWN_PACKAGE;
   const run = manager === 'npm' ? 'npm run' : manager;
   const pkg = {
@@ -90,6 +121,13 @@ export function appFiles({ name, title = name, manager = 'npm' }) {
       tsx: devDependencies.tsx,
     },
   };
+  const filled = { version, run };
+  const agentFiles = agentsMd
+    ? {
+        'AGENTS.md': template('AGENTS.template.md', filled),
+        'CLAUDE.md': '@AGENTS.md\n',
+      }
+    : {};
   return {
     'package.json': `${JSON.stringify(pkg, null, 2)}\n`,
     '.gitignore': 'node_modules\n',
@@ -107,11 +145,11 @@ export default function App() {
           alignSelf: 'flex-start',
           padding: '6px 14px',
           borderRadius: 6,
-          backgroundColor: '#1c4e80',
-          color: '#ffffff',
+          backgroundColor: '$accent',
+          color: '$accentText',
           cursor: 'pointer',
-          ':hover': { backgroundColor: '#24609c' },
-          ':active': { backgroundColor: '#163e66' },
+          ':hover': { backgroundColor: '$accentHover' },
+          ':active': { backgroundColor: '$accentActive' },
         }}
       >
         <text>Clicked {count} times</text>
@@ -135,7 +173,17 @@ A [react-x11](https://sidorares.github.io/react-x11/) app.
 - \`${run} dev\` — run it with hot reload: save \`src/App.jsx\` and the window
   updates in place, state and all.
 - \`${run} start\` — run it without.
+
+[DESIGN.md](DESIGN.md) is the app's design brief: fill in its first section.${
+      agentsMd
+        ? `
+Coding agents read [AGENTS.md](AGENTS.md) first: how react-x11 differs from
+react-dom, and where the docs that came with it are.`
+        : ''
+    }
 `,
+    'DESIGN.md': template('DESIGN.template.md', filled),
+    ...agentFiles,
   };
 }
 
@@ -150,6 +198,7 @@ function installCommand(manager) {
 export function createApp(dir, options = {}) {
   const {
     install = true,
+    agentsMd = true,
     manager = packageManagerOf(),
     log = (line) => console.log(line),
     run = (argv, cwd) =>
@@ -182,7 +231,7 @@ export function createApp(dir, options = {}) {
   }
 
   for (const [file, contents] of Object.entries(
-    appFiles({ name, title, manager }),
+    appFiles({ name, title, manager, agentsMd }),
   )) {
     const path = join(target, file);
     mkdirSync(join(path, '..'), { recursive: true });
@@ -227,7 +276,7 @@ export function runCreate(
     return 0;
   }
   const flags = argv.filter((arg) => arg.startsWith('-'));
-  const unknown = flags.find((flag) => flag !== '--no-install');
+  const unknown = flags.find((flag) => !FLAGS.has(flag));
   if (unknown !== undefined) {
     process.stderr.write(
       `${command}: no option ${unknown}.\n\n${usage(command)}`,
@@ -244,6 +293,7 @@ export function runCreate(
   try {
     createApp(dirs[0], {
       install: !flags.includes('--no-install'),
+      agentsMd: !flags.includes('--no-agents-md'),
       ...options,
     });
     return 0;
