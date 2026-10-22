@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.52.0](https://github.com/sidorares/react-x11/compare/v2.51.1...v2.52.0) (2026-10-22)
+
+
+### Features
+
+* **cli:** react-x11 create, and npm create react-x11 as its alias ([#993](https://github.com/sidorares/react-x11/issues/993)) ([36b22d2](https://github.com/sidorares/react-x11/commit/36b22d2550671a063127cff2dc4fce4586bb3d90))
+* **cli:** react-x11 help lists every REACT_X11_* variable the renderer reads, grouped, with what each does ([#986](https://github.com/sidorares/react-x11/issues/986)) ([4236e70](https://github.com/sidorares/react-x11/commit/4236e704f04cb21152f3321c6a6c5009e05d0c42))
+* **create:** new apps come with AGENTS.md and DESIGN.md, and the package ships its docs ([#997](https://github.com/sidorares/react-x11/issues/997)) ([ead1379](https://github.com/sidorares/react-x11/commit/ead13796c753c4e6667741a61f026b2c719be59a))
+* **wayland:** read desktop interaction settings from the settings portal ([#994](https://github.com/sidorares/react-x11/issues/994)) ([8402e7c](https://github.com/sidorares/react-x11/commit/8402e7c55847400480b2e241b1e12f6334dbca8d))
+* **wayland:** the 2d context fills with patterns — an image or a surface, repeated along either axis, through any transform ([#991](https://github.com/sidorares/react-x11/issues/991)) ([e03b299](https://github.com/sidorares/react-x11/commit/e03b2999fe0eceb685ac20b8a102b7d5c060fcdf))
+* **wayland:** useKeyboardState() from the seat — locks, group and layouts ([#995](https://github.com/sidorares/react-x11/issues/995)) ([2989aa4](https://github.com/sidorares/react-x11/commit/2989aa4a0795dbc9ac6e799c23f5e4b72df95411))
+
+
+### Bug Fixes
+
+* **bus:** the connection keeps an 'error' listener through the name-ready round trip, so an error there no longer crashes the app ([#990](https://github.com/sidorares/react-x11/issues/990)) ([2844f56](https://github.com/sidorares/react-x11/commit/2844f5623a54a3e88f836b15b3d7c575c6b1c2f2))
+* **examples:** the icon wall follows the theme, so it is visible on a dark desktop ([#985](https://github.com/sidorares/react-x11/issues/985)) ([50544bf](https://github.com/sidorares/react-x11/commit/50544bfd199c920fb0f8ba14132526ee54e80d18))
+* **examples:** the settings window's close button closes it, and asks first when something is unsaved ([#987](https://github.com/sidorares/react-x11/issues/987)) ([fa1ebc3](https://github.com/sidorares/react-x11/commit/fa1ebc35e554032acdf3e34ef3a8ffc3791fdde9))
+* **examples:** the showcase opens one window, not six ([#984](https://github.com/sidorares/react-x11/issues/984)) ([1c654d6](https://github.com/sidorares/react-x11/commit/1c654d6917c24cc11972596fdcc63d32dc7979c4))
+* **test:** the integration tests no longer follow the desktop, so a dark one does not fail the textinput test ([#982](https://github.com/sidorares/react-x11/issues/982)) ([a49a889](https://github.com/sidorares/react-x11/commit/a49a889c90571dc68ad46178c923e8fa659f189c))
+* **wayland:** a small surface that changes size inside the same buffers keeps them, instead of importing one with no descriptor and dying ([#989](https://github.com/sidorares/react-x11/issues/989)) ([aa484cb](https://github.com/sidorares/react-x11/commit/aa484cb14efc72dced81e19d1812e025f992b70d))
+* **wayland:** parent portal dialogs through xdg-foreign, not a fake x11: handle ([#996](https://github.com/sidorares/react-x11/issues/996)) ([8328f30](https://github.com/sidorares/react-x11/commit/8328f3028b61fd39875aaf50c2eaf82055062ca8))
+* **wayland:** pasting what another application copied works, where every read of the clipboard threw ([#992](https://github.com/sidorares/react-x11/issues/992)) ([87e5f11](https://github.com/sidorares/react-x11/commit/87e5f11013ea22dc20ce7a8044aa5adf601a7886))
+
 ## [2.51.1](https://github.com/sidorares/react-x11/compare/v2.51.0...v2.51.1) (2026-10-21)
 
 
