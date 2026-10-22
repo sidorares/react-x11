@@ -191,6 +191,17 @@ export class WaylandSwapchain {
 
   /** Give the chain buffers of this size, keeping its GBM surface. */
   _resize(w, h) {
+    // The size they already are keeps them: x11-dri makes nothing again and
+    // moves no generation, so the wl_buffers stay too. Dropped, the next
+    // swap answered a buffer the compositor already had — `isNew: false`, no
+    // descriptor — that this chain no longer knew, and imported it with
+    // none. A small surface asks for this on every change of size: `slackFor`
+    // rounds both sides up to the same 128. What each buffer holds is of the
+    // old size, so all of it is owed.
+    if (w === this.allocWidth && h === this.allocHeight) {
+      for (const entry of this.buffers.values()) entry.damage = 'all';
+      return;
+    }
     // In place: the handle stays valid, the context keeps its GL objects and
     // stays current. Buffers from the old generation are gone, so their
     // `wl_buffer`s go with them — the compositor may still be showing one, so
@@ -299,6 +310,18 @@ export class WaylandSwapchain {
       return true;
     }
     this._swapsSinceNew = 0;
+    if (!out.isNew) {
+      // GBM exported this one already, so it carries no descriptor, and the
+      // chain has no wl_buffer for it: the two have lost track of each
+      // other, which no compositor did.
+      this._fail(
+        new Error(
+          `GPU buffer ${id} came round again with no wl_buffer for it ` +
+            '(react-x11 bug: the swapchain dropped a buffer GBM still holds)',
+        ),
+      );
+      return false;
+    }
     return await this._import(id, out, generation, damage);
   }
 
