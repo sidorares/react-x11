@@ -321,38 +321,51 @@ async function connect(kind, generation) {
   // deliberately attaches none — an unlistened 'error' crashes the process,
   // which is the right contract for a caller-owned connection and the wrong
   // one for a shared one. Consumers never attach their own.
+  //
+  // It stays on through the name-ready round trip below, not just the
+  // socket's connect: an 'error' there — Bun's reader thread failing on the
+  // connection as an app's first dial meets WebAssembly compiling — found
+  // no listener between this one coming off and the death one going on.
   let onConnect, onClose, onError;
+  const failed = new Promise((resolve, reject) => {
+    onClose = (cause) =>
+      reject(cause ?? new Error(`react-x11: the ${kind} bus closed`));
+    onError = (err) => reject(err);
+  });
+  failed.catch(() => {});
+  conn.once('close', onClose);
+  conn.on('error', onError);
   try {
-    await new Promise((resolve, reject) => {
-      onConnect = () => resolve();
-      onClose = (cause) =>
-        reject(cause ?? new Error(`react-x11: the ${kind} bus closed`));
-      onError = (err) => reject(err);
-      conn.once('connect', onConnect);
-      conn.once('close', onClose);
-      conn.on('error', onError);
-    });
-  } catch (cause) {
-    await discard(bus);
-    return fail(cause);
+    try {
+      await Promise.race([
+        new Promise((resolve) => {
+          onConnect = () => resolve();
+          conn.once('connect', onConnect);
+        }),
+        failed,
+      ]);
+    } catch (cause) {
+      await discard(bus);
+      return fail(cause);
+    }
+
+    // Name-ready. `bus.name` is assigned in the Hello reply callback
+    // (dbus-native lib/bus.js:1002-1009), so it is *not* set when the
+    // constructor returns. One org.freedesktop.DBus round trip is an ordering
+    // barrier: replies arrive behind the Hello dbus-native sent first. Without
+    // it, the first consumer to derive state from the app's own identity — a
+    // portal Request path, say — races Hello and builds a path with
+    // `undefined` in it.
+    try {
+      await Promise.race([bus.listNames(), failed]);
+    } catch (cause) {
+      await discard(bus);
+      return fail(cause);
+    }
   } finally {
     conn.removeListener('connect', onConnect);
     conn.removeListener('close', onClose);
     conn.removeListener('error', onError);
-  }
-
-  // Name-ready. `bus.name` is assigned in the Hello reply callback
-  // (dbus-native lib/bus.js:1002-1009), so it is *not* set when the
-  // constructor returns. One org.freedesktop.DBus round trip is an ordering
-  // barrier: replies arrive behind the Hello dbus-native sent first. Without
-  // it, the first consumer to derive state from the app's own identity — a
-  // portal Request path, say — races Hello and builds a path with
-  // `undefined` in it.
-  try {
-    await bus.listNames();
-  } catch (cause) {
-    await discard(bus);
-    return fail(cause);
   }
   if (bus.name == null) {
     await discard(bus);
