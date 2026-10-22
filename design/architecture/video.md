@@ -198,8 +198,9 @@ the CPU column is what the process pays.
 - **What declines to the JavaScript path**, on purpose: a full-range frame
   (every adaptor reads video range), BT.2020, BT.709 on a port with no
   `XV_COLORSPACE`, the first frame of a size, and any frame while the window
-  is not mapped — its redirected child has no pixmap then (§2.6). An ntk
-  without `ntk/xv` declines everything, so react-x11 needs no new floor.
+  is not mapped — its redirected child has no pixmap then (§2.6). react-x11
+  asks for ntk ^8.24.0, the first with `ntk/xv`; an older ntk deduped into
+  an application's tree declines everything rather than failing.
 - **Tests**: `ntk/test/xv.test.js` (layouts, port choice, transport, the
   colour-space rule) and `xv-live.test.js` (pixels through a real adaptor,
   skipped without one); `test/xvideo.test.js` for the writer's decisions,

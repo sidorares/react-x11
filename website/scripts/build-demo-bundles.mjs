@@ -148,9 +148,6 @@ await esbuild.build({
     // ntk and every subpath it exports (react-x11 imports `ntk/color`,
     // `ntk/svg`, …), each to the one copy in the repo's node_modules
     ...ntkAliases,
-    // a subpath react-x11 imports only where ntk has it: an ntk too old to
-    // export it gets the stub, which fails the import as that ntk would
-    'ntk/xv': ntkAliases['ntk/xv'] ?? path.join(stubsDir, 'ntk-xv.js'),
     x11: x11Dir,
     // ONE React. The entry resolves 'react' from website/node_modules
     // (docusaurus' copy) and react-x11 resolves it from the repo root —
