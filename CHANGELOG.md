@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.53.0](https://github.com/sidorares/react-x11/compare/v2.52.0...v2.53.0) (2026-10-22)
+
+
+### Features
+
+* **video:** a &lt;video frames&gt; frame is converted on the GPU on Linux, by a shader on Wayland and through an Xv port on X11, where every one was converted in JavaScript ([#1003](https://github.com/sidorares/react-x11/issues/1003)) ([f95b317](https://github.com/sidorares/react-x11/commit/f95b317d3c4384dfe042e66e4571fdb6d004ecb6))
+
+
+### Bug Fixes
+
+* **menu:** a ContextMenu wrapper is no longer a nameless Tab stop ([#1001](https://github.com/sidorares/react-x11/issues/1001)) ([0b8e084](https://github.com/sidorares/react-x11/commit/0b8e0844c141c04658cb2561cdfe94fcc47182b9))
+
 ## [2.52.0](https://github.com/sidorares/react-x11/compare/v2.51.1...v2.52.0) (2026-10-22)
 
 
