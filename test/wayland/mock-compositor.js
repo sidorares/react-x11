@@ -66,6 +66,7 @@ const DEFS = loadDefs([
   'kde-server-decoration',
   'wlr-layer-shell-unstable-v1',
   'wlr-screencopy-unstable-v1',
+  'xdg-foreign-unstable-v2',
 ]);
 
 /** Globals the mock advertises: name -> [interface, version]. */
@@ -87,6 +88,7 @@ const GLOBALS = [
   ['org_kde_kwin_server_decoration_manager', 1],
   ['zwlr_layer_shell_v1', 4],
   ['zwlr_screencopy_manager_v1', 3],
+  ['zxdg_exporter_v2', 1],
 ];
 
 /** `wl_seat.capability` bits, as the mock's `capabilities` option spells them. */
@@ -199,6 +201,8 @@ export class MockCompositor extends EventEmitter {
     }
     /** the client's `zwp_text_input_v3`, once it asked for one */
     this.textInput = null;
+    /** xdg-foreign exports: `{ id, surface, handle, destroyed }` */
+    this.exports = [];
     /** `commit` requests received on it — what a `done` echoes */
     this.textInputCommits = 0;
     // drag and drop: the client's data device and source, the server's
@@ -470,6 +474,30 @@ export class MockCompositor extends EventEmitter {
         if (role) role.kdeDecoration = null;
         this.objects.delete(id);
       }
+      return;
+    }
+    if (iface === 'zxdg_exporter_v2' && name === 'export_toplevel') {
+      const [newId, surfaceId] = args;
+      // the spec's one rule: only an xdg_toplevel can be exported, and
+      // anything else is a protocol error that ends the connection
+      if (this.surfaces.get(surfaceId)?.role?.kind !== 'toplevel') {
+        this.send(1, 'error', id, 0, 'surface is not an xdg_toplevel');
+        return;
+      }
+      const record = {
+        id: newId,
+        surface: surfaceId,
+        handle: `mock-export-${this.exports.length + 1}`,
+        destroyed: false,
+      };
+      this.exports.push(record);
+      this.send(newId, 'handle', record.handle);
+      return;
+    }
+    if (iface === 'zxdg_exported_v2' && name === 'destroy') {
+      const record = this.exports.find((e) => e.id === id && !e.destroyed);
+      if (record) record.destroyed = true;
+      this.objects.delete(id);
       return;
     }
     if (iface === 'zwlr_layer_shell_v1') {

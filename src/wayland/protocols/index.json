@@ -127,5 +127,11 @@
  "keyboard-shortcuts-inhibit-unstable-v1": [
   "zwp_keyboard_shortcuts_inhibit_manager_v1",
   "zwp_keyboard_shortcuts_inhibitor_v1"
+ ],
+ "xdg-foreign-unstable-v2": [
+  "zxdg_exporter_v2",
+  "zxdg_importer_v2",
+  "zxdg_exported_v2",
+  "zxdg_imported_v2"
  ]
 }

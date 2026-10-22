@@ -88,6 +88,11 @@ to your window: stacked above it, and not a second entry in the task switcher.
 window through `useTopLevelWindow()` at the moment a dialog opens, by which
 time the window is mounted and has an XID.
 
+On the [native Wayland backend](wayland-backend.md) the window has no XID,
+and the portal is handed an **xdg-foreign** export of it instead —
+`wayland:<handle>`, which GNOME and KDE both parent to. Where the compositor
+has no xdg-foreign the handle is empty and the dialog opens unparented.
+
 Why inference rather than a lookup: a hook has no position in the host tree.
 React context cannot come from a host element, the host context
 `getChildHostContext` builds reaches `createInstance` and not components, and a

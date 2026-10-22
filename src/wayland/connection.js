@@ -65,6 +65,9 @@ export const PROTOCOLS = [
   'cursor-shape-v1',
   'tablet-v2',
   'xdg-activation-v1',
+  // a handle another client can parent a dialog to — the portal's
+  // `parent_window` (src/portal.js, `portalParentFor`)
+  'xdg-foreign-unstable-v2',
   'xdg-decoration-unstable-v1',
   // the older KDE protocol that does the same job, for the compositors that
   // have only that one (ssd.js picks between them)

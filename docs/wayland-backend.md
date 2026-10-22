@@ -450,8 +450,12 @@ Two protocol gaps are worth knowing. `@windowkit/wayland` keeps one
 global per interface name, so the output bound here is the one advertised
 last; `capture({ output })` and `layerShell.output` take another proxy, but
 enumerating them waits on `outputs.js`. And the portal's `parent_window`
-handle names an X window; a Wayland toplevel has none without xdg-foreign,
-so the portal dialog floats.
+handle comes from **xdg-foreign**: the first dialog a toplevel opens exports
+it (`zxdg_exporter_v2`, kept for the window's lifetime), and the portal gets
+`wayland:<handle>` — modal to the window and stacked over it, as `x11:<xid>`
+is on X11. A compositor without the protocol, or a popup, leaves the handle
+empty and the dialog floats; an `x11:` handle never goes out from this
+backend, because a Wayland window's id names no X window.
 
 ## Under a second compositor
 
@@ -565,8 +569,9 @@ same JSX is a toplevel and the same pick is the portal's.
   backends.
 - `src/screencolor.js` — rung 3 of the eyedropper's ladder, the Wayland
   backend's own picker, guarded by `app.backend === 'wayland'`; and the
-  portal's `parent_window` handle is left empty on that backend, where an
-  X window id would be a lie.
+  portal's `parent_window` handle is an xdg-foreign export on that backend
+  (`portalParentFor` in `src/portal.js`, shared with the file dialog),
+  where an X window id would be a lie.
 - [`@windowkit/wayland`](https://github.com/windowkit/wayland) 3.1.1 — a
   fork of [`wayland-client`](https://github.com/sdumetz/node-wayland-client)
   3.0.0: fd send/receive, the `$` synchronous request namespace, callback

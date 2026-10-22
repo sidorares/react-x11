@@ -104,6 +104,9 @@ export class WaylandApp extends EventEmitter {
     this.viewporter = null;
     this.fractionalScale = null;
     this.activation = null;
+    /** xdg-foreign's exporter: a toplevel's handle for another client to
+     *  parent to (`exportHandle`); null where the compositor has none */
+    this.exporter = null;
     /** the monitors, published into src/screens.js (outputs.js) */
     this.outputs = null;
     /** xdg-decoration, layer-shell, shm: null where the compositor has none */
@@ -153,6 +156,7 @@ export class WaylandApp extends EventEmitter {
     app.viewporter = await conn.bind('wp_viewporter');
     app.fractionalScale = await conn.bind('wp_fractional_scale_manager_v1');
     app.activation = await conn.bind('xdg_activation_v1');
+    app.exporter = await conn.bind('zxdg_exporter_v2');
     // The scale session first, so the outputs have a per-monitor map to
     // fill; then the outputs, awaited like the X11 backend's Xinerama tier:
     // an auto-sized window clamps to a monitor synchronously inside
@@ -304,6 +308,9 @@ export class WaylandApp extends EventEmitter {
   }
 
   _forgetWindow(win) {
+    // before the surface goes: the export is a handle *to* it
+    win._exported?.proxy.$.destroy();
+    win._exported = null;
     if (this.windows.get(win.wl.surface.id) === win)
       this.windows.delete(win.wl.surface.id);
     const i = this.toplevels.indexOf(win);
@@ -508,6 +515,37 @@ export class WaylandApp extends EventEmitter {
    */
   createOverlayPane(attributes) {
     return new WaylandOverlayPane(this, attributes);
+  }
+
+  /**
+   * A handle another client can parent a window of its own to — the
+   * portal's `parent_window`, spelled `wayland:<handle>` there — or null.
+   *
+   * xdg-foreign's `export_toplevel`, made once per window on first ask and
+   * kept for its lifetime: the handle is valid for as long as the export
+   * object lives, and a file dialog opened twice from one window should name
+   * it the same way both times. Only an xdg_toplevel can be exported — a
+   * popup or a layer surface is a protocol error, so those answer null, as
+   * does a compositor without the protocol. The dialog then floats, which the
+   * portal allows; what it must never get is an `x11:` handle naming a
+   * Wayland window, which is what it got before this existed.
+   */
+  exportHandle(win) {
+    if (!this.exporter || !win?.wl?.surface || win.isPopup || win.isLayer) {
+      return Promise.resolve(null);
+    }
+    if (win._destroyed) return Promise.resolve(null);
+    if (!win._exported) {
+      const proxy = this.exporter.$.export_toplevel(win.wl.surface.id);
+      const handle = new Promise((resolve) => {
+        proxy.on('handle', (value) => resolve(value || null));
+        // the answer is one round trip away; a compositor that never sends
+        // it is a floating dialog, not a hung one
+        setTimeout(() => resolve(null), 1000).unref?.();
+      });
+      win._exported = { proxy, handle };
+    }
+    return win._exported.handle;
   }
 
   /**
