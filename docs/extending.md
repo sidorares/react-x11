@@ -1119,13 +1119,15 @@ buffer, a jump to the far end and a resize all take. It is one `CopyArea`
 inside the pixmap: nothing crosses the wire but the request, the overlap is
 safe, and no exposure events come back.
 
-The same element runs unchanged on the Cocoa and Wayland backends.
+The same element runs unchanged on the Cocoa, Wayland and win32 backends.
 `react-x11/ntk`'s `Surface` asks the app it is handed for the
 implementation — ntk's pixmap on an X connection, a CG bitmap on a Cocoa
-app, a GL render target on a Wayland one — so the surface above is a bitmap
-there, `copyWithin` is one in-place copy of the band, and `drawImage` is
-one composite, with the element naming neither backend. The one thing to
-know: where a surface has one graphics state rather than a context per
+app, a GL render target on a Wayland one, a Direct2D bitmap on a win32 one
+— so the surface above is a bitmap there, `copyWithin` is one in-place copy
+of the band (on win32 it answers `false` for now, the bridge having no
+in-place blit for an offscreen bitmap, so the element repaints the rect),
+and `drawImage` is one composite, with the element naming no backend. The
+one thing to know: where a surface has one graphics state rather than a context per
 call — a bitmap, a render target — `getContext('2d')` answers the same
 context every time and its `destroy()` is a no-op (docs/macos.md "Custom
 drawing on a layer tree").
@@ -2161,9 +2163,10 @@ of ntk in one process means two font caches and two glyph atlases, and a
 node built against one cannot be painted by the other — a failure that
 looks like a drawing bug rather than a dependency bug. It is also where a
 drawing-adjacent name gets its backend-neutral answer: `Surface` from here
-is a pixmap on X11 and a CG bitmap on the Cocoa backend, where `Surface`
-from `ntk` is the pixmap only. And it is where an element that draws images
-of its own decodes them: `decodeImageBytes` is the ladder `<image>` reads
+is a pixmap on X11, a CG bitmap on the Cocoa backend, a GL render target on
+Wayland and a Direct2D bitmap on win32, where `Surface` from `ntk` is the
+pixmap only. And it is where an element that draws images of its own
+decodes them: `decodeImageBytes` is the ladder `<image>` reads
 bytes with — WebP everywhere, and under Bun every format Bun reads, off the
 JavaScript thread — where ntk's `decodeImage` is PNG and JPEG, synchronously
 ([formats](elements.md#formats-and-what-decodes-them)).
@@ -2229,9 +2232,11 @@ declare module 'react-x11/jsx-runtime' {
 stays true as the declarations move.
 
 The drawing side is declared too. `Context2D` from `react-x11/node` is the
-canvas-shaped subset **both** backends implement — ntk's context over
-XRender and the cocoa backend's over CoreGraphics — so `paintContent(ctx:
-Context2D)` type-checks every call an element makes, and a member only one
-backend has is optional there (`globalCompositeOperation`, X11 only) or
+canvas-shaped subset the backends implement — ntk's context over
+XRender, and the one `src/backend/context2d.js` wraps over CoreGraphics on
+Cocoa and Direct2D on win32 — so `paintContent(ctx: Context2D)`
+type-checks every call an element makes, and a member not every backend
+has is optional there (`globalCompositeOperation`, which a native context
+takes only for the modes its bridge draws — assign it and read it back) or
 absent. `paintCachePlan`, `paintCached`, `opaqueRect` and the rest of the
 contract above are on the class, with `PaintCachePlan` for the plan.

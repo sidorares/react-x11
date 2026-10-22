@@ -2,8 +2,8 @@
 
 **Status: a report, with one measurement that changes the plan.** Written
 2026-09-19 against react-x11 2.16.1 on Windows 11 build 26200, with a GeForce
-GTX 1080 Ti. [windows.md](windows.md) is the backend's design record and says
-`<glarea>` is ANGLE; this is the report that asks whether it has to be.
+GTX 1080 Ti. [windows.md](windows.md) is the backend's design record and said
+`<glarea>` is ANGLE; this is the report that asked whether it has to be.
 
 ## What react-x11's 3D story actually is
 
@@ -187,11 +187,12 @@ family). Budget the full WebGL 2 surface for it rather than the measured 64.
   `wglGetProcAddress`, which is per-context and must be resolved after the
   context is current. `maps-gl` draws, and so does the `configurator`
   example's laptop.
-- **Phase G3 — the overlay and the input.** `gloverlay.js`'s panes over the
-  surface, and the rule `glnodes.js` already states: the surface selects no
-  pointer input, so the pointer reaches the tree by propagation. On this
-  backend the surface is a visual rather than a window and selects no input
-  at all, so the second half is free; the panes are the work.
+- **Phase G3 — the overlay and the input. Done.** `gloverlay.js`'s panes
+  over the surface — a DirectComposition visual with a premultiplied surface
+  of its own (`src/win32/overlay.js`) — and the rule `glnodes.js` already
+  states: the surface selects no pointer input, so the pointer reaches the
+  tree by propagation. On this backend the surface is a visual rather than a
+  window and selects no input at all, so the second half is free.
 - **Phase G5 — composited GL. Done, and first.** `WGL_NV_DX_interop2` onto a
   composition visual, because the child-window route above is not a route.
   It is what makes a `<glarea>` participate in the window's alpha instead of

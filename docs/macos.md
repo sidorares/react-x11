@@ -2,9 +2,9 @@
 
 **Status: shipped, and still being extended.** This began life as a research
 RFC written 2026-09-01 against react-x11 2.2.1, and the backend it planned is
-now in the tree: `src/cocoa/` is ~8,800 lines across 23 modules, the bridge
+now in the tree: `src/cocoa/` is ~15,400 lines across 33 modules, the bridge
 published as **[`@windowkit/appkit`](https://www.npmjs.com/package/@windowkit/appkit)**
-(an `optionalDependency`, `^0.9.0` as of react-x11 2.11.0), and
+(an `optionalDependency`, `^0.30.1` as of react-x11 2.51.1), and
 `createRoot()` selects it **by default on macOS**. Where this document says
 `node-calayers`, read `@windowkit/appkit`: that is what the POC was called
 before it was published.
@@ -92,19 +92,20 @@ exactly the shape `node-calayers` already has.
 Out of scope on this backend, honestly and up front, the same way
 wayland.md declares its walls:
 
-- **A window manager cannot be written against Cocoa.** `examples/wm.jsx`
-  and the substructure-redirect half of the API remain X11-only.
-- **Cross-process window embedding does not exist on macOS.** `<foreign>`,
-  the XEmbed half of `<Frame>`, `@react-x11/components`' tray-host and its
-  mpv/VLC `--wid` embedding have no equivalent; `<Frame>` on macOS becomes
-  a parented toplevel or an in-process pane, exactly the fate wayland.md
-  assigns it. A `<foreign>` rendered here says so — one `onError`, no
-  `onReady`, an empty box — and `useSupports('embedding')` is false, so a
-  component can ask before rendering one (#531).
-- **XQuartz is not deprecated by this.** react-x11 already runs on macOS
-  today through XQuartz; that path remains the way to run the X11 backend
-  (and the WM example) on a Mac. This backend is for shipping _native_
-  apps.
+- **A window manager cannot be written against Cocoa.** `examples/wm.jsx` and
+  the substructure-redirect half of the API remain X11-only.
+- **Cross-process window embedding does not exist on macOS.** `<foreign>`, the
+  XEmbed half of `<Frame>`, `@react-x11/components`' tray-host and its mpv/VLC
+  `--wid` embedding have no equivalent. `<Frame>` on macOS was planned as a
+  parented toplevel or an in-process pane, the fate wayland.md assigns it, and
+  shipped as neither: its pane draws into IOSurfaces a host sublayer shows
+  (`src/cocoa/panehost.js`, [frame.md](frame.md)). A `<foreign>` rendered here
+  says so — one `onError`, no `onReady`, an empty box — and
+  `useSupports('embedding')` is false, so a component can ask before rendering
+  one (#531).
+- **XQuartz is not deprecated by this.** react-x11 already runs on macOS today
+  through XQuartz; that path remains the way to run the X11 backend (and the
+  WM example) on a Mac. This backend is for shipping _native_ apps.
 
 ## What macOS actually changes
 
@@ -534,36 +535,36 @@ successor the way wayland.md carries its measurements.
 
 ## Windowing semantics: what maps, what bends, what breaks
 
-| react-x11 today                                    | macOS                                                                                                      | verdict                                                                          |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `<window>`, WM-managed                             | `NSWindow` (titled), delegate events for move/resize/close/focus                                           | maps; the app _can_ place itself (unlike Wayland)                                |
-| `<window x y>` screen position                     | `setFrameOrigin` (flip Y against the screen frame)                                                         | maps                                                                             |
-| auto-sizing (`width: 'auto'`)                      | measure first, then size the window before ordering front — same commit-phase shape as `realize()`         | maps cleanly                                                                     |
-| `<popup>` (override-redirect, self-placed)         | borderless non-activating `NSPanel`, `addChildWindow` to the anchor's window, screen-coordinate placement  | maps — `anchor.js` flip/clamp math survives against `NSScreen.visibleFrame`      |
-| `<popup grab>` dismissal                           | no pointer grabs; local+global event monitors, or key-window resignation                                   | bends — same UX, different mechanism                                             |
-| `decorations: false`                               | `styleMask: [.borderless]` (or `.fullSizeContentView` for CSD-ish looks)                                   | maps                                                                             |
-| `states`: maximized/fullscreen/minimized/attention | `zoom:`, `toggleFullScreen:`, `miniaturize:`, `requestUserAttention:`; readback via delegate notifications | maps; `sticky`/`below`/`skip_taskbar`/`shaded` have no equivalent                |
-| `alwaysOnTop`                                      | `window.level = .floating`                                                                                 | maps                                                                             |
-| `transientFor`                                     | `addChildWindow:` / sheets                                                                                 | maps for the dialog case                                                         |
-| `appId`, `onClientMessage`, size-increment hints   | —                                                                                                          | gone; bundle identity lives in Info.plist                                        |
-| `transparent`                                      | `isOpaque = false`, clear background — always composited, no compositor probe needed                       | maps _better_; `useSupports('transparency')` is constant-true                    |
-| frame clock (Present + fence + estimator)          | `CADisplayLink` (macOS 14+) / `CVDisplayLink`                                                              | simpler; per-window, refresh-rate-aware                                          |
-| scale ladder (env → XSETTINGS → Xft → RandR)       | `backingScaleFactor` + `windowDidChangeBackingProperties`                                                  | collapses to one authoritative, live source                                      |
-| screens (`useScreens`)                             | `NSScreen.screens`, re-read: the bridge follows the change notification, but no event reaches a client     | maps — asked before a placement and on a clock while watched (#617)              |
-| appearance ladder                                  | `NSApp.effectiveAppearance` KVO + `NSColor.controlAccentColor`; accent-change notification                 | the osascript rung already feeds accent + ink into the palette; in-process later |
-| clipboard (selections, INCR, targets)              | `NSPasteboard` (+ lazy providers for the ownership model); no PRIMARY selection                            | maps; `transfer.js` MIME plumbing reusable; INCR dies unmourned                  |
-| DnD (XDND)                                         | `NSDraggingSource`/`NSDraggingDestination` on the hosting view                                             | maps; the `dropAccept`/`onDrag*` prop contract holds                             |
-| global menu (D-Bus registrar, in-window fallback)  | `NSApp.mainMenu` — **always present**, delegation never fails                                              | maps _better_; see §Menus                                                        |
-| file dialogs (portal → osascript → drawn)          | `NSOpenPanel`/`NSSavePanel` replace the osascript rung                                                     | upgrades                                                                         |
-| a11y (AT-SPI over D-Bus)                           | `NSAccessibility` protocol, virtual `NSAccessibilityElement` tree fed from the same `a11y.js` model        | maps; the model carries, the bridge is new (the Chromium/Flutter shape)          |
-| idle / keep-awake                                  | `CGEventSourceSecondsSinceLastEventType` / `IOPMAssertion`, `NSProcessInfo` activity                       | idle **shipped**, `ioreg` until the bridge reads it (#938); keep-awake maps      |
-| startup notification, `activateWindow`             | `NSApp.activate` + `makeKeyAndOrderFront:`, `NSRunningApplication`; Launch Services owns launch UX         | `activateWindow` **shipped** (`CocoaApp.raiseWindow`); startup dissolves         |
-| URI schemes / single instance (`application.js`)   | Apple Events (`kAEGetURL`) + Launch Services registration; single-instance is the platform default         | maps; same hooks (`onAppOpen`/`onAppActivate`), new plumbing                     |
-| tray                                               | `NSStatusItem`                                                                                             | **gained** — X11 has no core tray today                                          |
-| `<glarea>` (GLX / direct CGL)                      | `CAOpenGLLayer`/`NSOpenGLContext` (deprecated but functional), or ANGLE/Metal later                        | bends; ntk's existing `cgl` direct backend is prior art                          |
-| `<foreign>`, XEmbed `<Frame>`, `examples/wm.jsx`   | —                                                                                                          | **gone by design**                                                               |
-| `ssh -X` remoting                                  | —                                                                                                          | X11 backend remains the remote answer                                            |
-| keyboard state (Caps Lock before first key)        | `NSEvent.modifierFlags` (static read + `flagsChanged`)                                                     | maps                                                                             |
+| react-x11 today                                    | macOS                                                                                                      | verdict                                                                                                       |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `<window>`, WM-managed                             | `NSWindow` (titled), delegate events for move/resize/close/focus                                           | maps; the app _can_ place itself (unlike Wayland)                                                             |
+| `<window x y>` screen position                     | `setFrameOrigin` (flip Y against the screen frame)                                                         | maps                                                                                                          |
+| auto-sizing (`width: 'auto'`)                      | measure first, then size the window before ordering front — same commit-phase shape as `realize()`         | maps cleanly                                                                                                  |
+| `<popup>` (override-redirect, self-placed)         | borderless non-activating `NSPanel`, `addChildWindow` to the anchor's window, screen-coordinate placement  | maps — `anchor.js` flip/clamp math survives against `NSScreen.visibleFrame`                                   |
+| `<popup grab>` dismissal                           | no pointer grabs; local+global event monitors, or key-window resignation                                   | bends — same UX, different mechanism                                                                          |
+| `decorations: false`                               | `styleMask: [.borderless]` (or `.fullSizeContentView` for CSD-ish looks)                                   | maps                                                                                                          |
+| `states`: maximized/fullscreen/minimized/attention | `zoom:`, `toggleFullScreen:`, `miniaturize:`, `requestUserAttention:`; readback via delegate notifications | maps; `sticky`/`below`/`skip_taskbar`/`shaded` have no equivalent                                             |
+| `alwaysOnTop`                                      | `window.level = .floating`                                                                                 | maps                                                                                                          |
+| `transientFor`                                     | `addChildWindow:` / sheets                                                                                 | maps for the dialog case                                                                                      |
+| `appId`, `onClientMessage`, size-increment hints   | —                                                                                                          | gone; bundle identity lives in Info.plist                                                                     |
+| `transparent`                                      | `isOpaque = false`, clear background — always composited, no compositor probe needed                       | maps _better_; `useSupports('transparency')` is constant-true                                                 |
+| frame clock (Present + fence + estimator)          | `CADisplayLink` (macOS 14+) / `CVDisplayLink`                                                              | simpler; per-window, refresh-rate-aware                                                                       |
+| scale ladder (env → XSETTINGS → Xft → RandR)       | `backingScaleFactor` + `windowDidChangeBackingProperties`                                                  | collapses to one authoritative, live source                                                                   |
+| screens (`useScreens`)                             | `NSScreen.screens`, re-read: the bridge follows the change notification, but no event reaches a client     | maps — asked before a placement and on a clock while watched (#617)                                           |
+| appearance ladder                                  | `NSApp.effectiveAppearance` KVO + `NSColor.controlAccentColor`; accent-change notification                 | the osascript rung already feeds accent + ink into the palette; in-process later                              |
+| clipboard (selections, INCR, targets)              | `NSPasteboard` (+ lazy providers for the ownership model); no PRIMARY selection                            | maps; `transfer.js` MIME plumbing reusable; INCR dies unmourned                                               |
+| DnD (XDND)                                         | `NSDraggingSource`/`NSDraggingDestination` on the hosting view                                             | maps; the `dropAccept`/`onDrag*` prop contract holds                                                          |
+| global menu (D-Bus registrar, in-window fallback)  | `NSApp.mainMenu` — **always present**, delegation never fails                                              | maps _better_; see §Menus                                                                                     |
+| file dialogs (portal → osascript → drawn)          | `NSOpenPanel`/`NSSavePanel` replace the osascript rung                                                     | upgrades                                                                                                      |
+| a11y (AT-SPI over D-Bus)                           | `NSAccessibility` protocol, virtual `NSAccessibilityElement` tree fed from the same `a11y.js` model        | maps; the model carries, the bridge is new (the Chromium/Flutter shape)                                       |
+| idle / keep-awake                                  | `CGEventSourceSecondsSinceLastEventType` / `IOPMAssertion`, `NSProcessInfo` activity                       | idle **shipped**, `ioreg` until the bridge reads it (#938); keep-awake maps                                   |
+| startup notification, `activateWindow`             | `NSApp.activate` + `makeKeyAndOrderFront:`, `NSRunningApplication`; Launch Services owns launch UX         | `activateWindow` **shipped** (`CocoaApp.raiseWindow`); startup dissolves                                      |
+| URI schemes / single instance (`application.js`)   | Apple Events (`kAEGetURL`) + Launch Services registration; single-instance is the platform default         | maps; same hooks (`onAppOpen`/`onAppActivate`), new plumbing                                                  |
+| tray                                               | `NSStatusItem`                                                                                             | **shipped** (`useTray()`); the X11 side has the freedesktop StatusNotifierItem rung (`src/statusnotifier.js`) |
+| `<glarea>` (GLX / direct CGL)                      | **shipped**: `x11-dri`'s CGL context rendering into IOSurfaces on a sublayer (`src/cocoa/glarea.js`)       | bends; ntk's `cgl` direct backend was the prior art                                                           |
+| `<foreign>`, XEmbed `<Frame>`, `examples/wm.jsx`   | —                                                                                                          | **gone by design**                                                                                            |
+| `ssh -X` remoting                                  | —                                                                                                          | X11 backend remains the remote answer                                                                         |
+| keyboard state (Caps Lock before first key)        | `NSEvent.modifierFlags` (static read + `flagsChanged`)                                                     | maps                                                                                                          |
 
 The popup row deserves the same sit-down wayland.md gave it, with the
 opposite conclusion: macOS _keeps_ client-side placement, so `anchor.js`
@@ -815,7 +816,8 @@ the drain works where it matters most.
 
 **What happened instead.** Option 2 was never built: doing a frame's work
 inside the delegate callbacks (`CocoaApp._afterInput`) met the exit
-criterion without it, and option 1 is what ships. When the drain was finally
+criterion without it, and option 1 is what shipped — now the fallback
+(`REACT_X11_THREADED=0`) behind the default below. When the drain was finally
 probed (2026-09-11) its re-entrancy risk turned out to be concrete rather
 than theoretical — a `uv_run` nested under a JS call runs timers and never
 drains the microtasks they queue — and the shape that removes both of option
@@ -823,20 +825,20 @@ drains the microtasks they queue — and the shape that removes both of option
 in a real `[NSApp run]` and the JS moves to a worker. §"JS on a worker: a UI
 thread of the bridge's own" below.
 
-The frame clock rides the display link: `requestAnimationFrame`
-callbacks fire on link ticks, commits wrap in explicit `CATransaction`s,
-and the "answer the input" early-flush (`flushPendingFrames` on handler
-unwind) maps to committing the transaction before the pump returns to
-AppKit — same policy, new mechanism. What runs today is the timer pump
-with a frame interval over it (`frameInterval`; by default the period of
-the display each window is on, as `listScreens` reports it — 8.3ms on a
-120Hz panel, 16.7 on a 60Hz monitor — with a frame that falls between
-two pump ticks given a one-shot timer of its own, so the period is the
-display's whatever the pump's cadence — and, since the frame pacer, a
-frame asked for between two ticks armed on the spot rather than looked at
-by the next tick), discrete input and the wheel flushed on the event, and
-a window that is not on glass deferring its frames — see "Measured" below
-for what each of those was worth.
+The frame clock rides the display link: `requestAnimationFrame` callbacks fire
+on link ticks, commits wrap in explicit `CATransaction`s, and the "answer the
+input" early-flush (`flushPendingFrames` on handler unwind) maps to committing
+the transaction before the pump returns to AppKit — same policy, new
+mechanism. What runs in pump mode is the timer pump with a frame interval over
+it (threaded mode, the default, has no pump and gives every frame a timer of
+its own — §"The renderer's half") (`frameInterval`; by default the period of
+the display each window is on, as `listScreens` reports it — 8.3ms on a 120Hz
+panel, 16.7 on a 60Hz monitor — with a frame that falls between two pump ticks
+given a one-shot timer of its own, so the period is the display's whatever the
+pump's cadence — and, since the frame pacer, a frame asked for between two
+ticks armed on the spot rather than looked at by the next tick), discrete
+input and the wheel flushed on the event, and a window that is not on glass
+deferring its frames — see "Measured" below for what each of those was worth.
 
 What the clock cannot know is whether a frame is worth painting. It has no
 fence: the X11 frame waits for the server to consume the last one, and a
@@ -1178,7 +1180,7 @@ skip it, and what moves on which Node, is in
   synchronously as before. A bezel not drawn yet is null: its canvas draws
   the one it had and repaints when the new one lands, and a bezel drawn at
   rest brings its pressed twin, so a press never waits for one.
-- **Tests.** The 22 `test/cocoa-*.test.js` files drive fake bridges that
+- **Tests.** The 52 `test/cocoa-*.test.js` files drive fake bridges that
   answer synchronously and keep passing on the pump;
   `test/cocoa-threaded.test.js` drives the same app over a fake in a
   worker's shapes, `test/cocoa-relaunch.test.js` pins when the move
@@ -1846,9 +1848,11 @@ The three semantics [the design](architecture/animation.md) said to pin:
 - **Completion** is the bridge's `animation-end` event, so the node model
   drops the entry when the render server says so, not when a timer guesses.
 
-Not offloaded yet, in the order they would pay: `opacity` and transforms
-(they do not exist as style properties — the design's §3.4), an absolutely
-positioned node's offsets as `position`, and `boxShadow`'s components.
+Not offloaded yet, in the order they would pay: transforms (they do not
+exist as a style property — the design's §3.4) and `boxShadow`'s
+components. `opacity` (#601, offloaded in #818) and, for a node no pointer
+lands on, an out-of-flow node's insets as `position` have since joined the
+list above (`ANIMATED_KEY_PATHS`, `INSET_KEY_PATHS`, src/cocoa/presenter.js).
 
 Two style capabilities currently rejected everywhere become cheap on
 layers and are proposed as **capability-gated additions** rather than
@@ -1856,7 +1860,8 @@ macOS-only forks, keeping one style vocabulary:
 
 - **`opacity`** — free on a layer (`opacity`); on X11 implementable as
   group-raster through an ntk `Surface` at composite time (bounded,
-  cacheable). Ship on both, the X11 cost documented.
+  cacheable). Ship on both, the X11 cost documented. _Shipped that way
+  (#601): a style property on every backend, a group faded as one._
 - **`transform`** (2D: translate/scale/rotate) — free on a layer;
   XRender pictures do transform, so a bounded X11 story exists for
   leaf-ish content even if the general case (transformed subtrees with
@@ -2334,7 +2339,10 @@ additive or mechanical:
    stay flat but documented per backend (`display`/`stream`/`glxVisual`/
    `glPolicy` are X11's; an unknown-to-this-backend option throws with
    the usual corrective error). `createRoot({ app })` keeps working and
-   is how tests inject mocks of either flavor.
+   is how tests inject mocks of either flavor. _As built, the set is
+   `'x11' | 'cocoa' | 'wayland' | 'win32' | 'auto'`: `'auto'` takes
+   win32 on Windows the way it takes Cocoa on darwin, and never chooses
+   Wayland (`resolveBackend`, src/Reconciler.js)._
 2. **Capabilities.** `useSupports` grows `'nativeControls'`,
    `'embedding'` (false here), `'globalMenu'`, `'transforms'` (when built)
    beside `'transparency'` and `'shaders'`; same store-and-settle semantics.
@@ -2596,6 +2604,12 @@ a second native backend or Wayland actually starts, and not before: a
 half-renamed tree is worse than either name. (5) Bridge growth stays
 verb-shaped — a pattern fill for `<Flow>`'s grid tiles, a blend op for
 `PictOp.Src` — and never a JS canvas class.
+
+_As built: Wayland did not take the `'2d-sw'` route. Its context is a GLES
+rasterizer of its own (`src/wayland/context2d.js`, wayland.md's Tier D),
+which draws the dialect rather than forwarding it. Step (4) was taken for
+the context alone when the Windows backend started — `src/backend/context2d.js`
+drives both bridges' verb tables — and the swapchain stayed in `src/cocoa/`._
 
 ## Measured: the frame clock and the large tree
 

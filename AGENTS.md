@@ -28,8 +28,10 @@ ergonomics over **four backends**:
   a DirectComposition surface per window, Direct2D drawing and DirectWrite
   text. **The default on win32**, falling back to X11 when the bridge is
   absent so a WSLg or Cygwin setup with `DISPLAY` keeps working.
-  `docs/windows.md` is the design record. Young: the examples render and
-  respond to the mouse, and the desktop services are not built.
+  `docs/windows.md` is the design record. Young: the examples run, with an
+  IMM32 input method, a UI Automation bridge and most desktop services
+  (tray, notifications, file dialogs, taskbar) in place —
+  `docs/windows-integrations.md` is the measured status.
 
 The 2d drawing dialect lives in **`src/backend/context2d.js`** and is shared
 by the two native bridges: the class takes its `native` as a constructor
@@ -61,7 +63,7 @@ no override-redirect staging (issue #4).
 - `src/index.js` — public entry (`createRoot`; the legacy
   `render`/`unmountComponentAtNode` pair was retired in #114).
 - `src/Reconciler.js` — react-reconciler host config + render entry points.
-  Written against react-reconciler 0.33 (React 19). If you upgrade
+  Written against react-reconciler 0.34 (React 19). If you upgrade
   react-reconciler, expect host config contract changes; the smoke test is
   the safety net.
 - `src/nodes/` — the retained node tree: `Node`, and the elements built on
@@ -151,7 +153,7 @@ no override-redirect staging (issue #4).
   `--inspect-port` and `--inspect-publish-uid`, and a check for
   `--inspect` anywhere took every pane in a test for one under a debugger,
   and watched none of them.
-- `src/cocoa/` — the Cocoa backend, ~8,800 lines: `app.js` (the app
+- `src/cocoa/` — the Cocoa backend, ~15,400 lines: `app.js` (the app
   object, the AppKit pump, the per-display frame clocks, event routing),
   `window.js` (an `NSWindow` and its IOSurface swapchain), `presenter.js`
   (the surface presenter — the X11 paint machinery over a bitmap) and

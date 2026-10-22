@@ -320,7 +320,12 @@ four are what this reads, from the best source the machine has:
    unset `RESOURCE_MANAGER`. A _Linux_ process drawing to an XQuartz display
    never reaches this rung at all, which is correct: it cannot read that
    Mac's defaults.
-3. **XSETTINGS** — pre-D-Bus, X11-only. `Net/ThemeName` is a _name_, so "is
+3. **Windows** — answered by the win32 backend itself: the Personalize key
+   for light or dark, DWM for the accent, `SystemParametersInfo` for contrast
+   and reduced motion, live over `WM_SETTINGCHANGE` and its siblings. Before
+   XSETTINGS for the same reason macOS is, and asked of the app rather than
+   of the platform, so only a tree on the win32 backend reaches it.
+4. **XSETTINGS** — pre-D-Bus, X11-only. `Net/ThemeName` is a _name_, so "is
    this dark" comes down to trusting the `-dark` suffix — which is exactly
    what the portal was invented to replace, so it is a fallback and never a
    correction. Live over `PropertyNotify`.

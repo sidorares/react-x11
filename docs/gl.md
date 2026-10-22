@@ -43,6 +43,16 @@ into IOSurfaces and present by handing the surface's id to the area's own
 `CALayer`. `glPolicy: 'indirect'` is the one setting that is an error there
 and says so — GLX is a protocol, and there is no server to speak it to.
 
+The two other backends have no column because they hand `onDraw` the same
+direct API the Cocoa one does, and report `gl.backend === 'direct'` too. On
+**win32** a `<glarea>` is a WGL core context drawing into a Direct3D texture
+that is copied into a composition swap chain under the window's own visual
+([windows-gl.md](windows-gl.md)), so it composites with the window's alpha
+where an X11 surface does not. On **Wayland** it is not a surface of its own
+at all: it is a rectangle of the window's backing target, drawn by the
+window's own GLES context between the tree's 2D paint and its children's
+panes (`src/wayland/glarea.js`).
+
 On X11 the default is indirect, because it is what react-x11 has always
 used. Turn the other on per app:
 

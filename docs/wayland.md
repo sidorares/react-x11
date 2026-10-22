@@ -1,6 +1,9 @@
 # A native Wayland backend
 
-**Status: research RFC.** No code. Written 2026-08 against react-x11 2.2.1,
+**Status: research RFC, since built.** The backend it plans landed in #548
+as `src/wayland/`, opt-in; [wayland-backend.md](wayland-backend.md) is the
+record of what was built, and where the two disagree that one ran. The RFC
+below was written before any code, 2026-08, against react-x11 2.2.1,
 ntk 8.7.0, node-x11 4.1.0, x11-dri 0.6.0; the line counts and library
 versions below are measurements from that date, not estimates. Two upstream
 issues were filed from this research
@@ -479,11 +482,11 @@ machine cannot exercise it. Each item names the check that would close it;
   multisampled framebuffer, so the target's partial repaints would become
   textured draws); `MAX_SAMPLES` is 1 here. It needs a machine that reports
   4 or more.
-- **Bun after an `npm install`.** Until node-x11 ships the EINTR fix for
-  `fdpass-bun.js`, a fresh install loses the local patch and every example
-  under Bun closes its connection ~0.3 s in; Node is unaffected. Re-check
-  `env -u DISPLAY REACT_X11_BACKEND=wayland bun examples/simple.jsx` stays
-  up once the dependency moves.
+- ~~**Bun after an `npm install`.**~~ Closed: node-x11 ships the EINTR fix
+  for `fdpass-bun.js` since x11 4.2.1
+  ([sidorares/node-x11#297](https://github.com/sidorares/node-x11/pull/297)),
+  and the lockfile resolves 4.2.3, so a fresh install no longer closes every
+  Bun example's connection ~0.3 s in.
 
 ## Open questions
 

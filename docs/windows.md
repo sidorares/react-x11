@@ -121,25 +121,26 @@ inversions [macos.md](macos.md) describes:
 
 Two more differences decide the rest of this document:
 
-- **A window belongs to the thread that created it, not to the main
-  thread.** AppKit insists on the process's main thread, so the Cocoa
-  backend pumps `NSApplication` from a Node timer, and AppKit's modal loops
-  — a live resize, menu tracking, a drag session — freeze Node's event
-  loop for as long as they run; macos.md §"Input and the run loop" called
-  that the one architectural risk in its plan, and it is still the model
-  that ships. Win32 has the same modal loops and more of them —
-  `DoDragDrop` does not return until the drop — but it lets the addon run
-  them on a thread of its own, so JS never sits inside one (§"Threads and
-  the event loop"). It is the largest structural difference from the Cocoa
-  backend, and it is in Windows' favour.
+- **A window belongs to the thread that created it, not to the main thread.**
+  AppKit insists on the process's main thread, so the Cocoa backend pumps
+  `NSApplication` from a Node timer, and AppKit's modal loops — a live resize,
+  menu tracking, a drag session — freeze Node's event loop for as long as they
+  run; macos.md §"Input and the run loop" called that the one architectural
+  risk in its plan. That pump is now the fallback: the default on macOS moves
+  the JS to a worker and leaves AppKit the main thread (macos.md §"JS on a
+  worker"). Win32 has the same modal loops and more of them — `DoDragDrop`
+  does not return until the drop — but it lets the addon run them on a thread
+  of its own, so JS never sits inside one (§"Threads and the event loop"). It
+  is the largest structural difference from the Cocoa backend, and it is in
+  Windows' favour.
 - **Fractional scale is the normal case, and it changes under a window.**
   125%, 150% and 175% are what laptops ship at, and a laptop beside an
   external monitor is two scales on one desk. The four-generation ladder in
   [scale.md](scale.md) collapses to one authoritative, per-monitor, live
   answer — the same collapse Wayland and macOS give — but "live" is the
-  operative word: a window dragged to the other monitor is expected to
-  re-lay itself out at that monitor's scale. That is the one renderer
-  change this backend cannot ship without (§"Layout").
+  operative word: a window dragged to the other monitor is expected to re-lay
+  itself out at that monitor's scale. That is the one renderer change this
+  backend cannot ship without (§"Layout").
 
 And three things get easier:
 
@@ -357,8 +358,8 @@ inside stock `node.exe` — `node-usb-detection`'s listener window,
 
 ### The decision
 
-**Our own addon — `@windowkit/win32` as a working name, `@windowkit/appkit`'s
-sibling — mechanism only**: verbs, handles and events, no policy, no widget
+**Our own addon — `@windowkit/win32`, `@windowkit/appkit`'s sibling —
+mechanism only**: verbs, handles and events, no policy, no widget
 logic and no JS canvas class inside it, the same export-list discipline
 macos.md §"The split" set for the Cocoa bridge. It ships as an
 `optionalDependency` with `os: ["win32"]` and prebuilds for x64 and ARM64,
@@ -366,8 +367,9 @@ over N-API so Bun loads it too; absent on every other platform, the way
 `@windowkit/appkit` is absent on Linux.
 
 Reuse where it pays: `koffi` is the fastest route to Phase 0's first
-window, and is thrown away after it; AccessKit is the lean for UI
-Automation, through its C bindings; and `robotjs` injects real input for
+window, and is thrown away after it; AccessKit was the lean for UI
+Automation, through its C bindings, until a provider of our own was built
+instead (§Accessibility); and `robotjs` injects real input for
 the tests that want the whole input stack.
 
 ### C++, and where Rust would win
@@ -395,8 +397,10 @@ bridges wins until the cross-compile matters more than the symmetry.
 AppKit must run on the process's main thread, which in a Node process is
 the thread that runs JS. So the Cocoa backend does what macos.md §"Input
 and the run loop" called option 1: Node's loop is the master, and a timer
-pumps AppKit every 8 ms (`native.pump2()`, `src/cocoa/app.js`). Two costs
-follow, and both are measured:
+pumps AppKit every 8 ms (`native.pump2()`, `src/cocoa/app.js`). That is
+pump mode, which since threaded mode became the default runs only with
+`REACT_X11_THREADED=0` or where the move to a worker declines (macos.md
+§"The renderer's half"). Two costs follow, and both are measured:
 
 - **Input waits for the pump.** An event that lands just after a tick
   waits most of a pump interval before JS sees it. Frames got a timer of
@@ -478,7 +482,7 @@ window from its GPU thread (`ui/gl/child_window_win.cc`,
 | Node's main thread             | React, layout, the node tree; painting through Direct2D; the content's DirectComposition device and its `Commit`; DirectWrite                                                                  | commands posted to the UI thread, one wake per frame; reading what the UI thread publishes         |
 | the UI thread, one per process | every HWND and its message loop; the modal loops; the OLE apartment; the per-monitor-v2 DPI context; IME; the clipboard's owner window; the tray icon; hotkeys; the background plate (§Resize) | batched events through a threadsafe function per Node environment; state it publishes under a lock |
 | the frame thread               | waiting on the display's clock                                                                                                                                                                 | a tick through the same threadsafe function                                                        |
-| UI Automation's threads        | calls into the accessibility providers                                                                                                                                                         | answered from AccessKit's copy of the tree (§Accessibility)                                        |
+| UI Automation's threads        | calls into the accessibility providers                                                                                                                                                         | answered from the bridge's copy of the tree, which JS pushes (§Accessibility)                      |
 
 ### The rules that keep it from deadlocking
 
@@ -786,7 +790,10 @@ one-second grace — is `promotion.js`'s and transfers either way.
   OpenGL through the vendors' drivers exists too, but reaching a
   composition visual from it needs `WGL_NV_DX_interop2`, a driver's promise
   rather than the system's. ANGLE is two DLLs to ship, optional the way
-  `x11-dri` is.
+  `x11-dri` is. **What shipped is the other way round**
+  ([windows-gl.md](windows-gl.md)): a WGL context on the vendor driver,
+  through `WGL_NV_DX_interop2` into a composition swapchain on its own
+  visual, with ANGLE the unbuilt rung below it for a machine without one.
 - **Element-owned surfaces**
   ([architecture/element-layer-contents.md](architecture/element-layer-contents.md)):
   a visual with a surface of its own, so a terminal's or a chart's frame is
@@ -919,13 +926,15 @@ swappable; the default is DirectWrite.
 ### IME
 
 **Built, on IMM32** — `windows/src/ime.cc` and `src/win32/ime.js`. Input
-methods are where this backend is ahead of both shipped ones: X11 has none
+methods are where this backend is ahead of X11 and Cocoa: X11 has none
 ([#272](https://github.com/sidorares/react-x11/issues/272)) and Cocoa's
-`NSTextInputClient` is unbuilt. The surface they arrive on existed already —
-the composition state machine in `events.js` (`CompositionStart`, `Update`,
-`End`, each defaultable) and the preedit model in `src/nodes/preedit.js`,
-which keeps a composition out of the value and the undo history — so what was
-written is a transport and nothing else.
+`NSTextInputClient` is unbuilt; Wayland's text-input
+(`src/wayland/textinput.js`) is the one other backend that composes. The
+surface they arrive on existed already — the composition state machine in
+`events.js` (`CompositionStart`, `Update`, `End`, each defaultable) and the
+preedit model in `src/nodes/preedit.js`, which keeps a composition out of the
+value and the undo history — so what was written is a transport and nothing
+else.
 
 What it does:
 
@@ -1022,7 +1031,7 @@ Automation says it is one — not because of either API (§Accessibility).
 | startup notification, `activateWindow`             | Windows' own launch feedback; `SetForegroundWindow` under the foreground rules, where the second instance forwarding a URI first grants the running one the right to come forward (`AllowSetForegroundWindow`)                                                                                         | dissolves; the raise maps, with its own version of the X11 timestamp lesson                        |
 | URI schemes, single instance                       | the scheme registered under `HKCU\Software\Classes` (no admin — the `.desktop` file's job), a named pipe or `WM_COPYDATA` to the running instance                                                                                                                                                      | maps — the two-copies shape `application.js` already handles                                       |
 | tray                                               | `Shell_NotifyIcon`, its menu through `TrackPopupMenuEx`                                                                                                                                                                                                                                                | **gained**; the freedesktop rung is StatusNotifierItem (#353)                                      |
-| `<glarea>`                                         | ANGLE into a composition swapchain                                                                                                                                                                                                                                                                     | bends — two DLLs to ship                                                                           |
+| `<glarea>`                                         | **built**: a WGL context through `WGL_NV_DX_interop2` into a composition swapchain; ANGLE the unbuilt rung below ([windows-gl.md](windows-gl.md))                                                                                                                                                      | bends — a driver's extension, not the system's                                                     |
 | eyedropper                                         | no system sampler: a rung of our own, reading the screen without a permission prompt; windows that exclude themselves from capture read as absent                                                                                                                                                      | maps — the X11 rung's shape                                                                        |
 | global key grabs                                   | `RegisterHotKey`, system-wide, no admin — registered against a window on the UI thread, because a thread hotkey's message is eaten by modal loops; a combination another app holds fails, and the Windows-key combinations are reserved                                                                | maps — which macOS allows only behind a permission                                                 |
 | `ssh -X` remoting                                  | —                                                                                                                                                                                                                                                                                                      | the X11 backend remains the remote answer                                                          |
@@ -1130,7 +1139,7 @@ focused text field because UIA says it is one.
 ## Testing
 
 - **Any OS, in CI**: the backend's JS half against a fake bridge, the way
-  the Cocoa backend's 22 `test/cocoa-*.test.js` files run on Linux today —
+  the Cocoa backend's 52 `test/cocoa-*.test.js` files run on Linux today —
   including the pixel-holding fake `test/cocoa-scroll-blit.test.js` uses to
   prove a blit against a repaint, which a DirectComposition `Scroll` needs
   just as much.
@@ -1172,7 +1181,7 @@ focused text field because UIA says it is one.
   brief's manifest advice applies in full. Windows 11 24H2 adds a manifest setting that detaches the console
   when launched from Explorer and keeps it in a terminal. The addon rides
   beside the executable through `createRequire(process.execPath)`, as the
-  Cocoa one does, with an environment variable naming it for a compiled
+  Cocoa one does, with `REACT_X11_WIN32_PATH` naming it for a compiled
   bundle, as `REACT_X11_CALAYERS_PATH` does there.
 - `bun build --compile` targets Windows with `--windows-hide-console` and
   icon and metadata flags, and no way to supply a manifest — and `bun.exe`'s
@@ -1212,19 +1221,17 @@ Each phase has an exit that makes the next one safe to start.
   window-manager demos that do not run on Cocoa either. The keyboard decodes
   through `ToUnicodeEx` without consuming dead keys, all five mouse buttons
   and the wheel route, and `<popup>` places menus against the monitor's work
-  area. **Outstanding against the original exit criteria**: the fake-bridge
-  suite under `test/win32/`, which every other backend has and this one does
-  not, and the bench twin with its baselines. The bridge has a suite of its
-  own against the real thing, which is not the same test and does not
-  replace it.
+  area. **Outstanding against the original exit criteria**: the bench twin
+  with its baselines. The fake-bridge suite under `test/win32/` has landed
+  since, beside the bridge's own suite against the real thing.
 - **Phase 3 — input, scale and the desktop. Mostly done.** Built and
   verified on hardware: the clipboard, per-monitor-v2 scale and
   `WM_DPICHANGED`, monitors, appearance (light/dark, accent, the frame
   through `DWMWA_USE_IMMERSIVE_DARK_MODE`), window states, file dialogs, the
   tray, the taskbar's progress, badge and flash, global hotkeys,
   notifications as a balloon, idle time and keeping the screen awake.
-  **Not built**: IMM32 composition, drag and drop over OLE, single instance
-  and URI schemes — and the jump list, which waits on the last of those.
+  Built since: IMM32 composition, drag and drop over OLE and the jump list
+  (`useJumpList`). **Not built**: single instance and URI schemes.
   [windows-integrations.md](windows-integrations.md) is the row-by-row
   status. _Exit: a window dragged between a 100% and a 150% monitor
   re-lays out at each; every ladder in the README has a Windows rung or an
@@ -1290,13 +1297,13 @@ design depends on the answers:
 
 ## Open questions
 
-1. **The bridge's name and language.** `@windowkit/win32`, in the windowkit
-   organization beside `appkit`, is the lean — named for the API family it
+1. ~~**The bridge's name and language.**~~ Decided: `@windowkit/win32`, in
+   the windowkit organization beside `appkit` — named for the API family it
    binds, as `appkit` is; C++ with node-addon-api, Rust the recorded
    alternative (§"The bridge").
-2. **The backend's name.** `'win32'`, matching `process.platform` and the
-   API family, the way `'cocoa'` names an API rather than an OS. The
-   alternative is `'windows'`.
+2. ~~**The backend's name.**~~ Decided: `'win32'`, matching
+   `process.platform` and the API family, the way `'cocoa'` names an API
+   rather than an OS.
 3. **Which composition API holds promoted and retained content** — classic
    DirectComposition or the visual layer. Phase 4's probe.
 4. **The Windows floor.** Windows 10 1809 or later and Windows 11 —
@@ -1308,8 +1315,9 @@ design depends on the answers:
    paid extended updates after it.
 5. **Text metrics across backends** — DirectWrite's, the default, or ntk's
    shared ones: macos.md's open question 5, sharper with a third backend.
-6. **Accessibility** — AccessKit's pushed tree (the lean) or a provider of
-   our own answering from the live tree, decided by Phase 5's measurement.
+6. ~~**Accessibility**~~ — built as a pushed mirror served by a provider of
+   our own (`windows/src/uia.cc`), rather than AccessKit's adapter or a
+   provider answering from the live tree (§Accessibility).
 7. **A drag region in the API.** A drawn titlebar has to tell the platform
    which boxes are caption and which are buttons, for moving, snapping and
    Snap Layouts; X11 (`_NET_WM_MOVERESIZE`), Wayland (`xdg_toplevel.move`)
@@ -1320,7 +1328,9 @@ design depends on the answers:
    public API change on every backend (§Layout).
 9. **`x11-dri`'s name, again.** If `<glarea>` on Windows is ANGLE behind
    the same GLES API, the display-server-neutral GL addon wayland.md's open
-   question 4 anticipated gains a third platform.
+   question 4 anticipated gains a third platform. It shipped on WGL inside
+   `@windowkit/win32` instead ([windows-gl.md](windows-gl.md)), a second GL
+   binding beside `x11-dri` rather than a third platform inside it.
 
 ## References
 

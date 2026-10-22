@@ -663,10 +663,11 @@ not read out and the character it commits is —
 ### Input methods
 
 On the [Wayland backend](wayland-backend.md) the compositor's input method
-(IBus under GNOME) drives the same three events over `zwp_text_input_v3`:
-its preedit arrives on `onCompositionUpdate` and the text it commits on
-`onCompositionEnd`, inserted the way a typed character is. Two things are
-only there:
+(IBus under GNOME) drives the same three events over `zwp_text_input_v3`,
+and on the Windows backend the system IME drives them over IMM32
+(`src/win32/ime.js`): its preedit arrives on `onCompositionUpdate` and the
+text it commits on `onCompositionEnd`, inserted the way a typed character
+is. Two things are only there:
 
 - `ev.cursorBegin` / `ev.cursorEnd` on an update — code-point offsets into
   `data` — when the engine says where inside its preedit the cursor is, or
@@ -1012,8 +1013,10 @@ Two things that differ from the events above. A press on a `draggable` node
 is still a **click** until the pointer moves 4px, and a completed drag
 suppresses the click that would otherwise follow — the same bargain the DOM
 makes. And a drag that leaves the app's own windows keeps working: it is
-promoted to the X11 XDND protocol and can be dropped into a file manager,
-an editor or another react-x11 process, with the handlers unchanged.
+promoted to the platform's own protocol — XDND on X11, AppKit's dragging on
+Cocoa, the data device on Wayland, OLE on Windows — and can be dropped into
+a file manager, an editor or another react-x11 process, with the handlers
+unchanged.
 
 **The full reference is [drag-and-drop.md](drag-and-drop.md)**: the
 `dropAccept` matching rules, the event payload (`e.files`, `e.text`,

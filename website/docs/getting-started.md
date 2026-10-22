@@ -14,14 +14,16 @@ npm install react-x11 react
 
 Nothing compiles. react-x11 pulls in [ntk](https://sidorares.github.io/ntk/)
 and [node-x11](https://sidorares.github.io/node-x11/), which implement the
-X11 protocol in JavaScript, and yoga-layout, which is WASM. There is no
-native module and no toolkit to have installed.
+X11 protocol in JavaScript, and yoga-layout, which is WASM. The native
+bridges for macOS and Windows arrive prebuilt, and there is no toolkit to
+have installed.
 
 You need **Node 20.19 or newer** and somewhere to draw:
 
 | where               | what to run                                                                        |
 | ------------------- | ---------------------------------------------------------------------------------- |
 | macOS               | nothing — the native **Cocoa** backend is the default there                        |
+| Windows             | nothing — the native **win32** backend is the default there                        |
 | Linux desktop       | nothing — `$DISPLAY` is already set                                                |
 | headless / CI       | `Xvfb :99 & export DISPLAY=:99`                                                    |
 | a disposable screen | `Xephyr :10 -screen 1200x800 & export DISPLAY=:10`                                 |
@@ -30,7 +32,8 @@ You need **Node 20.19 or newer** and somewhere to draw:
 
 The Cocoa backend arrives with react-x11 as an optional dependency
 (`@windowkit/appkit`, prebuilt — nothing compiles); if it is not installed,
-a Mac falls back to X11. Or skip all of that and use the
+a Mac falls back to X11. The win32 backend does the same with
+`@windowkit/win32`. Or skip all of that and use the
 **[playground](/playground)**, which runs a JavaScript X server in the page.
 
 ## A first program
@@ -87,8 +90,9 @@ import { createRoot } from 'react-x11';
 ```
 
 `await createRoot(options?)` is the whole of it. With no options it opens a
-connection to whichever backend this machine has — Cocoa on macOS, else X11
-via `$DISPLAY` — and gives you `{ app, render(element), unmount() }`, where
+connection to whichever backend this machine has — Cocoa on macOS, win32 on
+Windows, else X11 via `$DISPLAY` (Wayland is opt-in, with
+`backend: 'wayland'`) — and gives you `{ app, render(element), unmount() }`, where
 `app` is that backend's app object (on X11, the ntk App and its one X
 connection).
 

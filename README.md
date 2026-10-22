@@ -11,12 +11,14 @@ A React renderer for **desktop applications**, whose host is a display
 system rather than a document. React's job in a renderer is to compute what
 changed; the renderer's job is to turn that into side effects on some host —
 in react-dom those are DOM mutations, here they are **X11 protocol requests**
-written to a socket, or **Core Animation layers and CoreGraphics drawing** on
-macOS. There is no DOM, no HTML and no browser engine underneath: this is not
-Electron with a different skin, and `<div>` is not an element that exists.
-Build GUI programs for a Linux desktop, for a display at the other end of an
-ssh connection, or as a native Mac app, with your React / React Native
-experience — flexbox layout, components, hooks, synthetic events.
+written to a socket, **Core Animation layers and CoreGraphics drawing** on
+macOS, **Direct2D drawing on DirectComposition surfaces** on Windows, or GL
+frames handed to a **Wayland** compositor. There is no DOM and no browser
+engine underneath: this is not Electron with a different skin, and `<div>` is
+not an element that exists. Build GUI programs for a Linux desktop, for a
+display at the other end of an ssh connection, as a native Mac app or a
+Windows one, with your React / React Native experience — flexbox layout,
+components, hooks, synthetic events.
 
 ### Four backends, one tree
 
@@ -47,21 +49,28 @@ main thread ([docs/macos.md](docs/macos.md#js-on-a-worker-a-ui-thread-of-the-bri
 
 Two more backends exist beside these, serving the goal of **full
 cross-platform support**, and both are younger than the two above.
-**native Wayland** ([docs/wayland.md](docs/wayland.md)) is opt-in rather than
-automatic, because X11 stays the default on Linux — the remote case is the
-flagship reason this project exists and Wayland has no network transparency.
-**Windows** ([docs/windows.md](docs/windows.md)) — Win32 windows, Direct2D
-and DirectWrite, DWM compositing through DirectComposition — renders and
-takes mouse input, with the desktop integrations still to come. Each is a
-backend beside the others rather than a replacement for any of them: the
-same tree, the same components, the same `style` objects.
+**native Wayland** ([docs/wayland-backend.md](docs/wayland-backend.md)) —
+the wire protocol in JavaScript and a GLES rasterizer of its own, on mutter,
+sway and labwc, with no Xwayland in the path — is opt-in
+(`REACT_X11_BACKEND=wayland`) rather than automatic, because X11 stays the
+default on Linux: the remote case is the flagship reason this project exists
+and Wayland has no network transparency. **Windows**
+([docs/windows.md](docs/windows.md)) — Win32 windows, Direct2D and
+DirectWrite, DWM compositing through DirectComposition — is the default on
+Windows, with the keyboard, an IME, a screen-reader bridge and most of the
+desktop integrations in place
+([docs/windows-integrations.md](docs/windows-integrations.md) is the
+measured list). Each is a backend beside the others rather than a
+replacement for any of them: the same tree, the same components, the same
+`style` objects.
 
 Layout is [yoga-layout](https://www.npmjs.com/package/yoga-layout) (WASM) on
-both, and text shaping is [fontkit](https://github.com/foliojs/fontkit) on
-the X11 side, CoreText on the Cocoa one. **`npm install` never compiles
-anything**: the X11 stack is JavaScript all the way down, and the two native
-addons in the tree — the Cocoa bridge and `x11-dri` for direct GL — are
-optional dependencies that ship prebuilt. And `npm test` doesn't even need
+every backend, and text shaping is [fontkit](https://github.com/foliojs/fontkit)
+through ntk on X11 and Wayland, CoreText on Cocoa and DirectWrite on Windows.
+**`npm install` never compiles anything**: the X11 stack is JavaScript all
+the way down, and the native addons in the tree — the Cocoa and win32
+bridges, and `x11-dri` for direct GL and the Wayland socket — are optional
+dependencies that ship prebuilt. And `npm test` doesn't even need
 an X server (node-x11 ships an in-process pure-JS X server that the tests
 render into and read pixels back from; every screenshot below was rendered
 that way too, by driving the real examples through the real event
@@ -141,30 +150,41 @@ three:
   Drag and drop works both ways with the desktop, and the taskbar's own
   surfaces — a thumbnail toolbar, a jump list, recent documents — are there
   behind a capability, so an app that also runs elsewhere asks
-  `useSupports()` rather than the platform. What it does not have is **IME
-  and screen-reader support**: an app is unusable with a screen reader and
-  in CJK input. So an app that needs either on Windows _this month_ still
-  wants Electron or Tauri.
+  `useSupports()` rather than the platform. CJK input goes through an
+  IMM32 input method and screen readers through a UI Automation provider of
+  the project's own, both with gaps worth reading before you rely on them:
+  no voice typing or handwriting (those want a TSF text store), and no
+  caret-by-caret reading inside a text field yet. Nor is there activation —
+  file associations, URL schemes and second launches — so an app that needs
+  any of that on Windows _this month_ still wants Electron or Tauri.
   [docs/windows-integrations.md](docs/windows-integrations.md) is the
   measured status and [docs/windows.md](docs/windows.md) the design. The three
   targets are not the same app: the desktop-shell half of X11 (`<foreign>`
   embedding, panel struts, substructure redirect, the window-manager example
   below) has no macOS or Windows equivalent, and `react-x11/test` drives the
   X11 backend only. [docs/macos.md](docs/macos.md) says which is which.
-- **native Wayland — today.** There is no Wayland backend yet. Ordinary
-  application windows work fine on a Wayland desktop through Xwayland, which
-  is not going away — but the desktop-shell half of X11 (panel struts,
-  global key grabs, screen capture, and the window-manager example below)
-  needs a real X session. A native backend is coming too, as a **target
-  beside X11, not a migration**: [docs/wayland.md](docs/wayland.md) is the
-  RFC, from the fd transport up to what the rendering would ride on.
+- **native Wayland — today.** The native backend is opt-in and young:
+  windows, text, input, an input method, the clipboard, popups, drag and
+  drop and layer-shell docks and panels run on mutter, sway and labwc, and
+  [docs/wayland-backend.md](docs/wayland-backend.md#what-is-left) lists what
+  is left — no multisampling, no `<Frame>` panes, no drag icon. Ordinary
+  application windows also work on a Wayland desktop through Xwayland, which
+  is not going away — but the desktop-shell half of X11 (`<foreign>`
+  embedding, global key grabs, and the window-manager example below) needs a
+  real X session. It is a **target beside X11, not a migration**;
+  [docs/wayland.md](docs/wayland.md) is the RFC it was built from.
 - **reusing web components.** There is no DOM. Your MUI, your Tailwind and
   your `recharts` do not come with you; the state, data-fetching, validation
   and math libraries mostly do. [docs/ecosystem.md](docs/ecosystem.md) says
   which is which, and what the failure looks like when it is the wrong one.
-- **rendering HTML.** There is no HTML element and no webview. Rich
-  documents are markdown, through `<Markdown>` in
-  [`@react-x11/components`](https://github.com/sidorares/react-x11-components).
+- **being a browser.** There is no webview and no browser engine to embed.
+  HTML is a component rather than a substrate: `<Html>` in
+  [`@react-x11/components`](https://github.com/sidorares/react-x11-components)
+  renders an HTML + CSS document with a layout engine of its own — selectable,
+  with real widgets for its form controls, and with a page's scripts run
+  against a DOM when `scripts` turns them on — and `<Markdown>` beside it
+  renders markdown. Both are for documents an app shows; an app that _is_ a
+  web app still wants Electron or Tauri.
 - **text entry outside Latin.** See [Known issues](#known-issues).
 
 The screenshots below are the X11 backend, rendered headlessly into
@@ -258,6 +278,7 @@ drawn tree. See [docs/elements.md](docs/elements.md) for the full reference.
 | `<textarea>`  | the same editor, wrapped and multi-line, scrolling with its content                                                                                                                                |
 | `<image>`     | PNG/JPEG/WebP from `src` (more formats under Bun), natural-size aware; also pixels the server already has                                                                                          |
 | `<canvas>`    | escape hatch: `onDraw={(ctx, {width, height}) => …}` with a canvas-like 2d context (XRender-backed on X11, CoreGraphics on Cocoa)                                                                  |
+| `<video>`     | decoded frames the app pushes, on every backend, or a `src` the platform plays itself where it has a player                                                                                        |
 | `<svg>`       | static SVG (paths, shapes, gradients, transforms), sized like `<image>`                                                                                                                            |
 | `<glarea>`    | an OpenGL surface in the layout — see [3D](#3d)                                                                                                                                                    |
 | `<foreign>`   | another application's X window, laid out as an element. **X11 only** ([docs/embedding.md](docs/embedding.md))                                                                                      |
@@ -303,8 +324,9 @@ entry just blinks. The OAuth redirect this is for has an easier answer that
 needs none of it, and the page says so first. See
 [docs/uri-schemes.md](docs/uri-schemes.md).
 
-**Drag and drop** works with the rest of the desktop on both backends —
-XDND on X11, `NSDraggingSession` on Cocoa. `<box dropAccept={['files']}
+**Drag and drop** works with the rest of the desktop on every backend —
+XDND on X11, `NSDraggingSession` on Cocoa, OLE on Windows, `wl_data_device`
+on Wayland. `<box dropAccept={['files']}
 onDrop={…}>` takes a file dragged out of Nautilus or Finder, and
 `<box draggable dragData={…}>` can be dropped into a file manager or an
 editor. Drags that stay inside the app never touch the wire and hand their
@@ -318,16 +340,16 @@ Everything an app does outside its own windows is a **ladder**: the best
 rung the machine actually has, the same hook whichever one answers, and a
 first-class "this desktop cannot" rather than a throw.
 
-| what                                                             | rungs, best first                                                                                                                                             |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [open/save panels](docs/filedialog.md) `useFileDialog()`         | `NSOpenPanel` · the XDG portal · `osascript` · one react-x11 draws                                                                                            |
-| [notifications](docs/notifications.md) `notify()`                | UNUserNotificationCenter · `org.freedesktop.Notifications` · `osascript` · `notify-send`                                                                      |
-| [light/dark, accent](docs/appearance.md) `useSystemAppearance()` | the settings portal · macOS · XSETTINGS — remembered on disk, so the first frame is not a flash                                                               |
-| [permissions](docs/permissions.md) `usePermission()`             | TCC on macOS · the Settings pane · `'unknown'` on Linux until the device portals land                                                                         |
-| [the user's real events](docs/desktop-calendar.md)               | EventKit through the bridge · EventKit through `osascript` · Evolution Data Server                                                                            |
-| [sample a screen colour](docs/eyedropper.md) `useEyedropper()`   | `NSColorSampler` · the portal's picker · a crosshair grab on plain X11                                                                                        |
-| a badge on the icon `setBadge()`                                 | `NSDockTile.badgeLabel` · `com.canonical.Unity.LauncherEntry`                                                                                                 |
-| a tray icon `useTray()`                                          | `NSStatusItem`. **Cocoa only today** — `available` is false on X11 until StatusNotifierItem lands ([#353](https://github.com/sidorares/react-x11/issues/353)) |
+| what                                                             | rungs, best first                                                                                                                             |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| [open/save panels](docs/filedialog.md) `useFileDialog()`         | `NSOpenPanel` / the Common Item Dialog · the XDG portal · `osascript` · one react-x11 draws                                                   |
+| [notifications](docs/notifications.md) `notify()`                | UNUserNotificationCenter / a tray balloon on Windows · `org.freedesktop.Notifications` · `osascript` · `notify-send`                          |
+| [light/dark, accent](docs/appearance.md) `useSystemAppearance()` | the settings portal · macOS · XSETTINGS — remembered on disk, so the first frame is not a flash                                               |
+| [permissions](docs/permissions.md) `usePermission()`             | TCC on macOS · the Settings pane · `'unknown'` on Linux until the device portals land                                                         |
+| [the user's real events](docs/desktop-calendar.md)               | EventKit through the bridge · EventKit through `osascript` · Evolution Data Server                                                            |
+| [sample a screen colour](docs/eyedropper.md) `useEyedropper()`   | `NSColorSampler` · the portal's picker · a crosshair grab on plain X11                                                                        |
+| a badge on the icon `setBadge()`                                 | `NSDockTile.badgeLabel` / a taskbar overlay icon · `com.canonical.Unity.LauncherEntry`                                                        |
+| a tray icon `useTray()`                                          | `NSStatusItem` / `Shell_NotifyIcon` · `org.kde.StatusNotifierItem` — `available` is false on a desktop with no tray host, such as stock GNOME |
 
 [docs/system.md](docs/system.md) is the rest of the machine — monitors,
 window state, idle, keyboard layout, locale — and
@@ -336,8 +358,8 @@ itself.
 
 ### 3D
 
-`<glarea>` is a GL surface in the layout, with three ways underneath it and
-the same `onDraw` over all three:
+`<glarea>` is a GL surface in the layout, with the same `onDraw` over every
+way underneath it — three on the mature backends:
 
 - **indirect GLX** (the X11 default) — the GL protocol encoded into the X
   connection, no native bindings and no GPU driver bindings, the same
@@ -351,6 +373,10 @@ the same `onDraw` over all three:
 - **Cocoa** — CGL into IOSurface-backed framebuffers, presented as a
   sublayer of the window; shaders and render targets, on any Mac, with no
   X server involved.
+
+The two younger backends have their own: WGL on Windows, composited through
+DirectComposition ([docs/windows-gl.md](docs/windows-gl.md)), and on Wayland
+a viewport into the window's own GLES target.
 
 ```jsx
 <glarea
@@ -376,8 +402,8 @@ a scroll container from scrolling, like the DOM.
 
 ## Examples
 
-On macOS these run natively, with no X server; everywhere else they need
-one — and "an X server" is a broader thing than it sounds: your Linux
+On macOS and Windows these run natively, with no X server; everywhere else
+they need one — and "an X server" is a broader thing than it sounds: your Linux
 desktop, XQuartz, `Xvfb` for automation, `Xephyr` for a disposable screen, a
 VNC server, or your own display reached over `ssh -X` from wherever the
 program actually runs — see [docs/remote.md](docs/remote.md), which is the
@@ -419,8 +445,8 @@ neither.
 ### Window manager
 
 `examples:wm` is a real reparenting window manager, and it is **X11 only** —
-substructure redirect has no macOS equivalent, so this is one of the places
-the two backends are not the same app. It takes over the root window, puts
+substructure redirect has no macOS, Windows or Wayland-client equivalent, so
+this is one of the places the backends are not the same app. It takes over the root window, puts
 every application's window inside a frame it draws, and moves, resizes,
 focuses and closes them. The frames are ordinary react-x11 `<window>`s — the
 titlebar, the buttons and the eight resize handles are components with
@@ -475,7 +501,7 @@ an element by clicking it in the app; "highlight updates when components
 render" outlines the rects that just re-rendered; the style editor edits a
 selected element's style live; and the Profiler can restart the app to
 record its mount. All of it is above the display system, so it works the
-same on both backends. `REACT_X11_DEVTOOLS_HOST` /
+same on every backend. `REACT_X11_DEVTOOLS_HOST` /
 `REACT_X11_DEVTOOLS_PORT` override the default `localhost:8097`. See
 [docs/devtools.md](docs/devtools.md).
 
@@ -602,10 +628,17 @@ the character that was actually typed.
   Cocoa the character arrives with the event, so AltGr-style levels type;
   an `NSTextInputClient` IME for CJK is not built there either.
 
+On the other two backends the input method is the platform's: the
+Wayland backend speaks `zwp_text_input_v3` to the compositor's IME, and the
+Windows one answers IMM32, so CJK composes on both
+([docs/windows-integrations.md](docs/windows-integrations.md) has Windows'
+limits).
+
 Two more places the backends genuinely differ, so you can plan around them
 rather than discover them: `react-x11/test` drives the **X11** backend only,
-and the AT-SPI accessibility bridge is X11's — on Cocoa `createRoot()`
-leaves it off, and an `NSAccessibility` bridge is not built yet
+and the accessibility bridges are AT-SPI on Linux and UI Automation on
+Windows — on Cocoa `createRoot()` leaves accessibility off, and an
+`NSAccessibility` bridge is not built yet
 ([docs/accessibility.md](docs/accessibility.md)).
 
 ## Security

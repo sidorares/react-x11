@@ -11,8 +11,8 @@ business and nobody else's.
 
 ## Where this stands today
 
-**`<Frame src>` is built and works.** Steps 1 and 2 below are done; what
-follows them is still open ground. The numbers, because the whole point of
+**`<Frame src>` is built and works.** Steps 1 and 2 below are what built
+it. The numbers, because the whole point of
 the element is a number:
 
 | the host's event loop, while the pane computes | beats in 9s | median | p95   | worst     |
@@ -193,11 +193,11 @@ surface, which WinUI 3, another react-x11 app, a DComp-based Electron host
 or a game editor can, and a plain Win32 or OLE document host cannot. That is
 the real trade, and it is a better one than a second renderer.
 
-The open question is the **API**, not the mechanism. X11's guest hands out a
+The open question was the **API**, not the mechanism. X11's guest hands out a
 window id from `windowIdOf(ref)`; Windows' would hand out a buffer handle,
 which is the same shape and a different number — "same public API, different
-implementation", exactly as asked. What it needs is a name and a home, and
-that is a decision rather than a build.
+implementation", exactly as asked. What it needed was a name and a home, and
+that was a decision rather than a build — taken below.
 
 **As an OLE embedding, for actual documents.** "Embed into a Windows document"
 in the literal sense — a pane inside a Word or Outlook document — is OLE

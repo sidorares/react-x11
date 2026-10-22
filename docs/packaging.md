@@ -17,10 +17,14 @@ guessed.
 
 The default, and fine for a server-side app, a CI tool, or anything already
 deployed with a package manager. Nothing to say beyond: the package is ESM
-(`"type": "module"`), it needs Node ≥ 22, and it has **no native
-dependencies** — ntk, node-x11 and yoga-layout are pure JavaScript and WASM,
-so there is no node-gyp, no prebuild matrix, and `npm install` on a fresh
-box just works.
+(`"type": "module"`), it needs Node ≥ 20.19 (`engines` in its
+`package.json`), and it has **no required native dependencies** — ntk,
+node-x11 and yoga-layout are pure JavaScript and WASM, so the X11 backend
+needs no node-gyp and no prebuild matrix, and `npm install` on a fresh box
+just works. The native bridges the other backends drive — `@windowkit/appkit`
+for Cocoa, `@windowkit/win32` for win32, `x11-dri` for Wayland's GPU path —
+are `optionalDependencies` that install from a bundled prebuild where one
+matches the platform, so an install that cannot build one still succeeds.
 
 ## Tier 2 — one `.mjs` file
 

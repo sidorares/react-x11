@@ -552,7 +552,8 @@ two desktop standards with a claim on core — are now built: **notifications**
 ([#463](https://github.com/sidorares/react-x11/issues/463)), and on a
 freedesktop session over `org.kde.StatusNotifierItem`
 ([#353](https://github.com/sidorares/react-x11/issues/353)) — D-Bus only, so
-the same rung serves X11, XWayland and Wayland.
+the same rung serves X11, XWayland and Wayland — and on win32 over
+`Shell_NotifyIcon`.
 
 **The user's calendar.** Their real events, from the accounts the desktop
 already holds — EventKit on macOS, Evolution Data Server on a freedesktop
@@ -562,14 +563,16 @@ system _setting_, which is why it is its own page rather than a hook here,
 but it is the same kind of thing as the rest of this one: something the
 desktop knows that an app would otherwise ask the user to type in again.
 
-**A launcher badge, and permission prompts.** An unread count on the icon
-(freedesktop `com.canonical.Unity.LauncherEntry`, one D-Bus signal; macOS
-`dockTile.badgeLabel`) and camera/mic/location authorization (the freedesktop
-device portals; macOS TCC) are both cross-backend integrations with a D-Bus
-half that needs nothing from a native bridge — tracked in
-[#464](https://github.com/sidorares/react-x11/issues/464) and
-[#466](https://github.com/sidorares/react-x11/issues/466). Attention (the taskbar
-urgency / Dock bounce) already exists on X11 as `states: ['demands_attention']`.
+**A launcher badge, and permission prompts.** Both are built, and neither is
+a system hook: an unread count on the icon (freedesktop
+`com.canonical.Unity.LauncherEntry`, one D-Bus signal; macOS
+`dockTile.badgeLabel`; a taskbar overlay icon on Windows) is `useBadge()` in
+[desktop.md](desktop.md#the-badge), and camera/mic/location authorization is
+`usePermission()` in [permissions.md](permissions.md) — macOS TCC today, with
+the freedesktop device portals still
+[#466](https://github.com/sidorares/react-x11/issues/466)'s remaining half. Attention (the taskbar urgency / Dock
+bounce) is `states: ['demands_attention']`
+([desktop.md](desktop.md#attention)).
 
 **Session lifecycle** — "we are suspending, save now", and "I have unsaved work,
 do not log out yet". The X-native answer (XSMP) is effectively dead and the live

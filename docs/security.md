@@ -33,7 +33,12 @@ Two consequences, both practical:
 
 Under Wayland this is different — a Wayland client cannot read its
 neighbours — but react-x11 running under Xwayland is inside the X11 sandbox
-with every other X client, so it shares theirs and not the compositor's.
+with every other X client, so it shares theirs and not the compositor's. The
+opt-in Wayland backend (`backend: 'wayland'`,
+[wayland-backend.md](wayland-backend.md)) is a native Wayland client instead,
+and is isolated the way any other one is. The Cocoa and win32 backends
+connect to no X display at all, so what isolation they have is the
+platform's, not X11's.
 
 ## `$XAUTHORITY` is a password
 

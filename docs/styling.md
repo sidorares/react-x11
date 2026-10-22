@@ -12,8 +12,10 @@ One namespace per kind of thing, and no name in both:
   `cursor`, `overflow`, `zIndex`, `pointerEvents`, `container`.
 - **props** — everything else: `title`, window geometry and size hints,
   `resizable`, `appId`, `windowType`, `grab`, `value`, `src`, `focusable`,
-  `tabIndex`, `disabled`, handlers. The 3D elements keep flat property props
-  (`position`, `material`) — those are object properties, not CSS.
+  `tabIndex`, `disabled`, handlers. The 3D elements of
+  `@react-x11/components/three`, under a reconciler of their own, keep flat
+  property props (`position`, `material`) — those are object properties, not
+  CSS.
 
 `style` takes an object or a nested array, flattened left-to-right with
 falsy entries skipped. That is what replaces the **selector** cascade:
@@ -780,7 +782,7 @@ label inside it:
 <box style={{ color: theme.textMuted, fontSize: 12 }}>
   <text>Last modified</text>
   <text>{row.modified}</text>
-  <Icon name="clock" />
+  <Icon name="moreVertical" />
 </box>
 ```
 
@@ -1467,7 +1469,7 @@ an inconsistency: a pointer move must never reflow the tree, but an author
 who writes `transition: { left: 200 }` has asked for animated layout and
 pays a layout pass per frame for it, and a repaint of whatever that pass
 moves rather than of the window. `Switch` is the worked example — the
-thumb is absolutely positioned and slides on `left`, because
+thumb is absolutely positioned and slides on `start`, because
 `justifyContent` would flip between the ends with nothing in between.
 
 ### Loops
@@ -1910,15 +1912,15 @@ can be looked at without stopping the compositor for the whole session. See
 
 ## Elements that are not styled
 
-The 3D scene elements and the declarative SVG children carry their own
-vocabularies — `position`, `color` and `width` mean a transform, a material
-and a radius there — so the style channel does not apply to them, the same
-way it does not apply to an `<input type>` in the DOM. They report
+The declarative SVG children carry a vocabulary of their own — `<circle cx
+r fill>` is SVG's, not the style channel's — so the style channel does not
+apply to them, the same way it does not apply to an `<input type>` in the
+DOM. They report
 `stylable === false` and their props are passed through untouched.
 
 ## Next
 
-`opacity` (needs offscreen composition — see NEXT_STEPS §3), and a
+A
 `boxShadow` that a `<popup>` can cast (the window needs a translucent margin
 around itself first — see [elements.md](elements.md) on `transparent`
 popups). Container queries shipped; the design record, with the targeting

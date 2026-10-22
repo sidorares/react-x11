@@ -8,10 +8,12 @@ underneath both, kept because the constraints explain most of the API's
 shape — and because they are permanent: they are properties of a wire
 protocol frozen in the 1990s, not of any implementation.
 
-`<glarea>` is a real X child window on a GLX visual, and everything drawn
-into it travels as **indirect GLX**: the GL protocol encoded into the same X
-connection as everything else. No direct rendering, no native bindings, no
-GPU driver bindings — the same pure-JS story as the rest of the stack.
+On X11 `<glarea>` is a real X child window on a GLX visual, and under the
+default `glPolicy` everything drawn into it travels as **indirect GLX**: the
+GL protocol encoded into the same X connection as everything else. No direct
+rendering, no native bindings, no GPU driver bindings — the same pure-JS
+story as the rest of the stack. (The direct path, which does take a native
+addon, is [gl.md](gl.md)'s.)
 
 The cost of that reach is a **fixed-function OpenGL 1.x pipeline**, and that
 single fact decides the rest.
@@ -78,8 +80,8 @@ same list is shared by meshes that differ in material.
              MultMatrixf, material state, CallList, PopMatrix -> SwapBuffers
 ```
 
-`<glarea>` is one of the three elements that legitimately needs its own X
-window (NEXT_STEPS §4): GLX needs its own visual and cannot share the
+`<glarea>` is one of the four elements that legitimately need an X window of
+their own — with `<window>`, `<popup>` and `<foreign>` (NEXT_STEPS §4): GLX needs its own visual and cannot share the
 XRender pipeline the 2D elements draw through.
 
 A scene tree over this surface is **separate from the drawn-node tree** — no

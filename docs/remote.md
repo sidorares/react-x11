@@ -18,11 +18,13 @@ Nothing in the app changes. No VNC, no browser, no streaming daemon, no port
 to forward, no second copy of the UI.
 
 **This is the X11 backend**, and it is the reason X11 stays the flagship
-target rather than becoming the legacy one: the Cocoa backend has no wire at
-all, so nothing on this page applies to it. That matters in one specific
-case — **an app running on a Mac and drawing somewhere else**. `$DISPLAY` in
-the environment does not choose the backend there; `backend: 'auto'` sees
-darwin and picks Cocoa, and the window opens on the Mac. Say which you want:
+target rather than becoming the legacy one: the Cocoa, win32 and Wayland
+backends have no wire at all, so nothing on this page applies to them. That
+matters in one specific case — **an app running on a Mac or on Windows and
+drawing somewhere else**. `$DISPLAY` in the environment does not choose the
+backend there; `backend: 'auto'` sees darwin and picks Cocoa, or win32 and
+picks the win32 backend, and the window opens on the local machine. Say
+which you want:
 
 ```sh
 REACT_X11_BACKEND=x11 DISPLAY=thin-client:0 npm start
@@ -176,13 +178,15 @@ the compositor is willing to expose), and `WM_TRANSIENT_FOR` and the
 `_NET_WM_STATE` work are among the things that survive the trip — see
 [elements.md](elements.md#transientfor--a-window-that-belongs-to-another).
 
-**Native Wayland: no**, and the reason is not effort. Wayland has no drawing
-protocol. A Wayland client allocates a buffer, renders pixels into it
-_itself_, and hands the compositor a handle — there is nothing to send over a
-wire, and no server-side rendering to ask for. The entire premise of this
-renderer, that drawing crosses the connection, does not exist there. A
-Wayland port would not be a port; it would be a different program that
-rasterizes locally, and at that point the interesting property is gone.
+**Native Wayland: not remotely**, and the reason is not effort. Wayland has
+no drawing protocol. A Wayland client allocates a buffer, renders pixels into
+it _itself_, and hands the compositor a handle — there is nothing to send over
+a wire, and no server-side rendering to ask for. The entire premise of this
+page, that drawing crosses the connection, does not exist there. The Wayland
+backend (`backend: 'wayland'`, [wayland-backend.md](wayland-backend.md)) is
+therefore a different program under the same API — it rasterizes locally —
+which is why it is opt-in only and never what `'auto'` picks: on Linux the
+default stays X11, and with it everything on this page.
 
 **XQuartz notes**, since it is the most common macOS path:
 

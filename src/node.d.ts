@@ -39,12 +39,13 @@ export interface ImageDataLike {
 }
 
 /**
- * The 2d context a node paints into — the canvas-shaped subset **both**
- * backends implement: ntk's `RenderingContext2D` over XRender on X11, and
- * `BackendContext2D` over CoreGraphics on macOS. Declared as the contract an
- * element may rely on rather than as either class: what is here is on
- * both, and a member one backend has and the other does not is optional
- * here or absent. Coordinates are device pixels in the owning window's
+ * The 2d context a node paints into — the canvas-shaped subset **every**
+ * backend implements: ntk's `RenderingContext2D` over XRender on X11, the
+ * Wayland backend's GLES rasterizer, and `BackendContext2D` over CoreGraphics
+ * on macOS and Direct2D on Windows. Declared as the contract an element may
+ * rely on rather than as any one class: what is here is on all of them, and
+ * a member some backends have and others do not is optional here or
+ * absent. Coordinates are device pixels in the owning window's
  * space — `abs`, `contentBox()` — unless a transform says otherwise.
  * Anything ntk documents beyond this is reachable at runtime and is
  * ntk's to change.
@@ -67,10 +68,9 @@ export interface Context2D {
   shadowOffsetY: number;
   shadowColor: string;
   /**
-   * X11 only: XRender's compositing operator — `'source-over'` (the
-   * default), `'copy'`, and the rest ntk documents. Absent on the cocoa
-   * backend, whose bridge has no blend-mode verb yet; test for it with
-   * `'globalCompositeOperation' in ctx`.
+   * The compositing operator — `'source-over'` (the default), `'copy'`,
+   * and the rest ntk documents on X11. A native context (macOS, Windows)
+   * takes only the modes its bridge draws: assign and read back to know.
    */
   globalCompositeOperation?: string;
   /**

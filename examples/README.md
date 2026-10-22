@@ -1,8 +1,11 @@
 # Examples
 
-Runnable demos, each a single file you can read top to bottom. They all need
-an X server — a Linux desktop, XQuartz on macOS, or `Xvfb`/`Xephyr` for
-something disposable — and they all read `$DISPLAY`.
+Runnable demos, each a single file you can read top to bottom. They run on
+whichever backend `createRoot()` resolves: native Cocoa on macOS, native
+win32 on Windows, and elsewhere an X server — a Linux desktop, or
+`Xvfb`/`Xephyr` for something disposable — read from `$DISPLAY`.
+`REACT_X11_BACKEND=x11` puts a mac on XQuartz instead (see
+[docs/macos.md](../docs/macos.md) and [docs/windows.md](../docs/windows.md)).
 
 On a Wayland desktop the same files run on the native backend, with the X
 display taken away so nothing can fall back — every example except the two

@@ -515,6 +515,11 @@ Platform notes:
 - **Linux / XWayland** — works both directions, including to and from
   native Wayland applications, which is what makes this worth having on a
   modern desktop.
+- **The Wayland backend** — works both directions too, over
+  `wl_data_device` (`src/wayland/dnd.js`): a drag from another application
+  arrives as the same `DropSession` the X11 path drives, and a drag out is a
+  `wl_data_source` the compositor carries from the press serial on. As on
+  the cocoa backend, the payload is read at the drop.
 - **Windows, the win32 backend** — works both directions with the desktop,
   over OLE: `IDropTarget` on every window with a `dropAccept` under it,
   `DoDragDrop` out of one. Files arrive as CF_HDROP and become one

@@ -11,7 +11,11 @@ It is on by default and costs nothing to have: with no accessibility bus on
 the machine the bridge never comes up, and the render path pays one property
 read per event for the hooks it would have filled.
 
-> **This is the X11 backend's bridge, and today it is the only one.** AT-SPI
+> **This is the Linux bridge; the win32 backend has one of its own and Cocoa
+> has none.** On **win32** the same tree is pushed to UI Automation instead
+> (`src/win32/a11y.js`, [windows.md](windows.md#accessibility-ui-automation)),
+> because UIA asks synchronously and is answered from a pushed copy rather
+> than from the live tree. AT-SPI
 > is a freedesktop protocol with nothing to register against on macOS, so on
 > the **Cocoa** backend `createRoot()` leaves it off (`desktop: { a11y:
 false }` by default there) and no `NSAccessibility` bridge has been built

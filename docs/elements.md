@@ -1,9 +1,10 @@
 # Elements
 
 Only `<window>`, `<popup>`, `<glarea>` and `<foreign>` are backed by real
-X11 windows, created top-down in React's commit phase so every
-`CreateWindow` names its actual parent — and, for `<foreign>`, so that no
-`ReparentWindow` is ever issued from a render React might discard.
+windows of the display system — on X11, X windows created top-down in
+React's commit phase so every `CreateWindow` names its actual parent — and,
+for `<foreign>`, so that no `ReparentWindow` is ever issued from a render
+React might discard.
 Everything else is a retained lightweight node — one
 [yoga-layout](https://www.yogalayout.dev/) node each — painted into the
 owning window's double-buffered 2d context on ntk's frame clock.
@@ -147,7 +148,6 @@ $border'` sets one side's pair. A blockquote's bar is
   `theme` prop above the node ([styling.md](styling.md#theme-tokens))
 - `'@width >= 600'` blocks restyle for the window's size, layout included
   ([styling.md](styling.md#window-size-queries))
-- `opacity` is not implemented yet (see NEXT_STEPS.md)
 
 `cursor` (`'pointer'`, `'text'`, `'wait'`, `'move'`, `'crosshair'`, resize
 arrows, … — the ntk cursor name map) and `pointerEvents` are style too: CSS
@@ -196,7 +196,7 @@ element: [accessibility.md](accessibility.md).
 
 Drag and drop is two more prop families on the same elements —
 `dropAccept` + `onDrop` to accept a drop, `draggable` + `dragData` to start
-a drag — and works with other X11 applications as well as inside the app.
+a drag — and works with other applications as well as inside the app.
 Their presence is what registers the node, so there is nothing else to
 mount: [drag-and-drop.md](drag-and-drop.md).
 
@@ -1168,7 +1168,7 @@ The [`Dialog`](components.md#dialog) component does exactly this, and takes
 Defaults to `windowType="popup_menu"` — the least-wrong answer for a popup
 that declares nothing; pass `windowType` to say what yours is
 (`"tooltip"`, `"dropdown_menu"`, …). The built-in widgets do:
-`Select`'s and `DatePicker`'s sheets are `dropdown_menu`, `Tooltip` is
+`Select`'s sheet is `dropdown_menu`, `Tooltip` is
 `tooltip`. The hint is **additive** — override-
 redirect is what keeps the WM from moving or decorating the popup, and
 stays on. The EWMH spec asks for the type hint on override-redirect
@@ -2248,7 +2248,7 @@ colours. There is no `controls` attribute: the transport is your React,
 over or beside the video.
 
 Where `useSupports('mediaPlayback')` is false — X11 and Wayland for good,
-and macOS over an older bridge — the element reports one
+Windows today, and macOS over an older bridge — the element reports one
 `NoMediaPlaybackError` (`code: 'ENOMEDIAPLAYBACK'`) through `onError`, on a
 microtask, and shows its poster: never a black box that looks like a video
 that has not started. Ask before rendering one:
@@ -2355,7 +2355,7 @@ Leave `cacheKey` unset for anything animated, or driven by state outside the
 props.
 
 `<svg>` does this automatically: its content is fully described by
-their props, so the renderer can build the key itself.
+its props, so the renderer can build the key itself.
 
 ### `mono` — one colour, and the colour out of the key
 
@@ -2414,11 +2414,13 @@ twelve of these.
 
 ## `<glarea>`
 
-An OpenGL surface in the layout — the only drawn element that owns a real X
-window, because GLX needs a drawable created for a GL-capable visual and
-cannot share the XRender pipeline the rest of the tree paints through
-(NEXT_STEPS §4). Needs ntk ≥ 3.6.0 and a server with **indirect GLX**
-enabled (`+iglx` / `AllowIndirectGLX` — off by default on many).
+An OpenGL surface in the layout — on X11 the only drawn element that owns a
+real X window, because GLX needs a drawable created for a GL-capable visual
+and cannot share the XRender pipeline the rest of the tree paints through
+(NEXT_STEPS §4); the other backends give it a surface of their own
+([gl.md](gl.md)). On X11 under the default `glPolicy` it needs ntk ≥ 3.6.0
+and a server with **indirect GLX** enabled (`+iglx` / `AllowIndirectGLX` —
+off by default on many).
 
 ```jsx
 <glarea
@@ -2454,12 +2456,14 @@ enabled (`+iglx` / `AllowIndirectGLX` — off by default on many).
 - `onError(err)` — no GL surface (no GLX, no matching visual). Without a
   handler the failure is a console warning.
 
-`gl` is ntk's indirect-GLX context: fixed-function OpenGL 1.4 (immediate
-mode, matrices, lighting, textures, display lists) — no shaders, no vertex
-arrays, since the GLX protocol does not encode them. **Geometry belongs in
-display lists**: every immediate-mode vertex is a command on the wire, so a
-mesh re-sent per frame costs kilobytes per frame, while a compiled list
-costs one `CallList`.
+On X11's indirect path, the default, `gl` is ntk's indirect-GLX context:
+fixed-function OpenGL 1.4 (immediate mode, matrices, lighting, textures,
+display lists) — no shaders, no vertex arrays, since the GLX protocol does
+not encode them. **Geometry belongs in display lists**: every
+immediate-mode vertex is a command on the wire, so a mesh re-sent per frame
+costs kilobytes per frame, while a compiled list costs one `CallList`. The
+direct path and the Cocoa backend hand `onDraw` a WebGL-shaped table with
+shaders instead ([gl.md](gl.md)).
 
 The surface is stacked above everything drawn in its window, so nothing the
 window paints can overlap it. **Its own children can: they are 2D content
@@ -2515,7 +2519,7 @@ server keeps what each pane and the surface show while they are mapped
 after an Expose and a repaint.
 
 `useSupports('glOverlay')` says whether a connection draws a surface's
-children at all. Both backends do, on every display but one.
+children at all. Every backend does, on every display but one.
 
 **XQuartz draws nothing over a GL surface.** There every surface, direct
 (Apple-DRI) or indirect, is composited by the macOS window server above
@@ -2556,7 +2560,7 @@ Limits worth knowing:
   own for an animation on the Cocoa backend. That layer would sit under the
   surface. Its transitions run on the frame clock instead.
 
-**The pointer over the surface is the tree's**, on both backends, exactly
+**The pointer over the surface is the tree's**, on every backend, exactly
 as over a `<box>`: `onMouseDown`, `onMouseMove`, `onMouseUp`, `onClick` (a
 double click is `detail: 2`), `onContextMenu`, `onMouseEnter` and
 `onMouseLeave`, `:hover` and `:active`, and `onWheel` fire at the child
@@ -2607,17 +2611,18 @@ both backends, and beside it on XQuartz.
 
 **X11 only.** Cross-process window embedding does not exist on macOS —
 there is no equivalent of handing another application's window to your
-layout, and none is planned. Where there is none — the Cocoa backend, and
-the headless mock tests render on — this element refuses: it lays out as an
-empty box and draws nothing, never calls `onReady`, and calls `onError` once
-to say why. Ask before rendering one:
+layout, and none is planned. Where there is none — the Cocoa, Wayland and
+Windows backends, and the headless mock tests render on — this element
+refuses: it lays out as an empty box and draws nothing, never calls
+`onReady`, and calls `onError` once to say why. Ask before rendering one:
 
 ```jsx
 const embedding = useSupports('embedding');
 ```
 
 `<Frame>`, which uses it on X11 to host a pane of your _own_ application,
-does work on both ([frame.md](frame.md)) — it just gets there another way.
+does work on the Cocoa and Windows backends too ([frame.md](frame.md)) — it
+just gets there another way.
 
 Another process's top-level X window, laid out as an element — a terminal
 pane, a video surface, a docked tray icon. The second element that owns a

@@ -65,6 +65,11 @@ reduce motion on the Cocoa backend (src/desktopsettings.js's `fromMacOS`).
 The vocabulary of §3 — easing, timelines, `opacity`, transforms — is still
 to come; the control-point tables it needs exist (`EASING_CONTROL_POINTS`).
 
+_Since then, `opacity` has landed (#601) — on Cocoa an opacity transition
+or loop runs in the render server (#818) — and so has a loop's `delay`
+(#605). Transform style properties, keyframes and finite timelines have
+not._
+
 ## 1. What exists
 
 ### 1.1 The vocabulary
