@@ -387,15 +387,15 @@ XQuartz, and in every toolkit that hardcodes it. This takes the convention.
 const { doubleClickMs, dragThreshold } = useDesktopSettings();
 ```
 
-|                       |                                                          |
-| --------------------- | -------------------------------------------------------- |
-| `caretBlink`          | **false means do not blink at all**                      |
-| `caretBlinkMs`        | how long a caret stays in each state (530)               |
-| `doubleClickMs`       | how long a second click has to arrive in (400)           |
-| `doubleClickDistance` | and how far it may land from the first (4px)             |
-| `dragThreshold`       | how far a press moves before it is a drag (4px)          |
-| `animations`          | **false means reduce motion** — see below                |
-| `source`              | `'xsettings'`, or null where no settings daemon answered |
+|                       |                                                                      |
+| --------------------- | -------------------------------------------------------------------- |
+| `caretBlink`          | **false means do not blink at all**                                  |
+| `caretBlinkMs`        | how long a caret stays in each state (530)                           |
+| `doubleClickMs`       | how long a second click has to arrive in (400)                       |
+| `doubleClickDistance` | and how far it may land from the first (4px)                         |
+| `dragThreshold`       | how far a press moves before it is a drag (4px)                      |
+| `animations`          | **false means reduce motion** — see below                            |
+| `source`              | `'xsettings'`, `'portal'`, `'macos'`, or null where nothing answered |
 
 **The built-in controls already follow these.** `<textinput>`'s caret, the click
 counting behind `ev.detail`, and the drag threshold all read the same values, so
@@ -420,7 +420,15 @@ why the desktop offers the switch at all. **Draw the caret solid rather than not
 at all** — that is what the built-in controls do.
 
 [XSETTINGS](appearance.md#what-each-rung-can-actually-answer) is the only source on X11; there is no
-portal interface for any of this. On the macOS backend the one of these the
+standard portal interface for any of this. On the
+[native Wayland backend](wayland-backend.md), which has no XSETTINGS to read,
+they come off the settings portal's GNOME namespaces instead —
+`org.gnome.desktop.interface` (`cursor-blink`, `cursor-blink-time`,
+`enable-animations`) and `org.gnome.desktop.peripherals.mouse`
+(`double-click`, `drag-threshold`), the same GSettings keys gsd-xsettings
+translates for X11 — with `source: 'portal'`, live, and only while
+`createRoot({ desktop })` leaves `appearance` on. A portal that does not pass
+those through (KDE's, a bare compositor's) leaves the defaults. On the macOS backend the one of these the
 system publishes is read from it: **Reduce motion** (System Settings ›
 Accessibility › Display) arrives as `animations: false` with
 `source: 'macos'`, live — flipping the switch stops a spinner that is already

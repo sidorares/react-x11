@@ -10,6 +10,11 @@
 // made deterministic. A client that subscribed after its read would miss a
 // change emitted there, and stay stale for the rest of its life with nothing
 // to correct it.
+//
+// It also answers the GNOME namespaces GNOME's portal backend passes
+// through untouched — `org.gnome.desktop.interface` and friends — which is
+// where the Wayland backend reads the interaction settings XSETTINGS carries
+// on X11 (src/desktopsettings.js).
 
 import { PORTAL_NAME, PORTAL_PATH } from '../../src/portal.js';
 
@@ -20,8 +25,11 @@ const APPEARANCE_NS = 'org.freedesktop.appearance';
  * @param {string} address the broker's address
  * @param {object} values the `org.freedesktop.appearance` namespace, as the
  *   portal spells it — `{ 'color-scheme': 1, 'accent-color': [r, g, b] }`
+ * @param {object} [other] more namespaces, keyed by name, holding plain
+ *   values — `{ 'org.gnome.desktop.interface': { 'cursor-blink': false } }`.
+ *   Typed the way GSettings types those keys: a boolean is `b`, a number `i`.
  */
-export async function fakeSettingsPortal(address, values = {}) {
+export async function fakeSettingsPortal(address, values = {}, other = {}) {
   const dbus = (await import('dbus-native')).default;
   const bus = dbus.createClient({ busAddress: address });
   const { Variant } = dbus;
@@ -35,10 +43,26 @@ export async function fakeSettingsPortal(address, values = {}) {
     key === 'accent-color'
       ? new Variant('(ddd)', value)
       : new Variant('u', value);
+  const wrapOther = (value) =>
+    typeof value === 'boolean'
+      ? new Variant('b', value)
+      : typeof value === 'number'
+        ? new Variant('i', value)
+        : new Variant('s', String(value));
+  const typed = (namespace) =>
+    Object.fromEntries(
+      Object.entries(portal.other[namespace]).map(([k, v]) => [
+        k,
+        wrapOther(v),
+      ]),
+    );
 
   const portal = {
     bus,
     values: { ...values },
+    other: Object.fromEntries(
+      Object.entries(other).map(([ns, keys]) => [ns, { ...keys }]),
+    ),
     reads: 0,
     /** Called during ReadAll, before it replies. */
     onRead: null,
@@ -52,6 +76,15 @@ export async function fakeSettingsPortal(address, values = {}) {
           wrap(key, portal.values[key]),
         ]);
       }
+    },
+    /** Change a setting in one of the `other` namespaces, and announce it. */
+    changeIn(namespace, key, value) {
+      (portal.other[namespace] ??= {})[key] = value;
+      bus.sendSignal(PORTAL_PATH, SETTINGS_IFACE, 'SettingChanged', 'ssv', [
+        namespace,
+        key,
+        wrapOther(value),
+      ]);
     },
     /** An announcement in a namespace nothing here cares about. */
     changeNamespace(namespace, key) {
@@ -88,14 +121,17 @@ export async function fakeSettingsPortal(address, values = {}) {
           // changing things afterwards is exactly the race: the *reply* is
           // stale and the *signal* is the only carrier of the new value, so a
           // client that was not already subscribed never learns it.
-          const answer = appearance();
-          portal.onRead?.();
           const wanted = namespaces?.length ? namespaces : [APPEARANCE_NS];
-          return Object.fromEntries(
+          const answer = Object.fromEntries(
             wanted
-              .filter((ns) => ns === APPEARANCE_NS)
-              .map((ns) => [ns, answer]),
+              .filter((ns) => ns === APPEARANCE_NS || ns in portal.other)
+              .map((ns) => [
+                ns,
+                ns === APPEARANCE_NS ? appearance() : typed(ns),
+              ]),
           );
+          portal.onRead?.();
+          return answer;
         },
       },
       ReadOne: {

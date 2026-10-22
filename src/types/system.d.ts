@@ -253,16 +253,18 @@ export interface DesktopSettings {
   /** How far a press moves before it is a drag rather than a click. */
   readonly dragThreshold: number;
   /** **False means hold still** — the desktop asked for less motion:
-   *  `Gtk/EnableAnimations` off over XSETTINGS, reduce motion on macOS.
+   *  `Gtk/EnableAnimations` off over XSETTINGS, `enable-animations` off on
+   *  the settings portal (Wayland), reduce motion on macOS.
    *  Core's loops do not start then (docs/styling.md, "Loops"); an element
    *  that animates on a timer of its own holds still too, and draws its
    *  resting frame. True wherever the desktop said nothing. */
   readonly animations: boolean;
-  /** `'xsettings'`; `'macos'` on the Cocoa backend, where only `animations`
-   *  comes from the system (reduce motion) and the rest are the defaults; or
-   *  null where no settings daemon answered and these are the renderer's own
-   *  defaults. */
-  readonly source: 'xsettings' | 'macos' | 'test' | null;
+  /** `'xsettings'`; `'portal'` on the Wayland backend, from the settings
+   *  portal's GNOME namespaces; `'macos'` on the Cocoa backend, where only
+   *  `animations` comes from the system (reduce motion) and the rest are the
+   *  defaults; or null where nothing answered and these are the renderer's
+   *  own defaults. */
+  readonly source: 'xsettings' | 'portal' | 'macos' | 'test' | null;
 }
 
 /**

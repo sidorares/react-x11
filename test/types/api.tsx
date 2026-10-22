@@ -2043,9 +2043,11 @@ function _System() {
 
   const feel: DesktopSettings = useDesktopSettings();
   const blinkFor: number = feel.caretBlink ? feel.caretBlinkMs : 0;
-  // where the numbers came from: a settings daemon, the macOS accessibility
-  // panel (reduce motion only), a test, or nobody
-  const feelSource: 'xsettings' | 'macos' | 'test' | null = feel.source;
+  // where the numbers came from: a settings daemon, the settings portal
+  // (Wayland), the macOS accessibility panel (reduce motion only), a test,
+  // or nobody
+  const feelSource: 'xsettings' | 'portal' | 'macos' | 'test' | null =
+    feel.source;
   void feelSource;
   // whether anything should move at all
   const moving: boolean = feel.animations;
