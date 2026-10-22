@@ -176,7 +176,10 @@ try {
       p = p.parent;
     return p?.abs ? p : null;
   };
+  // Button widgets only: a sidebar or list row an app gives role="button"
+  // is meant to span its column
   result.wideButtons = buttons
+    .filter((b) => t.ownerChainOf(b)[0] === 'Button')
     .map((b) => ({ b, column: columnOf(b) }))
     .filter(
       ({ b, column }) =>

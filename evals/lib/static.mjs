@@ -41,6 +41,20 @@ function stripComments(src) {
   );
 }
 
+const HEX =
+  '#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})(?![0-9a-zA-Z])';
+// a colour where CSS puts one: after a width or a border style, or as an
+// argument. "Review PR #482" is prose, not a colour.
+const HEX_IN_CSS = new RegExp(
+  `(?:(?:\\d(?:px|em|rem|%)?|solid|dashed|dotted|double|inset)\\s+|[(,]\\s*)${HEX}`,
+);
+
+/** A string that is a colour, or a CSS value with one in it. */
+export const isColourValue = (value) =>
+  new RegExp(`^\\s*${HEX}\\s*$`).test(value) ||
+  HEX_IN_CSS.test(value) ||
+  /\b(rgba?|hsla?)\s*\(/.test(value);
+
 const lineOf = (src, index) => src.slice(0, index).split('\n').length;
 
 /**
@@ -92,12 +106,7 @@ export function scanSource(app) {
     }
     for (const m of src.matchAll(/(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g)) {
       const value = m[2];
-      if (
-        /(^|[\s(,])#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})(?![0-9a-zA-Z])/.test(
-          value,
-        ) ||
-        /\b(rgba?|hsla?)\s*\(/.test(value)
-      ) {
+      if (isColourValue(value)) {
         out.hexColours.push(at(file, src, m.index, value));
       }
       if (/\p{Emoji_Presentation}|️/u.test(value))

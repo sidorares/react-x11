@@ -110,15 +110,15 @@ node evals/controls.mjs [--judge]                # the self-check alone
 "Rules broken" counts the ones below that fail, out of those that could be
 checked (a window that never mounted has no layout).
 
-| rule                  | how it is checked                                                                                                                                                                |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| no hard-coded colours | no hex, `rgb()`/`hsl()` or named colour in a string in `src/` or the entry file (comments and tests excluded)                                                                    |
-| every control named   | `renderX11(…, { a11y: true }).at.focusables()` has no control without an accessible name. Focusable containers (`ContextMenu`'s wrapper is one) are listed apart and not counted |
-| MenuBar               | `<MenuBar` in the source, or a `menubar` role in the mounted tree                                                                                                                |
-| minWidth set          | the mounted `<window>` has a `minWidth`                                                                                                                                          |
-| no stretched buttons  | no button at least 160 px wide and 80% of the column it sits in (the column-stretch trap)                                                                                        |
-| no website look       | no gradient, emoji in strings or JSX text, `className`, title-sized words (26 px or more) in the top third of the window, or three or more rounded, shadowed boxes               |
-| dark mode is dark     | the dark picture's mean luminance is at least 40 below the light one's                                                                                                           |
+| rule                  | how it is checked                                                                                                                                                                                                                                               |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| no hard-coded colours | no string in `src/` or the entry file (comments and tests excluded) that is a hex colour, has one where CSS puts one (`1px solid #ccc`, `gradient(…, #fff)`), or has `rgb()`/`hsl()`; no named colour on a colour property. Prose like "PR #482" does not count |
+| every control named   | `renderX11(…, { a11y: true }).at.focusables()` has no control without an accessible name. Focusable containers (`ContextMenu`'s wrapper is one) are listed apart and not counted                                                                                |
+| MenuBar               | `<MenuBar` in the source, or a `menubar` role in the mounted tree                                                                                                                                                                                               |
+| minWidth set          | the mounted `<window>` has a `minWidth`                                                                                                                                                                                                                         |
+| no stretched buttons  | no `Button` at least 160 px wide and 80% of the column it sits in (the column-stretch trap). A row the app gives `role="button"` (a sidebar item) is meant to span its column and is not counted                                                                |
+| no website look       | no gradient, emoji in strings or JSX text, `className`, title-sized words (26 px or more) in the top third of the window, or three or more rounded, shadowed boxes                                                                                              |
+| dark mode is dark     | the dark picture's mean luminance is at least 40 below the light one's                                                                                                                                                                                          |
 
 ### Trap hits
 
@@ -254,7 +254,36 @@ the harness itself. It skips the judge.
 
 ## Cost and time
 
-COST_SECTION
+Measured on the smoke run (`--limit 2`: `pomodoro` and `recipes`, `none`
+and `create-default`, one run each), on 2026-10-22 with Claude Code 2.1.304,
+its default model (Opus 5.5) at its default effort, react-x11 2.51.1:
+
+| per                   | cost                    | time        | other                                                      |
+| --------------------- | ----------------------- | ----------- | ---------------------------------------------------------- |
+| agent run             | $0.73–$1.22, mean $0.93 | 2.1–4.0 min | 0.8–1.4 M tokens, almost all cache reads; 16–25 tool calls |
+| grading a run         | nothing (local)         | about 10 s  | a clean install and two headless mounts                    |
+| judged pair           | about $0.07             | about 10 s  | Opus 5.5, four pictures in one message                     |
+| judge's control check | about $0.50             | about 1 min | eight pairs, once per `judge.mjs` or `run.mjs`             |
+| disk                  |                         |             | about 60 MB per cell, mostly `node_modules`                |
+
+The smoke run itself cost $4.33: $3.70 for the four agent runs, $0.49 for
+the judge's control check, $0.14 for two judged pairs. Nothing came near the
+15-minute clock, but these two are among the smaller prompts: three-pane,
+data and editor apps should take longer and cost more, so budget about $1.50
+a cell until a batch says otherwise. Cost is Claude Code's own
+`total_cost_usd`; on a subscription it is the API-equivalent price, not a
+bill, and counts against the plan's usage instead.
+
+**The full dev matrix** is three variants, 12 prompts and three runs:
+
+```bash
+node evals/run.mjs --variants none,create-default,oneshot-mac --prompts dev --runs 3 --concurrency 3
+```
+
+That is 108 agent runs, about $100–160, and 108 judged pairs, about $8.
+Allow 2–3 hours at `--concurrency 3`, or 6–8 hours one at a time, and about
+7 GB of disk. The held-out check for the two finalists (`--prompts test
+--runs 3`, 48 runs) is about $45–75 more.
 
 ## Known limits
 
@@ -264,8 +293,9 @@ COST_SECTION
 - Only the first screen is pictured and judged. Behaviour (a shortcut, a
   dialog) counts only through the rules and the checklist items visible in
   it.
-- Hex colours are counted wherever they appear in a string in `src/`, so
-  sample data that is itself a colour (a tag's colour) counts too. The
-  details in `grade.json` list each one.
+- A colour in sample data (a tag's colour, `'#e5534b'`) counts as a
+  hard-coded colour too. The details in `grade.json` list each one.
+- The website-look rule only sees shadowed cards; bordered ones without a
+  shadow get past it, and are left to the judge.
 - `oneshot-mac` was written for an empty folder and a Mac; the adaptation
   keeps its content and changes only its paths.
