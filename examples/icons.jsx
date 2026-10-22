@@ -150,9 +150,11 @@ const NAMES = Object.keys(ICONS);
 // attributes on the root element, so `fill="none"` there would be dropped and
 // every stroke icon would paint as a solid blob. This is the same re-rooting
 // the `iconSource` adapter does — see docs/ecosystem/icons.md.
+// `currentColor`, so the icons take the cell's `color` — the palette's text,
+// light or dark. A fixed charcoal was invisible on a dark desktop.
 const PAINT = {
   fill: 'none',
-  stroke: '#2d3436',
+  stroke: 'currentColor',
   'stroke-width': 1.7,
   'stroke-linecap': 'round',
   'stroke-linejoin': 'round',
@@ -242,7 +244,10 @@ function IconCell({ name, mode, size, cell }) {
     // SvgView rebuild whenever anything in the subtree changes.
     return (
       <box style={box}>
-        <svg viewBox="0 0 24 24" style={{ width: size, height: size }}>
+        <svg
+          viewBox="0 0 24 24"
+          style={{ ...s.glyph, width: size, height: size }}
+        >
           <g {...PAINT}>
             {ICONS[name].map((el, i) => {
               const { t, ...attrs } = el;
@@ -256,7 +261,10 @@ function IconCell({ name, mode, size, cell }) {
 
   return (
     <box style={box}>
-      <svg source={SOURCES[name]} style={{ width: size, height: size }} />
+      <svg
+        source={SOURCES[name]}
+        style={{ ...s.glyph, width: size, height: size }}
+      />
     </box>
   );
 }
