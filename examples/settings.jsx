@@ -477,7 +477,7 @@ function SettingRow({ def, value, onChange, onReset, dirty, disabled }) {
   );
 }
 
-export function SettingsPanel({ store, onQuit }) {
+export function SettingsPanel({ store, onQuit, closing }) {
   const [values, setValues] = useState(defaults);
   const [saved, setSaved] = useState(defaults);
   const [page, setPage] = useState(PAGES[0]);
@@ -508,6 +508,16 @@ export function SettingsPanel({ store, onQuit }) {
     () => SETTINGS.filter((d) => values[d.id] !== saved[d.id]).map((d) => d.id),
     [values, saved],
   );
+
+  // The window's close button lands here, through `closing`: with nothing
+  // unsaved it closes, and with something unsaved it asks first.
+  useEffect(() => {
+    if (!closing) return undefined;
+    closing.current = () => (dirty.length ? setAsking(true) : onQuit());
+    return () => {
+      closing.current = null;
+    };
+  }, [closing, dirty.length, onQuit]);
   const invalid = useMemo(
     () => SETTINGS.some((d) => d.validate?.(values[d.id] ?? '')),
     [values],
@@ -696,7 +706,7 @@ export function SettingsPanel({ store, onQuit }) {
   );
 }
 
-export function App({ store }) {
+export function App({ store, onQuit = () => process.exit(0) }) {
   const chosen = useMemo(() => store ?? fileStore(), [store]);
   const closing = useRef(null);
   return (
@@ -709,7 +719,7 @@ export function App({ store }) {
       onCloseRequest={() => closing.current?.()}
       style={{ backgroundColor: '$background' }}
     >
-      <SettingsPanel store={chosen} onQuit={() => process.exit(0)} />
+      <SettingsPanel store={chosen} onQuit={onQuit} closing={closing} />
     </window>
   );
 }

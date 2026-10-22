@@ -19,7 +19,8 @@ import {
 
 process.env.REACT_X11_NO_AUTORUN = '1';
 
-const { SettingsPanel, memoryStore } = await import('../examples/settings.jsx');
+const { App, SettingsPanel, memoryStore } =
+  await import('../examples/settings.jsx');
 
 afterEach(cleanup);
 
@@ -47,6 +48,41 @@ const search = () => screen.getByPlaceholder('Search settings');
 const rowFor = (label) => within(page().getByRole('group', { name: label }));
 
 describe('examples/settings', () => {
+  // The window manager's close button: ntk turns WM_DELETE_WINDOW into a
+  // cancellable 'close' on the window, which is what reaches onCloseRequest.
+  const closeButton = (handle) =>
+    handle.window.emit('close', { name: 'close', preventDefault() {} });
+
+  const mountApp = async (onQuit) => {
+    const handle = await renderX11(h(App, { store: memoryStore(), onQuit }), {
+      wrap: false,
+    });
+    await waitFor(() => {
+      const field = screen.getByPlaceholder('Search settings');
+      assert.ok(field.abs?.width > 0, 'not laid out yet');
+    });
+    return handle;
+  };
+
+  test('the close button closes when nothing is unsaved', async () => {
+    let quit = 0;
+    const handle = await mountApp(() => quit++);
+    closeButton(handle);
+    await waitFor(() => assert.equal(quit, 1));
+  });
+
+  test('the close button asks first when something is unsaved', async () => {
+    let quit = 0;
+    const handle = await mountApp(() => quit++);
+    await userEvent.click(rowFor('Animate transitions').getByRole('switch'));
+    await waitFor(() => screen.getByText('1 unsaved change'));
+    closeButton(handle);
+    await waitFor(() => screen.getByText('1 change would be lost.'));
+    assert.equal(quit, 0);
+    await userEvent.click(screen.getByText('Discard and close'));
+    await waitFor(() => assert.equal(quit, 1));
+  });
+
   test('search finds settings, not pages, and goes where they live', async () => {
     await mount(memoryStore());
 
