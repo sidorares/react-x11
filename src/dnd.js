@@ -1,7 +1,7 @@
 // XDND drag and drop, the drop-target half: react-x11 windows accept drags
 // from other X11 applications (file managers, editors, browsers).
 //
-// Design: docs/architecture/drag-and-drop.md; protocol: XDND version 5.
+// Design: design/architecture/drag-and-drop.md; protocol: XDND version 5.
 // The advertisement (`XdndAware`) is a 4-byte property written
 // unconditionally on every top-level window at realize time — it creates no
 // X windows, so it is orthogonal to the windowed/windowless split.
@@ -1080,7 +1080,7 @@ export class DropSession {
 // ---------------------------------------------------------------------------
 // The drag source.
 //
-// One drag session, two transports (docs/architecture/drag-and-drop.md §6.3):
+// One drag session, two transports (design/architecture/drag-and-drop.md §6.3):
 // while the pointer is over this process's own windows the drag is local —
 // no wire, live JS payloads, the DropSession above delivering to the same
 // handlers with `e.source === 'internal'`. The moment it leaves them, the

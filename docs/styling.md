@@ -1,8 +1,7 @@
 # Styling
 
 Style lives in one place: the `style` prop. A style property passed flat is
-an error in development that names the fix, rather than the silent no-op an
-unrecognised prop used to be.
+an error in development that names the fix.
 
 ## The rule
 
@@ -18,19 +17,16 @@ One namespace per kind of thing, and no name in both:
   CSS.
 
 `style` takes an object or a nested array, flattened left-to-right with
-falsy entries skipped. That is what replaces the **selector** cascade:
-precedence is written at the call site instead of resolved by specificity.
+falsy entries skipped. That replaces the **selector** cascade: precedence is
+written at the call site instead of resolved by specificity.
 
 ```jsx
 <box style={[s.card, isWide && s.wide, { backgroundColor: theme.panel }]} />
 ```
 
-Inheritance is a different thing and it does happen — see
-[Inheritance](#inheritance-the-ink-the-face-and-the-size) below. The two are
-easy to conflate because CSS ships them together: what is gone here is
-_matching a rule against a tree_; what remains is a handful of properties
-that travel down it, which is the part that makes a theme, a caption block
-or a dimmed row expressible at all.
+Nothing matches a rule against the tree, but inheritance does happen: a
+handful of properties travel down it — see
+[Inheritance](#inheritance-the-ink-the-face-and-the-size).
 
 ## Lengths and shorthands
 
@@ -40,60 +36,17 @@ value, and the display scale turns either into device pixels (see
 mean what they mean in CSS; a border's or an outline's width also takes
 `'thin'`, `'medium'` and `'thick'` (1, 3 and 5).
 
-### Relative units
-
-Every length also takes CSS's relative units, resolved for the node it is
-written on into the same logical pixels:
-
-| unit                       | one of it is                                                                                                          | resolved again when             |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| `em`                       | the node's own font size — and on `fontSize` itself, the size it inherits, so `'1.5em'` is half again its parent's    | an ancestor's font size changes |
-| `rem`                      | the palette's `fontSize`: the size every label that names none is set in, 14 by default                               | the theme changes               |
-| `vw`, `vh`, `vmin`, `vmax` | a hundredth of the window the node is in — the `<window>` or `<popup>`, the size a `'@width >= 600'` block asks about | the window is resized           |
-
-A **percentage on `fontSize`** is of the inherited size, as `em` is. A
-**percentage `borderRadius`** is of the box's shorter side: a corner here is
-a circle, so `'50%'` is a circle on a square and a pill on anything longer,
-where CSS would draw each corner as an ellipse. Everywhere else a percentage
-is the layout's, as before.
-
-`calc()`, `min()`, `max()` and `clamp()` over any of these resolve to one
-number where the style is — `'calc(1rem + 2px)'`, and fluid type as
-`fontSize: 'clamp(14px, 1rem + 0.5vw, 20px)'`. A **percentage takes part
-only alone** (`'calc(100% / 3)'`): yoga takes one unit per value, and what a
-percentage is of is decided inside the layout, so `'calc(100% - 16px)'` is an
-error that says so. Pad a `'100%'` box rather than subtracting from it, or
-give the room to `flexGrow`.
-
-`lineHeight` takes all of CSS's forms and comes to the multiple the text
-engines take: `1.5`, `'150%'` and `'1.5em'` are that multiple, and a length
-— `'24px'`, `'1.75rem'` — is divided by the node's own font size, which is
-what makes a design's "16 on 24" the line it asks for.
-
-What a relative length costs is the re-resolution, and only on the nodes that
-wrote one: a node records what its style read — the inherited size, the
-palette's, the window's — and is resolved again by the walk that already
-carries that change (the text cascade, the theme walk, the size-query
-registry). A style written in pixels reads none of them. Inside an
-`'auto'`-sized window a viewport unit makes the content depend on the window
-that depends on the content; like a size query, it settles where the two
-agree, so size such a window or keep the viewport units out of it.
-
-Some of CSS's units are **not read**, and a value in one is an error naming
-the unit and why — `invalid width "2ex" in <box style>: ex is not read — it
-needs the font's x-height`:
-
-- `ex` and `ch`, which need font metrics nothing measures yet (`0.5em` is the
-  usual stand-in);
-- the container units, `cqw` and the rest: a container's size is known only
-  after a layout pass, and a length in it would lay the tree out again on
-  every frame the container moves — a percentage of the parent, or an
-  `'@container'` block, says the same without that;
-- the print units, `pt`, `mm`, `in`: lengths here are logical pixels, which
-  the display scale turns into device ones.
-
-So is a second value where a property takes one. Yoga's own setters used to
-`parseFloat` whatever they were handed, so `'2ex'` was quietly two pixels.
+`null`, like `undefined`, is unset: `width: wide ? 240 : null` leaves the
+width to the layout, and `''` is an unset colour. A value a property cannot
+take (`width: 'hidden'`, `padding: 'auto'`, `flexDirection: 'sideways'`) or
+a colour that does not parse (`'nonsense'`, `7`, `'#12'`) is an error at the
+commit in development, naming the property — in a state block, a gradient
+stop, a shadow, and a query block that does not match yet too. One that
+gets past that — a `$token` resolving to it, or a production build — is
+dropped where it is applied and reported, the way CSS drops a declaration it
+cannot parse: the rest of the block still applies, and a dropped colour
+paints no fill, stroke, gradient or shadow at all rather than half of one,
+and the inherited ink for text.
 
 ```jsx
 <box
@@ -131,11 +84,8 @@ A `$token` may stand for any one value inside them — `padding: '$gutter 0'`,
 **The more specific property wins, wherever it is written.** A longhand
 beats its shorthand, a side beats all four sides, and a pair beats all four
 too: `paddingTop` beside `padding: '8px 16px'` is the top padding whether it
-comes before or after it in the style. That is the rule `paddingLeft` beside
-`padding: 8` has always followed, and it is not CSS's, which goes by order.
-A flattened style array has no order left to go by — a longhand and its
-shorthand end up as two keys of one object — and "the specific one wins" is
-the rule you can read off a style without knowing how it was assembled.
+comes before or after it in the style. CSS goes by order instead; a
+flattened style array has no order left to go by.
 
 A part a shorthand leaves out is left unset rather than reset to CSS's
 initial value, since a longhand written beside it would win anyway. Three
@@ -163,15 +113,67 @@ camelCase), and a misspelt name gets the nearest real ones. `background` and
 by a shorthand reaches the longhands it expands into —
 `transition: { border: 150 }` fades the `borderColor` a `border` set.
 
+### Relative units
+
+Every length also takes CSS's relative units, resolved for the node it is
+written on into the same logical pixels:
+
+| unit                       | one of it is                                                                                                          | resolved again when             |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `em`                       | the node's own font size — and on `fontSize` itself, the size it inherits, so `'1.5em'` is half again its parent's    | an ancestor's font size changes |
+| `rem`                      | the palette's `fontSize`: the size every label that names none is set in, 14 by default                               | the theme changes               |
+| `vw`, `vh`, `vmin`, `vmax` | a hundredth of the window the node is in — the `<window>` or `<popup>`, the size a `'@width >= 600'` block asks about | the window is resized           |
+
+`rem` is read from the nearest palette, the way a `$token` is: a
+`<ThemeProvider value={{ fontSize: 12 }}>` around a dense panel re-bases it,
+and an app porting web numbers that assume 16 sets `fontSize: 16` on its
+theme.
+
+A **percentage on `fontSize`** is of the inherited size, as `em` is. A
+**percentage `borderRadius`** is of the box's shorter side: a corner here is
+a circle, so `'50%'` is a circle on a square and a pill on anything longer,
+where CSS would draw each corner as an ellipse. Everywhere else a percentage
+is the layout's, as before.
+
+`calc()`, `min()`, `max()` and `clamp()` over any of these resolve to one
+number where the style is — `'calc(1rem + 2px)'`, and fluid type as
+`fontSize: 'clamp(14px, 1rem + 0.5vw, 20px)'`. A **percentage takes part
+only alone** (`'calc(100% / 3)'`): yoga takes one unit per value, and what a
+percentage is of is decided inside the layout, so `'calc(100% - 16px)'` is an
+error that says so. Pad a `'100%'` box rather than subtracting from it, or
+give the room to `flexGrow`.
+
+`lineHeight` takes all of CSS's forms and comes to the multiple the text
+engines take: `1.5`, `'150%'` and `'1.5em'` are that multiple, and a length
+— `'24px'`, `'1.75rem'` — is divided by the node's own font size, which is
+what makes a design's "16 on 24" the line it asks for.
+
+A relative length is re-resolved only on the nodes that wrote one, when what
+it reads changes; a style written in pixels costs nothing. Inside an
+`'auto'`-sized window a viewport unit makes the content depend on the window
+that depends on the content; like a size query, it settles where the two
+agree, so size such a window or keep the viewport units out of it.
+
+Some of CSS's units are **not read**, and a value in one is an error naming
+the unit and why — `invalid width "2ex" in <box style>: ex is not read — it
+needs the font's x-height`:
+
+- `ex` and `ch`, which need font metrics nothing measures yet (`0.5em` is the
+  usual stand-in);
+- the container units, `cqw` and the rest: a container's size is known only
+  after a layout pass, and a length in it would lay the tree out again on
+  every frame the container moves — a percentage of the parent, or an
+  `'@container'` block, says the same without that;
+- the print units, `pt`, `mm`, `in`: lengths here are logical pixels, which
+  the display scale turns into device ones.
+
+So is a second value where a property takes one.
+
 ## What it fixes on `<window>`
 
-`width`/`height` on a `<window>` are the real X window's geometry — the user
-can drag them, and `flush()` reads them back — so they must never reach the
-root yoga node. That used to mean stripping them out of the style bag
-(`_yogaProps`), and it forced the size hints to hide inside a `sizeHints`
-object because `minWidth`/`maxWidth` were already taken by yoga.
-
-With the split, both workarounds go:
+`width`/`height` on a `<window>` are the real window's geometry — the user
+can drag them — so they are props and never reach the layout, and the window
+manager's size hints sit beside them, flat:
 
 ```jsx
 <window
@@ -187,9 +189,8 @@ With the split, both workarounds go:
 />
 ```
 
-`WINDOW_HINT_PROPS` is mapped back to ntk's `sizeHints` shape in
-`windowAttributes()`, and `style.backgroundColor` is forwarded as the window's
-creation attribute — the ntk contract is unchanged, only the call site is.
+`style` is the root box, and its `backgroundColor` is also the window's own
+background colour.
 
 ## Inline pseudo-states
 
@@ -206,12 +207,10 @@ The thing inline CSS cannot do, and the reason people keep a stylesheet:
 ```
 
 `:hover`, `:focus-within`, `:focus`, `:focus-visible`, `:active`,
-`:disabled`, `:drag-over`, `:dragging`.
-These are **node states, not selectors** — each is something the node itself
-already knows, so resolving them needs no specificity and no matching. The
-event manager already tracks the hover path, the press chain and the focused
-node; a state change recomputes one node's style and repaints. **No React
-render.**
+`:disabled`, `:drag-over`, `:dragging`. These are **node states, not
+selectors**: each is something the node itself already knows, so there is no
+specificity and no matching. A state change recomputes one node's style and
+repaints — **no React render.**
 
 Precedence is fixed and low-to-high: `:hover` → `:focus-within` → `:focus` →
 `:focus-visible` → `:active` → `:disabled` → `:drag-over` → `:dragging`,
@@ -221,18 +220,13 @@ focus, and a drag in progress outranks all of the pointer and focus states.
 Because the hover _path_ is the ancestor chain, hovering a child lights up an
 ancestor's `:hover` block, exactly like CSS.
 
-`:active` is a press, and it follows the same chain for the same reason: the
-node under the pointer is whatever a control happens to be built out of — a
-button's label, a switch's thumb — and it is the control that has to draw
-the press. It is also **live for the whole gesture**: it drops when the
-pointer leaves the chain and comes back when it returns, so `:active` always
-means "releasing now activates this", matching the nearest-common-ancestor
-rule the click itself is synthesized on.
-
-This is not decoration. A control acts on the release, so `:active` is the
-only thing it can show while it is held, and a click held half a second is
-half a second of silence without it. Give every interactive thing one — see
-[components.md](components.md#the-press-state).
+`:active` is a press, and follows the same chain, so the control draws the
+press whichever of its parts — a label, a thumb — is under the pointer. It
+is **live for the whole gesture**: it drops when the pointer leaves the
+chain and comes back when it returns, so it always means "releasing now
+activates this". A control acts on the release, so give every interactive
+thing an `:active` look: it is the only thing it can show while it is held
+([components.md](components.md#the-press-state)).
 
 ```jsx
 <box
@@ -249,30 +243,25 @@ A `transition` on the same property is welcome — what matters is that the
 change _starts_ on the press frame, not that it finishes there.
 
 The keyboard has no press state: Space and Enter act on the down, so the
-activation is immediate, but nothing draws held-ness. X reports auto-repeat
-as release/press pairs and neither ntk nor node-x11 implements XKB's
-`DetectableAutoRepeat`, so a held key cannot be told from fast tapping.
+activation is immediate, but nothing draws held-ness — on X11 a held key
+cannot be told from fast tapping.
 
 `:focus-visible` is focus that came from the keyboard — Tab, an arrow inside
 a widget, `autoFocus`, `node.focus()`, a modal handing focus back as it
-closes. A **press** sets `:focus` and not `:focus-visible`, for the reason
-CSS grew the distinction: the user knows where they clicked, and a ring on
-every click is noise, where a ring on Tab is the only cue a keyboard user
-has. Put focus rings in `:focus-visible` and colour changes that are welcome
-either way in `:focus`.
+closes. A **press** sets `:focus` and not `:focus-visible`, as in CSS: the
+user knows where they clicked, and a ring on every click is noise, where a
+ring on Tab is the only cue a keyboard user has. Put focus rings in
+`:focus-visible` and colour changes that are welcome either way in `:focus`.
 
 The exception is CSS's too: a press on a **text control** — `<textinput>`,
 `<textarea>`, or a custom element reporting editable text — does set
-`:focus-visible`. What the click told the user is where the caret went, not
-that every keystroke from now on lands there, and that second fact is what
-the ring is for.
+`:focus-visible`, because what the click told the user is where the caret
+went, not that every keystroke from now on lands there.
 
 `:focus-within` is focus on this node **or inside it** — CSS's, and the
 answer to "the row should light up while the field in it is being typed
-into", which is the one thing a node's own states cannot say. It is diffed
-over the focused node's ancestor chain, the same walk `:hover` uses, and a
-`<popup>` counts as inside the node it hangs off in the JSX tree, so a
-`Select` with its menu open still reads as focused.
+into". A `<popup>` counts as inside the node it hangs off in the JSX tree,
+so a `Select` with its menu open still reads as focused.
 
 ```jsx
 <box
@@ -293,13 +282,19 @@ that. `:dragging` is set on the source node for the duration of a drag.
 See [drag-and-drop.md](drag-and-drop.md).
 
 **State blocks may only set paint properties** (`backgroundColor`,
-`borderColor` and the per-side `borderTopColor`/…, `borderRadius`, `zIndex`,
-`outlineWidth`, `outlineColor`,
-`outlineOffset`, `opacity`, `color`) — enforced at declaration
-time by `createStyles`. A `:hover` that could set `padding` would reflow the
-tree on pointer move: jitter, and the end of the "hover is a repaint" property
-that makes this worth having. Anything that changes layout or what renders
-stays in React state.
+`backgroundImage`, `borderColor` and the per-side `borderTopColor`/…,
+`borderRadius`, `boxShadow`, `zIndex`, `outlineWidth`, `outlineColor`,
+`outlineOffset`, `opacity`, `color`, and the `background` and `outline`
+shorthands) — enforced at declaration time by `createStyles`, so that a
+pointer move never reflows the tree. Anything that changes layout or what
+renders stays in React state.
+
+There are **no relational selectors** — no `:hover > child`, no sibling
+combinator, no Tailwind-style `group`. A parent's `:hover` reaches its
+children because `color` is
+[inherited](#inheritance-the-ink-the-face-and-the-size), a child's hover
+reaches its ancestors because the hover path is the ancestor chain, and a
+sibling reacting to a sibling stays in React ([In components](#in-components)).
 
 ### The focus ring
 
@@ -312,8 +307,7 @@ for the keyboard (see `:focus-visible` above).
 `outlineWidth`, `outlineColor` and `outlineOffset` override it, and they are
 paint properties like any other: animatable, legal in a state block, and
 painted **outside the border box** so switching one on cannot move the thing
-it surrounds. That is the whole reason CSS has `outline` as well as `border`,
-and the reason these are not in the layout vocabulary.
+it surrounds.
 
 ```jsx
 <box focusable />                                  {/* ring, for free */}
@@ -342,13 +336,11 @@ it mirrors that subtree and nothing above it. Rows run the other way, `flex-star
 is the right-hand end, and every logical edge below swaps sides with it.
 
 **The default comes from the locale.** An app started under
-`LANG=ar_EG.UTF-8` is mirrored with no configuration, because that is what
-GTK and Qt both do and because the alternative is an Arabic desktop where
-one application's panels are on the wrong side. Every locale that is not
-written right to left answers `'ltr'`, so an app that never thinks about
-this pays nothing. The palette carries it — `theme.direction` — so an app
-with a language menu switches the whole UI with the `<ThemeProvider>` swap
-it was already doing for colours:
+`LANG=ar_EG.UTF-8` is mirrored with no configuration, as GTK and Qt apps
+are. Every locale that is not written right to left answers `'ltr'`, so an
+app that never thinks about this pays nothing. The palette carries it —
+`theme.direction` — so an app with a language menu switches the whole UI with
+the `<ThemeProvider>` swap it was already doing for colours:
 
 ```jsx
 <ThemeProvider value={{ direction: settings.rtl ? 'rtl' : 'ltr' }}>
@@ -373,10 +365,8 @@ routes always agree under one.
 | `borderStartColor` / `…EndColor` | `borderLeftColor` / `…Right…`  | swapped |
 
 **A logical edge wins over the physical one even in LTR**, the way CSS's
-`padding-inline-start` wins over `padding-left`. Yoga's full order is
-start/end, then the physical side, then `EDGE_HORIZONTAL`, then
-`EDGE_ALL` — the opposite way round from what the vertical shorthands
-suggest, which is why it is pinned in a test.
+`padding-inline-start` wins over `padding-left`, and the physical side wins
+over all four sides.
 
 Write layout in the logical pair and it is the same layout in both
 directions. Use the physical one when you mean the screen: a drop shadow, a
@@ -392,8 +382,7 @@ resize handle in a fixed corner.
   scrollbar's travel, Up/Down on every control.
 - **The caret keys in a field.** Left and Right step through the _string_,
   not across the screen, and so do Home and End — the editing model is
-  written in logical positions, and visual-order caret motion through bidi
-  text is its own question.
+  written in logical positions.
 
 What **does**, besides the box tree: a vertical scrollbar moves to the left;
 horizontal scrolling counts from the right-hand edge, so `scrollX: 0` still
@@ -407,18 +396,16 @@ screen edge; and the inside of a `<textinput>`/`<textarea>` — see below.
 A field is laid out at its box's direction, exactly as a `<text>` is, and the
 direction does two separate things there:
 
-- **It is the base level the value is shaped at.** UAX#9 resolves a run of
-  neutral characters — `"(1) 12:30"`, a filename, a lone bracket — against
-  the paragraph level, and "take it from the first strong character" is only
-  the rule for when nobody said. A field that never said reorders an Arabic
-  word typed into an English form as though the whole line were Arabic, in an
-  **LTR** window. So the field says.
+- **It is the base level the value is shaped at.** A run of neutral
+  characters — `"(1) 12:30"`, a filename, a lone bracket — resolves against
+  it rather than against the first strong character, so an Arabic word typed
+  into an English form in an **LTR** window does not reorder the line as
+  though it were Arabic.
 - **It is the edge the text is against.** The value, the placeholder and the
   caret start at the direction's start edge — the right-hand one under
   `direction: 'rtl'` — and an unscrolled field still shows the _beginning_ of
   its value, so a value too long for its box overflows towards the left.
-  Clicking, the caret, the selection bands and the scroll are read from one
-  placement, so they mirror together.
+  Clicking, the caret, the selection bands and the scroll mirror together.
 
 `textAlign` works on a field too: `'start'` (the default) is the base
 direction's start edge, and `'center'`/`'end'` do what they say while the
@@ -427,7 +414,7 @@ whatever the alignment says, because that is what it is scrolled from.
 
 The text's _own_ direction is not consulted: a Latin value in an RTL field is
 placed at the field's right edge, the way `<input dir="rtl">` places one, and
-there is no `dir="auto"` equivalent yet.
+there is no `dir="auto"` equivalent.
 
 ## Per-side borders
 
@@ -449,27 +436,20 @@ widths are layout — yoga sees each edge, so the bar above insets content on
 the left only — and the colours are paint, legal in a state block like
 `borderColor` itself.
 
-This is what a rule or an accent edge should be built from: a blockquote's
-bar, a table's row separators (`borderBottomWidth: 1` on each row), a tab's
-underline. Composing the same line out of 1px `<box>`es works but pays a
-node per row into layout and paint, and scatters what is really one style
-value ("the table's border colour") across the tree.
+Build a rule or an accent edge this way — a blockquote's bar, a table's row
+separators (`borderBottomWidth: 1` on each row), a tab's underline — rather
+than out of 1px `<box>`es, which pay a node per row in layout and paint.
 
-Two edges of the v1 shape:
+Two limits:
 
 - **`borderRadius` requires uniform borders** — same width and colour on
   all four sides. A non-uniform border paints square, ignores the radius,
-  and says so once in development; bars and rules are square, so this costs
-  nothing real.
+  and says so once in development.
 - Corners between two painted sides of different colours are square and
   deterministic: top and bottom span the box's full width, left and right
-  run between them. CSS mitres that corner diagonally; nothing built from
-  bars and rules can tell the difference.
+  run between them, where CSS mitres the corner diagonally.
 
 ## Gradients and shadows
-
-The two decorations a UI asks for after colour and radius, and the two that
-used to mean giving up on `<box>` and drawing the panel by hand:
 
 ```jsx
 <box
@@ -488,9 +468,8 @@ used to mean giving up on `<box>` and drawing the panel by hand:
 Both are **paint** properties: legal in a state block, and outside layout
 entirely — a gradient fills the box the layout already decided on, and a
 shadow is drawn beyond it and moves nothing. Both are written in CSS's
-spelling, because both are values people already know by heart, and a
-`$token` resolves **inside** them as well as as a whole value, which is what
-keeps a themed decoration in a hoisted style.
+spelling, and a `$token` resolves **inside** them as well as as a whole
+value, which is what keeps a themed decoration in a hoisted style.
 
 ### `backgroundImage`
 
@@ -507,64 +486,39 @@ against the node's own box so it works wherever the node lands.
 
 Only linear gradients exist. A radial or conic one is a `<canvas onDraw>`
 away (`createRadialGradient` draws on every backend but Windows', and
-ntk's context has `createConicalGradient`),
-and CSS's sizing keywords for them are most of the work for very little of
-the demand.
+ntk's context has `createConicalGradient`).
 
-One cost worth knowing, because it is not where anyone would look for it: a
-gradient is a server-side source picture, so a **square** one is as cheap as
-a colour — but a **rounded** one is not. ntk's rounded-rect fast path (cached
-corner glyphs plus `FillRectangles`) only takes a solid colour, so a rounded
-gradient falls back to a coverage mask rasterized on the client and uploaded
-per fill: about 4 KB per box per repaint. Damage bounding means that is only
-paid where something changed, but a list of rounded gradient rows is the one
-shape to think twice about — see the `shapes: 24 gradient+shadow cards`
-scenario in `npm run bench`, which prices it.
+On X11 a **square** gradient is as cheap as a colour, but a **rounded** one
+is rasterized on the client and uploaded per fill — about 4 KB per box per
+repaint, paid only where something changed. A list of rounded gradient rows
+is the one shape to think twice about.
 
 ### `boxShadow`
 
 `<x> <y> [blur] [spread] [colour]`, comma-separated for several, painted
 first-on-top like CSS's. The colour may be left out, which means the node's
 own `color` — [`currentColor`](#currentcolor), which may be written out
-too. A blurred shadow is a real gaussian — RENDER's convolution over a
-coverage surface — cached by size, radius and blur, so a list of identical
-cards renders one and composites it many times.
-
-On macOS and Windows, which have no X server to bake one on, the shadow is
-the 2d context's own `shadowBlur`, and the context draws a rounded rect's
-shadow from a tile it makes once and stretches — see
-[macos.md](macos.md#a-shadow-from-a-tile). The rest of this section is the
-X11 route.
-
-The blur is **baked into the cached surface's pixels**, in two separable 1-D
-passes, rather than left as a filter on its picture. That is not an internal
-detail: XRender applies a picture's filter on every composite, so a shadow
-whose blur rode on the picture paid its whole kernel again every frame it was
-drawn — a card-sized coverage surface at a wide blur is hundreds of millions
-of multiply-accumulates, in the server, per shadow, per repaint. Baked, a
-repaint composites a plain mask however wide the blur is, and the convolution
-runs once per distinct geometry.
+too. A blurred shadow is a real gaussian, computed once per distinct size,
+radius and blur and cached, so a list of identical cards renders one and
+composites it many times, and a repaint costs the same however wide the
+blur. On macOS and Windows it is the 2D context's own `shadowBlur`.
 
 What it does not do, and why:
 
-- **`inset` throws.** An inner shadow is a different drawing and a different
-  damage story, and painting an outer one where an inner was asked for is a
-  bug with no visible cause. An inset border or a `<canvas>` says it today.
+- **`inset` throws.** An inner shadow is a different drawing, and painting an
+  outer one where an inner was asked for is a bug with no visible cause. An
+  inset border or a `<canvas>` says it today.
 - **Ignored on `<window>` and `<popup>`** (with a warning in development). A
   shadow is painted outside the box, and a toplevel owns no pixels there —
-  a real one needs the window to carry a translucent margin of its own,
-  which is a feature rather than a line in the painter. Put the shadow on a
-  `<box>` inside the window; for a floating menu, the popup's own
-  `borderRadius` plus a border is what reads as raised today.
+  a real one needs the window to carry a translucent margin of its own.
+  Put the shadow on a `<box>` inside the window; for a floating menu, the
+  popup's own `borderRadius` plus a border is what reads as raised.
 - **Neither transitions.** Both are several numbers and a colour in one
-  string, and `interpolate` moves one value; they snap. A card that wants to
-  rise on hover animates the `backgroundColor` or the border beside them.
+  string; they snap. A card that wants to rise on hover animates the
+  `backgroundColor` or the border beside them.
 
-A shadow is the first thing in this vocabulary that inks pixels the node
-does not own, so it also widens what the node repaints — its offset, its
-spread and the blur's tail — and the frame that _removes_ one claims where
-it was. That is the renderer's business, not the application's, but it is
-the reason a shadow is not free the way a colour is: prefer one shadow on
+A shadow inks pixels the node does not own, so it widens what the node
+repaints — its offset, its spread and the blur's tail. Prefer one shadow on
 the card to one on every row inside it.
 
 ## Opacity
@@ -598,11 +552,6 @@ faded and released when it is opaque again. `0` draws nothing and costs
 nothing — and the node is still laid out and still hit, as in CSS. A value
 outside 0 to 1 is clamped; one that is not a number throws in development.
 
-On the Cocoa backend a faded box is drawn into the window's bitmap like this
-rather than lifted onto a layer of its own (docs/macos.md): a box and its
-content on separate layers would fade one over the other, which is the thing
-`opacity` exists not to do.
-
 ## Measuring text to its letters
 
 ```jsx
@@ -616,18 +565,12 @@ alphabetic`: the `<text>`'s box becomes the capitals down to the last
 baseline, so padding around a label is measured from the letters and
 centring centres what you can see. Default `'none'`.
 
-The problem it solves is that **a line box is not the text**. It is the
-font's ascent plus its descent plus its line gap, and the space over a
-capital differs from the space under a baseline by `(ascent - capHeight) -
-descent` — a property of the typeface, so a label is only ever optically
-centred by luck. With the KaTeX face the tests use, a 24px label in a 12px
-padded box sits 17px below the top and 18px above the bottom; trimmed, it is
-12 and 12.
-
-**`lineHeight` is not an alternative.** It is a multiplier over the natural
-line box and the leading still splits evenly above and below, so it moves
-both edges by the same amount — it can change how much space there is, never
-how it is balanced.
+**A line box is not the text**: the space over a capital differs from the
+space under a baseline by `(ascent - capHeight) - descent`, a property of
+the typeface, so an untrimmed label is only optically centred by luck.
+**`lineHeight` is not an alternative**: it is a multiplier over the natural
+line box, and the leading still splits evenly above and below, so it changes
+how much space there is, never how it is balanced.
 
 Two things worth knowing:
 
@@ -639,11 +582,9 @@ Two things worth knowing:
 
 **The built-in widgets set it on every label**, which is why `paddingY` in a
 palette is bigger than a CSS padding for the same look — it is the space you
-see, not the space plus whatever the ascent left over. Which way a face is
-off changes with the face: at 14px, SF NS leaves 3.7px above the capitals
-against 2.9px below the baseline, so an untrimmed label rides low, while
-Helvetica leaves 0.7 against 3.2 and it rides high. A widget cannot correct
-for that, because it does not know the face it will be drawn in.
+see, not the space plus whatever the ascent left over. Which way an untrimmed
+label is off changes with the face (it rides low in SF NS and high in
+Helvetica), and a widget does not know the face it will be drawn in.
 
 A glyph drawn as text — a check mark, a submenu arrow, an icon — is centred
 on its own middle rather than sitting on a baseline, so trimming its box
@@ -687,16 +628,14 @@ that a paragraph is made of, and nothing hangs out of a stack of them.
 `textWrap: 'nowrap'` is CSS's, and it is what separates a cell from a
 paragraph. A `<text>` measures height-for-width: hand it a narrow box and it
 wraps to fit, which is right for prose and wrong for a row of a fixed height —
-a date that wraps to two lines is not a taller row, it is a line and a half of
-date with the rest sliced off, top and bottom, spilling over the rows either
-side on the way. `'nowrap'` measures at unbounded width, so the overflow is
-horizontal, which `overflow: 'hidden'` on the box around it already knows what
-to do with. Default `'wrap'`.
+a date that wraps is sliced off top and bottom and spills over the rows
+either side. `'nowrap'` measures at unbounded width, so the overflow is
+horizontal, which `overflow: 'hidden'` on the box around it clips. Default
+`'wrap'`.
 
-A date is the case that wants exactly that: it is a fixed width, it always
-fits, and clipping it would be a bug rather than a design. A **name** is not.
-Clipped, a truncated file name and a short one look equally complete, and the
-reader has no way to tell which they are looking at:
+A date always fits, so clipping it would be a bug rather than a design. A
+**name** does not: clipped, a truncated file name and a short one look
+equally complete.
 
 ```jsx
 <text style={{ textWrap: 'nowrap', textOverflow: 'ellipsis' }}>
@@ -717,12 +656,10 @@ a substring —
 - it cuts the **visually** last run rather than the logically last one, so a
   right-to-left line ends on its left.
 
-`maxLines` is the other half — CSS has no single-property spelling for it
-(`-webkit-line-clamp` is what everyone actually writes), so this is the name
-the platforms that got a clean shot at it chose. A three-line blurb that ends
-in a `…` is `{ maxLines: 3, textOverflow: 'ellipsis' }`; the lines past the
-cap are dropped before the box is measured, so the height is the kept lines'
-and not the whole paragraph's.
+`maxLines` is the other half — CSS's `-webkit-line-clamp`. A three-line blurb
+that ends in a `…` is `{ maxLines: 3, textOverflow: 'ellipsis' }`; the lines
+past the cap are dropped before the box is measured, so the height is the
+kept lines' and not the whole paragraph's.
 
 **`textOverflow: 'ellipsis'` on its own means one line.** Eliding happens off
 a line count — the mark stands for the lines that were dropped — so an
@@ -732,8 +669,8 @@ ask for two or three.
 
 ### What `nowrap` and `ellipsis` do together
 
-They are not in tension, but they change what the `<text>` reports to layout,
-which is worth knowing before a row moves under you.
+They change what the `<text>` reports to layout, which is worth knowing
+before a row moves under you.
 
 A clipping `nowrap` label is measured at unbounded width, so it tells its
 container it needs the **whole string** — and CSS's automatic minimum size
@@ -741,21 +678,15 @@ turns that into a floor. It cannot be squeezed, so a long name pushes the
 column next to it out of the row and the overflow is dealt with somewhere
 above.
 
-An eliding one is measured against the width on offer, because at unbounded
-width there is one line, one line is never over the cap, and nothing would
-ever be cut. So its floor is small and it **gives way**: it takes the room
-that is left, shows `Applicati…`, and the column beside it keeps its width.
-That is the behaviour a table wants — a column that cannot show a file name
-should say so rather than making every other column narrower to avoid it.
-
-`<Table>` sets `nowrap` and `ellipsis` on every cell and header for that
-reason.
+An eliding one is measured against the width on offer, so its floor is small
+and it **gives way**: it takes the room that is left, shows `Applicati…`,
+and the column beside it keeps its width. That is the behaviour a table
+wants, and `<Table>` sets `nowrap` and `ellipsis` on every cell and header
+for that reason.
 
 What is truncated is a fact about the pixels and nothing else. A `<text>` that
 was elided still reports the **whole** string as its accessible name, and the
-caret and selection indices still index into the whole string — a screen
-reader that read `Application Sup…` would be reading the layout instead of the
-content.
+caret and selection indices still index into the whole string.
 
 ## Inheritance: the ink, the face and the size
 
@@ -810,12 +741,10 @@ its icon follow.
 </box>
 ```
 
-Nothing about that costs a layout pass. A state block may only set paint
-properties and `color` (see above), so the only inherited property a pointer
-can ever move is the ink — which drops the memoised text layouts under it
-and repaints, with no re-measuring and no reflow. A `fontSize` change
-_does_ re-measure, and it can only come from a React commit, a size query or
-a theme.
+Nothing about that costs a layout pass: a state block sets paint and `color`
+only, so the only inherited property a pointer can move is the ink, which
+repaints without re-measuring. A `fontSize` change _does_ re-measure, and it
+can only come from a React commit, a size query or a theme.
 
 What does **not** inherit: `textAlign`, `lineHeight`, `textWrap`,
 `textOverflow`, `maxLines` and `textBoxTrim`. CSS inherits the first two;
@@ -829,11 +758,10 @@ drawing rather than a letter, so it takes its default from the palette's
 development, naming the property; where one gets past that — a `$token`, or
 a production build — the text sets as though it had not been written, the way
 CSS inherits past a declaration it cannot parse. Numbers may be numeric
-strings (`fontSize: '20'`), as they always could, and a size is a
+strings (`fontSize: '20'`), and a size is a
 [length](#lengths-and-shorthands) like any other: `fontSize: '20px'` is 20,
 and `'1.5em'` or `'150%'` is half again the size inherited. A `lineHeight`
-in a length — `'24px'` — is that multiple of the node's own size. Before, a
-size in px set no text at all and the others threw from inside a frame.
+in a length — `'24px'` — is that multiple of the node's own size.
 
 ### `currentColor`
 
@@ -859,9 +787,8 @@ It stays the keyword in the node's style, which is CSS's computed value, and
 becomes a colour where it is painted, so it follows the ink wherever the ink
 moves: a `:hover` on a row above, a theme swap, a `color` transition frame by
 frame. A node painting in it repaints when its ink moves, bounded to that
-node, and a box does too although it draws no text; one that paints nothing
-in it still costs nothing when the ink above it moves. A `<popup>` written
-under the row inherits the ink like any other child and repaints with it.
+node. A `<popup>` written under the row inherits the ink like any other
+child and repaints with it.
 
 Two places it cannot simply follow:
 
@@ -946,28 +873,23 @@ that is merely _previewing_ files does not — it would quietly change which
 face draws the bullets and the curly quotes in its own UI.
 
 Both verbs read a given file once per connection, however often they are
-called: the face is cached in the app's font manager, so `useFont` in a
-component that re-renders sixty times a second parses nothing, and
-`loadFont` after `openFont` on the same path registers the face already
-open. This matters more than it looks — a second copy of a font is a second
-glyph cache and a second server-side glyphset, and a node built against one
-copy cannot be painted by the other.
+called: `useFont` in a component that re-renders sixty times a second parses
+nothing, and `loadFont` after `openFont` on the same path registers the face
+already open.
 
 `font` is ntk's `Font`, which has more on it than the four members above
 ([ntk's docs/fonts.md](https://github.com/sidorares/ntk/blob/master/docs/fonts.md)). If you need
 anything else of ntk's — `Path2D`, `Image`, `Surface` — **import it from
 `react-x11/ntk`, never from `ntk`**, and never declare `ntk` as a dependency
 of your own. Two copies in one process are two font caches and two glyph
-atlases, with the same consequence as above and a great deal further from
-its cause.
+atlases, and a node built against one copy cannot be painted by the other.
 
 ## `createStyles`
 
-Identity is the point — a hoisted style object lets `applyProps` skip the
-whole update with a `===` check, the same reason RN's `StyleSheet.create`
-still exists now that its id registry is gone. It also validates keys, which
-a bare object literal cannot: an unknown style property is an error at
-declaration instead of a silent no-op.
+A hoisted style object keeps its identity, so `applyProps` skips the whole
+update with a `===` check. `createStyles` also validates keys, which a bare
+object literal cannot: an unknown style property is an error at declaration
+instead of a silent no-op.
 
 ## `flattenStyle`
 
@@ -996,8 +918,8 @@ node-local state block can cross that.
 A component's own props are never style. `ProgressBar` takes `color`,
 `Dialog` takes `width`/`height` — a dialog is a real popup window and needs
 its geometry up front — and `ContextMenu` takes `fontSize` because it
-measures labels with it. `Select` and `Slider` used to take `width` purely
-to put it in their own box; that is `style={{ width }}` now.
+measures labels with it. A `Select`'s or a `Slider`'s width is
+`style={{ width }}`.
 
 ## Theme tokens
 
@@ -1017,10 +939,9 @@ const s = createStyles({
 </window>;
 ```
 
-That is the point of tokens: the style is **hoisted** — declared once,
-outside render, with no access to React context — and still follows the
-theme. Without them a palette has to be threaded to every element that
-paints (`style={[s.card, { backgroundColor: theme.panel }]}`).
+A **hoisted** style — declared once, outside render, with no access to React
+context — still follows the theme, with no palette threaded to every element
+that paints.
 
 Tokens are not colour-only; `padding: '$gutter'` resolves a number just as
 well. And they resolve wherever a style value is written: in a state block, in
@@ -1055,7 +976,7 @@ which is the desktop's `sans-serif` unless the window itself was given a
 theme. An app that ships its own fonts then draws its headings in the face it
 shipped and its body copy in whatever the machine calls sans-serif, which is
 both wrong and slow: resolving a generic family costs an `fc-match` per weight
-on the first paint (~110ms each here).
+on the first paint (~110ms each).
 
 Three ways to say it. For a whole app the first says it once, for the widgets
 and every window; the last is the one for a subtree:
@@ -1072,9 +993,8 @@ and every window; the last is the one for a subtree:
 </box>
 ```
 
-`monoFamily` has no such fallback — nothing is monospace unless it says so, and
-that is what the `$` above is for. It is a token so that the code surfaces of
-an app, which are written by components that never meet, can be set from one
+`monoFamily` has no such fallback — nothing is monospace unless it says so,
+with `fontFamily: '$monoFamily'`, so an app's code surfaces are set from one
 place.
 
 A `theme` prop anywhere scopes its subtree, and an inner one merges over the
@@ -1091,32 +1011,24 @@ by `<ThemeProvider>`, which plants the resolved palette in the tree for this
 lookup to find. Hand-writing `theme={{ accentHover: … }}` on a box gets the
 merge and not the derivation.
 
-Changing the theme restyles the subtree in place. Nodes whose own props did
-not change are still updated — which is why a theme change also drops the
-memoised text layouts under it, or cached text would keep painting the old
-colour.
+Changing the theme restyles the subtree in place, nodes whose own props did
+not change included.
 
 An unknown token is **reported and dropped**: the message names the token,
 the element, the component that wrote it, and every token the palette in
 force does have; that one property goes missing, so the widget paints
 visibly wrong rather than the app dying; and `process.exitCode` is set to 1,
-so a test run, a CI job or a supervisor still counts the run as failed.
+so a test run, a CI job or a supervisor still counts the run as failed. It
+is not a throw because resolution also happens where no error boundary can
+catch one — above every boundary inside a `<window>`, or from the desktop's
+light/dark switch with no React on the stack.
 
-That is deliberately not a throw. Resolution happens when a node's ancestry
-completes — inside a commit, and also from an X event when the desktop
-switches between light and dark — and on both of those paths a throw is
-uncatchable: it either lands on the `<window>` fiber above every error
-boundary the app wrote inside it, or it unwinds into the frame loop with no
-React on the stack at all. One wrong character in a style value should not
-be able to blank the screen.
-
-Set **`REACT_X11_STRICT_TOKENS=1`** to make it fatal again — for a kiosk, or
-a build that would rather stop than paint something wrong. Strict mode also
-throws in the right _place_: the error is raised from the offending node's
-own `commitMount`, so an error boundary at any depth inside the window
-catches it and shows a fallback for that subtree. Where React genuinely is
-not on the stack — the desktop appearance switch — strict mode crashes,
-which is what it was asked for.
+Set **`REACT_X11_STRICT_TOKENS=1`** to make it fatal — for a kiosk, or
+a build that would rather stop than paint something wrong. Strict mode
+throws from the offending node's own `commitMount`, so an error boundary at
+any depth inside the window catches it and shows a fallback for that
+subtree. Where React genuinely is not on the stack — the desktop appearance
+switch — strict mode crashes, which is what it was asked for.
 
 A token with **no** theme above it at all warns in dev — that one is
 otherwise silent, since the whole style is stripped rather than one value
@@ -1127,17 +1039,15 @@ node that wears it, not just the first.
 
 Resolution walks the node tree, not React context, so a palette has to reach
 the tree to be seen. `<ThemeProvider>` puts it in both places — the context
-widgets read with `useTheme()`, and a `theme` prop on a node — which is what
-makes provider and token one mechanism rather than two
+widgets read with `useTheme()`, and a `theme` prop on a node
 ([components.md](components.md#theming)). Widgets plant their own merged
 palette on their root node as well, so `$tokens` work inside a widget
 subtree — and in a style you pass one — with no provider anywhere.
 
 With no `theme` prop above it at all, a token resolves against **the
 desktop's palette** — `backgroundColor: '$background'` in an app that never
-wrote a `<ThemeProvider>` is dark on a dark desktop, which is how that app
-blends in ([appearance.md](appearance.md)). A token no palette defines is
-reported the same way, naming every token the one in force does have.
+wrote a `<ThemeProvider>` is dark on a dark desktop
+([appearance.md](appearance.md)).
 
 ## Sticky positioning
 
@@ -1187,11 +1097,9 @@ const s = createStyles({
   the rows that scroll under a header do not paint over it, and it takes the
   press where it covers them. `zIndex` still orders it first. Give it a
   background, or the rows show through.
-- **It lands in the frame that scrolled.** The pane applies the offset in
-  the layout pass the scroll runs — never through a re-render — so a header
-  cannot trail its content by a frame, and a pane of headers keeps the
-  scroll blit: a header riding with its rows costs nothing, and a held one
-  repaints its own rect.
+- **It lands in the frame that scrolled**, with no re-render, so a header
+  cannot trail its content by a frame; a header riding with its rows costs
+  nothing, and a held one repaints its own rect.
 - **`onLayout` reports where layout put the box**, not where it is held,
   the same way a scroll does not fire it. Where it is held is
   `getClientRects()`.
@@ -1201,9 +1109,9 @@ Both axes at once, and one sticky box inside another, are what
 row of room names held under the banner, a column of times held at the left,
 and the corner where the two meet.
 
-Not yet: CSS's `scroll-padding`. Scrolling a node into view — keyboard focus
-reaching a row — brings it to the pane's edge, which can be under a held
-header.
+Not supported: CSS's `scroll-padding`. Scrolling a node into view — keyboard
+focus reaching a row — brings it to the pane's edge, which can be under a
+held header.
 
 Sticky is the built-in [custom position](#custom-positions): the same
 placement, written against the same context a registered one is handed.
@@ -1234,7 +1142,9 @@ registerPosition('parallax', {
 
 - **It is a `position` value**, by name or with its options, and switches
   like one — from a container query block too. The box is laid out exactly
-  where `relative` would put it, and moved; nothing around it reflows.
+  where `relative` would put it, and moved; nothing around it reflows. A box
+  has one `position`, so to combine a scheme with `absolute`, wrap it in a
+  box.
 - **The insets are the scheme's.** Yoga never sees them as offsets: sticky
   reads them as thresholds, and a registered position reads them as whatever
   it documents.
@@ -1301,19 +1211,24 @@ so a grid copied from a web codebase lays out here as it was written:
 </box>
 ```
 
-| on the grid box                           | CSS                                |                                                                                                                                                                                                                            |
-| ----------------------------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gridTemplateColumns`, `gridTemplateRows` | `grid-template-*`                  | a track list — lengths in `px` (logical pixels), `%` and `fr`; `auto`, `min-content`, `max-content`; `minmax()`, `fit-content()`; `repeat()` with a count, `auto-fill` or `auto-fit` — or a number: that many equal tracks |
-| `gridTemplateAreas`                       | `grid-template-areas`              | one quoted string per row — `'"head head" "side main"'` — or an array of the rows                                                                                                                                          |
-| `gridAutoColumns`, `gridAutoRows`         | `grid-auto-*`                      | the size of a track the grid adds for a child placed past its template; a number is a length                                                                                                                               |
-| `gridAutoFlow`                            | `grid-auto-flow`                   | `'row'` (the default) or `'column'`, and `'dense'` to back-fill a hole                                                                                                                                                     |
-| `gap`, `columnGap`, `rowGap`              | `gap`                              | between the tracks                                                                                                                                                                                                         |
-| `justifyItems`, `alignItems`              | `justify-items`, `align-items`     | where each child sits in its area: `'stretch'` (the default), `'flex-start'`, `'center'`, `'flex-end'`                                                                                                                     |
-| `justifyContent`, `alignContent`          | `justify-content`, `align-content` | where the tracks sit when they leave room                                                                                                                                                                                  |
-| **on a child**                            |                                    |                                                                                                                                                                                                                            |
-| `gridColumn`, `gridRow`                   | `grid-column`, `grid-row`          | `2`, `'span 2'`, `'2 / 4'`, `'2 / span 3'`, `'1 / -1'`                                                                                                                                                                     |
-| `gridArea`                                | `grid-area`                        | a name from `gridTemplateAreas`, or four lines; `gridColumn` and `gridRow` beside it win for their own axis                                                                                                                |
-| `justifySelf`, `alignSelf`                | `justify-self`, `align-self`       | its own place in its area, over the grid's                                                                                                                                                                                 |
+| on the grid box                           |                                                                                                             |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `gridTemplateColumns`, `gridTemplateRows` | a track list, or a number: that many equal tracks                                                           |
+| `gridTemplateAreas`                       | one quoted string per row — `'"head head" "side main"'` — or an array of the rows                           |
+| `gridAutoColumns`, `gridAutoRows`         | the size of a track the grid adds for a child placed past its template; a number is a length                |
+| `gridAutoFlow`                            | `'row'` (the default) or `'column'`, and `'dense'` to back-fill a hole                                      |
+| `gap`, `columnGap`, `rowGap`              | between the tracks                                                                                          |
+| `justifyItems`, `alignItems`              | where each child sits in its area: `'stretch'` (the default), `'flex-start'`, `'center'`, `'flex-end'`      |
+| `justifyContent`, `alignContent`          | where the tracks sit when they leave room                                                                   |
+| **on a child**                            |                                                                                                             |
+| `gridColumn`, `gridRow`                   | `2`, `'span 2'`, `'2 / 4'`, `'2 / span 3'`, `'1 / -1'`                                                      |
+| `gridArea`                                | a name from `gridTemplateAreas`, or four lines; `gridColumn` and `gridRow` beside it win for their own axis |
+| `justifySelf`, `alignSelf`                | its own place in its area, over the grid's                                                                  |
+
+Each property is CSS's of the same name (`gridTemplateColumns` is
+`grid-template-columns`). A track list takes lengths in `px` (logical
+pixels), `%` and `fr`; `auto`, `min-content`, `max-content`; `minmax()`,
+`fit-content()`; and `repeat()` with a count, `auto-fill` or `auto-fit`.
 
 Things to know:
 
@@ -1338,9 +1253,7 @@ Things to know:
   gap is as wide as it was written. Chrome lays a track out at a fraction of
   a pixel, so a row whose content fits in the fraction can wrap one line
   differently here.
-- **It is checked against Chrome.** A corpus of grids Chrome laid out is
-  part of the test suite (`test/grid-conformance.test.js`) and lays out here
-  within a pixel of Chrome's, but for the fraction above.
+- **It matches Chrome** within a pixel, but for the fraction above.
 - **Not here:** subgrid (a grid's child lays its own children out), baseline
   alignment, named lines (`[full-start]` — name an area instead) and the
   `grid` and `grid-template` shorthands. A value that uses one is an error
@@ -1357,6 +1270,8 @@ Things to know:
   `auto` rows ask each child its height at its column's width, which placing
   it needs anyway. What a child answered is remembered until something inside
   it changes, so a frame in which one card's text changed lays out that card.
+
+Design notes: [design/architecture/grid-layout.md](../design/architecture/grid-layout.md).
 
 ## Custom layouts
 
@@ -1399,12 +1314,10 @@ the cells are one height too.
 
 Things to know:
 
-- **It runs inside the layout pass.** The box's size is what the algorithm
-  answers and its children are where it puts them, in the same frame — on
-  a window resize, a live resize, a scroll or a container query flip, with
-  no React render involved. That is the difference from measuring in
-  `onLayout` and setting state, which paints the old arrangement first
-  ([react-features.md](react-features.md#measuring-a-node)).
+- **It runs inside the layout pass**, in the same frame — on a window
+  resize, a live resize, a scroll or a container query flip, with no React
+  render. Measuring in `onLayout` and setting state instead paints the old
+  arrangement first ([react-features.md](react-features.md#measuring-a-node)).
 - **It is a style property**, so a container query block can switch it:
   `'@container width < 500': { layout: { name: 'masonry', columns: 1 } }`.
 - **Right to left is mirrored for you.** An algorithm places from the left,
@@ -1422,9 +1335,8 @@ Things to know:
   the box is laid out as flexbox — in the same frame.
 
 Writing one of your own is `registerLayout` from `react-x11/host`
-([extending.md](extending.md#a-layout-algorithm-of-your-own)). The design
-record, with why it has to run in the pass rather than in an effect, is
-[architecture/custom-layout.md](architecture/custom-layout.md).
+([extending.md](extending.md#a-layout-algorithm-of-your-own)). Design notes:
+[design/architecture/custom-layout.md](../design/architecture/custom-layout.md).
 
 ## Transitions
 
@@ -1441,17 +1353,16 @@ property; an object picks them individually.
 />
 ```
 
-Numbers lerp and colours lerp per channel through ntk's own CSS colour
-parser, so anything the paint path accepts animates. Two percentages of the
-same unit lerp as numbers — `'-40%'` to `'100%'` is a value travelling across
-whatever contains it, with nothing measuring the container. A value with no
-meaningful midpoint — an enum like `flexDirection`, `auto`, a percentage
-against a pixel value — snaps instead, and `zIndex` is excluded on purpose:
-restacking every frame is not an animation. A duration keyed by a
-[shorthand](#lengths-and-shorthands) is its longhands', the longhand's own
-entry winning: `{ border: 150 }` fades the colour `border: '1px solid …'`
-set, and `{ padding: 200 }` moves each side `padding: '8px 16px'` expanded
-into.
+Numbers interpolate, and colours interpolate per channel, so any colour the
+paint accepts animates. Two percentages of the same unit interpolate as
+numbers — `'-40%'` to `'100%'` is a value travelling across whatever contains
+it, with nothing measuring the container. A value with no meaningful
+midpoint — an enum like `flexDirection`, `auto`, a percentage against a
+pixel value — snaps instead, and `zIndex` never transitions. A duration
+keyed by a [shorthand](#lengths-and-shorthands) is its longhands', the
+longhand's own entry winning: `{ border: 150 }` fades the colour
+`border: '1px solid …'` set, and `{ padding: 200 }` moves each side
+`padding: '8px 16px'` expanded into.
 
 The easing is a fixed ease-out cubic. A transition starts from **what is on
 screen**, not from the declared value, so interrupting one reverses from
@@ -1459,18 +1370,16 @@ where it got to rather than jumping to the end first. One to or from
 [`currentColor`](#currentcolor) runs between the colours as they are at the
 change.
 
-The animation _is_ the repaint loop: the window keeps asking its frame clock
-for frames while any transition is unfinished, and stops the frame the last
-one lands. Nothing polls, and there is no per-widget
+A transition runs on the window's own frame clock, which stops the frame the
+last one lands: nothing polls, and there is no per-widget
 `requestAnimationFrame`.
 
-Transitions may animate layout properties, unlike state blocks. That is not
-an inconsistency: a pointer move must never reflow the tree, but an author
+Transitions may animate layout properties, unlike state blocks: an author
 who writes `transition: { left: 200 }` has asked for animated layout and
 pays a layout pass per frame for it, and a repaint of whatever that pass
-moves rather than of the window. `Switch` is the worked example — the
-thumb is absolutely positioned and slides on `start`, because
-`justifyContent` would flip between the ends with nothing in between.
+moves. `Switch` is the worked example — the thumb is absolutely positioned
+and slides on `start`, because `justifyContent` would flip between the ends
+with nothing in between.
 
 ### Loops
 
@@ -1544,54 +1453,36 @@ const TypingDot = ({ index }) => (
 A changed `delay` is a different loop and starts from the top, as a changed
 `duration` does.
 
-Why this and not a repeating `transition`: a transition is defined by a
-_change_, from what is on screen to a new target, and it has no cycle to
-repeat. A loop has no target — it has two ends and a period. They are
-different declarations because they are different things, and one of them
-would otherwise have to be spelled as the other with a flag.
+A loop's easing is `linear` unless you say otherwise, where a transition's is
+ease-out: a cycle that restarts would stutter at the wrap.
 
-The easing default differs from a transition's for the same reason. A change
-that ends looks right slowing into its new value; a cycle that restarts
-would stutter at the wrap, so a loop is `linear` unless you say otherwise.
-
-**A loop costs a repaint of what moves.** It is the same machinery
-transitions run on — the window's own frame clock, a damage region claimed
-per frame — so an indeterminate progress bar repaints the bar, not the
-window. The alternative an app would otherwise write, `setInterval` →
-`setState`, is a re-render of the component and a repaint of whatever the
-damage heuristics decide, at a cadence unrelated to when the window can
-present.
+**A loop costs a repaint of what moves**, on the window's frame clock: an
+indeterminate progress bar repaints the bar, not the window. Prefer it to
+`setInterval` → `setState`, which re-renders the component on a cadence
+unrelated to when the window can present.
 
 On macOS a loop — or a transition — on a plain box's colour, border width
-or radius is handed to Core Animation instead and costs no frames at all:
-the layer presenter runs it on the node's own layer, and the surface
-presenter promotes the node to a layer of its own above the window for as
-long as it animates, where nothing is painted over it
-([macos.md](macos.md#layer-promotion-the-animated-few-on-their-own-layers-above-the-surface-presenter)).
-So is a loop on an inset of a box out of the flow that says no pointer
-lands on it — `position: 'absolute'` and `pointerEvents: 'none'`, as the
-block of `<ProgressBar indeterminate>` does — since it moves that box and
-nothing else: it becomes the layer's position. Without `pointerEvents:
-'none'` it stays on the clock, because input is hit where the layout put
-the box.
-Anything else runs as above. `examples/animation.jsx` has both shapes side
-by side, with a frame counter in the terminal that shows the difference.
+or radius runs in Core Animation and costs no frames at all. So does a loop
+on an inset of a box that is `position: 'absolute'` and
+`pointerEvents: 'none'`, as the block of `<ProgressBar indeterminate>` is;
+without `pointerEvents: 'none'` it stays on the frame clock, because input is
+hit where the layout put the box. Anything else runs as above.
+`examples/animation.jsx` has both shapes side by side, with a frame counter
+in the terminal that shows the difference.
 
-**And it stops itself**, which is the whole reason this is core's job. A
-forever-loop keeping a frame clock alive is invisible when it is wrong, so
-every way of going off the screen is wired to it:
+**And it stops itself** whenever it goes off the screen:
 
-|                                                                                                                            |     |
-| -------------------------------------------------------------------------------------------------------------------------- | --- |
-| the window is unmapped, minimized, or fully obscured under a bare WM                                                       |     |
-| anything above the node hides it — `display: 'none'`, `<Suspense>`, `<Activity>`                                           |     |
-| the node unmounts, or the style stops declaring the loop                                                                   |     |
-| the desktop asked for **reduced motion** ([system.md](system.md#usedesktopsettings--how-the-desktop-wants-an-app-to-feel)) |     |
-| all the loop can draw is out of sight — scrolled out of its pane, clipped away by a box above it, off the window           |     |
+- the window is unmapped, minimized, or fully obscured under a bare WM;
+- anything above the node hides it — `display: 'none'`, `<Suspense>`,
+  `<Activity>`;
+- the node unmounts, or the style stops declaring the loop;
+- the desktop asked for **reduced motion**
+  ([system.md](system.md#usedesktopsettings--how-the-desktop-wants-an-app-to-feel));
+- all the loop can draw is out of sight — scrolled out of its pane, clipped
+  away by a box above it, off the window.
 
 Each one leaves the frame clock idle, and every one of them runs the loop
-again when it goes away — with its phase reset, since a loop that resumes
-mid-cycle would have been drawing where nobody could see it.
+again when it goes away — with its phase reset.
 
 Out of sight is judged after each layout pass, by what **every** frame of
 the loop can reach and never by where the current one has the node: the
@@ -1613,8 +1504,7 @@ still shows something in progress.
 
 Nothing about this is a per-frame callback: `animation` describes the motion
 and the renderer runs it. For a `<glarea>` drawing its own frames,
-[`frameLoop`](gl.md) is the per-frame seam, and a 2D one is not
-built yet.
+[`frameLoop`](gl.md) is the per-frame seam; there is no 2D one.
 
 ## Window size queries
 
@@ -1635,12 +1525,9 @@ const s = createStyles({
 merged in declaration order, before state blocks — so a `:hover` inside the
 wide layout still wins over the wide layout.
 
-**A size query may set layout properties, unlike a state block.** That is
-not an inconsistency: a pointer state must never reflow the tree, but a size
-query is only ever re-evaluated inside a layout pass that a resize has
-already required, so it costs nothing extra. Nodes that declare one are
-registered with their window and re-resolved just before it lays out, and
-only when the size actually changed.
+**A size query may set layout properties, unlike a state block.** It is only
+re-evaluated inside the layout pass a resize already requires, and only when
+the size actually changed, so it costs nothing extra.
 
 A malformed query is an error rather than a key that silently never
 matches.
@@ -1672,11 +1559,14 @@ A container is declared with the **`container` style property** — CSS's
 **nearest ancestor that declares one**. Wrapping the card in another `<box>`
 for a border changes nothing: the parent is not the container, the declared
 ancestor is, which is what lets a component be put anywhere and still get
-the answer its author meant. The declaration changes nothing about the
-container itself; it is neither layout nor paint, only what the blocks under
-it resolve against. Being a style property, it can be set from inside a
-query block — a box that is a container only in the wide layout — and
-`false` takes a declaration back from earlier in a style array.
+the answer its author meant. A scroll pane is not a container unless it
+declares one, though it is the ideal one to declare. A node's blocks never
+answer to its own size, even when it declares itself a container: its
+declaration is for the blocks under it. The declaration changes nothing
+about the container itself; it is neither layout nor paint. Being a style
+property, it can be set from inside a query block — a box that is a
+container only in the wide layout — and `false` takes a declaration back
+from earlier in a style array.
 
 `width` and `height`, with `>=`, `<=`, `>` or `<`, in the logical pixels the
 dependent's own lengths are written in. Blocks that match are merged in
@@ -1734,16 +1624,12 @@ would; that is the reason to write a style as a block where one can.
 
 ### A block must not move the size it asks about
 
-CSS makes this impossible by construction: `container-type: inline-size` is
-size containment, the container is sized as if it had no content, and
-nothing a descendant does can move it. Yoga has no containment, so here it is
-a rule, and breaking it is detected rather than prevented. A block that
-grows the container past the very threshold that turned it on — and shrinks
-it back when it turns off — has no size that satisfies it. The renderer
-notices (the node comes back to an answer it already held this frame),
-**holds the answer it has**, and says so once in development, naming the
-node. The answer stays held until the container's size moves for some other
-reason.
+Yoga has no size containment, so here this is a rule, detected rather than
+prevented. A block that grows the container past the very threshold that
+turned it on — and shrinks it back when it turns off — has no size that
+satisfies it. The renderer notices, **holds the answer it has**, and says so
+once in development, naming the node. The answer stays held until the
+container's size moves for some other reason.
 
 The way to stay clear of it is also what makes a good container: a size that
 does not come from the content below it.
@@ -1757,6 +1643,8 @@ does not come from the content below it.
 The common responsive pattern — less content when narrow, more when wide —
 is monotone and settles on the first re-layout; a warning means the design
 genuinely contradicts itself.
+
+Design notes: [design/architecture/container-queries.md](../design/architecture/container-queries.md).
 
 ## Capability queries
 
@@ -1781,14 +1669,14 @@ const s = createStyles({
 
 Write the design that works everywhere as the base and the enhancement in
 the block — the same way you would write a `@media` query for a wider
-screen. That ordering is the point: get it the other way round and the
-fallback is the _unusual_ case, which is the one nobody tests.
+screen. Get it the other way round and the fallback is the _unusual_ case,
+which is the one nobody tests.
 
 `transparency` is true only when **both** halves hold: the window was
 created on a 32-bit visual (`<window transparent>`, and the display had one
 to give), **and** a compositor is running to blend it. Either half missing
 and a transparent corner is a _black_ corner — X shows the raw pixels — so
-the honest answer is no, and the block does not apply.
+the answer is no, and the block does not apply.
 
 It is answered **per window**, not per display. A component rendered inside
 a `<popup transparent>` gets the translucent design; the same component
@@ -1809,106 +1697,9 @@ which answers the same question about the display.
 An unknown feature name is an error, like a malformed size query.
 
 Running with `REACT_X11_NO_TRANSPARENCY=1` makes the answer false on any
-display, so the base design — the one nobody tests, being the unusual case —
-can be looked at without stopping the compositor for the whole session. See
+display, so the base design can be looked at without stopping the compositor
+for the whole session. See
 [debugging.md](debugging.md#react_x11_no_transparency1).
-
-## Decided
-
-- **`':hover'`, not `_hover`.** The CSS spelling costs a pair of quotes and
-  buys transfer from every other styling system.
-- **Declared containers, not the parent.** `'@container'` answers to the
-  nearest ancestor that _declares_ itself one, never to whatever happens to
-  be the parent: a wrapper `<box>` added for a border must not change a
-  component's answer. CSS spent a decade on element queries before shipping
-  container queries with exactly this requirement. Nor is a scroller a
-  container without saying so — it is the ideal one to declare, but the
-  presence of one between a node and its container must not silently change
-  which box answers. And there is no self query: a node's own size deciding
-  its own layout is the cycle containment exists to forbid.
-- **Inherited properties, no relational selectors.** `color` and the font
-  properties travel down the tree; nothing matches a rule against it. So
-  there is no `:hover > child`, no sibling combinator and no Tailwind-style
-  `group`. Each of those exists to move a value across the tree, and
-  inheritance already does it in the one direction that is cheap: a parent's
-  `:hover` reaches its children because `color` is inherited, and a child's
-  hover reaches its parents because the hover path is the ancestor chain.
-  What is left over — a **sibling** reacting to a sibling — stays in React,
-  where `useControl` already returns `hover`/`focused`/`pressed` as state
-  ([components.md](components.md#basic-controls)). `<Checkbox>` does exactly
-  that, because its well is a sibling of the label the press lands on.
-- **`currentColor` resolves where it is painted, not in the style.**
-  Resolving it where a `$token` resolves, once per style swap, would have
-  made every reader of a colour simpler and every inherited change wrong: a
-  `:hover { color }` on a row restyles no node under it, so an ink baked
-  into their styles would be stale in every one. So the style keeps the
-  keyword, as CSS's computed value does, and every reader — the paint on
-  each backend, a Cocoa layer's properties, the blits deciding what a box
-  covers — asks `resolveColor`.
-- **Sticky sticks to a pane that scrolls, not to anything that clips.** CSS
-  makes every `overflow` but `visible` a scroll container, so a header
-  inside a card with `overflow: hidden` sticks to the card — which never
-  scrolls — and appears to do nothing, the most asked-about sticky bug there
-  is. Here `'hidden'` is CSS's `clip`: it clips and scrolls nothing, and only
-  `overflow: 'scroll'` makes a pane (see
-  [Sticky positioning](#sticky-positioning)). A header inside a rounded card
-  sticks to the list the card scrolls in, and stays inside the card.
-- **A registered position is a `position` value, not a property of its
-  own.** CSS's `position` already picks a positioning scheme, and sticky is
-  one whose insets mean something other than an offset; a scheme of your own
-  is the same kind of thing. The first spelling, `placement`, was already
-  the anchor vocabulary — which side of its trigger a popup opens on — and
-  threw on the first `<popup placement>` it met. What one property costs is
-  composing a scheme with `absolute`, which a wrapping box answers.
-- **A layout is a style property, and runs inside the pass.** What a layout
-  decides depends on sizes the pass produces, so a React-side one —
-  measure in `onLayout`, set state — paints the old arrangement first, and
-  misses every pass React never sees: a scroll, a live resize, a
-  transition. A style property is also one a container query block can
-  switch in the same frame.
-- **The renderer mirrors right to left, not the algorithm.** An algorithm
-  places from the left, once, and each slot is mirrored across the box when
-  it reads right to left — the way yoga mirrors a flex row, so no layout can
-  forget to.
-- **`null` is unset, and a layout value the layout cannot take is an error
-  where it is written.** `width: wide ? 240 : null` leaves the width to the
-  layout, as `undefined` does — yoga's own setters threw on `null`.
-  `width: 'hidden'`, `padding: 'auto'` or `flexDirection: 'sideways'` is an
-  error at the commit in development, naming the property, and that includes
-  a query block that does not match yet: the block is applied when it starts
-  matching, which is inside a frame, and a throw from there used to take the
-  process down. A value that only turns out wrong in a frame — a `$token`
-  resolving to one — is dropped there and reported, the way CSS drops a
-  declaration it cannot parse, and the rest of the block still applies.
-- **A colour that does not parse is dropped, not painted.**
-  `backgroundColor: 'nonsense'`, `7` or `'#12'` is an error at the commit in
-  development, naming the property — in the style, in a state block, as a
-  gradient stop or as a shadow's colour. `''`, like `undefined`, means
-  unset. Where one gets past that — a `$token` whose palette entry is not a
-  colour, or any value in a production build — the paint drops it the way
-  CSS drops a declaration it cannot parse: no fill and no stroke, no
-  gradient or shadow at all rather than half of one, and the inherited ink
-  for text. On X11 it used to throw from the frame, where no error boundary
-  could catch it, and the other backends painted it black.
-
-- **The more specific property wins, not the later one.** CSS resolves a
-  longhand against its shorthand by order. A flattened style has no order
-  left — `[base, { padding: '8px 16px' }]` and `{ paddingTop: 0, … }` are
-  keys of one object by the time anything reads them — so a longhand beats
-  its shorthand and a side beats all four, wherever each is written. It is
-  the rule `paddingLeft` beside `padding: 8` always followed.
-- **A length is pixels, and a unit nothing reads is an error.** `'12px'` is
-  12 — scaled for the display like any number, where it used to reach yoga
-  as a string the scale skipped and the border setter read as NaN — and
-  `'2ex'` names its unit rather than becoming 2.
-- **`rem` is the palette's `fontSize`, not 16.** CSS's root font size is
-  whatever the document's root says, and here that is the theme: the size
-  every label nobody styled is set in. So spacing written in `rem` follows a
-  theme that sets a bigger type size, as the palette's own radii and
-  paddings already do, and an app porting web numbers that assume 16 sets
-  `fontSize: 16` on its theme. The nearest palette is the one read, the way
-  a `$token` is — a `<ThemeProvider value={{ fontSize: 12 }}>` around a
-  dense panel re-bases it.
 
 ## Elements that are not styled
 
@@ -1917,12 +1708,3 @@ r fill>` is SVG's, not the style channel's — so the style channel does not
 apply to them, the same way it does not apply to an `<input type>` in the
 DOM. They report
 `stylable === false` and their props are passed through untouched.
-
-## Next
-
-A
-`boxShadow` that a `<popup>` can cast (the window needs a translucent margin
-around itself first — see [elements.md](elements.md) on `transparent`
-popups). Container queries shipped; the design record, with the targeting
-forms considered and the cost measured, is
-[architecture/container-queries.md](architecture/container-queries.md).

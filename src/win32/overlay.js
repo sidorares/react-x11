@@ -13,7 +13,7 @@
 // leave transparent shows the GL frame, and a translucent fill, an
 // antialiased edge or a shadow blends with it. Text on it is grayscale
 // rather than ClearType, which Direct2D does on any surface with alpha
-// (docs/windows.md §Text).
+// (design/windows.md §Text).
 //
 // Drawn like the window it lives in (src/win32/window.js): a DirectComposition
 // surface hands out a context per `BeginDraw`, valid until `EndDraw`, so the

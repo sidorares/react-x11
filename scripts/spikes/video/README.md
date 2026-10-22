@@ -1,7 +1,7 @@
 # Video spikes
 
 The two probes behind the measured claims in
-[docs/architecture/video.md](../../../docs/architecture/video.md) §3.4 and
+[design/architecture/video.md](../../../design/architecture/video.md) §3.4 and
 §3.4.1. Swift against the platform directly — no bridge, no renderer, no
 React — so that what they measure is macOS and not our use of it.
 

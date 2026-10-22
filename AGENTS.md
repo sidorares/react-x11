@@ -17,9 +17,10 @@ ergonomics over **four backends**:
   compositing, the system menu bar, native control bezels. **The default
   on darwin**, so `npm test`, the benches and the examples all behave
   differently there than they did before it existed — check which backend
-  you are measuring. `docs/macos.md` is the design record.
+  you are measuring. `design/macos.md` is the design record; `docs/macos.md`
+  is what an app sees.
 - **Wayland** — `src/wayland/`, the wire protocol in pure JavaScript with a
-  GLES rasterizer of its own (wayland.md's Tier D). **Opt-in only**, never
+  GLES rasterizer of its own (design/wayland.md's Tier D). **Opt-in only**, never
   through `'auto'`: X11 stays the default on Linux because the remote case
   is the flagship reason this project exists and Wayland has no network
   transparency.
@@ -28,7 +29,7 @@ ergonomics over **four backends**:
   a DirectComposition surface per window, Direct2D drawing and DirectWrite
   text. **The default on win32**, falling back to X11 when the bridge is
   absent so a WSLg or Cygwin setup with `DISPLAY` keeps working.
-  `docs/windows.md` is the design record. Young: the examples run, with an
+  `design/windows.md` is the design record. Young: the examples run, with an
   IMM32 input method, a UI Automation bridge and most desktop services
   (tray, notifications, file dialogs, taskbar) in place —
   `docs/windows-integrations.md` is the measured status.
@@ -88,7 +89,7 @@ no override-redirect staging (issue #4).
 - `src/glnodes.js` — `<glarea>`: the GL surface. A child X window on a
   GLX visual (ntk's `chooseGLXConfig`), positioned by the parent's yoga
   rect, drawing `onDraw` frames on its own frame clock. First step of
-  docs/glx.md. It **selects no pointer input**: X then reports the pointer
+  design/glx.md. It **selects no pointer input**: X then reports the pointer
   over it to the owning window, whose hit test asks the window's surfaces
   before its tree (`_surfaces`, `hitSurface`). So a listener on the
   surface's `window` is a bug — ntk selects what a window is listened to
@@ -185,7 +186,7 @@ no override-redirect staging (issue #4).
   top-level await, and one import costs every app the single-executable
   build (docs/packaging.md); `test/yoga.test.js` enforces this.
 - `src/pacing.js` — frame pacing: `frameRate`'s policies and the token
-  bucket over paint time behind them (docs/architecture/frame-pacing.md).
+  bucket over paint time behind them (design/architecture/frame-pacing.md).
   Pure — no node, no backend, a clock it is handed — and off by default:
   `'display'` answers every claim with "now" for one property read, and a
   streaming window opts into `'adaptive'`. It sits **above** both frame
@@ -316,7 +317,7 @@ no override-redirect staging (issue #4).
   (#414): every other number is identical either way, which is how this
   survived a full bench run at 277M convolved pixels.
 - `src/grid.js` — CSS grid, the built-in layout behind `display: 'grid'`
-  (docs/architecture/grid-layout.md). Pure — strings and sizes in, rects
+  (design/architecture/grid-layout.md). Pure — strings and sizes in, rects
   out — and the style validator runs its parsers, so a value that would not
   lay out is an error where it was written. Held to Chrome by
   `test/grid-conformance.test.js`, over a corpus Chrome laid out once
@@ -550,7 +551,7 @@ stop it, in one place — see docs/desktop.md for the worked example.
   A 3D shot is **not** something that script can produce: the in-process X
   server has no GL, and on XQuartz GL renders where `GetImage` cannot read
   it, so anything showing a `<glarea>` has to be captured by hand on a real
-  server with indirect GLX (`docs/glx.md`).
+  server with indirect GLX (`docs/gl.md`, "Testing").
   **Pixels come out of `scripts/capture.js` and nowhere else**, and
   `test/capture.test.js` pins it. Every script here used to hand-roll "the
   server gives BGRA" and swap the channels itself; ntk 5.3.0 made
@@ -588,6 +589,18 @@ and both are enforced rather than asked for:
   tree is rebuilt from scratch. **Never** hand-edit `website/docs/reference/`.
   Only `intro.md` and `getting-started.md` are the site's own prose, and they
   narrate rather than specify — anything normative belongs in `docs/`.
+- **`docs/` is reference; `design/` is the record.** `docs/` is what app
+  developers and their coding agents read, on the site and next to the
+  package, so a page there says what an app sees: props, defaults,
+  behaviour, backend differences, caveats, and a sentence of _why_ where a
+  behaviour needs one. Implementation history, rejected alternatives,
+  presenter and protocol internals, measurements, plans and open questions
+  go in `design/` — `design/<page>.md` for the notes behind `docs/<page>.md`,
+  under the heading they had, and `design/architecture/` for the records
+  behind the bigger pieces ([design/README.md](design/README.md) indexes
+  both). `design/` is not synced to the site or listed in `files`. Code
+  comments cite the record by path and section:
+  `design/macos.md §"Layer promotion"`.
 - **The playground runs the real renderer**, so it fails when the API moves.
   `website/scripts/build-demo-bundles.mjs` bundles `src/` together with
   React, ntk, node-x11, its pure-JS X server and its GLX-over-WebGL2
@@ -1065,7 +1078,7 @@ machine. The timing table still prints, and the CI job appends it to the
 run's summary for the trend. When a change is _meant_ to move the frame
 clock — a cadence, a deferral, a cache — run the full table on a real
 display (`npm run bench:presenters`, 6s per cell, nothing else running) and
-put the before/after rows in the PR, the way docs/macos.md "Measured"
+put the before/after rows in the PR, the way design/macos.md "Measured"
 records them; and loosen a rule in the same PR only with the number that
 made it necessary.
 
@@ -1482,7 +1495,7 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     where the cap is sixteen, on Cocoa.
 
 - **A `layout` host's children are yoga trees of their own** (the layout
-  host in `src/nodes/layouthost.js`; docs/architecture/custom-layout.md).
+  host in `src/nodes/layouthost.js`; design/architecture/custom-layout.md).
   Yoga gives a node a measure function or children, never both, so the
   host is a measured leaf and each child a root — and everything that
   assumed the yoga tree mirrors the node tree has a host branch —

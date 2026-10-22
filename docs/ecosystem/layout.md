@@ -1,31 +1,25 @@
 # Layout and positioning
 
 Layout itself is yoga's job — see [styling](../styling.md). The two packages
-here cover the parts yoga does not: placing a popup relative to a trigger
-across screen edges, and rendering a long list without building a node per
-row.
-
-Both are the _core_ half of a library whose React wrapper is DOM-bound. That
-is the recurring shape in this section of the ecosystem: the algorithm is
-portable, the wrapper is not, and the core is published separately precisely
-so that non-DOM hosts can use it.
+here cover what yoga does not: placing a popup relative to a trigger across
+screen edges, and rendering a long list without a node per row. Both are the
+_core_ half of a library whose React wrapper is DOM-bound; the core is
+published separately so non-DOM hosts can use it.
 
 ## `@floating-ui/core` {#floating-ui}
 
 **Adapter, ~35 lines (a platform object).** @floating-ui/core@1.8.0.
 
-The positioning engine underneath Floating UI, published without any DOM
-code. You hand `computePosition` a `platform` object — `getElementRects`,
-`getDimensions`, `getClippingRect`, `isRTL` — and get back the full
-middleware pipeline (`offset`, `flip`, `shift`, `size`, `arrow`,
-`autoPlacement`, `hide`) with the placement vocabulary every web developer
-already knows.
+Floating UI's positioning engine without DOM code. Hand `computePosition` a
+`platform` object — `getElementRects`, `getDimensions`, `getClippingRect`,
+`isRTL` — and get the full middleware pipeline (`offset`, `flip`, `shift`,
+`size`, `arrow`, `autoPlacement`, `hide`) and its placement vocabulary.
 
-The seam is exactly where `anchorRect()` already works: a drawn node's
-`node.abs` rect plus the owning window's screen origin gives the reference
-rect in screen coordinates, `screenOf(node)` gives the clipping rect, and the
-popup-to-be is just `{width, height}`. The result's `{x, y, placement}` drops
-straight into `<popup x y>`.
+As in the built-in `anchorRect()`, a drawn node's `node.abs` rect plus the
+window's screen origin is the reference rect in screen coordinates,
+`screenOf(node)` gives the clipping rect, and the popup-to-be is just
+`{width, height}`. The result's `{x, y, placement}` drops straight into
+`<popup x y>`.
 
 ```jsx
 import { computePosition, offset, flip, shift } from '@floating-ui/core';
@@ -78,40 +72,37 @@ const { x, y, placement } = await computePosition(
 // -> <popup x={x} y={y}> ; placement tells you which side won
 ```
 
-What this buys over the built-in `anchorRect` is middleware composition
-(`shift` with padding, `size` to clamp long menus, `arrow`) and alignment
-fallback — `flip` with `crossAxis: 'alignment'` switches `bottom-start` to
-`bottom-end` when that is what fits. `anchorRect`'s `placement`, `align` and
-`offset` options map 1:1 onto `placement` plus the `offset()` middleware.
+Over `anchorRect` this adds middleware composition (`shift` with padding,
+`size` to clamp long menus, `arrow`) and alignment fallback — `flip` with
+`crossAxis: 'alignment'` switches `bottom-start` to `bottom-end` when that
+fits. `anchorRect`'s `placement`, `align` and `offset` options map 1:1 onto
+`placement` plus the `offset()` middleware.
 
-- `computePosition` is async — `await` it, even though this platform is fully
+- `computePosition` is async — `await` it, though this platform is
   synchronous.
 - `getClippingRect` above is screen 0's full rect, the same single-monitor
-  simplification `screenOf` has today. On a dual-head X display, popups clamp
-  to the bounding box of both monitors.
-- **`@floating-ui/dom` and `@floating-ui/react` are not usable** — they are
-  the DOM platform and DOM interactions respectively. Only `core` and its
-  `@floating-ui/utils` dependency belong in an X11 app.
-- The safe-polygon hover logic in `anchor.js` has no equivalent in `core`;
-  that lives in `@floating-ui/react`'s `useHover`, which is DOM-bound. Keep
-  the built-in one.
+  simplification as `screenOf`. On a dual-head X display, popups clamp to
+  the bounding box of both monitors.
+- **`@floating-ui/dom` and `@floating-ui/react` are not usable** (DOM
+  platform and DOM interactions). Only `core` and its `@floating-ui/utils`
+  dependency belong in an X11 app.
+- Safe-polygon hover lives in `@floating-ui/react`'s DOM-bound `useHover`,
+  not in `core`; keep react-x11's built-in one.
 
 ## `@tanstack/virtual-core` {#tanstack-virtual}
 
 **Adapter, ~40 lines.** @tanstack/virtual-core@3.17.7.
 
-The virtualization engine behind `useVirtualizer`: given a count, an
-`estimateSize`, the viewport rect and the scroll offset, it computes which
-items are visible (`getVirtualItems()`), the total scrollable size
-(`getTotalSize()`), and offsets for `scrollToIndex`. All DOM touchpoints are
-constructor options, which is what makes this work.
+The engine behind `useVirtualizer`: from a count, an `estimateSize`, the
+viewport rect and the scroll offset it computes the visible items
+(`getVirtualItems()`), the total size (`getTotalSize()`), and offsets for
+`scrollToIndex`. Every DOM touchpoint is a constructor option.
 
 **Do not import `@tanstack/react-virtual`.** Its first line is
-`import { flushSync } from "react-dom"`. Without react-dom installed it fails
-to resolve; _with_ react-dom installed it silently flushes into the wrong
-reconciler — see the
-[silent-failures table](../ecosystem.md#silent-failures). Everything the
-React wrapper adds is the hook below.
+`import { flushSync } from "react-dom"`: without react-dom it fails to
+resolve; _with_ it, it silently flushes into the wrong reconciler
+([silent failures](../ecosystem.md#silent-failures)). The hook below is
+everything the React wrapper adds.
 
 Three seams wire to a scrolling `<box>`:
 
@@ -121,9 +112,9 @@ Three seams wire to a scrolling `<box>`:
 - `observeElementOffset` → `<box onScroll>` (`scrollY`);
 - `scrollToFn` → `ref.scrollTo(offset)`.
 
-One non-obvious requirement: `getScrollElement()` must return something with
-`scrollHeight`/`clientHeight`, because virtual-core duck-types Element vs
-Window with `'scrollHeight' in el`. A getter shim over the scroll box node's
+`getScrollElement()` must return something with
+`scrollHeight`/`clientHeight` (virtual-core duck-types Element vs Window
+with `'scrollHeight' in el`); a getter shim over the node's
 `contentHeight`/`abs.height` satisfies it.
 
 ```jsx
@@ -207,10 +198,9 @@ function BigList() {
 - **First paint shows zero rows.** Layout runs on the frame clock after the
   mount commit, `onViewport` reports a tick later, and the list fills in on
   the next frame. Fine interactively; tests must tick a few times.
-- `estimateSize` is the only measurement. Dynamic per-item measurement
-  (`measureElement`) is built on `ResizeObserver` and
-  `getBoundingClientRect`. For variable-height rows, pass exact sizes:
-  `estimateSize: (i) => heights[i]`.
+- `estimateSize` is the only measurement; `measureElement` is built on
+  `ResizeObserver` and `getBoundingClientRect`. For variable-height rows
+  pass exact sizes: `estimateSize: (i) => heights[i]`.
 - `_didMount`/`_willUpdate` are underscored but are the documented pattern
-  for custom framework adapters — the official React, Vue and Svelte adapters
-  call exactly these.
+  for custom adapters — the official React, Vue and Svelte adapters call
+  exactly these.

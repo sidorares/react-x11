@@ -1,0 +1,118 @@
+# Custom URI schemes and single instances: design notes
+
+Contributor-only, not shipped and not on the website. These sections were
+moved out of [docs/uri-schemes.md](../docs/uri-schemes.md), the reference, and keep
+their original headings so code comments that cite them still resolve.
+
+## Read this first: for a login, you probably want a loopback port
+
+Custom schemes still earn their place three ways: providers that only accept a
+registered private-use scheme; deep links that are not logins at all
+(`myapp://project/42` out of a chat message, a document opened from a
+launcher); and the fact that owning a name on the bus is the same machinery
+the [global menu](../docs/globalmenu.md) and a tray icon need anyway.
+
+## The code
+
+### `registerApplication()`
+
+**`appId` is not a free parameter.** The desktop entry spec ties three things
+to one string: the well-known bus name, the `.desktop` file's basename, and —
+by RFC 8252 §7.1 — the URI scheme. The object path follows from it too, and is
+derived rather than passed: dots become slashes, a slash goes on the front,
+and **a dash becomes an underscore**. `com.example.my-app` is served at
+`/com/example/my_app`; get that wrong and the desktop calls a path you do not
+serve, which looks exactly like nothing happening.
+
+### Two dispatch paths, and why `role` exists
+
+The desktop entry spec makes D-Bus activation sound like the whole story.
+`DBusActivatable=true`, and implementations _should_ ignore `Exec` and send a
+D-Bus message instead. _Should_ — and the most common opener does not.
+
+- **GIO honours it.** `g_app_info_launch_default_for_uri` calls `Open` on the
+  app's well-known name. `gio open`, and most of GNOME, take this path.
+- **`xdg-open`'s generic fallback does not.** It resolves the handler with
+  `xdg-mime query default`, reads the `Exec` key and runs it;
+  `DBusActivatable` is never read on that branch. Chromium shells out to
+  `xdg-open`, and `xdg-open` takes the generic branch on every desktop it
+  cannot identify — which is every WM-only session, react-x11's own persona.
+
+So on half of all desktops **a second copy of your app is spawned with the URI
+in `argv`**, and it has to hand that URI to the first copy and exit. An app
+that only exports the interface opens a second window every time.
+`registerApplication` does both halves, which is why it answers a role:
+
+| `role`        |                                                                    |
+| ------------- | ------------------------------------------------------------------ |
+| `'primary'`   | this process owns the name and will receive `Open`                 |
+| `'secondary'` | another instance owns it; this launch was forwarded — **exit now** |
+
+It does not call `process.exit()` for you. Exiting is an application decision
+and a library that takes it is a library that surprises somebody.
+
+A second launch with **no** URI forwards `Activate` rather than an empty
+`Open`: "the user started the app again" and "the user clicked a link" are
+different events, and an app that cannot tell them apart cannot answer the
+first one properly.
+
+### The raise is the part that fails
+
+**The timestamp is the whole feature.** Per the startup-notification protocol
+the digits after `_TIME` in a startup id are the X timestamp of the user action
+that triggered the launch, and that timestamp is what a window manager's
+focus-stealing prevention weighs before letting a window come forward. Get it
+wrong and nothing reports an error: the user finishes logging in, the browser
+redirects, your app receives the code correctly, the WM declines, and the
+taskbar entry blinks. Every layer says it worked.
+
+The return value is whether the request was **issued**, not whether it worked.
+EWMH is explicit that the window manager may refuse and set
+`_NET_WM_STATE_DEMANDS_ATTENTION` instead — that is the blinking taskbar entry,
+it is the WM's call, and no client can tell the difference from here.
+
+## Registration: the half that is not runtime code
+
+react-x11 does **not** write into `~/.local/share` for you. A library that
+edits a user's data directory on import is the kind of thing that surprises
+people, and it cannot work for a system-installed or Flatpak app anyway. Ship
+these from your installer, your package, or a one-line setup command your users
+run.
+
+### Checking it by hand
+
+Neither branch below is reachable from `npm test` — the in-process broker has
+no service activation and no security policy — so this is the pass that covers
+them:
+
+## On macOS
+
+Quit is worth a sentence, because macOS asks the app before ending it. The
+bridge answers `applicationShouldTerminate:` with "cancel" and hands the
+question over, so a quit becomes the same close request the red light sends
+to the app's primary window: an `onCloseRequest` that opens a "save your
+work?" dialog has vetoed it until it decides, and one that unmounts has
+accepted it. Once the app has closed on a quit, the process ends
+(`createRoot({ cocoa: { exitOnQuit: false } })` turns that off for an embedder
+that owns the process). One limit to know: because the bridge's answer is
+"cancel" rather than "later", a **logout** is cancelled by macOS the moment it
+asks, and the app then quits on its own — the logout has to be started again.
+
+## Deliberately not here
+
+- **`ActivateAction` beyond a correct reply.** Desktop actions (jump-list
+  entries) want a design alongside the global menu. The method answers properly
+  today, and `onAction` is there if you want it — a stub that _errors_ would
+  make a shell conclude the app is broken rather than that the action is
+  unhandled.
+- **Writing `.desktop` files.** See above. A generator belongs with the
+  packaging work ([packaging.md](../docs/packaging.md)), not on an import.
+- **A full OAuth client.** This is the transport for a redirect, not a PKCE
+  implementation or a token store.
+- **`http`/`https` handling.** Being the default browser is not this.
+- **Wayland's `xdg-activation` token.** `platform_data.activation-token` is
+  read and exposed on `ctx`, and ignored. On the
+  [Wayland backend](../docs/wayland-backend.md) `activateWindow()` does go through
+  xdg-activation, but with a token it requests itself against the seat's
+  last input serial (`src/wayland/app.js`, `activate`) — the launcher's token
+  is not handed to the compositor.

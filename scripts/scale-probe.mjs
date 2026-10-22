@@ -28,7 +28,7 @@
 // against (a 16" MacBook panel handed 1:1 to a UTM Linux guest), sources
 // 1-4 all answer "1x" — the VM's EDID invents 870x550mm to make the maths
 // come out at ~100dpi — and only the resolution class knows the panel is
-// retina. See docs/scale.md for why each rung outranks the next.
+// retina. See design/scale.md for why each rung outranks the next.
 
 import x11 from 'x11';
 import { parseXSettings } from '../src/xsettings.js';

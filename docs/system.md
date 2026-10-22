@@ -1,10 +1,10 @@
 # The machine around the app
 
-Six hooks for the things an application has to read off the system rather than
-work out for itself: the monitors, what the window manager did with the
-window, whether anyone is at the desk, the state of the keyboard, how the
-desktop wants an app to feel, and the language it was launched in — and a
-store for what the app remembers itself, between launches.
+Hooks for what an application reads off the system rather than working out
+itself: the monitors, what the window manager did with the window, whether
+anyone is at the desk, the state of the keyboard, how the desktop wants an app
+to feel, and the language it was launched in — and a store for what the app
+remembers itself, between launches.
 
 ```jsx
 import {
@@ -19,17 +19,15 @@ import {
 } from 'react-x11';
 ```
 
-They share a shape, and it is worth knowing before reading any one of them:
+They share a shape:
 
-- **Nothing is asked of the server until a component asks.** Every one of
-  these costs round trips or an event selection, and an app that never calls
-  them pays for none of it.
-- **Every one has an answer with no extension present.** X is a protocol with
-  thirty years of optional pieces, and "this display cannot say" is a real
-  state rather than an error. Each hook below names what it reports then, and
-  which field tells that apart from a genuine "no".
+- **Nothing is asked of the server until a component asks.** An app that
+  never calls them pays for none of it.
+- **Every one has an answer with no extension present.** "This display cannot
+  say" is a real state rather than an error. Each hook below names what it
+  reports then, and which field tells that apart from a genuine "no".
 - **The colours are somewhere else.** Light or dark, the accent and reduced
-  motion are [system appearance](appearance.md), which has a ladder of its own.
+  motion are [system appearance](appearance.md).
 
 ---
 
@@ -66,24 +64,20 @@ Re-renders when a monitor is plugged in or unplugged, when the arrangement
 changes, and when a panel appears, moves or auto-hides.
 
 The rects are in **logical pixels**, like every other length an app touches,
-and `scale` is the per-monitor answer the display-scale ladder arrived at —
-a retina lid and an office monitor genuinely differ. The root's own scale
-is the primary monitor's; see [scale.md](scale.md).
+and `scale` is the per-monitor answer the display-scale ladder arrived at — a
+retina lid and an office monitor genuinely differ. The root's own scale is the
+primary monitor's; see [scale.md](scale.md).
 
 ### The names arrive after the geometry
 
 `source` says which tier answered. The geometry resolves during `createRoot()`
-from **Xinerama**, which is one round trip; the names, the primary flag and the
-physical sizes take a **RandR** walk — `GetScreenResourcesCurrent`, then a
-`GetOutputInfo` and a `GetCrtcInfo` per output, ten or more round trips on an
-ordinary two-head desktop — and that deliberately does not hold startup up.
-
-So a component can render once with `source: 'xinerama'` and null names, and
-again a moment later with `source: 'randr'` and real ones. The rects do not
-move between the two: Xinerama on any modern server _is_ RandR's emulation of
-it, so what arrives late is added rather than corrected. Where a name is what
-gets persisted — "reopen on the monitor I was on" — treat null as _not known
-yet_ and keep the last one rather than writing it.
+from **Xinerama**; the names, the primary flag and the physical sizes come
+from **RandR** a moment later, without holding startup up. So a component can
+render once with `source: 'xinerama'` and null names, and again with
+`source: 'randr'` and real ones. The rects do not move between the two: what
+arrives late is added, not corrected. Where a name is persisted — "reopen on
+the monitor I was on" — treat null as _not known yet_ and keep the last one
+rather than writing it.
 
 `'screen'` is the tier under both: one entry covering the whole display, for a
 server with neither extension. `null` is a headless mock with no display at
@@ -91,49 +85,37 @@ all.
 
 ### `available` is an approximation on X11, and the only one here
 
-`_NET_WORKAREA` — the desktop minus the docks and panels that reserved space —
-is published **for the whole virtual desktop**, not per monitor. That is an
-EWMH weakness rather than a choice made here. So it is applied as a _per-axis_
-bound on top of the monitor rect: exact on one head, and on several it still
-takes a top or bottom panel off the height without pretending to know which
-head the panel is on.
-
-A true per-monitor work area means reading `_NET_WM_STRUT_PARTIAL` off every
-window on the screen and intersecting the reservations that land on each head
-— a full window-tree walk, redone whenever any panel changes. If you need
-that, `useApp().X` is the escape hatch.
+`_NET_WORKAREA` — the desktop minus the panels that reserved space — is
+published for the **whole virtual desktop**, not per monitor. So it is applied
+as a per-axis bound on each monitor's rect: exact on one head; on several, a
+top or bottom panel comes off the height without knowing which head it is on.
+For a true per-monitor work area, read `_NET_WM_STRUT_PARTIAL` off every
+window yourself through `useApp().X`.
 
 ### On Wayland
 
 The same shape, from `wl_output` ([wayland-backend.md](wayland-backend.md)):
 `name` is the compositor's connector name (`DP-1`, `eDP-1`) and arrives with
 the geometry rather than after it; the rects are xdg_output's logical ones.
-The protocol has no primary — the entry at the origin is flagged — and no
-work area: `available` is each monitor's own rect, less what the compositor
-told a window on it to fit in (`xdg_toplevel.configure_bounds`, the monitor
-minus its panels), so it is exact per monitor, as on macOS, once a window has
-appeared there. `scale` is the monitor's own, the fraction under fractional
-scaling. `source` reads `'test'` on both native backends — the stamp of the
-seam they publish through.
+There is no primary — the entry at the origin is flagged — and no work area:
+`available` is each monitor's own rect less the bounds the compositor gave a
+window on it, so it is exact per monitor once a window has appeared there.
+`scale` is the monitor's own, a fraction under fractional scaling. `source`
+reads `'test'` on both native backends.
 
-**On macOS it is exact.** `NSScreen.visibleFrame` is per screen already — that
-display's own menu bar and Dock taken off — so each monitor carries its real
-usable rect and no approximation runs. `workArea` there is still one rect,
-because the field is one rect by definition; it is the primary screen's, and
-on a multi-display Mac `screens[n].available` is the answer to prefer.
-`primary` is the screen with the menu bar, `refreshRate` the panel's own rate,
-and `name` is null — the bridge does not report one.
+**On macOS it is exact.** Each monitor's `available` is its `visibleFrame` —
+that display's own menu bar and Dock taken off. `workArea` is one rect by
+definition, the primary screen's; on a multi-display Mac prefer
+`screens[n].available`. `primary` is the screen with the menu bar,
+`refreshRate` the panel's own rate, and `name` is null.
 
 ### On macOS the layout is asked for, not announced
 
-Every other backend is told: RandR sends an event, a `wl_output` announces
-itself. macOS has no such event for a client — the bridge keeps its
-`NSScreen` copy current on the system's own notification and says nothing —
-so react-x11 re-reads the layout instead, at the moments it matters:
+macOS sends a client no event when the displays change, so react-x11 re-reads
+the layout at the moments it matters:
 
-- **before a placement**, which is where a stale rect would be visible — a
-  popup flipped and clamped into a monitor that has moved, an auto-sized
-  window capped by one that is gone;
+- **before a placement** — a popup flipped and clamped into a monitor, an
+  auto-sized window capped by one;
 - **when a window reports that it moved**, at most once a second, because a
   display arriving or leaving moves the windows that were on it;
 - **on a clock while a `useScreens()` subscriber is mounted**, every
@@ -142,15 +124,13 @@ so react-x11 re-reads the layout instead, at the moments it matters:
 
 So a component watching the layout sees a monitor plugged in about half a
 second later than an X11 one does, and everything else sees it at the moment
-it asks. `useApp().refreshScreens()` publishes the layout right now for an
-app that knows before any of those.
+it asks. `useApp().refreshScreens()` publishes the layout right now.
 
 ### Mirroring
 
-Two outputs showing the same pixels share one CRTC and are reported as **one**
-monitor, with both names in `outputs`. A laptop mirroring to a projector is one
-screen to put a window on, and `screens.length === 2` there would be a wrong
-answer an app would act on.
+Two outputs showing the same pixels are reported as **one** monitor, with both
+names in `outputs`. A laptop mirroring to a projector is one screen to put a
+window on.
 
 ---
 
@@ -182,18 +162,18 @@ useEffect(() => {
 | `states`     | the raw `_NET_WM_STATE` names                                          |
 | `desktop`    | the workspace index, or null                                           |
 
-`<window states>` is what a window **asks for**; this is what it **got**. The
-two part company routinely — a user hits a maximize hotkey, a tiling WM
-declines a fullscreen request — and an app that mirrors the state in its own
-UI has nowhere else to read it.
+`<window states>` is what a window **asks for**; this is what it **got**. They
+part company routinely — a user hits a maximize hotkey, a tiling WM declines a
+fullscreen request — and an app that mirrors the state in its own UI has
+nowhere else to read it.
 
 On the **Cocoa** backend the same rows come from AppKit, in the same
-`_NET_WM_STATE` names (@windowkit/appkit 0.30.0): `fullscreen` is the title
-bar's green button, or `<window fullscreen>`, `maximized` the zoom
-(`maximized_vert` and `maximized_horz` together), `minimized` the Dock
-(`hidden`), and `states` lists `focused` for the key window. `fullscreen`
-turns as AppKit's transition **begins**, before the animation, so a toolbar an
-app hides in full screen goes while the window grows rather than after it:
+`_NET_WM_STATE` names: `fullscreen` is the title bar's green button or
+`<window fullscreen>`, `maximized` the zoom (`maximized_vert` and
+`maximized_horz` together), `minimized` the Dock (`hidden`), and `states`
+lists `focused` for the key window. `fullscreen` turns as AppKit's transition
+**begins**, so a toolbar an app hides in full screen goes while the window
+grows rather than after it:
 
 ```jsx
 const { fullscreen } = useWindowState();
@@ -201,7 +181,7 @@ return fullscreen ? <Page /> : [<Toolbar />, <Page />];
 ```
 
 `obscured` and `desktop` keep their initial values there — a Space is not a
-numbered workspace — and on a bridge older than 0.30.0 only `focused` moves.
+numbered workspace.
 
 With no argument it reads the window the component is in, inferred the way
 [`useTopLevelWindow()`](filedialog.md) infers it: exact for a one-window app,
@@ -213,39 +193,32 @@ const { fullscreen } = useWindowState(win);
 return <window ref={win}>…</window>;
 ```
 
-The first render answers `focused: true, visible: true` rather than waiting for
-a round trip. A window opens focused and on screen far more often than not, and
-a title bar that renders dimmed on frame one and un-dims on frame two is a
-flash on every launch.
+The first render answers `focused: true, visible: true` rather than waiting
+for a round trip, so a title bar does not render dimmed on frame one and
+un-dim on frame two.
 
 ### `obscured` and the compositor
 
 **A composited window is never obscured.** The compositor redirects it to an
 offscreen pixmap, so the server considers it entirely visible whatever is
-stacked on top, and `VisibilityNotify` says so. One is running on every stock
-GNOME and KDE session. That is X working as designed and there is no protocol
-answer to it.
-
-So `obscured` is a bare-WM optimisation, and `visible` — which folds in
-`minimized`, the signal that _does_ survive compositing — is the field to
-branch on. An animation paused on `visible` stops when the window is minimized
-everywhere, and additionally when it is buried on a desktop with no compositor.
+stacked on top — and every stock GNOME and KDE session runs one. So `obscured`
+is a bare-WM optimisation, and `visible`, which folds in `minimized` (that
+_does_ survive compositing), is the field to branch on. An animation paused on
+`visible` stops when the window is minimized everywhere, and additionally when
+it is buried on a desktop with no compositor.
 
 ### `presenting`, and the Wayland frame clock
 
-A Wayland compositor will not tell you a surface is covered either — but it
-stops sending it **frame callbacks**, and on that backend a frame callback is
-the only thing that paces the frame loop. So a window nobody is showing draws
-once and then stops, while React above it goes on re-rendering into a tree
-that reaches no screen. That is the compositor being right (painting into a
-surface nobody sees is work for nothing) and it used to be invisible: no
-error, no warning, and nothing an app could ask.
+A Wayland compositor stops sending **frame callbacks** to a surface it is not
+showing, and on that backend frame callbacks pace the frame loop. So a window
+nobody is showing draws once and then stops, while React above it goes on
+re-rendering into a tree that reaches no screen.
 
 `presenting` is that state, published. It goes false after a couple of
 seconds of silence with a repaint waiting, and true again on the very next
-frame callback — the compositor still holds the one we asked for, and answers
-it the moment the surface is shown again. It folds into `visible`, so an
-animation already paused on `visible` pauses here too:
+frame callback, which the compositor sends the moment the surface is shown
+again. It folds into `visible`, so an animation already paused on `visible`
+pauses here too:
 
 ```jsx
 const { visible, presenting } = useWindowState();
@@ -261,13 +234,10 @@ useEffect(() => {
 const status = presenting ? 'live' : 'paused — this window is not on screen';
 ```
 
-It is a signal to **stop work** on, not a frame-accurate one: two seconds of
-silence is what makes it certain, so nothing that has to be exact should read
-it. On X11, macOS and the headless mock it is `true` and stays there — their
-frame clocks do not depend on a compositor's goodwill, and `obscured` is the
-question to ask there instead. The backend also says it once on stderr in
-development, because "the app is alive and has drawn once" is otherwise an
-unguessable state; see
+It is a signal to **stop work** on, not a frame-accurate one: nothing that has
+to be exact should read it. On X11, macOS and the headless mock it is `true`
+and stays there; `obscured` is the question to ask there instead. The Wayland
+backend also says it once on stderr in development; see
 [wayland-backend.md](wayland-backend.md#a-surface-the-compositor-stops-showing-stops-drawing).
 
 ---
@@ -280,30 +250,26 @@ const away = useIdle(5 * 60_000);
 ```
 
 Idleness is the **whole display's**, not this window's: it counts input on
-every device, whichever application it went to. That is the right meaning for a
-presence indicator, an auto-save, or a dashboard that stops refreshing when the
-desk is empty — and the wrong one for "has the user ignored _my_ window", which
-is `useWindowState().focused`.
+every device, whichever application it went to. That is the right meaning for
+a presence indicator, an auto-save, or a dashboard that stops refreshing when
+the desk is empty — and the wrong one for "has the user ignored _my_ window",
+which is `useWindowState().focused`.
 
-Where the X server carries an `IDLETIME` counter — Xorg does — this costs **no
-timer at all**: a SYNC alarm fires when the counter crosses `timeout` and
-another when input pulls it back down, which is what every idle daemon on the
-desktop is built on. On a server without one (XQuartz) it falls back to polling
-MIT-SCREEN-SAVER, scheduled against the remaining time rather than on a tick —
-and on win32, `GetLastInputInfo` on the same schedule, which answers for the
-whole session the way the X counter does. On macOS it is the same schedule
-over the session's idle time: the `@windowkit/appkit` bridge's `lastInputMs()`
-(CoreGraphics' count, a call) where it has one, and otherwise `ioreg`'s
-`HIDIdleTime` — a short-lived child process per check, which is one per
-`timeout` while the user is there and one every quarter of it, at most every
-half minute, while they are away.
-On an X display with neither extension it stays `false`.
+- **Xorg**, with an `IDLETIME` counter: SYNC alarms fire when the counter
+  crosses `timeout` and when input pulls it back — **no timer at all**.
+- **XQuartz**, with none: MIT-SCREEN-SAVER, polled on a schedule against the
+  remaining time rather than on a tick.
+- **Windows**: `GetLastInputInfo`, the whole session's, on the same schedule.
+- **macOS**: the session's idle time, on the same schedule — the bridge's
+  `lastInputMs()`, or else `ioreg`'s `HIDIdleTime`, a child process per check
+  (one per `timeout` while the user is there; one every quarter of it, at most
+  every half minute, while away).
+- **An X display with neither extension**: always `false`.
 
 Nothing is armed until a component subscribes, and the alarm or the poll
-stops when the last subscriber to that `timeout` unmounts.
-
-`timeout` is a dependency, so hold it in a constant rather than building it
-inline from state that moves.
+stops when the last subscriber to that `timeout` unmounts. `timeout` is a
+dependency, so hold it in a constant rather than building it inline from state
+that moves.
 
 ### Keeping the screen on
 
@@ -312,29 +278,25 @@ useKeepAwake(playing, 'Playing a video');
 ```
 
 Held while the flag is true and the component is mounted, released on either —
-including on an unmount mid-playback, which is the case that leaves a desktop
-permanently un-blanking when this is done by hand.
+including an unmount mid-playback, the case that leaves a desktop permanently
+un-blanking when this is done by hand.
 
-Four rungs. On [win32](windows-integrations.md), `SetThreadExecutionState`
-with `ES_CONTINUOUS`, which is what makes it a state rather than a one-shot
-nudge, and which is counted here so that one caller finishing does not speak
-for another. Elsewhere: the settings portal's `Inhibit`, the older
-`org.freedesktop.ScreenSaver` service, and `ScreenSaverSuspend`, which is a
-plain X request and needs no session bus at all. **The three freedesktop
-rungs inhibit screen blanking only.** Nothing there stops a suspend — only
-the portal rung could, and a seam that works on one desktop in three is worse
-than not offering it. The Windows rung asks for both the display and the
-system, which is the same call either way.
+- **Windows**: `SetThreadExecutionState` with `ES_CONTINUOUS`
+  ([windows-integrations.md](windows-integrations.md)) — the display **and**
+  the system; counted, so one caller finishing does not release another's.
+- **Elsewhere**: the first that answers of the desktop portal's `Inhibit`,
+  `org.freedesktop.ScreenSaver`, and `ScreenSaverSuspend` (a plain X request,
+  no session bus). These inhibit **screen blanking only** — nothing stops a
+  suspend.
 
-`reason` is shown by desktops that list what is holding the screen on, so it
-reads best as a sentence about the app's state rather than the app's name,
-which they already show. Windows takes no string with the call —
-`powercfg /requests` names the process — so there it is dropped rather than
-put somewhere the system will not show it.
+`reason` is shown by desktops that list what is holding the screen on, so
+write it as a sentence about the app's state rather than the app's name, which
+they already show. Windows takes no string — `powercfg /requests` names the
+process — so there it is dropped.
 
 Failure is silent by design: a machine with no portal, no screensaver service
-and no MIT-SCREEN-SAVER cannot be asked, and a video player is not the place to
-surface that. `keepAwake()` is the imperative twin, and resolves to the release.
+and no MIT-SCREEN-SAVER cannot be asked. `keepAwake()` is the imperative twin,
+and resolves to the release.
 
 ---
 
@@ -356,36 +318,28 @@ const { capsLock, layout } = useKeyboardState();
 | `layout`             | that group's layout code, `'ru'` — or null |
 | `layouts`            | every configured layout, `['us', 'ru']`    |
 
-The point of the first row is that it is true of the **keyboard** rather than
-of an event. A key event carries the modifier state at the moment it was
-pressed, so an app can see that Caps Lock was on for a key it received — which
-is no help at all in the case that matters, a password field that wants to warn
-while it is merely focused and before anything has been typed.
+The locks are true of the **keyboard**, not of an event: a key event carries
+the modifier state at the moment it was pressed, which is no help to a
+password field that wants to warn while merely focused, before anything has
+been typed.
 
-The layout half is for a status-bar indicator, and for the other thing that
-costs people real time: a password typed in the wrong script, which looks
-identical to a wrong password. `layout` is a code rather than a description
+The layout is for a status-bar indicator, and for a password typed in the
+wrong script, which looks identical to a wrong password. `layout` is a code
 (`'ru'`, not `'Russian'`) because that is what an indicator shows; uppercase it
 for display.
 
 Everything here needs **XKB**, which Xorg and XQuartz both have. Where it is
-missing the locks read false and `layouts` is empty — so `layouts` is the field
-to check when the difference between "off" and "not known" matters. Changes
-arrive as `XkbStateNotify`, with no polling, even while another application has
-the keyboard.
+missing the locks read false and `layouts` is empty — so `layouts` is the
+field to check when "off" and "not known" differ. Changes arrive with no
+polling, even while another application has the keyboard.
 
 The [native Wayland backend](wayland-backend.md) answers the same fields from
-its seat: the locks and the group from `wl_keyboard.modifiers`, the layout
-codes from the keymap the compositor sent. One difference is the protocol's
-rather than this library's — a compositor tells only the focused client, so a
-lock toggled while another app has the keyboard is seen when focus returns.
-For a password field, the case this hook exists for, the window is focused
-already.
+its seat. A compositor tells only the focused client, so a lock toggled while
+another app has the keyboard is seen when focus returns — for a password
+field, the window is focused already.
 
-Which bit is which lock is worth writing down: Caps Lock is `LockMask`, fixed
-by the core protocol, and **Num Lock is not fixed by anything** — it is wherever
-the modifier map puts it, which is `Mod2` on every Linux and BSD desktop, on
-XQuartz, and in every toolkit that hardcodes it. This takes the convention.
+Caps Lock is `LockMask`; Num Lock is taken to be `Mod2`, where every Linux and
+BSD desktop and XQuartz put it.
 
 ---
 
@@ -405,53 +359,45 @@ const { doubleClickMs, dragThreshold } = useDesktopSettings();
 | `animations`          | **false means reduce motion** — see below                            |
 | `source`              | `'xsettings'`, `'portal'`, `'macos'`, or null where nothing answered |
 
-**The built-in controls already follow these.** `<textinput>`'s caret, the click
-counting behind `ev.detail`, and the drag threshold all read the same values, so
-an app that uses the widget set gets this for nothing. The hook is for an app
-drawing its own: a `<canvas>` with a text cursor in it, a custom gesture, a
-diagram editor with its own drag. Reach for it so that one widget on the screen
-does not feel unlike every other.
+**The built-in controls already follow these.** `<textinput>`'s caret, the
+click counting behind `ev.detail`, and the drag threshold all read the same
+values. The hook is for an app drawing its own: a `<canvas>` with a text
+cursor in it, a custom gesture, a diagram editor with its own drag.
 
-`animations` is the desktop's "reduce motion", from GTK's
-`gtk-enable-animations`. **Looping animations already honour it** — a
-[`style.animation`](styling.md#loops) never starts while it is false, so
-`<ProgressBar indeterminate>` and anything else built on the loop primitive
-comes to rest with nothing to do. Transitions are left alone: a 120ms fade
-that ends is not the unbounded motion the setting exists for. Read the field
-where the _resting_ look is a design decision your app has to make — a
-spinner that does not spin should still say it is working, which is what
-`<ProgressBar indeterminate>` does by filling its track instead.
+`animations` is the desktop's "reduce motion" — GTK's
+`gtk-enable-animations` on X11. **Looping animations already
+honour it** — a [`style.animation`](styling.md#loops) never starts while it is
+false, so `<ProgressBar indeterminate>` and anything else built on the loop
+primitive comes to rest. Transitions are left alone: a 120ms fade that ends is
+not the unbounded motion the setting exists for. Read the field where the
+_resting_ look is your decision — a spinner that does not spin should still
+say it is working, which `<ProgressBar indeterminate>` does by filling its
+track instead.
 
-`caretBlink` deserves the callout. A caret that ignores it is not a cosmetic
-miss: a moving thing on screen is what some people cannot read past, which is
-why the desktop offers the switch at all. **Draw the caret solid rather than not
-at all** — that is what the built-in controls do.
+`caretBlink` is not cosmetic: a moving thing on screen is what some people
+cannot read past. **Draw the caret solid rather than not at all** — that is
+what the built-in controls do.
 
-[XSETTINGS](appearance.md#what-each-rung-can-actually-answer) is the only source on X11; there is no
-standard portal interface for any of this. On the
-[native Wayland backend](wayland-backend.md), which has no XSETTINGS to read,
-they come off the settings portal's GNOME namespaces instead —
-`org.gnome.desktop.interface` (`cursor-blink`, `cursor-blink-time`,
-`enable-animations`) and `org.gnome.desktop.peripherals.mouse`
-(`double-click`, `drag-threshold`), the same GSettings keys gsd-xsettings
-translates for X11 — with `source: 'portal'`, live, and only while
-`createRoot({ desktop })` leaves `appearance` on. A portal that does not pass
-those through (KDE's, a bare compositor's) leaves the defaults. On the macOS backend the one of these the
-system publishes is read from it: **Reduce motion** (System Settings ›
-Accessibility › Display) arrives as `animations: false` with
-`source: 'macos'`, live — flipping the switch stops a spinner that is already
-going round — and the other fields keep the defaults there, since macOS has
-no equivalent to hand over. On a desktop with no settings daemon — a bare
-`startx`, most window managers, XQuartz — `source` is null and the numbers above
-are this renderer's own defaults. They are deliberately not GTK's, which blinks
-on a 1200ms cycle and drags at 8px: the point is to follow a desktop that
-expressed a preference, not to change what happens on one that did not.
+Where the values come from:
 
-One seam worth knowing about. `createRoot()` starts XSETTINGS but does not
-**await** it — five round trips on every app's startup path, to answer a
-question that is not asked until the first interaction, is a bad trade. A field
-focused on the very first frame therefore gets the built-in default and the
-desktop's cadence from its next focus onward.
+- **X11** (`'xsettings'`): [XSETTINGS](appearance.md#what-each-rung-can-actually-answer),
+  the only source; there is no standard portal interface for any of this.
+- **[Native Wayland](wayland-backend.md)** (`'portal'`): the settings portal's
+  GNOME keys — `org.gnome.desktop.interface` (`cursor-blink`,
+  `cursor-blink-time`, `enable-animations`) and
+  `org.gnome.desktop.peripherals.mouse` (`double-click`, `drag-threshold`) —
+  live, while `createRoot({ desktop })` leaves `appearance` on. A portal that
+  does not pass them through (KDE's, a bare compositor's) leaves the defaults.
+- **macOS** (`'macos'`): **Reduce motion** only (System Settings ›
+  Accessibility › Display), as `animations: false`, live — flipping it stops
+  a spinner already going round. The other fields keep the defaults.
+- **No settings daemon** — a bare `startx`, most window managers, XQuartz
+  (`null`): this renderer's own defaults above, deliberately not GTK's 1200ms
+  blink and 8px drag.
+
+`createRoot()` starts XSETTINGS but does not wait for it, so a field focused
+on the very first frame gets the built-in default, and the desktop's cadence
+from its next focus onward.
 
 ---
 
@@ -487,8 +433,8 @@ covers a key with no default.
 
 The `appId` is a reverse-DNS name no other app uses, the shape
 [`registerApplication`](uri-schemes.md) takes; the store registers nothing
-with it. Creating the store twice with the same id, in a module a hot reload
-evaluates again or in two call sites, is one store with one set of values.
+with it. Creating the store twice with the same id — in a module a hot reload
+evaluates again, or in two call sites — is one store with one set of values.
 
 **It is read synchronously, the first time a value is asked for**, so the
 first render already has what was saved rather than the defaults and then a
@@ -497,15 +443,15 @@ jump. It is written asynchronously:
 - **coalesced** — a quarter second after the last change, and at least once a
   second while changes keep coming, so a drag on a slider is a few writes and
   not one per pointer move;
-- **atomically** — into a temporary file that is then renamed over the old
-  one, so a crash mid-write leaves the file as it was, never half a file;
+- **atomically** — into a temporary file renamed over the old one, so a crash
+  mid-write leaves the file as it was;
 - **on exit** — whatever is still unsaved when the process exits is written
-  on the way out, including a change whose write was in flight. `await
-settings.flush()` writes it now.
+  on the way out, including a change whose write was in flight.
+  `await settings.flush()` writes it now.
 
 Outside React, `settings.get(key)`, `settings.set(key, value)`,
 `settings.reset(key)` — the default again — and `settings.subscribe(listener)`
-are the same store. A value is whatever JSON can keep, and one it cannot, a
+are the same store. A value is whatever JSON can keep; one it cannot, a
 function or a `BigInt`, is a `TypeError` at `set`. A file that is not JSON is
 reported once and the defaults stand; the next change replaces it.
 
@@ -532,17 +478,14 @@ const { locale, weekStartsOn } = useLocale();
 | `timeZone`     | `'Europe/London'`, or null                                  |
 | `source`       | `'env'` when `LANG` and friends said, `'intl'` when ICU did |
 
-**`LC_ALL` / `LC_MESSAGES` / `LANG` win over `Intl`'s own answer.** node resolves
-`Intl.DateTimeFormat().resolvedOptions().locale` through ICU, and ICU answers
-what it has compiled in — a small-ICU build reports `en-US` for every
-environment there is. The POSIX variables are what the person who launched the
-app actually said. `C` and `POSIX` are not locales but the _absence_ of one, so
-they fall through to ICU rather than becoming a tag.
+**`LC_ALL` / `LC_MESSAGES` / `LANG` win over `Intl`'s own answer**, which is
+whatever ICU has compiled in — a small-ICU build of node reports `en-US`
+everywhere. `C` and `POSIX` are the _absence_ of a locale, so they fall
+through to ICU rather than becoming a tag.
 
-**This does not change while the app runs**, and there is deliberately no
-subscription behind it: a process's environment is fixed at exec and ICU's
-resolution with it, so a desktop that switches language announces it for the
-_next_ login and nothing this process can observe has moved.
+**This does not change while the app runs**, and there is no subscription
+behind it: the environment is fixed at exec, so a desktop that switches
+language does so for the _next_ login.
 
 For text direction inside a component prefer `useDirection()` over
 `useLocale().direction` — it also honours `<ThemeProvider direction>` and the
@@ -554,46 +497,23 @@ an app started under `LANG=ar_EG.UTF-8` mirrors without being told to.
 
 ## What is not here
 
-**Network status.** There is no X-level answer, so it is necessarily D-Bus or
-netlink, and the honest version of the API would be a hint rather than a fact —
-a failed request is always the better truth than a flag that says the link is
-up. Not ruled out; not built.
+- **Network status** — not built: there is no X-level answer, and a failed
+  request is a better truth than a flag that says the link is up.
+- **Battery, brightness, volume, media keys** — D-Bus services a third party
+  can wrap without anything from here ([dbus.md](dbus.md)).
+- **Elsewhere:** notifications ([notifications.md](notifications.md)); the
+  tray, [`useTray()`](desktop.md#the-tray); a launcher badge,
+  [`useBadge()`](desktop.md#the-badge); attention — the taskbar urgency or
+  Dock bounce — `states: ['demands_attention']`
+  ([desktop.md](desktop.md#attention)); the user's calendar,
+  `useDesktopCalendarEvents()` ([desktop-calendar.md](desktop-calendar.md));
+  camera/mic/location authorization, `usePermission()`
+  ([permissions.md](permissions.md)) — macOS TCC today, not yet the
+  freedesktop device portals.
+- **Session lifecycle** — "we are suspending, save now", "I have unsaved work,
+  do not log out yet" — not built. On the cocoa backend a quit request from
+  the Dock, ⌘Q or a logout already reaches the primary window's
+  `onCloseRequest` ([uri-schemes.md](uri-schemes.md), "On macOS").
 
-**Battery, brightness, volume, media keys.** These are D-Bus services a third
-party can wrap without anything from here. Two things once on this list — the
-two desktop standards with a claim on core — are now built: **notifications**
-([notifications.md](notifications.md)), and the **tray**, whose menu is
-[dbusmenu](globalmenu.md) this renderer already speaks — on the cocoa backend
-[`useTray()`](desktop.md) over `NSStatusItem`
-([#463](https://github.com/sidorares/react-x11/issues/463)), and on a
-freedesktop session over `org.kde.StatusNotifierItem`
-([#353](https://github.com/sidorares/react-x11/issues/353)) — D-Bus only, so
-the same rung serves X11, XWayland and Wayland — and on win32 over
-`Shell_NotifyIcon`.
-
-**The user's calendar.** Their real events, from the accounts the desktop
-already holds — EventKit on macOS, Evolution Data Server on a freedesktop
-session — are [desktop-calendar.md](desktop-calendar.md):
-`useDesktopCalendarEvents()`, keyed the way a calendar grid asks. It is not a
-system _setting_, which is why it is its own page rather than a hook here,
-but it is the same kind of thing as the rest of this one: something the
-desktop knows that an app would otherwise ask the user to type in again.
-
-**A launcher badge, and permission prompts.** Both are built, and neither is
-a system hook: an unread count on the icon (freedesktop
-`com.canonical.Unity.LauncherEntry`, one D-Bus signal; macOS
-`dockTile.badgeLabel`; a taskbar overlay icon on Windows) is `useBadge()` in
-[desktop.md](desktop.md#the-badge), and camera/mic/location authorization is
-`usePermission()` in [permissions.md](permissions.md) — macOS TCC today, with
-the freedesktop device portals still
-[#466](https://github.com/sidorares/react-x11/issues/466)'s remaining half. Attention (the taskbar urgency / Dock
-bounce) is `states: ['demands_attention']`
-([desktop.md](desktop.md#attention)).
-
-**Session lifecycle** — "we are suspending, save now", and "I have unsaved work,
-do not log out yet". The X-native answer (XSMP) is effectively dead and the live
-one is logind. The shape worth having is probably not a system hook but a
-`useBeforeQuit()` that unifies it with `<window onCloseRequest>`. On the cocoa
-backend the second half already lands there: a quit request from the Dock,
-⌘Q or a logout is routed to the primary window's `onCloseRequest`
-([uri-schemes.md](uri-schemes.md), "On macOS").
+Why, and what was considered:
+[design/system.md](../design/system.md#what-is-not-here).

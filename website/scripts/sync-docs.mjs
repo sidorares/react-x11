@@ -202,7 +202,7 @@ const ORDER = [
   'scale.md',
   'remote.md',
   'macos.md',
-  'wayland.md',
+  'wayland-backend.md',
   'windows.md',
   'security.md',
   'packaging.md',
@@ -210,14 +210,10 @@ const ORDER = [
   'debugging.md',
   'click-to-component.md',
   'gl.md',
-  'glx.md',
   'ecosystem.md',
   // docs/ecosystem/ — same order as the compatibility tables on the landing
   // page. Matched by basename, and sorting happens per directory, so these
   // never collide with the top-level names above.
-  //
-  // docs/architecture/ is not listed: those are design records rather than
-  // reference, and alphabetical is as good an order as any for them.
   'state.md',
   'data-fetching.md',
   'forms.md',

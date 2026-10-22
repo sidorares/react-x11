@@ -2,30 +2,19 @@
 
 react-x11 applications are visible to screen readers. The renderer carries a
 built-in [AT-SPI2](https://gitlab.gnome.org/GNOME/at-spi2-core) bridge — the
-same interface GTK and Qt applications register themselves through — so Orca
-reads a react-x11 window the way it reads any other: roles, names, states,
-focus, live text editing, and the actions to drive controls without a
-pointer.
+interface GTK and Qt register through — so Orca reads a react-x11 window like
+any other: roles, names, states, focus, live text editing, and the actions
+that drive controls without a pointer. It is on by default; with no
+accessibility bus the bridge never comes up, and the render path pays one
+property read per event.
 
-It is on by default and costs nothing to have: with no accessibility bus on
-the machine the bridge never comes up, and the render path pays one property
-read per event for the hooks it would have filled.
-
-> **This is the Linux bridge; the win32 backend has one of its own and Cocoa
-> has none.** On **win32** the same tree is pushed to UI Automation instead
-> (`src/win32/a11y.js`, [windows.md](windows.md#accessibility-ui-automation)),
-> because UIA asks synchronously and is answered from a pushed copy rather
-> than from the live tree. AT-SPI
-> is a freedesktop protocol with nothing to register against on macOS, so on
-> the **Cocoa** backend `createRoot()` leaves it off (`desktop: { a11y:
-false }` by default there) and no `NSAccessibility` bridge has been built
-> in its place — a Cocoa-backend app is not yet reachable by VoiceOver.
-> Everything else on this page still earns its keep there: `role`, `aria-*`
-> and `announce()` are properties of the shared node tree, keyboard
-> traversal and the widgets' own semantics are shared code, and all of it is
-> what an `NSAccessibility` bridge will read when it lands
-> ([macos.md](macos.md), Phase 5). Write them now; nothing changes when it
-> does.
+> **Per backend.** On **win32** the same tree is pushed to UI Automation
+> instead ([windows.md](windows.md#accessibility-ui-automation)). On
+> **Cocoa** there is no bridge yet: `createRoot()` leaves AT-SPI off there
+> (`desktop: { a11y: false }` by default) and a Cocoa-backend app is not
+> reachable by VoiceOver. Write `role`, `aria-*` and `announce()` anyway:
+> they live on the shared node tree, and an `NSAccessibility` bridge will
+> read them unchanged.
 
 ```jsx
 <box role="button" aria-label="Close" onClick={close} focusable>
@@ -34,21 +23,19 @@ false }` by default there) and no `NSAccessibility` bridge has been built
 ```
 
 That is the entire API for most code. `role` and `aria-*` are the web's
-names, accepted on every host element — the same vocabulary react-dom takes
-and React Native adopted — so a component library that sets them is
-accessible here with no react-x11-specific knowledge, and the built-in
-widgets (`Button`, `Checkbox`, `Select`, `Menu`, `Tabs`, …) already
-carry them.
+names, accepted on every host element — the vocabulary react-dom takes — so
+a component library that sets them is accessible here with no
+react-x11-specific knowledge, and the built-in widgets (`Button`,
+`Checkbox`, `Select`, `Menu`, `Tabs`, …) already carry them.
 
-> This page is the reference. The design record — why there is no mirror
-> tree, why the vocabulary is the web's rather than React Native's, why
-> discovery dials its own socket, what was rejected and what is deferred —
-> is [architecture/accessibility.md](architecture/accessibility.md).
+Design notes: [design/architecture/accessibility.md](../design/architecture/accessibility.md)
+(no mirror tree, the web's vocabulary, what was rejected) and
+[design/accessibility.md](../design/accessibility.md).
 
 ## What a screen reader hears without any props
 
-Accessibility is not opt-in; the defaults are chosen so an unlabelled tree
-is _boring_ to a screen reader rather than broken:
+Accessibility is not opt-in; an unlabelled tree is _boring_ to a screen
+reader rather than broken:
 
 | element                 | reads as                                                    |
 | ----------------------- | ----------------------------------------------------------- |
@@ -99,58 +86,49 @@ rowheader scrollbar search searchbox separator slider spinbutton status
 switch tab table tablist tabpanel term textbox timer toolbar tooltip tree
 treegrid treeitem window`, plus `none`/`presentation` to erase a wrapper
 from the accessible tree while keeping its children. An unknown role warns
-in development and falls back to the element default — a typo must not
-silently turn a button into a filler, and it must not crash either.
+in development and falls back to the element default — a typo neither turns
+a button into a filler nor crashes.
 
-Two deliberate absences. There is no `aria-disabled`: `disabled` is already
-a host prop with real behaviour (it blocks focus and drives `:disabled`
-style blocks), and a parallel prop that only _said_ disabled would let the
-two disagree. And there is no `aria-labelledby`/`aria-describedby`: there
-are no element ids to point them at — use `aria-label`, or lean on
-name-from-contents.
+There is no `aria-disabled`: use `disabled`, which blocks focus and drives
+`:disabled` style blocks, so the two cannot disagree. There is no
+`aria-labelledby`/`aria-describedby` either: there are no element ids to
+point them at — use `aria-label`, or lean on name-from-contents.
 
 ### Names
 
 The accessible name resolves in order: `aria-label` → what the element
 itself carries (a window's `title`, an image's `alt`, an input's
-`placeholder` — the fallback the web engines also use) → for roles whose
-contents are their label (buttons, checkboxes, menu items, tabs, links,
-options, tree items, …), the visible text inside. So
-`<Button>Save</Button>` is named "Save" with nobody writing a label, and
-`announce`-worthy custom controls need one prop, not three.
+`placeholder`) → for roles whose contents are their label (buttons,
+checkboxes, menu items, tabs, links, options, tree items, …), the visible
+text inside. So `<Button>Save</Button>` is named "Save" with nobody writing
+a label.
 
 ### AT-driven controls
 
-Activation needs no wiring at all: every element whose role promises it
-(button, checkbox, menu item, tab, …) or that has an `onClick` exposes an
-AT-SPI `activate` action, and the bridge performs it by dispatching a
-synthetic click through the normal event path — capture, bubble, default
-actions, the discrete-priority commit — so Orca pressing a button is
-indistinguishable from a finger.
-
-(Under the hood the activation is a full press gesture — mousedown, mouseup,
-click — because several controls act on the press: `Select` and `MenuBar`
-drop their menus on it, the way real menus do.)
+Activation needs no wiring: every element whose role promises it (button,
+checkbox, menu item, tab, …) or that has an `onClick` exposes an AT-SPI
+`activate` action. The bridge performs it as a synthetic click through the
+normal event path — capture, bubble, default actions, the discrete-priority
+commit — so Orca pressing a button is indistinguishable from a pointer. It
+is a full press gesture (mousedown, mouseup, click), because `Select` and
+`MenuBar` open their menus on the press.
 
 **The keyboard shares that click.** Space and Enter on a focused element with
-an `onClick` dispatch the same gesture through the same function, so a
-keyboard user and a screen-reader user are never served differently by the
-same element — see [events.md](events.md#space-and-enter-are-a-click). The
-role half of the rule above stays the AT's: a role _advertises_ an action to
-something that cannot press a key, and a `role="button"` with no `onClick`
-has no click for a key to be.
+an `onClick` dispatch the same gesture through the same function
+([events.md](events.md#space-and-enter-are-a-click)). A role _advertises_
+an action to an AT that cannot press a key; a `role="button"` with no
+`onClick` has no click for a key to trigger.
 
-The one thing that does need a handler is a _value_ write — Orca adjusting
-a slider through the Value interface. The handler receives one argument:
+The one thing that needs a handler is a _value_ write — Orca adjusting a
+slider through the Value interface. The handler receives one argument:
 
 ```ts
 { action: 'setValue', value: number }
 ```
 
-(`action` is a string so the shape can grow; `'setValue'` is the only
-action delivered today — activation never arrives here, it goes through the
-event system above.) Wire it into the same state setter as the pointer and
-the keyboard:
+`'setValue'` is the only action delivered today (`action` is a string so
+the shape can grow; activation never arrives here). Wire it into the same
+state setter as the pointer and the keyboard:
 
 ```jsx
 <box
@@ -178,83 +156,84 @@ announce('Connection lost', { assertive: true });
 The explicit counterpart of an ARIA live region: say something through the
 screen reader without moving focus. Returns `true` when a bridge was live
 to carry it; `false` means nobody is listening and a visible fallback may
-be warranted. (Orca ≥ 45 speaks these; there is no `aria-live` region
-tracking — an explicit call is smaller, and it cannot fire on renders you
-did not mean.)
+be warranted. Orca ≥ 45 speaks these. There is no `aria-live` region
+tracking — an explicit call cannot fire on renders you did not mean.
 
 ## What the built-in widgets announce
 
 Every widget in [components.md](components.md) is wired; none of them need
 anything from you beyond their ordinary props. What a screen reader hears:
 
-| widget                    | reads as                                                                                                                                                                                                                                                                                            |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Button`                  | button, named by its label; disabled buttons say so                                                                                                                                                                                                                                                 |
-| `Checkbox`                | check box, checked/unchecked, named by its label                                                                                                                                                                                                                                                    |
-| `Radio` / `RadioGroup`    | radio buttons with the selected one checked                                                                                                                                                                                                                                                         |
-| `Switch`                  | switch, on/off — **give it an `aria-label`**, it has no visible label of its own                                                                                                                                                                                                                    |
-| `Slider`                  | horizontal slider with value and range; Orca can adjust it                                                                                                                                                                                                                                          |
-| `ProgressBar`             | progress bar; the value reads as a percentage of its range, and an `indeterminate` one is busy with no value rather than 0%                                                                                                                                                                         |
-| `Select`                  | combo box named by the current choice, expanded/collapsed; its menu is a listbox of options, each "n of m" and the current one selected                                                                                                                                                             |
-| `MenuBar` / `ContextMenu` | menu bar and menus; items carry their shortcut as the standard `keyshortcuts` attribute ("Control+N" — UI Events spelling, where the row draws "Ctrl+N" and the key path [binds it](events.md#accelerators)), a `toggleType` as checked/radio, `toggleState: -1` as `mixed`, submenus as expandable |
-| `Tooltip`                 | tooltip                                                                                                                                                                                                                                                                                             |
-| `Dialog`                  | modal dialog, named by its title                                                                                                                                                                                                                                                                    |
-| `Tabs`                    | tab list with orientation; each tab selected or not; the panel is a tab panel                                                                                                                                                                                                                       |
-| `Table`                   | table with column headers and rows ("n of m", selected). Virtualization means only rendered rows exist in the tree — the same rows a sighted user can see                                                                                                                                           |
-| `SplitPane`               | the divider is a separator with orientation and position — the ARIA window-splitter pattern                                                                                                                                                                                                         |
+| widget                    | reads as                                                                         |
+| ------------------------- | -------------------------------------------------------------------------------- |
+| `Button`                  | button, named by its label; disabled buttons say so                              |
+| `Checkbox`                | check box, checked/unchecked, named by its label                                 |
+| `Radio` / `RadioGroup`    | radio buttons with the selected one checked                                      |
+| `Switch`                  | switch, on/off — **give it an `aria-label`**, it has no visible label of its own |
+| `Slider`                  | horizontal slider with value and range; Orca can adjust it                       |
+| `ProgressBar`             | progress bar, its value as a percentage of its range; `indeterminate` is busy    |
+| `Select`                  | combo box named by the current choice, expanded/collapsed; its menu is a listbox |
+| `MenuBar` / `ContextMenu` | menu bar and menus (below)                                                       |
+| `Tooltip`                 | tooltip                                                                          |
+| `Dialog`                  | modal dialog, named by its title                                                 |
+| `Tabs`                    | tab list with orientation; each tab selected or not; the panel is a tab panel    |
+| `Table`                   | table with column headers and rows ("n of m", selected)                          |
+| `SplitPane`               | the divider is a separator with orientation and position (ARIA window splitter)  |
+
+An `indeterminate` `ProgressBar` reports no value rather than 0%. A
+`Select`'s options each read "n of m", the current one selected. Menu items
+carry their shortcut as the standard `keyshortcuts` attribute ("Control+N" —
+UI Events spelling, where the row draws "Ctrl+N" and the key path
+[binds it](events.md#accelerators)), a `toggleType` as checked/radio,
+`toggleState: -1` as `mixed`, and submenus as expandable. A virtualized
+`Table` has only its rendered rows in the tree — the same rows a sighted
+user can see.
 
 ## Text controls
 
 `<textinput>` and `<textarea>` implement the AT-SPI `Text` and
-`EditableText` interfaces in full working order: character count, reading
-by character/word/line, caret position (offsets are code points, on both
+`EditableText` interfaces in full: character count, reading by
+character/word/line, caret position (offsets are code points, on both
 sides), selections, per-character screen rectangles for magnifiers and
 caret tracking, and edits — a screen reader can read, navigate, select,
 and type. Every edit and caret move emits the precise
 `text-changed`/`text-caret-moved` deltas Orca narrates from.
 
-One honest limit: "line" granularity follows hard newlines, not the soft
-wraps of a `<textarea>`'s layout. Orca still reads everything; a
-line-by-line walk of one long wrapped paragraph is one stop, not several.
+Limit: "line" granularity follows hard newlines, not the soft wraps of a
+`<textarea>`'s layout. Orca still reads everything; a line-by-line walk of
+one long wrapped paragraph is one stop, not several.
 
-A `<text>` has the `Text` interface too — readable, with no caret to move.
-What it now also reports is its **selection**: a paragraph inside a
-`selectable` surface ([elements.md](elements.md#selecting-text)) hands over
-the range the user has dragged across, and says so as it moves, so a
-magnifier's highlight and a braille display's cursor sit on the same
-characters the highlight is painted over.
+A `<text>` has the `Text` interface too — readable, with no caret — and
+reports its **selection**: a paragraph inside a `selectable` surface
+([elements.md](elements.md#selecting-text)) hands over the range the user
+has dragged across, and says so as it moves, so a magnifier's highlight and
+a braille display's cursor sit on the highlighted characters.
 
 ### While a composition is open
 
 A dead key or a half-typed Compose sequence puts text on the screen that is
 in nobody's value yet ([events.md](events.md#composition)). The `Text`
 interface answers with **what is drawn**, that preedit included, and its
-offsets index that string — because every geometric answer beside it is
-read off the layout of the same string, and a magnifier tracking character
-3 has to land on the glyph a sighted user sees. `CaretOffset` is at the far
-end of the composition, where the next keystroke of the sequence appears.
+offsets index that string, so a magnifier tracking a character lands on the
+glyph a sighted user sees. `CaretOffset` is at the far end of the
+composition, where the next keystroke of the sequence appears.
 
-Which part of it is uncommitted is said twice, so a reader can act on
-either:
+The uncommitted part is marked twice:
 
-- the preedit is its own **attribute run** — `underline: single`, the
-  registered AT-SPI attribute for what is literally drawn, plus
-  `composition: true`, which is this renderer's own because AT-SPI
-  registers nothing for a preedit;
-- its churn is **`:system`** text — `text-changed:insert:system` when the
-  accent appears, `delete:system` when it changes or is abandoned. That is
-  the suffix Gecko established for a change the user did not type, and it
-  is what lets a reader stay quiet through a composition.
+- as its own **attribute run** — `underline: single` (the registered AT-SPI
+  attribute) plus `composition: true` (this renderer's own; AT-SPI
+  registers nothing for a preedit);
+- as **`:system`** text — `text-changed:insert:system` when the accent
+  appears, `delete:system` when it changes or is abandoned — which lets a
+  reader stay quiet through a composition.
 
 What the sequence **commits** is a plain `insert` of the finished
-character: `é` is what the user typed, and it is spoken, once, as one
-insertion — the same event an ordinary keystroke produces, which is also
-why it is one undo step and not two.
+character: `é` is spoken once, as one insertion — the same event an
+ordinary keystroke produces, and one undo step.
 
-Nothing here is announced through `announce()`. A live-region announcement
-on top of the text-changed feed would have a screen reader say the accent
-twice; an application that wants to narrate composition state can call
-`announce()` itself from `onCompositionUpdate`.
+Nothing here goes through `announce()` (the screen reader would say the
+accent twice); an application that wants to narrate composition state can
+call `announce()` itself from `onCompositionUpdate`.
 
 ### Text of your own
 
@@ -291,40 +270,37 @@ class EditorNode extends Node {
 | `a11yReplaceText(start, end, text)` | an AT edited — insert, delete and replace all arrive as this                                        |
 | `a11yRole`                          | the role the element is when the app writes none; `role` still wins                                 |
 
-Two tiers, because the read-only one is a real element and not a
-degenerate editor. `{ value, selectionStart, selectionEnd }` alone is a
-document: the `Text` interface, a `document` role, a selection an AT reads
-and sets — which is what a markdown view with Ctrl+C needs and all it
-needs. `editable: true` adds the EDITABLE state, an `entry` role and, once
-`a11yReplaceText` exists, the `EditableText` interface. Nothing is exposed
-that would not work: an element that reports editable text but implements
-no write is announced as editable and reports its own edits, but is not
-offered to an AT as one to type into.
+Two tiers. `{ value, selectionStart, selectionEnd }` alone is a document:
+the `Text` interface, a `document` role, a selection an AT reads and sets —
+all a markdown view with Ctrl+C needs. `editable: true` adds the EDITABLE
+state, an `entry` role and, once `a11yReplaceText` exists, the
+`EditableText` interface. An element that reports editable text but
+implements no write is announced as editable and reports its own edits, but
+is not offered to an AT to type into.
 
 Offsets are code points and index the string the element **draws** — an
-open composition included, for the same reason `<textinput>`'s do. Report
-which part is uncommitted as `preedit: { offset, text }` and its churn is
-marked `:system`, so a reader stays quiet through a dead key and speaks the
-character it commits. Offsets are clamped on the way out, so a stale caret
-cannot become an out-of-range answer on the wire.
+open composition included, as with `<textinput>`. Report the uncommitted
+part as `preedit: { offset, text }` and its churn is marked `:system`, so a
+reader stays quiet through a dead key and speaks the character it commits.
+Offsets are clamped on the way out, so a stale caret cannot become an
+out-of-range answer.
 
-The known limits of the tier, none of which stop a screen reader working:
-per-character screen rectangles fall back to the element's own rect (a
-magnifier tracks the element, not the glyph), and AT-driven paste and copy
-are the built-ins' — an element's own Ctrl+C/Ctrl+V is unaffected. Both
-want a layout the element alone has; say so on the issue if you have one.
+Known limits, none of which stop a screen reader working: per-character
+screen rectangles fall back to the element's own rect (a magnifier tracks
+the element, not the glyph), and AT-driven paste and copy are the
+built-ins' — an element's own Ctrl+C/Ctrl+V is unaffected.
 
-The seam is observed by the test spy exactly as core's is, so an editor in
-another package can assert what it says with no bus and no desktop —
+The test spy observes this seam exactly as it observes core's, so an editor
+in another package can assert what it says with no bus and no desktop —
 [below](#asserting-what-a-screen-reader-would-hear).
 
 ### A scene of your own
 
-The other half of the same gap. A [registered element](extending.md) that
-_draws_ interactive things — a graph pane, a chart, a timeline, a seating
-plan — is one node, so it is one accessible: "Flow graph, group", with
-three hundred selectable nodes inside it that no assistive technology can
-see. It says what it drew and each one becomes a child:
+A [registered element](extending.md) that _draws_ interactive things — a
+graph pane, a chart, a timeline, a seating plan — is one node, so it is one
+accessible: "Flow graph, group", with three hundred selectable nodes inside
+it that no assistive technology can see. It says what it drew and each one
+becomes a child:
 
 ```js
 class FlowNode extends Node {
@@ -353,17 +329,16 @@ class FlowNode extends Node {
 | `notifyA11ySceneChanged()`    | the scene moved between commits — a drag, an animation, your own arrow keys                           |
 | `a11ySceneAction(id, action)` | an AT sent `'activate'`, `'focus'` or `'scroll'`. `true` claims it; anything else keeps core's answer |
 
-They are read by the same model everything else is: `role` and the
-`aria-*`-shaped states above become the AT-SPI role and state set, `rect`
-becomes the Component extents a magnifier tracks and focus is drawn around,
-and a change to any of it is announced as that child changing rather than as
-the pane being replaced. Keyboard navigation _between_ items stays the
-element's own — the window's focus manager holds the element, which is why
+`role` and the `aria-*`-shaped states become the AT-SPI role and state set,
+`rect` becomes the Component extents a magnifier tracks and focus is drawn
+around, and a change to any of it is announced as that child changing
+rather than as the pane being replaced. Keyboard navigation _between_ items
+stays the element's own — the window's focus manager holds the element, so
 `states.focused` is the only way the cursor inside it is reported.
 
 Activation with no `a11ySceneAction` is a synthetic click at the item's own
-rect, which is exactly what a mouse user does to it; the seam is for the
-elements where that is not the truth. See
+rect, which is what a mouse user does to it; the seam is for elements where
+that is not the truth. See
 [extending.md](extending.md#a-scene-a-screen-reader-can-walk) for the whole
 contract.
 
@@ -379,11 +354,10 @@ contract.
 4. connect, export the tree, `Embed` with the AT-SPI registry.
 
 Every "no" is a normal, **silent** off: ssh sessions, CI, containers, bare
-`startx`, macOS and Windows X servers — react-x11's own flagship
-configurations — simply have no accessibility stack, and an app must not
-log, slow down or grow a mode because of it. The bridge holds no
-event-loop reference either, so a process that is done exits; the registry
-sees the name drop and forgets the app.
+`startx`, macOS and Windows X servers have no accessibility stack, and the
+app does not log, slow down or change behaviour because of it. The bridge
+holds no event-loop reference, so a process that is done exits; the
+registry sees the name drop and forgets the app.
 
 Environment switches, in priority order:
 
@@ -401,8 +375,8 @@ Environment switches, in priority order:
   `react-x11/test` sets it, so a test run on a desktop does not parade
   phantom applications through a running screen reader.
 
-And one that is not environmental, for an app that has to turn the bridge off
-for itself without setting a variable every child process will inherit:
+To turn the bridge off from the app itself, without a variable every child
+process inherits:
 
 ```jsx
 await createRoot({ desktop: { a11y: false } });
@@ -415,21 +389,13 @@ Pass it on the first root: the climb happens once per process, and a second
 root's switch cannot unstart a bridge that is already up.
 
 A dead accessibility bus is not redialled — the same contract as
-[dbus.md](dbus.md): the app simply stops being accessible until restarted.
+[dbus.md](dbus.md): the app stops being accessible until restarted.
 
 ## How often the bridge speaks
 
-A bridge mirrors the tree for a platform that reads it on its own schedule,
-and pushing the mirror on every commit is paid by everything that commits
-often: a scroll, a pan, a value ticking. That was mostly paid for nobody.
-An AT-SPI bus runs in most Linux sessions whether or not a screen reader
-does, and a 100,000-row `<Table>` flung through it exported, diffed and
-unexported every row that scrolled past: 31 frames a second against 38 with
-the bridge off. On Windows the same push was 1.6 ms of every frame of a
-graph pane's pan. So both bridges pace what they push (`src/a11ypace.js`),
-the way browsers do. Chromium batches non-interactive accessibility updates
-150 ms apart once a page has loaded, and bounds 500 ms apart, and serializes
-focus and selection at once.
+Both bridges (AT-SPI and UI Automation) pace what they push, the way
+browsers do, so a scroll, a pan or a ticking value does not pay for a
+platform update on every commit:
 
 - **A change after a quiet spell is pushed at once.** A click or a key that
   changes one thing is heard immediately.
@@ -449,19 +415,10 @@ back to a push per change.
 
 ### With nobody listening
 
-Pacing bounds what a push costs. It does not help when nobody hears the
-push, which is the usual case: the bus runs whether or not a screen reader
-does. Dragging a scrollbar thumb down a 100,000-row `<Table>` ran at 19
-frames a second with the AT-SPI bridge on and 24 with it off, and nothing on
-that desktop was listening. So the bridge asks the registry.
-
-An AT registers the events it wants with the registry. The registry answers
-`GetRegisteredEvents` and announces each new listener, and GTK 4 and
-at-spi2-atk use that to hold back the events nobody asked for. Both still
-send the cache's signals and `children-changed` regardless, because libatspi
-listens for those in every client without registering. So an empty list is
-not the whole answer. An AT that registered for nothing still has to call in
-to read anything, and a call from anybody but the registry counts too.
+An AT-SPI bus runs in most Linux sessions whether or not a screen reader
+does, so the bridge asks the registry who is listening. A listener is an AT
+that registered for events, or any client other than the registry that
+calls in.
 
 - **With no listener and no caller, the bridge falls silent.** Nothing is
   queued, pushed or exported, and what it had exported before the registry
@@ -524,23 +481,22 @@ Every entry is a precise fact (`{ type, state, on, node, … }`) plus a
 one-line `summary`; `at.transcript()` is the summaries, made for
 `deepEqual`. `at.focused()` and `at.focusables()` describe nodes the way an
 AT would — name, role, states, and an `utterance` string following the
-model documented on this page (name, role, the states worth speaking, a
-value as a percentage). The utterance is deliberately **this library's
-model, not an imitation of Orca**, whose wording is presentation policy;
-what it buys you is that a control nobody named renders as
-`"(no accessible name)"` instead of passing because no assertion happened
-to mention its name.
+model on this page (name, role, the states worth speaking, a value as a
+percentage). The utterance is **this library's model, not an imitation of
+Orca**, whose wording is presentation policy; a control nobody named
+renders as `"(no accessible name)"` instead of passing because no assertion
+happened to mention its name.
 
 Four tests worth copying into any application — each one a check a sighted
-test author cannot make by looking (`test/a11y-spy.test.js` is the worked
-example of all four):
+test author cannot make by looking (`test/a11y-spy.test.js` in the
+repository is the worked example of all four):
 
 - **Focus order** — tab through, `deepEqual` the focus summaries.
 - **No keyboard trap** — `at.focusables().length` + 1 Tabs lands back on
   the first stop, and Shift+Tab wraps the other way.
 - **Nothing nameless** — for each of `at.focusables()`, assert the
-  utterance is not `"(no accessible name)"`. The highest value per line in
-  this document.
+  utterance is not `"(no accessible name)"`. The highest value per line on
+  this page.
 - **State changes are announced** — press Space on a checkbox, assert a
   `checked` state entry arrived; a widget that repaints without one is the
   most common accessibility regression there is.
@@ -552,13 +508,13 @@ The wire half is testable without a desktop too: point
 `org.a11y.atspi.Registry` on it with a stub `Embed`, and walk your app with
 real D-Bus calls — `test/atspi.test.js` is the worked example, and the
 model half (roles, names, states as pure functions over the tree) needs no
-bus at all (`test/a11y.test.js`). Applications rarely need this layer; it
-is how react-x11 proves the transport.
+bus at all (`test/a11y.test.js`). Applications rarely need this layer.
 
 ### Seeing it without learning a screen reader
 
-`npm run a11y:probe` is the client side of AT-SPI — the side Orca is on —
-with no GNOME libraries and nothing to configure:
+`npm run a11y:probe`, from a checkout of the react-x11 repository, is the
+client side of AT-SPI — the side Orca is on — with no GNOME libraries and
+nothing to configure:
 
 ```bash
 npm run a11y:probe                       # what is on the accessibility bus
@@ -568,12 +524,10 @@ npm run a11y:probe -- widgets --watch --speak   # ...said out loud
 npm run a11y:probe -- nautilus           # someone else's toolkit, for comparison
 ```
 
-It talks to whatever is on the bus, so pointing it at a GTK app and at
-yours is the sharpest check available: if the shapes match, a screen reader
-will treat them the same. The `say:` lines it prints are a **toy** model —
-what Orca really utters is Orca's own policy — but they make a missing
-accessible name audible instead of merely absent, which is the failure that
-matters most and is easiest to miss.
+Point it at a GTK app and at yours: if the shapes match, a screen reader
+will treat them the same. The `say:` lines it prints are a **toy** model,
+not what Orca utters, but they make a missing accessible name audible
+instead of merely absent.
 
 ### With a real screen reader
 
@@ -601,28 +555,21 @@ app = next(a for a in apps if a and a.get_name() == 'myapp')
 # walk it, read roles/names/states, do_action(0), set values…
 ```
 
-Accerciser gives the same view interactively, and running `orca` while
-Tab-walking your app is the ground truth. Under `react-x11/test`,
-remember, the bridge is off by default (`NO_AT_BRIDGE`) so tests stay
-deterministic.
+Under `react-x11/test` the bridge is off by default (`NO_AT_BRIDGE`), so
+tests stay deterministic.
 
 ## What is deliberately not there (yet)
 
-- **Relations** (`aria-labelledby`, label-for) — needs an id registry;
-  `aria-label` and name-from-contents cover the widgets.
-- **The Selection interface** on containers — Orca reads per-item
-  SELECTED states and selection is driven through actions and focus, so
-  this is polish, not a gap in coverage.
-- **The Table interface** — `Table` exposes honest `table`/`row`/`cell`
-  roles with positions, but not the row/column navigation calls; note that
-  virtualization means only rendered rows exist in the accessible tree,
-  which is also all a sighted user can see.
+- **Relations** (`aria-labelledby`, label-for) — use `aria-label` or
+  name-from-contents.
+- **The Selection interface** on containers — per-item SELECTED states are
+  exposed, and selection is driven through actions and focus.
+- **The Table interface** — `Table` exposes `table`/`row`/`cell` roles with
+  positions, but not the row/column navigation calls; only rendered rows
+  exist in the accessible tree.
 - **Key-event forwarding** (`DeviceEventController.NotifyListenersSync`) —
-  Orca's per-keystroke echo of _keys themselves_; typed characters already
-  arrive through text-changed events.
+  typed characters arrive through text-changed events.
 - **Soft-wrap line granularity** in `<textarea>`, per above.
 - **An input method** — dead keys and Compose are the whole composition
-  story today, so a script that needs a candidate window (any CJK) cannot
-  be typed at all, accessibly or otherwise. What an IME would report is
-  already here: the preedit is a text run and its own `:system` feed, so
-  the work left is the input method, not its accessibility.
+  story, so a script that needs a candidate window (any CJK) cannot be
+  typed.

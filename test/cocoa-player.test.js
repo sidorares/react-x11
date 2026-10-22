@@ -1,7 +1,7 @@
 // <video src> on macOS (src/cocoa/player.js, the player `contents` kind in
 // src/cocoa/sprites.js) over the fake bridge, whose `player-*` events the
 // test emits the way AVFoundation's KVO would. The contract
-// (docs/architecture/video.md §6, §7): a `<video src>` is played by the
+// (design/architecture/video.md §6, §7): a `<video src>` is played by the
 // platform's player where the bridge has one, laid out at the clip's size
 // once the item is ready, and its picture is the player's own layer lifted
 // into the part — or, painted over, the frame showing copied into the

@@ -4,7 +4,7 @@
 // an app on macOS moves onto a worker (src/cocoa/relaunch.js), and on that
 // worker the same import sets it up. A Windows backend's UI thread will be
 // the addon's own, and X11 has none, so neither needs this step
-// (docs/windows.md §"Three shapes on Windows"). Imported first by
+// (design/windows.md §"Three shapes on Windows"). Imported first by
 // src/index.js, so that it runs before the rest of the package.
 import { isMainThread, workerData } from 'node:worker_threads';
 

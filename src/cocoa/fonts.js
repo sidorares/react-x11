@@ -1,6 +1,6 @@
 // The Cocoa text engine: CoreText behind the same `app.fonts` contract ntk's
 // FontManager answers on the X11 backend. The renderer touches exactly this
-// surface (docs/macos.md §"Text: the engine contract"):
+// surface (design/macos.md §"Text: the engine contract"):
 //
 //   fonts.layout(spans, base, { maxWidth, align, lineHeight, maxLines,
 //                               overflow, direction })

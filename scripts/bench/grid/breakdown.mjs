@@ -1,7 +1,7 @@
 // Which runs of a layout one frame makes, and where the frame's layout time
 // goes: the algorithm, its children's measures, the placement or the rest of
 // the pass — with what the seam remembered for the children and what it had
-// to ask again. docs/architecture/grid-layout.md §3.
+// to ask again. design/architecture/grid-layout.md §3.
 //   node --import tsx scripts/bench/grid/breakdown.mjs [grid|masonry] [n]
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';

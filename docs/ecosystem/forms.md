@@ -1,23 +1,20 @@
 # Forms and validation
 
-There is no `<form>` element here, so nothing submits itself — wire
+There is no `<form>` element, so nothing submits itself — wire
 `handleSubmit` to a `Button`'s `onPress` or to `<textinput onSubmit>`.
 
-Everything else follows from **one signature**. Every value control in the
-library — the host elements `<textinput>` and `<textarea>`, and the widgets
-`Checkbox`, `Switch`, `RadioGroup`, `Select` and `Slider` — calls
-`onChange(ev)` with a change event carrying `ev.value`, `ev.target.value`,
-`ev.target.name` and, for a checkbox, `ev.target.checked`. That is the shape
-every DOM form library reads, so a library's handler goes straight in:
+Everything else follows from **one signature**. Every value control — the
+host elements `<textinput>` and `<textarea>`, and the widgets `Checkbox`,
+`Switch`, `RadioGroup`, `Select` and `Slider` — calls `onChange(ev)` with a
+change event carrying `ev.value`, `ev.target.value`, `ev.target.name` and,
+for a checkbox, `ev.target.checked`. That is the shape DOM form libraries
+read, so a library's handler goes straight in, with no per-widget bridge:
 
 ```jsx
 <textinput name="host"  value={f.values.host}   onChange={f.handleChange} />
 <Checkbox  name="agree" checked={f.values.agree} onChange={f.handleChange} />
 <Select    name="size"  value={f.values.size} options={sizes} onChange={f.handleChange} />
 ```
-
-No adapter, no per-widget bridge, nothing to remember about which control
-you are wiring.
 
 | library                | how it goes in                                            |
 | ---------------------- | --------------------------------------------------------- |
@@ -26,43 +23,36 @@ you are wiring.
 | `downshift`            | `getInputProps()` spread onto a `<textinput>`             |
 | `@tanstack/react-form` | `onChange={(ev) => field.handleChange(ev.value)}` — below |
 
-Every row was established by running the library headless against this
-renderer rather than by reading its documentation: react-hook-form@7.84.0,
+Each row was run headless against the renderer: react-hook-form@7.84.0,
 formik@2.4.9, downshift@9.4.0, @tanstack/react-form@1.33.2.
 
 **The one thing to know**: a library whose field contract is
-value-in/value-out — TanStack Form is the one here — needs the value taken
-off the event, and a bare `onChange={field.handleChange}` stores the _event
-object_ as the field value with no error. See below.
+value-in/value-out — TanStack Form here — needs the value taken off the
+event; a bare `onChange={field.handleChange}` stores the _event object_ as
+the field value with no error.
 
-**Where the line falls.** A control that takes a `name` is a form field and
-reports an event. `Tabs`, `Table` and the menus are not form fields
-and keep their plain callbacks
+A control that takes a `name` is a form field and reports an event. `Tabs`,
+`Table` and the menus are not, and keep their plain callbacks
 ([components](../components.md#the-change-event-and-name)).
 
 ## TanStack Form {#tanstack-form}
 
 **Out of the box.** @tanstack/react-form@1.33.2 (form-core 1.33.2).
 
-A headless, framework-agnostic form state manager: field values, dirty and
-touched tracking, sync and async validation (including Standard Schema, so
-zod/valibot/arktype plug in directly), and submission handling. Fields are
-value-in/value-out — no DOM events, no refs.
-
-The field contract is `field.state.value` + `field.handleChange(value)` —
-a **value, not an event**. react-x11's controls fire an event, so each field
-takes the value off it:
+A headless form state manager: field values, dirty and touched tracking,
+sync and async validation (Standard Schema, so zod/valibot/arktype plug in
+directly), and submission. The field contract is `field.state.value` +
+`field.handleChange(value)` — a **value, not an event** — so each field
+takes the value off the control's event, the same expression a DOM app
+writes, for a `<textinput>` and a `Checkbox` alike:
 
 ```jsx
 onChange={(ev) => field.handleChange(ev.value)}
 ```
 
-One expression, the same one a DOM app writes, and it is identical for a
-`<textinput>` and for a `Checkbox`.
-
-Watch for the bare form: `onChange={field.handleChange}` stores the event
-object as the field's value — no error, no warning, and validation sees an
-object where it expected a string.
+The bare `onChange={field.handleChange}` stores the event object as the
+field's value — no error, no warning, and validation sees an object where it
+expected a string.
 
 ```jsx
 import React from 'react';
@@ -101,25 +91,19 @@ function ConnectForm({ connect }) {
 }
 ```
 
-- No `<form>` element exists, so there is no submit-on-Enter for free. Wire
-  `form.handleSubmit()` to a button's `onPress` and/or a window-level Enter
-  key handler.
-- The **widgets** are the exception: `Checkbox`, `Switch`, `RadioGroup`,
-  `Select` and `Slider` still pass the next value first, so
-  `onChange={field.handleChange}` is right there and needs no unwrap. Only
-  the host elements `<textinput>`/`<textarea>` changed.
+- There is no submit-on-Enter for free. Wire `form.handleSubmit()` to a
+  button's `onPress` and/or a window-level Enter key handler.
 - Validation errors from a zod schema are error _objects_
-  (`errors[0].message`), not strings; a plain string validator returns
-  strings. A `<text>` child must be a string, so render `.message`.
-- The package also ships SSR and Next helpers under subpaths; the root
-  import used here pulls in no react-dom.
+  (`errors[0].message`); a plain string validator returns strings. A
+  `<text>` child must be a string, so render `.message`.
+- The SSR and Next helpers live under subpaths; the root import pulls in no
+  react-dom.
 
 ## zod {#zod}
 
 **Out of the box.** zod@4.4.3.
 
-TypeScript-first schema validation. Pure computation, no DOM, nothing
-renderer-specific — the interesting part is only where it plugs in:
+Schema validation, pure computation. Where it plugs in:
 
 - **TanStack Form** — pass a schema straight into a field's
   `validators: { onChange: z.string().min(3, 'too short') }`. Zod 4
@@ -157,49 +141,39 @@ function Settings({ raw }) {
 
 - Zod 4 field errors surface as issue objects; render `issue.message`, not
   the issue itself.
-- `valibot` and `arktype` are equally viable (also Standard Schema). zod is
-  documented here because both verified form integrations used it.
-- Bundle-size arguments from the web world do not apply — an X11 app ships
-  no bundle.
+- `valibot` and `arktype` are equally viable (also Standard Schema).
+- Bundle-size arguments from the web do not apply — an X11 app ships no
+  bundle.
 
 ## React Hook Form {#react-hook-form}
 
 **Out of the box, both APIs.** react-hook-form@7.84.0 with
 @hookform/resolvers@5.5.7.
 
-RHF's headline API is uncontrolled-first: `register()` returns DOM-shaped
-props (`{name, ref, onChange(e), onBlur(e)}`) and reads `e.target.value` off
-the event. That is exactly what `<textinput>` provides, so the terse spread
-works:
+`register()` returns DOM-shaped props (`{name, ref, onChange(e),
+onBlur(e)}`) and reads `e.target.value` off the event, which is what
+`<textinput>` provides, so the spread works:
 
 ```jsx
 const { register, handleSubmit } = useForm({ defaultValues: { host: '' } });
 <textinput {...register('host')} />;
 ```
 
-Three things had to line up, and all three now do: `name` exists as a prop,
-`onChange` receives an event whose `target.value` is the new text, and the
-`ref` RHF attaches lands on a node whose `value` is **writable** — RHF
-assigns `ref.value = ''` while registering the field, which used to throw
-`TypeError: Cannot set property value of #<TextInputNode> which has only a
-getter` from inside the commit phase and take the render down with it.
+The `ref` RHF attaches lands on a node whose `value` is writable (RHF
+assigns `ref.value = ''` while registering). Through `register()`, typing
+updates `getValues()`, `handleSubmit` receives the values,
+`setValue(name, v)` writes through the ref so the field redraws, and
+`setFocus(name)` calls the node's `.focus()`.
 
-Verified working through `register()`: typing updates `getValues()`,
-`handleSubmit` receives them, `setValue(name, v)` writes through the ref so
-the field redraws, and `setFocus(name)` focuses the node.
+**`reset()` updates form state but does not clear an uncontrolled field's
+text.** RHF writes values back through refs on reset only when its `isWeb`
+probe (`typeof window !== 'undefined' && window.HTMLElement && document`)
+passes, which it never does here; `setValue()` is not gated. To have
+`reset()` clear the display, make the field controlled with `<Controller>`,
+or assign `ref.current.value = ''` yourself.
 
-One asymmetry to know about: **`reset()` updates form state but does not
-clear an uncontrolled field's text.** RHF only writes values back through
-refs on the reset path when its `isWeb` probe
-(`typeof window !== 'undefined' && window.HTMLElement && document`) passes,
-which it never does here. `setValue()` is not gated that way and does write
-through. If you need `reset()` to clear the display, make the field
-controlled — `<Controller>`, below — or assign `ref.current.value = ''`
-yourself.
-
-`<Controller>` / `useController` still works, unchanged, and is the better
-choice when you want the field controlled. `field.onChange` accepts either a
-plain value or an event, so both of these are fine:
+`<Controller>` / `useController` is the choice for a controlled field.
+`field.onChange` accepts a plain value or an event, so both are fine:
 
 ```jsx
 onChange={(ev) => field.onChange(ev.target.value)}   // explicit
@@ -246,11 +220,9 @@ function ConnectForm({ connect }) {
 }
 ```
 
-- A `Controller` field is controlled, so its subtree re-renders on every
-  keystroke. `register()` does not, which is the same performance argument
-  RHF makes on the web — and it now applies here too.
-- `setFocus(name)` works: it calls `.focus()` on whatever the ref holds, and
-  a `<textinput>` node has one.
+- A `Controller` field re-renders its subtree on every keystroke;
+  `register()` does not — the same performance argument RHF makes on the
+  web.
 - `handleSubmit` returns a function. Call it: `handleSubmit(fn)` in an
   `onPress` is the curried form, and there is no submit event to pass.
 
@@ -258,12 +230,7 @@ function ConnectForm({ connect }) {
 
 **Out of the box.** formik@2.4.9.
 
-Formik was the clearest casualty of the old `onChange(string)` contract, and
-it failed _silently_: `handleChange` treats a string argument as its curried
-field-name form, returns a handler, and never touches state — so spreading
-`getFieldProps` onto a `<textinput>` left `values` at its initial object and
-`touched` empty, with nothing logged. That is fixed by the event, not by an
-adapter. All three of Formik's field styles now work:
+All three of Formik's field styles work:
 
 ```jsx
 import { Formik, Field, useFormik } from 'formik';
@@ -286,10 +253,7 @@ import { Formik, Field, useFormik } from 'formik';
 ```
 
 `handleChange` reads `target.name` to decide which field to write, so the
-`name` prop is not optional in any of these — that is what the synthetic
-event carries it for.
-
-The widgets need no bridge — same handler, same signature:
+`name` prop is required in all of these. The widgets take the same handler:
 
 ```jsx
 <Checkbox
@@ -301,13 +265,13 @@ The widgets need no bridge — same handler, same signature:
 </Checkbox>
 ```
 
-`ev.target` is `{ type: 'checkbox', name, value, checked }`, which is exactly
-what `handleChange` destructures — including `type`, which is how it knows to
-take `checked` rather than `value`.
+`ev.target` is `{ type: 'checkbox', name, value, checked }`, which is what
+`handleChange` destructures — `type` is how it knows to take `checked`.
 
 - `<Formik>`'s render-prop form and `useFormik` both work; there is no
   `<form>` element, so call `submitForm()` (or `handleSubmit()`) yourself
   from a `Button` or from `<textinput onSubmit>`.
-- Passing a non-event object to `handleChange` — a hand-rolled fake event
-  with no `target` — still throws `TypeError: Cannot read properties of
-undefined (reading 'type')` rather than no-opping. Pass the real event.
+- Passing `handleChange` a non-event object — a hand-rolled fake event with
+  no `target` — throws
+  `TypeError: Cannot read properties of undefined (reading 'type')` rather
+  than no-opping. Pass the real event.

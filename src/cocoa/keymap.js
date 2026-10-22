@@ -23,7 +23,7 @@
 //
 // There is no input method behind this. The bridge's view swallows
 // `keyDown:` without `interpretKeyEvents:` and is no `NSTextInputClient`
-// (docs/macos.md, "IME"), so these fields are all the text there is. Two
+// (design/macos.md, "IME"), so these fields are all the text there is. Two
 // consequences, both handled below:
 //
 // - **A dead key types nothing.** ⌥E on a US layout leaves `chars` empty, and

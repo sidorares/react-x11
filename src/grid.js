@@ -1,5 +1,5 @@
 // CSS grid, built in (docs/styling.md "Grid"; the design record is
-// docs/architecture/grid-layout.md). A box with `display: 'grid'` — or
+// design/architecture/grid-layout.md). A box with `display: 'grid'` — or
 // `layout: 'grid'`, the same request under the name every layout goes by —
 // arranges its children by CSS Grid's placement and track sizing algorithms
 // (css-grid-2 §8.5 and §12), inside the pass that lays the window out. It is

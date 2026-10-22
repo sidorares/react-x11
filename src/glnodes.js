@@ -95,7 +95,7 @@ export function glxConfig(app, spec) {
           process.platform === 'win32'
             ? 'react-x11: <glarea> is not built on the win32 backend yet — it ' +
                 'needs ANGLE (EGL and GLES over Direct3D 11), which ' +
-                'docs/windows.md plans as an optional dependency the way ' +
+                'design/windows.md plans as an optional dependency the way ' +
                 'x11-dri is on X11. Everything else on this backend works ' +
                 'without it; for GL content today, use the X11 backend.'
             : 'react-x11: <glarea> needs ntk >= 3.6.0 (app.chooseGLConfig)',

@@ -21,7 +21,7 @@
 // Then start the app against the proxy port:
 //   REACT_X11_DEVTOOLS=1 REACT_X11_DEVTOOLS_PORT=8098 node app.js
 //
-// See docs/devtools.md.
+// See design/devtools.md, "Watching the wire".
 
 import { createWriteStream } from 'node:fs';
 import { WebSocketServer, WebSocket } from 'ws';

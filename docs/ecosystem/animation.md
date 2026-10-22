@@ -1,41 +1,36 @@
 # Animation
 
-react-x11 has a built-in `transition` style property with a fixed easing
-curve — see [styling](../styling.md#transitions). Everything on this page
-exists to cover what that cannot express: springs with velocity carry-over,
-interruption, arbitrary easing curves, shape morphing, and keeping an element
-mounted while it animates out.
+react-x11's built-in `transition` style property has a fixed easing curve
+([styling](../styling.md#transitions)). This page covers what it cannot
+express: springs with velocity carry-over, interruption, arbitrary easing
+curves, shape morphing, and keeping an element mounted while it animates
+out.
 
-There is one constraint every entry shares: **there is no `opacity` style
-property**, and `validateStyle` throws on unknown properties. The classic
-fade does not port literally; animate a colour, a size or a position instead.
+**There is no `opacity` style property**, and `validateStyle` throws on
+unknown properties, so the classic fade does not port; animate a colour, a
+size or a position instead.
 
 Two patterns recur. The cheap one is `onUpdate → setState → style prop`:
-every frame is a React render plus a commit, which react-x11 turns into a
-partial repaint of the node whose paint changed. Keep the animated component
-a leaf — a `<box>`, not the window root — and it is fine at spring frame
-rates. The expensive-to-set-up, cheap-to-run one is the
-[react-spring host](#react-spring), which applies frames imperatively and
-bypasses React entirely.
+each frame is a React render plus a commit, which react-x11 turns into a
+partial repaint of the changed node. Keep the animated component a leaf — a
+`<box>`, not the window root — and it holds spring frame rates. The other is
+the [react-spring host](#react-spring): more setup, but it applies frames
+imperatively and bypasses React.
 
-Headless Node has no `requestAnimationFrame`. In a real app the right clock
-is the ntk window's `requestAnimationFrame`, reachable through a ref on
-`<window>`, which paces frames to X connection latency; a 16 ms
-`setInterval` works everywhere else.
+Node has no global `requestAnimationFrame`. In an app, use the ntk window's
+`requestAnimationFrame` (through a ref on `<window>`), which paces frames to
+X connection latency; a 16 ms `setInterval` works everywhere else.
 
-`framer-motion` is not on this page. Both its component layer and its bare
-value layer fail — see the
-[negative-results register](../ecosystem.md#render-time), which also explains
-why reaching past `motion.*` does not help.
+`framer-motion` fails at both its component and its value layer — see the
+[negative-results register](../ecosystem.md#render-time).
 
 ## popmotion {#popmotion}
 
 **Out of the box.** popmotion@11.0.5.
 
-Framer's low-level animation toolkit: `animate()` tweens or springs a plain
-JS value and calls `onUpdate(v)` every frame. No components, no DOM — the
-value goes wherever you point it. This is the smallest way to get real
-springs, with velocity and overshoot, without adopting the react-spring host.
+`animate()` tweens or springs a plain JS value and calls `onUpdate(v)`
+every frame. The smallest way to get real springs, with velocity and
+overshoot, without the react-spring host.
 
 ```jsx
 import React, { useEffect, useState } from 'react';
@@ -57,29 +52,25 @@ function Bar() {
 }
 ```
 
-popmotion's `framesync` detects the missing `requestAnimationFrame` and falls
-back to a 16.7 ms `setTimeout`, so it works headless with no configuration.
-For latency-adaptive pacing, `animate()` accepts a custom `driver` you can
-back with the ntk window's clock.
+With no `requestAnimationFrame`, popmotion falls back to a 16.7 ms
+`setTimeout`, so it needs no configuration. For latency-adaptive pacing,
+pass `animate()` a custom `driver` backed by the ntk window's clock.
 
 - Springs on layout properties (width, margin) cost a yoga layout pass per
-  frame — the same trade react-x11's own layout transitions make.
-- `animate` also interpolates colour strings (`'#f00' → '#00f'`), and the
-  `rgba(...)` strings it emits are accepted by the paint path.
-- popmotion's `styler` and DOM helpers are irrelevant here. Use only the
-  value APIs: `animate`, `spring`, `decay`, `mix`.
+  frame, as react-x11's own layout transitions do.
+- `animate` interpolates colour strings (`'#f00' → '#00f'`), and the
+  `rgba(...)` strings it emits paint as-is.
+- Use only the value APIs — `animate`, `spring`, `decay`, `mix` — not
+  `styler` or the DOM helpers.
 
 ## d3-ease {#d3-ease}
 
 **Out of the box.** d3-ease@3.0.1.
 
-Pure easing functions: `ease(t)` maps normalized time to normalized progress,
-and nothing else. Thirty-plus curves — cubic, elastic, bounce, back — each a
-few lines of maths with no environment dependencies. This is the zero-cost
-way to get the curves the built-in `transition` does not have.
-
-Compute `t` from wall time, pass `ease(t)` to an interpolator, push the
-result into a style prop.
+Pure easing functions — `ease(t)` maps normalized time to progress — with
+thirty-plus curves (cubic, elastic, bounce, back) the built-in `transition`
+lacks. Compute `t` from wall time, pass `ease(t)` to an interpolator, push
+the result into a style prop.
 
 ```jsx
 import React, { useEffect, useState } from 'react';
@@ -109,26 +100,19 @@ function Gauge() {
 }
 ```
 
-- ESM-only since v3 — `require()` fails, `import` works. react-x11 apps are
-  ESM anyway.
+- ESM-only since v3 — `import`, not `require()`.
 - It is only the curve; you own the clock and the interpolation.
-- Overshooting curves (elastic, back) produce values outside the from/to
-  range. That is the point of them, but clamp before feeding anything
-  react-x11 validates as non-negative.
+- Overshooting curves (elastic, back) leave the from/to range; clamp before
+  feeding anything react-x11 validates as non-negative.
 
 ## d3-interpolate {#d3-interpolate}
 
 **Out of the box.** d3-interpolate@3.0.1.
 
 `interpolate(a, b)` returns `t => value` for numbers, colours in any CSS
-space, strings with embedded numbers, dates, arrays and nested objects. Pure
-maths, no DOM.
-
-Worth knowing: `interpolateRgb` emits `'rgb(r, g, b)'` strings and the paint
-path takes them as-is, so colour animation needs no conversion. react-x11 has
-an internal interpolator for its own `transition` styles, but it is not
-exported and handles only what transitions need — d3-interpolate is the
-general tool for hand-rolled timelines.
+space, strings with embedded numbers, dates, arrays and nested objects.
+`interpolateRgb` emits `'rgb(r, g, b)'` strings, which paint as-is. (The
+interpolator behind react-x11's `transition` is not exported.)
 
 ```jsx
 import { easeCubicOut } from 'd3-ease';
@@ -148,9 +132,8 @@ function Gauge() {
 
 - ESM-only since v3.
 - Generic `interpolate(a, b)` on objects interpolates _every_ numeric-looking
-  key, so interpolating a whole style object will happily produce fractional
-  values for properties that want integers. Interpolate the two or three
-  properties you mean.
+  key, giving fractional values to properties that want integers.
+  Interpolate only the properties you mean.
 - There is no `opacity`; to fade, interpolate a colour's alpha into
   `backgroundColor: 'rgba(...)'`.
 - `interpolateArray` over polygon points feeding `<canvas onDraw>` is a good
@@ -160,14 +143,11 @@ function Gauge() {
 
 **Out of the box.** @tweenjs/tween.js@25.0.0.
 
-`new Tween(obj).to(target, ms).easing(...).onUpdate(...).start()`, and then
-_you_ call `tween.update(time)` on whatever clock you own. Since v18 there is
-no implicit global loop — nothing runs until you pump it.
-
-The explicit clock is the feature here: in a real app, pump from the ntk
-window's `requestAnimationFrame`, which paces updates to X connection
-latency. Use one `Group` per window if you run many tweens, so
-`group.update(now)` steps them all from the same tick.
+`new Tween(obj).to(target, ms).easing(...).onUpdate(...).start()`, then
+_you_ call `tween.update(time)` on your own clock — there is no implicit
+global loop. In an app, pump from the ntk window's `requestAnimationFrame`;
+with many tweens, one `Group` per window lets `group.update(now)` step them
+all from the same tick.
 
 ```jsx
 import React, { useEffect, useState } from 'react';
@@ -200,11 +180,10 @@ function Panel() {
 }
 ```
 
-- Tweens numbers only, including numbers nested in objects and arrays.
-  Colours need pre-decomposition into channels; use d3-interpolate or
-  popmotion instead.
-- Nothing animates until something calls `update()`. Forgetting the pump is
-  the classic first bug.
+- Numbers only, including nested in objects and arrays. For colours use
+  d3-interpolate or popmotion.
+- Nothing animates until something calls `update()` — the classic first
+  bug.
 - `onUpdate` mutates the source object, so spread it into fresh state
   (`setPos({ ...state })`) or React skips the re-render on identity.
 
@@ -212,11 +191,9 @@ function Panel() {
 
 **Out of the box.** flubber@0.4.2.
 
-Shape-morphing interpolators for SVG paths: `interpolate(from, to)` returns
+Shape morphing for SVG paths: `interpolate(from, to)` returns
 `t => d-string`, handling ring alignment, point insertion and topology
-changes so intermediate frames look sensible instead of self-intersecting.
-Shape morphing is the one animation the `<svg>` host makes easy, and flubber
-is the standard tool for it.
+changes so intermediate frames do not self-intersect.
 
 ```jsx
 import React, { useEffect, useState } from 'react';
@@ -247,12 +224,12 @@ function Morph() {
 
 - `import { interpolate } from 'flubber'` throws — it is a CJS package, so
   use the default-import form above.
-- Build the interpolator once (module scope or `useMemo`). Construction does
-  the expensive ring matching; sampling is cheap.
+- Build the interpolator once (module scope or `useMemo`); construction is
+  the expensive part.
 - Every frame is a full SVG parse and rasterize of the `source` string. Fine
-  for icons and small figures; for large scenes prefer `<canvas onDraw>` and
-  draw the interpolated points yourself.
-- Old but stable (0.4.2 since 2017) — finished rather than unmaintained.
+  for icons and small figures; for large scenes draw the interpolated points
+  in `<canvas onDraw>`.
+- 0.4.2 since 2017 — finished rather than unmaintained.
 
 ## react-transition-group {#react-transition-group}
 
@@ -260,16 +237,12 @@ function Morph() {
 
 A transition _state machine_, not an animator: `<Transition in={bool}
 timeout={ms}>` walks its child through `entering`/`entered`/`exiting`/
-`exited` on a timer and keeps the child mounted during exit. You decide what
-each state looks like. It is the standard way to keep an element mounted
-while it animates out, which react-x11 has no built-in answer for.
+`exited` on a timer and keeps it mounted during exit — the way to keep an
+element mounted while it animates out, which react-x11 has no built-in for.
 
-Two rules. Always pass `nodeRef` — without it, v4 falls back to
-`ReactDOM.findDOMNode`, which would receive a react-x11 node it cannot
-understand. And map states to styles yourself, pairing with the built-in
-`transition` style so the state flip _tweens_ instead of snapping. That
-combination is the whole "CSSTransition" story here, since there are no class
-names.
+Always pass `nodeRef` — without it, v4 falls back to `ReactDOM.findDOMNode`,
+which cannot handle a react-x11 node. Map states to styles yourself, with the
+built-in `transition` style so the flip _tweens_ instead of snapping.
 
 ```jsx
 import React, { useRef } from 'react';
@@ -301,14 +274,13 @@ function Panel({ shown }) {
 }
 ```
 
-- **`react-dom` must be present in `node_modules`.** `cjs/Transition.js`
-  requires it at module scope for the `findDOMNode` fallback, even when
-  `nodeRef` means it is never called. It is a peer dependency: install it, it
-  will not be rendered with.
-- `CSSTransition` is pointless here — it toggles class names, and there are
-  none. Use plain `Transition`.
-- `timeout` and your visual transition duration are independent numbers. Keep
-  them equal, or the state flips mid-tween.
+- **`react-dom` must be in `node_modules`.** `cjs/Transition.js` requires it
+  at module scope for the `findDOMNode` fallback, even when `nodeRef` means
+  it is never called. Install the peer; nothing renders through it.
+- `CSSTransition` toggles class names, and there are none. Use plain
+  `Transition`.
+- `timeout` and your transition duration are independent; keep them equal,
+  or the state flips mid-tween.
 - `addEndListener` works; call the provided `done` yourself.
 
 ## `@react-spring/core` {#react-spring}
@@ -316,23 +288,20 @@ function Panel({ shown }) {
 **Adapter, ~20 lines.** @react-spring/core@10.1.2,
 @react-spring/animated@10.1.2.
 
-The platform-independent half of react-spring: `useSpring`, `useTransition`,
-`useTrail`, `SpringValue`, `Controller`. `@react-spring/animated` provides
-`createHost`, the documented seam for building a non-DOM target — it is how
-`@react-spring/native` and `/three` exist.
-
-Springs, interruption with velocity carry-over, and `api.start()` are exactly
-what the built-in duration-only `transition` cannot express. Two public
+The platform-independent half of react-spring: `useSpring`,
+`useTransition`, `useTrail`, `SpringValue`, `Controller` — springs,
+interruption with velocity carry-over, `api.start()`.
+`@react-spring/animated` provides `createHost`, the documented seam for a
+non-DOM target (how `@react-spring/native` and `/three` exist). Two public
 seams do the work:
 
-- `Globals.assign({ now, requestAnimationFrame })` points react-spring's
-  frame loop at a clock.
+- `Globals.assign({ now, requestAnimationFrame })` points the frame loop at
+  a clock.
 - `createHost(['box', …], { applyAnimatedValues })` produces `animated.box`.
-  Every frame, react-spring calls `applyAnimatedValues(instance, props)`
-  where `instance` is the react-x11 node your ref points at — and
-  `node.applyProps(next, prev)` is the same imperative path the reconciler's
-  own `commitUpdate` uses. Frames bypass React entirely: a component renders
-  once while hundreds of frames apply.
+  Each frame, react-spring calls `applyAnimatedValues(instance, props)` with
+  the react-x11 node, and `node.applyProps(next, prev)` is the imperative
+  path the reconciler's `commitUpdate` uses. A component renders once while
+  hundreds of frames apply.
 
 ```jsx
 // spring-x11.js — the adapter
@@ -375,20 +344,17 @@ function Bar() {
 }
 ```
 
-- **Merge `style` one level deep in `applyAnimatedValues`** — this is the
-  number-one silent failure. On animation frames react-spring calls
-  `props.getValue(true)` for _animated leaves only_, so static keys
-  (`height: 30` next to an animated `width`) are absent from the payload and
-  a naive `{...prev, ...props}` merge wipes them. The box then paints
-  nothing, with no error.
-- Hex, `rgb()` and `rgba()` colour strings interpolate out of the box. Named
-  CSS colours are not enabled by default in `@react-spring/shared` — stick to
-  hex and rgb.
+- **Merge `style` one level deep in `applyAnimatedValues`** — the
+  number-one silent failure. Frames carry _animated leaves only_
+  (`props.getValue(true)`), so static keys (`height: 30` beside an animated
+  `width`) are absent, and a naive `{...prev, ...props}` merge wipes them:
+  the box paints nothing, with no error.
+- Hex, `rgb()` and `rgba()` strings interpolate; named CSS colours are not
+  enabled by default in `@react-spring/shared`.
 - Do not use `useScroll`, `useResize`, `useInView` or `useReducedMotion` from
   core; they observe the DOM `window` and `matchMedia`.
   `Globals.assign({ skipAnimation })` is the manual reduced-motion switch.
 - Style arrays (`style={[a, b]}`) defeat the shallow merge. Flatten first —
   react-x11 exports `flattenStyle`.
-- Driving the clock from `setImmediate` runs frames as fast as the event loop
-  turns, which is fine for tests and wasteful for apps. Use the ntk window
-  clock or a 16 ms timeout.
+- A `setImmediate` clock runs frames as fast as the event loop turns — fine
+  for tests, wasteful for apps. Use the ntk window clock or a 16 ms timeout.

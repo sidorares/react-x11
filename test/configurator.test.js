@@ -177,7 +177,7 @@ describe('examples/configurator', () => {
   test('the laptop is shut at the top of the page and open at the bottom', () => {
     // The pose is the only part of the 3D panel a headless test can see: GL
     // renders where GetImage cannot read it, so there is no pixel to assert
-    // on (docs/glx.md). What matters is that it is a *function of the scroll
+    // on (docs/gl.md). What matters is that it is a *function of the scroll
     // position* — the same offset gives the same frame, and it only opens.
     const shut = laptopPose(0);
     const open = laptopPose(1);

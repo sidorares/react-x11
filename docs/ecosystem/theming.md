@@ -2,38 +2,28 @@
 
 react-x11's theme is a plain object of hex strings and numbers — see
 [components](../components.md#theming) for the token list and
-[styling](../styling.md#theme-tokens) for how `$token` resolves. So every
-palette package on this page is used the same way: pick keys at
-theme-build time, hand the result to `<ThemeProvider>` and `<window theme>`,
-and the renderer never knows the package exists.
+[styling](../styling.md#theme-tokens) for how `$token` resolves. Every
+palette package here is used the same way: pick keys at theme-build time and
+hand the result to `<ThemeProvider>` and `<window theme>`.
 
-One rule governs the whole page: **ntk's colour parser accepts hex, `rgb()`,
-`rgba()`, `hsl()` and CSS colour names, and returns null for anything else —
-and a null colour paints nothing, silently.** Modern token sets are
-increasingly `oklch()`-first, so conversion is not optional. That is the
-single sharpest edge here.
+**ntk's colour parser accepts hex, `rgb()`, `rgba()`, `hsl()` and CSS colour
+names, and returns null for anything else — and a null colour paints
+nothing, silently.** Modern token sets are increasingly `oklch()`-first, so
+convert them. That is the sharpest edge on this page.
 
-CSS-in-JS is not on this page at all. `styled-components` and
-`@emotion/styled` both fail, in interestingly different ways, and are written
-up in the [negative-results register](../ecosystem.md#what-does-not-work).
-Use `createStyles` plus one of the palettes below.
+CSS-in-JS (`styled-components`, `@emotion/styled`) fails — see the
+[negative-results register](../ecosystem.md#what-does-not-work). Use
+`createStyles` plus one of the palettes below.
 
 ## `@radix-ui/colors` {#radix-colors}
 
 **Out of the box.** @radix-ui/colors@3.0.0.
 
-Thirty named 12-step colour scales (plus dark, alpha and P3 variants) shipped
-as plain JS objects of hex strings — no React, no DOM, no CSS. Each step has
-a documented job: 1–2 app backgrounds, 3–5 component backgrounds, 6–8
-borders, 9–10 solid fills, 11–12 text. That semantic contract is what makes
-it a theme _generator_ rather than a swatch book.
-
-Because every scale has identical structure, one function produces any
-light/dark pairing.
-
-Radix's ladder and the token set line up almost step for step: 1–2 are the
-`background`, 3–5 are the `surface` and its hover, 6–8 the `border`, 9–10 the
-solid fills, 11–12 the ink.
+Thirty named 12-step colour scales (plus dark, alpha and P3 variants) as
+plain JS objects of hex strings. Each step has a documented job that lines
+up with the token set almost step for step: 1–2 `background`, 3–5 `surface`
+and its hover, 6–8 `border`, 9–10 solid fills, 11–12 text. Every scale has
+the same structure, so one function produces any light/dark pairing.
 
 ```jsx
 import {
@@ -110,19 +100,18 @@ const dark = radixTheme({
 - `Object.values()` ordering relies on the package's insertion order
   (`blue1`…`blue12`). It holds in 3.0.0, but indexing by key
   (``accent[`${name}9`]``) is sturdier if the scale name is handy.
-- Nothing here names `accentText`, `hoverText` or any of the `…Text` four:
-  each is derived from the fill it goes on as the more legible of this
-  palette's `text` and `background`. That is what used to bite here — steps 9
-  and 10 of yellow, lime, amber, sky and mint are light enough that a
-  hard-coded `'#ffffff'` label fails contrast on them, and now the ratio
-  decides. Name one to overrule it.
+- Nothing here names `accentText`, `hoverText` or the other `…Text` tokens:
+  each is derived as the more legible of the palette's `text` and
+  `background` on the fill it goes on. Steps 9 and 10 of yellow, lime,
+  amber, sky and mint are light enough that a hard-coded `'#ffffff'` label
+  fails contrast; the ratio decides instead. Name one to overrule it.
 - The window needs no `backgroundColor`: with no style of its own it paints
-  `background`, which is the ground this palette just named.
-- The alpha variants (`slateA`) are `#rrggbbaa`, which parses fine, but
-  remember a translucent widget composites against the window background, not
-  against whatever is behind the window.
-- The P3 variants (`blueP3`) are `color(display-p3 …)` strings. The parser
-  returns null and nothing is painted. Stick to the sRGB exports.
+  `background`.
+- The alpha variants (`slateA`) are `#rrggbbaa`, which parses fine, but a
+  translucent widget composites against the window background, not against
+  whatever is behind the window.
+- The P3 variants (`blueP3`) are `color(display-p3 …)` strings, which the
+  parser rejects, so nothing paints. Stick to the sRGB exports.
 
 ## `@catppuccin/palette` {#catppuccin}
 
@@ -130,13 +119,9 @@ const dark = radixTheme({
 
 Four flavours (latte is light; frappé, macchiato and mocha are dark), each
 with 14 accents and a 12-step neutral ladder whose names _are_ UI roles —
-`base`/`mantle`/`crust` for backgrounds, `surface0-2`, `overlay0-2`,
-`subtext0-1`, `text`. Of all the palette packages this one maps most directly
-onto the theme shape.
-
-`flavor.dark` decides whether accent-coloured fills get dark or light text.
-Catppuccin accents are pastel, so on dark flavours the readable text on an
-accent is _dark_, not white.
+`base`/`mantle`/`crust`, `surface0-2`, `overlay0-2`, `subtext0-1`, `text` —
+so it maps most directly onto the theme shape. The accents are pastel, so on
+dark flavours (`flavor.dark`) the readable text on an accent is _dark_.
 
 ```jsx
 import { flavors } from '@catppuccin/palette';
@@ -181,31 +166,26 @@ const mocha = catppuccinTheme(flavors.mocha);
 const latte = catppuccinTheme(flavors.latte, 'blue');
 ```
 
-- `accentHover` has no canonical Catppuccin answer — the palette defines flat
-  accents, not interaction ramps. Picking a neighbouring accent, as above, is
-  a taste call; deriving a real hover shade is a one-liner with
-  [colord](#colord) or [culori](#culori).
-- The package is ESM-first with an `exports` map, so un-exported subpaths
-  fail. The root import is all you need.
+- `accentHover` has no canonical Catppuccin answer — the palette has flat
+  accents, not interaction ramps. A neighbouring accent, as above, is a
+  taste call; a real hover shade is a one-liner with [colord](#colord) or
+  [culori](#culori).
+- ESM-first with an `exports` map, so un-exported subpaths fail; the root
+  import is all you need.
 - Latte's accents sit around 4:1 contrast on `base` — fine for fills,
-  marginal for small accent-coloured _text_. Same caveat as every pastel
-  scheme.
+  marginal for small accent-coloured _text_.
 
 ## `@material/material-color-utilities` {#material-color-utilities}
 
 **Out of the box from a source colour.**
 @material/material-color-utilities@0.4.0.
 
-Google's reference implementation of the Material 3 colour system: the HCT
-colour space, tonal palettes, and `themeFromSourceColor(argb)`, which turns a
-single seed colour into complete light and dark schemes. It is the only
-package here that _generates_ a coherent scheme from one input, which is
-exactly the shape `<window theme>` wants.
-
-M3 roles map nearly 1:1 onto the theme shape: `background → background`,
-`surface → surface`, `onSurface → text`, `outlineVariant → border`,
-`primary → accent`, `onPrimary → accentText` — and `error`, which is the one
-status colour M3 defines, is `danger`.
+Google's Material 3 colour system: the HCT colour space, tonal palettes,
+and `themeFromSourceColor(argb)`, which turns one seed colour into complete
+light and dark schemes — the only package here that _generates_ a scheme.
+M3 roles map nearly 1:1 onto the theme: `background`, `surface`,
+`onSurface → text`, `outlineVariant → border`, `primary → accent`,
+`onPrimary → accentText`, and `error` (M3's one status colour) → `danger`.
 
 ```jsx
 import {
@@ -250,35 +230,31 @@ const dark = materialTheme(m3.schemes.dark); //   accent #cfbcff
 ```
 
 - **The published ESM uses extensionless relative imports**, so plain `node`
-  fails with `ERR_MODULE_NOT_FOUND`. Under tsx — which is how react-x11 JSX
-  runs anyway — or any bundler, it resolves fine.
-- `themeFromImage`/`sourceColorFromImage` call `document.createElement('canvas')`
-  and are dead here. `sourceColorFromImageBytes(rgbaBytes)` is exported and
-  pure: decode a PNG or JPEG yourself with pngjs or jpeg-js and hand it the
-  RGBA array. Downscale first — the Celebi quantizer walks every opaque
-  pixel, and it skips pixels with alpha below 255.
+  fails with `ERR_MODULE_NOT_FOUND`. Under tsx (how react-x11 JSX runs
+  anyway) or a bundler it resolves.
+- `themeFromImage`/`sourceColorFromImage` call
+  `document.createElement('canvas')` and fail here.
+  `sourceColorFromImageBytes(rgbaBytes)` is pure: decode a PNG or JPEG with
+  pngjs or jpeg-js and pass the RGBA array. Downscale first — the quantizer
+  walks every opaque pixel, and skips pixels with alpha below 255.
 - `accentHover` has no M3 role. `inversePrimary` is serviceable; a tone step
   via `theme.palettes.primary.tone(n)` is more faithful.
-- 0.4.0 has sat unchanged for a while. The upstream repo is active but npm
-  releases are slow — pin it.
+- npm releases are slow (0.4.0 has sat unchanged for a while) — pin it.
 
 ## colord {#colord}
 
 **Out of the box.** colord@2.9.3.
 
-A tiny immutable colour-manipulation library: parse, `darken`/`lighten`/
-`alpha`/`mix`, `isDark()`, output as hex/rgb/hsl. The `a11y` plugin adds WCAG
-`contrast()` and `isReadable()`.
+A tiny immutable colour library: parse, `darken`/`lighten`/`alpha`/`mix`,
+`isDark()`, output as hex/rgb/hsl; the `a11y` plugin adds WCAG `contrast()`
+and `isReadable()`. It answers the colours no palette ships — `accentHover`,
+`surfaceHover`, `dangerHover` — in a line each, turning one brand colour
+into a complete theme.
 
-The theme shape wants colours no palette ships — `accentHover`,
-`surfaceHover`, a `dangerHover`. colord answers each in a line, which turns
-a single brand colour into a complete theme without hand-tuning.
-
-The `…Text` inks are the one thing you no longer need it for: `resolveTheme`
-already picks the more legible of the palette's own `text` and `background`
-for every fill that has one. The version below is still worth reading as the
-explicit form — and it is what to write when the two candidates the palette
-happens to hold are not the two you want.
+You do not need it for the `…Text` inks: `resolveTheme` already picks the
+more legible of the palette's `text` and `background` for every fill. The
+explicit form below is what to write when those two candidates are not the
+ones you want.
 
 ```jsx
 import { colord, extend } from 'colord';
@@ -305,27 +281,24 @@ const theme = { ...baseTheme, ...accentSlice('#1f883d') };
 
 - Plugins must be `extend`-ed before use; forgetting yields
   `c.contrast is not a function` at theme-build time.
-- `darken()` works in HSL, which shifts saturated hues perceptibly. For a 6%
-  hover nudge nobody notices; for accent _ramps_ that must stay on-hue, use
-  culori's OKLCH interpolation.
-- Maintenance is quiet (2.9.3 since 2023) but the library is complete and
-  dependency-free. Low risk.
+- `darken()` works in HSL, which shifts saturated hues. Fine for a 6% hover
+  nudge; for accent _ramps_ that must stay on-hue, use culori's OKLCH
+  interpolation.
+- Quiet (2.9.3 since 2023) but complete and dependency-free.
 
 ## culori {#culori}
 
 **Out of the box.** culori@4.0.2.
 
-Parses every CSS Color 4 syntax, converts between about thirty colour spaces
-(OKLCH and OKLab included), interpolates in any of them, builds scales, and
-computes WCAG contrast. Two distinct jobs here:
+Parses every CSS Color 4 syntax, converts between about thirty colour
+spaces (OKLCH and OKLab included), interpolates in any of them, builds
+scales, and computes WCAG contrast. Two jobs here:
 
-1. **Gateway for modern colour strings.** Growing amounts of design-token
-   output — Tailwind v4, Open Props' OKLCH variants, design systems
-   exporting CSS Color 4 — are `oklch()`-first, and ntk's parser returns null
-   for those. `formatHex(str)` is the one-call fix.
+1. **Gateway for modern colour strings.** Tailwind v4, Open Props' OKLCH
+   variants and other CSS Color 4 token output are `oklch()`-first, which
+   ntk's parser rejects. `formatHex(str)` is the one-call fix.
 2. **Perceptual ramps.** Hover, active and disabled shades interpolated in
-   OKLCH keep hue and perceived lightness honest where HSL manipulation
-   drifts.
+   OKLCH keep hue and perceived lightness where HSL drifts.
 
 ```jsx
 import { formatHex, interpolate, wcagContrast } from 'culori';
@@ -347,9 +320,8 @@ const theme = {
 formatHex('oklch(54.6% 0.245 262.881)'); // '#155dfc'
 ```
 
-- It is the heavyweight of the pair. Prefer colord for "darken this a bit",
-  culori when you need OKLCH, CSS Color 4 parsing, or scales. Using both is
-  fine — neither touches the render path.
+- The heavyweight of the pair: colord for "darken this a bit", culori for
+  OKLCH, CSS Color 4 parsing or scales. Using both is fine.
 - `formatHex` clips out-of-sRGB-gamut results channelwise; for scales from
   vivid P3-ish seeds, `clampChroma` first gives cleaner ramps.
 - Dual-published: ESM source plus a bundled CJS. The `/fn` and `/css`
@@ -359,20 +331,16 @@ formatHex('oklch(54.6% 0.245 262.881)'); // '#155dfc'
 
 **Out of the box for colours.** open-props@1.7.23.
 
-Open Props is a CSS-custom-properties design system, but it does have a JS
-export: the root import resolves to a flat frozen object of about 1,830
-entries keyed by custom-property name (`'--gray-0'`, `'--indigo-7'`), values
-as strings. No DOM, no dependencies.
+A CSS-custom-properties design system whose root JS import is a flat frozen
+object of about 1,830 entries keyed by property name (`'--gray-0'`,
+`'--indigo-7'`), values as strings. Only the colour half is useful here, so
+**prefer [`@radix-ui/colors`](#radix-colors)** for a palette alone (hex
+throughout, documented steps, separate dark scales); Open Props fits a
+project that already uses it.
 
-Only the colour half is worth having here, so **prefer
-[`@radix-ui/colors`](#radix-colors)** if all you want is a palette — it is
-hex throughout, has documented step semantics, and ships separate dark
-scales. Open Props earns its place when a project already uses it and you
-want the same swatches on both sides.
-
-The colour tokens — 13 hues × 13 steps — are plain hex, so building a theme
-is pure key-picking. The step convention is roughly: 0–2 backgrounds, 3–5
-borders and muted, 6–9 solids, 10–12 deep text.
+The colour tokens — 13 hues × 13 steps — are plain hex, so a theme is
+key-picking. Steps run roughly: 0–2 backgrounds, 3–5 borders and muted, 6–9
+solids, 10–12 deep text.
 
 ```jsx
 import OP from 'open-props';
@@ -407,15 +375,13 @@ const theme = {
 };
 ```
 
-- **The sizes read in a style; the palette's own entries are numbers.**
-  Open Props sizes are `rem` strings, which a style takes as written —
-  `padding: OP['--size-3']` is `1rem` — and `rem` here is the palette's
-  `fontSize`, which the theme above sets to Open Props' own 16, so the scale
-  comes out as it does on the web. The palette entries are another matter:
-  the widgets do arithmetic with `radius` and `fontSize`, so those are
-  converted to numbers, as above. Easings are `cubic-bezier()` strings where
-  react-x11 takes named easings, and shadows reference `var(--shadow-color)`
-  and have no equivalent at all; ignore the animation and shadow tokens.
+- **Sizes read in a style; the theme's own entries are numbers.** Open Props
+  sizes are `rem` strings, which a style takes as written
+  (`padding: OP['--size-3']` is `1rem`, and `rem` is the theme's
+  `fontSize` — 16 above, so the scale matches the web). The widgets do arithmetic with `radius` and `fontSize`, so
+  those are converted to numbers, as above. Easings are `cubic-bezier()`
+  strings where react-x11 takes named easings, and shadows reference
+  `var(--shadow-color)`; ignore the animation and shadow tokens.
 - Key names include the `--` prefix, so it is bracket access everywhere;
   camelCase aliases exist too (`OP.gray0`).
 - Unlike Radix there are no separate dark scales — a dark theme is your own
@@ -426,17 +392,14 @@ const theme = {
 **Adapter, ~3 lines — and the failure without it is silent.**
 tailwindcss@4.3.3.
 
-Tailwind-the-framework is a non-starter here: it emits CSS class utilities
-for a CSSOM, and react-x11's style channel is a validated object system. The
-_palette_ is a different story — 22 named scales × 11 steps, importable as
-plain JS from `tailwindcss/colors` without touching any of the CSS
-machinery, and it is the palette half your users already think in. The
-package has zero dependencies, so installing it purely for the colours costs
-about 770 KB unpacked and pulls in nothing else.
+Tailwind's utility classes need a CSSOM, but the _palette_ — 22 named
+scales × 11 steps — imports as plain JS from `tailwindcss/colors`. The
+package has zero dependencies, so installing it for the colours costs about
+770 KB unpacked and nothing else.
 
-Since v4 every value is an `oklch()` string. ntk's parser returns null for
-those, and a null colour paints **nothing** — no error, just an invisible
-widget. Convert at theme-build time:
+Since v4 every value is an `oklch()` string, which ntk's parser rejects, and
+a null colour paints **nothing** — no error, just an invisible widget.
+Convert at theme-build time:
 
 ```jsx
 import colors from 'tailwindcss/colors';
@@ -473,14 +436,11 @@ const theme = {
 };
 ```
 
-- **Do not pass the raw values through.** This is the sharpest edge on the
-  page; everything else here is smooth.
-- `formatHex` gamut-clips, but Tailwind's vivid 500s are chosen to survive
-  sRGB conversion, so in practice the clipped hex closely matches what
-  Tailwind v3 shipped.
-- Installing a whole CSS framework for a data file is aesthetically odd; if
-  that grates, `@radix-ui/colors` does the same job natively in hex. Zero
-  dependencies means it is only odd, not costly.
+- **Do not pass the raw values through.**
+- `formatHex` gamut-clips, but Tailwind's vivid 500s survive sRGB
+  conversion, so the hex closely matches what Tailwind v3 shipped.
+- If installing a CSS framework for a data file grates, `@radix-ui/colors`
+  does the same job natively in hex.
 
 ## `daltonize` {#daltonize}
 
@@ -488,17 +448,13 @@ const theme = {
 explicit colour-vision variant; for everyday contrast work
 [colord](#colord)'s `a11y` plugin is the tool.** daltonize@1.0.2.
 
-A single-function package: `daltonize([r, g, b], type)` where `type` is
-`'protanope' | 'deuteranope' | 'tritanope'`, returning a corrected triplet.
-It implements the classic LMS-space daltonization algorithm — simulate the
-deficiency, take the error against the original, redistribute it into
-channels the viewer _can_ see. Pure arithmetic, 9 KB, zero dependencies;
-despite the README's image-oriented pitch, nothing in it touches a canvas.
-
-Themes are small closed sets of colours, which makes whole-theme
-daltonization trivial: map the correction over every value and offer it as an
-accessibility variant next to light and dark. The adapter is only hex ↔
-triplet plumbing.
+One function: `daltonize([r, g, b], type)`, `type` being
+`'protanope' | 'deuteranope' | 'tritanope'`, returns a corrected triplet
+(classic LMS-space daltonization). Pure arithmetic, 9 KB, zero dependencies;
+despite the README's image pitch, nothing touches a canvas. A theme is a
+small closed set of colours, so map the correction over every value and
+offer the result as an accessibility variant beside light and dark. The
+adapter is hex ↔ triplet plumbing.
 
 ```jsx
 import { daltonize } from 'daltonize';
@@ -526,15 +482,13 @@ const accessible = daltonizeTheme(githubLight);
 // '#1f883d' (GitHub green) -> '#1f7206' for deuteranopia
 ```
 
-- **Correction, not validation.** It shifts colours so information carried by
-  problem hues survives; it does not check or fix contrast. A low-contrast
-  theme stays low-contrast. Pair it with colord's `a11y` plugin or culori's
-  `wcagContrast`.
-- Only the three dichromatic extremes are modelled — anomalous trichromacy,
-  which is the common mild case, is not. Corrections can look aggressive to a
-  mildly affected viewer, so offer it as an opt-in variant rather than a
-  default.
-- Handles opaque triplets only. Run it on the RGB part and reattach alpha
-  yourself if the theme uses `#rrggbbaa`.
-- The package is small and finished rather than maintained (last release 2023) and its `repository` field is a placeholder. Vendoring the ~40 lines
-  is a fair alternative to the dependency.
+- **Correction, not validation.** It shifts colours so information carried
+  by problem hues survives; it does not check or fix contrast. Pair it with
+  colord's `a11y` plugin or culori's `wcagContrast`.
+- Only the three dichromatic extremes are modelled, not the common mild
+  anomalous trichromacy, so corrections can look aggressive; offer it as an
+  opt-in variant, not a default.
+- Opaque triplets only: run it on the RGB part and reattach alpha yourself
+  for `#rrggbbaa`.
+- Finished rather than maintained (last release 2023, placeholder
+  `repository` field); vendoring the ~40 lines is a fair alternative.

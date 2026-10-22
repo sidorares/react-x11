@@ -8,7 +8,7 @@ GTX 1080 Ti. [windows.md](windows.md) is the backend's design record and said
 ## What react-x11's 3D story actually is
 
 `<glarea>` is **a GL surface in the layout and nothing above it**
-([gl.md](gl.md)). The scene graph — meshes, materials, lights,
+([gl.md](../docs/gl.md)). The scene graph — meshes, materials, lights,
 post-processing — is `@react-x11/components/three`, which brings its own
 reconciler and renders through that surface. So "3D support" on a backend is
 one question: can `onDraw` be handed a working GL context, and can what it
@@ -44,7 +44,7 @@ extensions      392
 ```
 
 That is **OpenGL 4.6 core out of `opengl32.dll`, with nothing shipped**. It is
-the measurement that matters, because docs/windows.md's plan — ANGLE, two DLLs
+the measurement that matters, because design/windows.md's plan — ANGLE, two DLLs
 beside the app — was written on a Mac from Microsoft's documentation and from
 what the browsers do, and the browsers ship ANGLE for reasons that are theirs
 rather than ours: they must run identically on every driver, including the
@@ -116,10 +116,10 @@ draw into one. Three ways out were on the table:
 
 - **`WGL_NV_DX_interop2`** — render GL into a texture shared with the D3D11
   device and put that on a composition visual. This is the one that
-  composites properly. docs/windows.md flags it as "a driver's promise rather
+  composites properly. design/windows.md flags it as "a driver's promise rather
   than the system's": it is present on NVIDIA and AMD, absent on some Intel
   configurations, and absent from WARP.
-- **ANGLE into a composition swapchain**, which is docs/windows.md's plan and
+- **ANGLE into a composition swapchain**, which is design/windows.md's plan and
   is the only one that is both composited and universal — because ANGLE is
   already D3D11, so its output is a D3D texture by construction.
 

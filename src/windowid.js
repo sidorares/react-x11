@@ -78,7 +78,7 @@ export function windowOf(target) {
  * - **Windows** — a **composition surface handle**, already valid in the
  *   host process. A window cannot be embedded here at all: a composition
  *   target stops presenting the moment its window becomes a child, measured
- *   in docs/windows-embedding.md. So what crosses is the buffer, and the
+ *   in design/windows-embedding.md. So what crosses is the buffer, and the
  *   host binds it to a visual of its own instead of reparenting. The host is
  *   the parent process by default — `createRoot({ win32: { paneHostPid } })`
  *   when it is not.

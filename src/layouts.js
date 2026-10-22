@@ -1,5 +1,5 @@
 // Layout algorithms and positions from outside the renderer — the two seams
-// docs/architecture/custom-layout.md is the design record for.
+// design/architecture/custom-layout.md is the design record for.
 //
 // A **layout** arranges a box's children. It is asked how big the box is for
 // the room on offer, and then where each child goes in the room the box got.

@@ -1289,7 +1289,7 @@ export function startA11y(app) {
   // presence *is* the capability — the same rule the rest of the library
   // uses. The Windows backend installs one, because UI Automation asks
   // synchronously and has to be answered from a pushed copy rather than from
-  // the live tree (docs/windows.md §Accessibility); AT-SPI's asynchronous
+  // the live tree (design/windows.md §Accessibility); AT-SPI's asynchronous
   // questions are answered from the tree itself, below.
   if (typeof app?.startAccessibility === 'function') {
     startPromise = Promise.resolve()

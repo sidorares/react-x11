@@ -7,7 +7,7 @@ sidorares/react-x11-components#69 §6 and the last of them still unbuilt.
 **Nothing is implemented with this document**; §9 is the shape the
 implementing PR takes, and §10 is the spike its claims were measured on.
 The mechanism it extends is
-[layer promotion](../macos.md#layer-promotion-the-animated-few-on-their-own-layers-above-the-surface-presenter);
+[layer promotion](../../docs/macos.md#layer-promotion-the-animated-few-on-their-own-layers-above-the-surface-presenter);
 the cost it removes is the one [frame pacing](frame-pacing.md) measured and
 then paced around._
 
@@ -18,7 +18,7 @@ then paced around._
 - An element with a **retained surface** — a terminal, a chart on a socket,
   a media frame — draws its pixels once into a `Surface` of its own and
   composites that bitmap over its box on every frame
-  ([extending.md](../extending.md#an-element-that-covers-its-box)). On the
+  ([extending.md](../../docs/extending.md#an-element-that-covers-its-box)). On the
   Cocoa backend that composite, and the window swapchain's catch-up copy
   behind it, are **1.3ms of a 3.8ms frame** on an M1 Pro at 1800×1280 — to
   move pixels that already exist into a bitmap the window then hands to
@@ -51,7 +51,7 @@ then paced around._
 ## 1. What a retained-surface element pays now
 
 The element class is the one
-[extending.md](../extending.md#scrolling-the-pixels-not-just-the-offset)
+[extending.md](../../docs/extending.md#scrolling-the-pixels-not-just-the-offset)
 already documents: it keeps its drawing in a `Surface`, draws into it when
 its data changes — a terminal writes the rows that arrived, a chart the
 sample that landed, and a pan is one `copyWithin` of the band that survives
@@ -119,7 +119,7 @@ after drawing into the SHOWN buffer, with no present:
 - **Device pixels, and the scale carried by the layer.** The layer's frame
   is points, its `contentsScale` is the window's scale, and the IOSurface is
   device pixels — the units a `Surface` is already sized in
-  ([scale.md](../scale.md)). A 200×120pt layer showing a 400×240 surface at
+  ([scale.md](../../docs/scale.md)). A 200×120pt layer showing a 400×240 surface at
   2× is pixel-exact.
 - **The same colour space as the bitmap.** Mid grey drawn into the element's
   IOSurface composites to the same bytes as mid grey drawn into the window's
@@ -393,7 +393,7 @@ WindowServer load, as every Cocoa measurement in this repo does.
 
 - **A core-owned raster for any element** — "a node whose content is painted
   code gets a raster visual", the Tier L rule in
-  [macos.md](../macos.md#custom-drawing-on-a-layer-tree). More general (it
+  [macos.md](../../docs/macos.md#custom-drawing-on-a-layer-tree). More general (it
   needs nothing from the element but its existing `paint`) and a different
   design: core owns the buffer, core decides when to redraw, and the
   element's incremental drawing — the terminal writing the rows that arrived,
@@ -421,23 +421,23 @@ WindowServer load, as every Cocoa measurement in this repo does.
 
 ## 9. Decisions the implementing PR has to make, and the suggested answer
 
-| question                         | suggested answer                                                                                                                                                                                                                                                    |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the `Surface` option             | `presentable: true`. Not `swapchain: 2` (the count is an implementation detail) and not a separate class (`Surface` is already the backend-neutral name a component reaches for)                                                                                    |
-| the node accessor                | `presentedSurface()` → `{ surface, rect }` or `null`, asked every frame beside `opaqueRect()`                                                                                                                                                                       |
-| who calls `present()`            | core, in `prepareFrame`, so the flip is a frame and the pacer prices it. `Surface.present(damage)` stays public for a consumer outside the renderer                                                                                                                 |
-| what the catch-up copies         | the rects the element claimed since the last present, translated into surface coordinates by `rect`'s origin; an unbounded claim is a full copy                                                                                                                     |
-| when it copies                   | at the flip, synchronously — the element may draw the moment the frame returns                                                                                                                                                                                      |
-| a node with drawn children       | v1 declines; promotion's raster sublayer is the answer when a consumer needs it                                                                                                                                                                                     |
-| an element that draws in `paint` | documented as a contract, not detected: `paint` is not called, so the element would go stale. The accessor's doc line, and a `docs/extending.md` section beside "An element that covers its box"                                                                    |
-| the scene test                   | promotion's `_clear`, unchanged, plus a presenting node's rect counted as ink in `paintsSomething`/`_reaches`                                                                                                                                                       |
-| the grace period                 | none — `IDLE_GRACE_MS` is for an animation that ended; a surface does not end                                                                                                                                                                                       |
-| resize                           | the element reallocates its surface as it does today; the old pair is freed on the call, not by the finalizer                                                                                                                                                       |
-| two nodes, one surface           | refused (the second answers `null` in development with a warning); one buffer cannot be two layers' contents without tearing between them                                                                                                                           |
-| X11                              | the option is accepted and ignored, `present()` returns false, `presentedSurface()` is never asked because no window answers `prepareFrame`                                                                                                                         |
-| tracing                          | a `trace` line for taken/declined with the reason, the way promotion's decisions are traceable — a refusal is invisible in the picture, which is the point and also the debugging problem                                                                           |
-| types                            | `presentable` on the `Surface` options and `presentedSurface(): { surface, rect } \| null` in `src/node.d.ts`, one line in `test/types/extend.tsx`                                                                                                                  |
-| docs                             | a section in [extending.md](../extending.md#an-element-that-covers-its-box) after "An element that covers its box"; the ladder in [macos.md](../macos.md#custom-drawing-on-a-layer-tree) gains the presented case; this file becomes the design record it points at |
+| question                         | suggested answer                                                                                                                                                                                                                                                                    |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the `Surface` option             | `presentable: true`. Not `swapchain: 2` (the count is an implementation detail) and not a separate class (`Surface` is already the backend-neutral name a component reaches for)                                                                                                    |
+| the node accessor                | `presentedSurface()` → `{ surface, rect }` or `null`, asked every frame beside `opaqueRect()`                                                                                                                                                                                       |
+| who calls `present()`            | core, in `prepareFrame`, so the flip is a frame and the pacer prices it. `Surface.present(damage)` stays public for a consumer outside the renderer                                                                                                                                 |
+| what the catch-up copies         | the rects the element claimed since the last present, translated into surface coordinates by `rect`'s origin; an unbounded claim is a full copy                                                                                                                                     |
+| when it copies                   | at the flip, synchronously — the element may draw the moment the frame returns                                                                                                                                                                                                      |
+| a node with drawn children       | v1 declines; promotion's raster sublayer is the answer when a consumer needs it                                                                                                                                                                                                     |
+| an element that draws in `paint` | documented as a contract, not detected: `paint` is not called, so the element would go stale. The accessor's doc line, and a `docs/extending.md` section beside "An element that covers its box"                                                                                    |
+| the scene test                   | promotion's `_clear`, unchanged, plus a presenting node's rect counted as ink in `paintsSomething`/`_reaches`                                                                                                                                                                       |
+| the grace period                 | none — `IDLE_GRACE_MS` is for an animation that ended; a surface does not end                                                                                                                                                                                                       |
+| resize                           | the element reallocates its surface as it does today; the old pair is freed on the call, not by the finalizer                                                                                                                                                                       |
+| two nodes, one surface           | refused (the second answers `null` in development with a warning); one buffer cannot be two layers' contents without tearing between them                                                                                                                                           |
+| X11                              | the option is accepted and ignored, `present()` returns false, `presentedSurface()` is never asked because no window answers `prepareFrame`                                                                                                                                         |
+| tracing                          | a `trace` line for taken/declined with the reason, the way promotion's decisions are traceable — a refusal is invisible in the picture, which is the point and also the debugging problem                                                                                           |
+| types                            | `presentable` on the `Surface` options and `presentedSurface(): { surface, rect } \| null` in `src/node.d.ts`, one line in `test/types/extend.tsx`                                                                                                                                  |
+| docs                             | a section in [extending.md](../../docs/extending.md#an-element-that-covers-its-box) after "An element that covers its box"; the ladder in [macos.md](../../docs/macos.md#custom-drawing-on-a-layer-tree) gains the presented case; this file becomes the design record it points at |
 
 **Tests**, in the shape of `test/cocoa-promotion.test.js` and
 `test/cocoa-surface.test.js` — the fake bridge for what reaches the natives,

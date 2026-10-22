@@ -362,7 +362,7 @@ export class Win32App {
     // `embeddable` is "created, not shown; somebody else will place me", and
     // on this backend that cannot be a window: a composition target stops
     // presenting the moment its window becomes a child, so an HWND is not
-    // something another process can take (docs/windows-embedding.md). What a
+    // something another process can take (design/windows-embedding.md). What a
     // host can take is the **buffer**, so an embeddable window here is the
     // same shared surface a `<Frame>` pane draws into — whether this process
     // was forked as a pane or is a guest somebody else started.
@@ -825,7 +825,7 @@ export class Win32App {
         break;
       }
       case 'dpichanged':
-        // The renderer cannot re-scale a live window yet (docs/windows.md
+        // The renderer cannot re-scale a live window yet (design/windows.md
         // §Layout, open question 8), so this is recorded and not acted on.
         wnd.emit('statechange', { scale: event.a / 96 });
         break;

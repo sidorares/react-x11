@@ -95,7 +95,7 @@
 // ## What does not work
 //
 // **The 3D panel cannot be screenshotted.** GL renders where `GetImage`
-// cannot read it (docs/glx.md), so a capture of this window has a hole where
+// cannot read it (docs/gl.md), so a capture of this window has a hole where
 // the laptop is — `gl.readPixels` inside `onDraw` is the only way to see it,
 // which is what `examples/labs/direct-gl.jsx` is for. It also does not take
 // part in hit testing yet, so the scroll position is its only input.

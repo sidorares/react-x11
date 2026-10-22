@@ -1,132 +1,86 @@
 # Events
 
-ntk delivers raw X11 events per window; react-x11 turns them into synthetic
-events dispatched over the drawn node tree with DOM-like semantics.
+Raw input arrives per window from the backend; react-x11 dispatches it as
+synthetic events over the drawn node tree with DOM-like semantics.
 
 ## Dispatch
 
-1. **Hit test**: front-to-back walk of the stacking-ordered tree (zIndex,
-   then document order), respecting `overflow` clipping and
-   `pointerEvents` — `'none'` takes a node and everything in it out of the
-   test, `'box-none'` only the node itself, so its children are still
-   targets and a point over its own area lands on what is behind it. A
-   `<glarea>` is asked first: its surface is stacked above everything 2D in
-   the window, and its children above the surface, so a point over one lands
-   on the child under it or on the `<glarea>` — or, with `'box-none'`, on
-   whatever the tree has behind the surface
+1. **Hit test**: front-to-back over the stacking-ordered tree (zIndex, then
+   document order), respecting `overflow` clipping and `pointerEvents` —
+   `'none'` removes a node and its subtree, `'box-none'` only the node
+   itself, so its children are still targets and a point over its own area
+   lands on what is behind it. A `<glarea>` is asked first: its surface is
+   above everything 2D in the window and its children above the surface, so
+   a point over it lands on a child, on the `<glarea>`, or (with
+   `'box-none'`) on what is behind the surface
    ([elements.md](elements.md#glarea)).
 2. **Capture phase**: `on<Event>Capture` handlers from the window down to
    the target.
 3. **Target + bubble phase**: `on<Event>` handlers from the target up.
-4. **Default action**: the element's built-in behavior (textinput editing,
+4. **Default action**: the element's built-in behaviour (textinput editing,
    wheel scrolling, then Tab traversal) — skipped if any handler called
    `ev.preventDefault()`.
 
-Step 4 is a documented seam, not a privilege of the built-in elements: an
-element added with `registerElement` implements the same `defaultKeyDown` /
-`defaultMouseDown` / `defaultMouseMove` / … methods and gets the same
-ordering ([extending.md](extending.md#behaviour-of-your-own)). The wheel has
-one more layer than the rest: the node under the pointer gets `defaultWheel`
-first — for a pane whose wheel is a zoom rather than a scroll — and unless it
-consumes the event, the scroll chain walks outward from the target asking
-each node `canScroll(deltaX, deltaY)`, which is how an element that scrolls
-content it painted joins in
+`ev.stopPropagation()` stops the walk. Handlers always read current props.
+Step 4 is open to elements added with `registerElement`, through the same
+`defaultKeyDown` / `defaultMouseDown` / `defaultMouseMove` / … methods
+([extending.md](extending.md#behaviour-of-your-own)). For the wheel, the node
+under the pointer gets `defaultWheel` first (a pane that zooms), then the
+scroll chain asks each node outward `canScroll(deltaX, deltaY)`
 ([extending.md](extending.md#scrolling-content-you-painted)).
-
-`ev.stopPropagation()` stops the walk. Handlers always read from current
-props — they can never go stale.
 
 ### When the response is painted
 
-**Discrete input paints from its own handler**, in the same turn of the
-event loop as the press — not on the next frame. A click has exactly one
-visual answer (a button darkens, a caret lands, focus moves), so there is
-nothing a frame's wait could coalesce it with, and waiting would charge it
-up to a frame interval plus a server round trip on top of a paint that
-measures in the hundreds of microseconds. The dispatcher therefore lands
-React's discrete-priority commit and paints once the whole dispatch has
-unwound — the default action, your handlers and React's update all in one
-pass, never a half-updated frame followed by a second one.
+**Discrete input** — `mouseDown`/`mouseUp`, `keyDown`/`keyUp`, focus, blur,
+the window manager's close request — paints in the same turn of the event
+loop, once the default action, your handlers and React's update have all
+run: one frame, never a half-updated one. A burst faster than frames are
+acknowledged folds into one catch-up frame.
 
-Discrete means everything ntk does not coalesce: `mouseDown`/`mouseUp`,
-`keyDown`/`keyUp`, focus and blur, and the window manager's close request.
+**Motion and the wheel stay on the frame clock**: `mouseMove` (and the hover
+it drives) coalesces to at most one per frame, keeping the newest position;
+wheel events coalesce by _adding up_, so one event carries the frame's whole
+distance.
 
-**Motion and the wheel stay on the frame clock.** `mouseMove`, and the hover
-enter/leave work it drives, are the opposite case — the pointer reports at
-device rate and only the newest position matters — so they coalesce to at
-most one repaint per frame. A scroll is the same case for a different reason:
-a touchpad reports one dozens of times a frame, and nobody can see those
-frames apart. What makes the wait free is that ntk coalesces a scroll by
-_adding it up_ rather than keeping the newest, so a frame's event carries the
-whole distance and the pacing costs a paint, never a pixel.
+**Hover follows content.** After a frame that laid out — every frame of a
+scroll — the window re-hit-tests the pointer's last position, as a browser
+does: `:hover`, `onMouseEnter` and `onMouseLeave` update, and the node under
+the pointer hears `defaultMouseMove` (so self-painted hover re-reads what it
+is over). `onMouseMove` is not called, and nothing changes while a press or
+capture holds the pointer or after it has left the window.
 
-**Hover follows content.** A scroll moves content under a pointer that did
-not move, and so can a layout that reflows it. After a frame that laid out
-— every frame of a scroll does — the window asks again what is under the
-pointer's last position, as a browser asks at the frame after a scroll:
-`:hover`, `onMouseEnter` and `onMouseLeave` change as a motion would change
-them, and the node under the pointer hears `defaultMouseMove` at that point,
-so an element that paints its own hover (a document, a graph) re-reads what
-it is over. `onMouseMove` is not called — the pointer did not move — and
-nothing changes while a press or a capture holds the pointer, or after the
-pointer has left the window.
-
-**Hover belongs to the active window, on macOS.** Nothing in CSS or the
-DOM ties hover to focus — `:hover` is "while the user designates an element
-with a pointing device", and a `mousemove` is owed whenever the pointer moves
-over an element — but the platform does. A window there that is not the
-active one does not track the pointer: AppKit's own controls roll over in
-the key window alone, and a browser drops the moves over a window that is
-neither key nor main and tells the page the pointer left. So on the Cocoa
-backend a window that loses the keyboard hears `onMouseLeave` down its hover
-path, `:hover` comes off, an element that paints its own hover hears
+**On macOS, hover belongs to the active window**, as in AppKit and the
+browsers there. A Cocoa window that loses the keyboard hears `onMouseLeave`
+down its hover path, `:hover` comes off, a self-painting element hears
 `defaultMouseLeave`, and no motion, enter, cursor or attention follows until
-the window is the active one again — when the hover comes back at the point
-the pointer is at, without waiting for it to move. `<window onMouseOut>` is
-not called: the pointer is still over it.
-
-"Active" is the focus's answer, as it is for the caret
-([below](#window-focus)): a window whose `<Dialog>` holds the keyboard still
-hovers. A `<popup>` nothing manages — a menu, a dropdown, a popover under a
-tray item — always does, since it is on the screen because the user asked
-for it, in an application that may have no active window at all. A press
-still lands where it was aimed, as the first click on a window always has
-here, and its gesture runs on; the wheel scrolls a background window as the
-platform has it. On X11, Wayland and Windows nothing changes: every toolkit
-there hovers in a window without the keyboard, and with focus-follows-mouse
-the question hardly arises.
-
-Bursts of discrete input stay bounded by the same mechanism. While the
-server has not acknowledged the last frame, the response goes back to the
-paced path: click twice quickly and the first press paints immediately while
-the second folds into one catch-up frame. Update instantly, then catch up.
-
-This needs ntk 5.2.0 or newer, which publishes the `frameInFlight()` gate
-the decision is made with. On an older ntk everything still works; the
-response simply waits for the next frame, as it did before.
+it is active again — when hover returns at the pointer without waiting for a
+move. `<window onMouseOut>` is not called. "Active" is the focus's answer
+([Window focus](#window-focus)): a window whose `<Dialog>` holds the keyboard
+still hovers, and an unmanaged `<popup>` (menu, dropdown, tray popover)
+always does. Presses still land where aimed and the wheel scrolls a
+background window. On X11, Wayland and Windows windows hover without the
+keyboard, as every toolkit there does. Design notes:
+[design/events.md](../design/events.md#when-the-response-is-painted).
 
 ### When a handler throws
 
-**No error boundary can catch it.** A boundary only sees throws React
-itself invoked, and a handler runs from an X event, so React is not on the
-stack. react-x11 therefore catches it at the dispatcher: the error is
-reported with the element, the handler name and the component that rendered
-the node, `process.exitCode` is set to 1 so the crash is still visible to CI
-and to a supervisor, and **dispatch continues** — one bad tooltip handler
-must not stop the handlers after it, or the frame loop.
+**No error boundary can catch it**: a handler runs from an X event, with
+React not on the stack. The dispatcher catches it, reports the element, the
+handler name and the component that rendered the node, sets
+`process.exitCode = 1` (so CI and a supervisor still see it), and **dispatch
+continues** — one bad handler must not stop the handlers after it, or the
+frame loop.
 
 ```
 react-x11: onClick on <box> in Panel threw. It ran from an X event rather
 than a render, so no error boundary could catch it; dispatch continues.
 ```
 
-`onDrop` is the one handler that may be `async`, and a promise it rejects
-with arrives here too — same message, same channel — rather than becoming an
-unhandled rejection, which node exits on. It also refuses the drop; see
-[drag-and-drop.md](drag-and-drop.md#the-drop).
-
-`createRoot({ onUncaughtError })` takes it over completely, which is the
-point of it being overridable: for a kiosk, crashing loudly is correct.
+`onDrop` may be `async`; a promise it rejects with arrives here too (same
+message, not an unhandled rejection, which node exits on) and refuses the
+drop ([drag-and-drop.md](drag-and-drop.md#the-drop)).
+`createRoot({ onUncaughtError })` takes over completely — for a kiosk,
+crashing loudly is correct:
 
 ```js
 const root = await createRoot({
@@ -156,46 +110,34 @@ const root = await createRoot({
 }
 ```
 
-`ev.screenX`/`screenY` are where the pointer is on the virtual screen, in the
-same logical pixels `ev.x`/`y` are in — what to anchor a `<popup>` at, since
-`<popup x y>` are logical too. Undefined on an event with no pointer position.
+- `x`/`y`/`localX`/`localY` and the wheel deltas are logical pixels in **the
+  target's** unit: the display scale times any `scale` prop above it
+  ([scale.md](scale.md#a-subtree-of-its-own)). A handler on an unzoomed
+  ancestor reads the zoomed target's pixels; `ev.nativeEvent.x`/`y` are the
+  window's own.
+- `ev.screenX`/`screenY`: the pointer on the virtual screen in the same
+  logical pixels — what to anchor a `<popup>` at. Undefined without a
+  pointer position. `nativeEvent.rootx`/`rooty` is the same point in
+  **device** pixels, the unit of a node's `abs`; use it only for geometry
+  against `abs` ([scale.md](scale.md)).
+- `detail` counts a multi-click within the desktop's double-click time and
+  distance ([system.md](system.md#usedesktopsettings--how-the-desktop-wants-an-app-to-feel)),
+  timed by the presses' own `nativeEvent.time`, so a slow first render does
+  not break a double click. win32 presses carry no time and are timed as
+  handled.
+- On the Wayland backend a finger or tablet tool drives the mouse events,
+  which then carry `nativeEvent.pointerType` (`'touch'`, `'pen'`, `'eraser'`,
+  `'mouse'`) and `pressure`, `tiltX`/`tiltY`, `rotation`, `distance`,
+  `tangentialPressure` in the DOM's ranges; a mouse adds nothing. Raw
+  `touchstart`/`touchmove`/`touchend`/`touchcancel` arrive on the window
+  (`wnd.on(...)`, not React props) — [wayland-backend.md](wayland-backend.md).
 
-`nativeEvent.rootx/rooty` is the same point in **device** pixels, which is the
-unit a node's `abs` is in — reach for it when doing geometry against `abs`,
-and for nothing else. The split is the same one `ev.x` and `nativeEvent.x`
-have (docs/scale.md).
-
-`detail` counts a press as the next of a multi-click when it lands within the
-desktop's double-click time and distance of the last one
-([system.md](system.md#usedesktopsettings--how-the-desktop-wants-an-app-to-feel)),
-and the gap is the one between the times the two presses carry,
-`nativeEvent.time`, not between when each was handled. So a first click
-whose render outlasts the window still makes a double click with a second
-the user pressed in time. Presses that carry no time (win32's) are timed as
-they are handled.
-
-On the Wayland backend a finger or a tablet tool drives the same mouse
-events, and those events alone carry `nativeEvent.pointerType` (`'touch'`,
-`'pen'`, `'eraser'` or `'mouse'`) with `pressure`, `tiltX`/`tiltY`,
-`rotation`, `distance` and `tangentialPressure` in the DOM's ranges; a mouse
-adds nothing, so a handler that never looks is unaffected. Every finger also
-arrives raw on the window as `touchstart`/`touchmove`/`touchend`/
-`touchcancel` (`wnd.on(...)`, not React props) — see
-[wayland-backend.md](wayland-backend.md).
-
-`x`/`y`/`localX`/`localY` and the wheel deltas are logical pixels in **the
-target's** unit — the display scale, times any `scale` prop above it
-([scale.md](scale.md#a-subtree-of-its-own)). With no `scale` in the tree
-that is one unit for the whole window; with one, a handler on an unzoomed
-ancestor is reading the zoomed target's pixels, and `ev.nativeEvent.x`/`y`
-are the way back to the window's own.
-
-**A Ctrl chord is read from the keysym, not the code point.** `codepoint`
-comes from the _shifted_ keysym, so Ctrl+Shift+Z arrives as `Z` and Ctrl+Z as
-`z`; a handler that compares code points misses half of its own shortcut.
-`ctrlChordLetter(ev)` from `react-x11/keysyms` answers with the lowercase
-keysym either way — it is what `<textinput>` reads Ctrl+C/V/Z with, and it is
-exported because any widget with a chord of its own needs the same rule:
+**Read a Ctrl chord from the keysym, not the code point.** `codepoint` comes
+from the _shifted_ keysym (Ctrl+Shift+Z is `Z`, Ctrl+Z is `z`).
+`ctrlChordLetter(ev)` from `react-x11/keysyms` gives the lowercase keysym
+either way, as `<textinput>` uses for Ctrl+C/V/Z, and keeps working under a
+Cyrillic or Greek layout ([Layouts](#layouts)). For most chords,
+[Accelerators](#accelerators) is shorter.
 
 ```js
 onKeyDown={(ev) => {
@@ -203,16 +145,10 @@ onKeyDown={(ev) => {
 }}
 ```
 
-That keeps working under a Cyrillic or Greek layout too: `ev.keysym` is the
-Latin keysym for the key however the layout is switched — see
-[Layouts](#layouts). For a chord an application would otherwise write out by
-hand, [Accelerators](#accelerators) is the shorter way: a menu item's
-`shortcut` already binds itself, and `useAccelerator` takes the same chord.
-
 ### Modifiers
 
-Four booleans, DOM names, on **every** event rather than only the keyboard
-ones — a shift+click, an Alt+drag and a Super+wheel all need them:
+Four booleans with DOM names, on **every** event — a shift+click, an
+Alt+drag and a Super+wheel all need them:
 
 | property   | X11 modifier | usually |
 | ---------- | ------------ | ------- |
@@ -227,25 +163,19 @@ onKeyDown={(ev) => {
 }}
 ```
 
-**Mod1 is Alt and Mod4 is Super by convention, not by protocol.** X says
-only that there are eight modifier rows and lets the keymap decide which
-keys sit in each; those two are where `setxkbmap` puts Alt and Super, and
-where every toolkit — GTK and Qt included — reads them from. The setup that
-disagrees still has the raw mask: `ev.nativeEvent.buttons` is the state
-field as it arrived, and `MOD` in `react-x11/keysyms` names its bits
-(`MOD.Mod3`, `MOD.Lock` for Caps Lock, and so on).
+Mod1/Mod4 as Alt/Super is the convention every toolkit reads, not protocol.
+For a keymap that disagrees, `ev.nativeEvent.buttons` is the raw mask and
+`MOD` in `react-x11/keysyms` names its bits (`MOD.Mod3`, `MOD.Lock` for Caps
+Lock, …).
 
 ### The primary modifier {#primary-modifier}
 
 **On the Cocoa backend the editing chords are ⌘, not Ctrl.** ⌘ arrives as
-`metaKey` (the DOM's own macOS mapping), and the app says which of the two its
-shortcuts are pressed with: `app.primaryModifier` is `'Super'` there and absent
-everywhere else, X11 under XQuartz included. The built-in editors read it, so
-`<textinput>`'s Undo, Cut, Copy, Paste and Select All are ⌘Z, ⌘X, ⌘C, ⌘V and
-⌘A on a Mac, Redo is ⇧⌘Z, and the right-click menu prints them that way. A ⌃
-or ⌘ chord the field has no answer for is never typed as text — AppKit hands
-over the key's bare character with either held. A widget with chords of its
-own asks the same question with `primaryModifierHeld`:
+`metaKey`, and `app.primaryModifier` is `'Super'` there and absent elsewhere
+(X11 under XQuartz included). The built-in editors read it: `<textinput>`'s
+Undo, Cut, Copy, Paste and Select All are ⌘Z, ⌘X, ⌘C, ⌘V, ⌘A, Redo is ⇧⌘Z,
+and the context menu prints them so. A ⌃ or ⌘ chord the field does not answer
+is never typed as text. Ask the same question with `primaryModifierHeld`:
 
 ```js
 import { ctrlChordLetter, keysymOf, primaryModifierHeld } from 'react-x11/keysyms';
@@ -256,72 +186,61 @@ onKeyDown={(ev) => {
 }}
 ```
 
-It is the same rule a menu bar's `shortcut` follows there, where `Control`
-means ⌘ ([globalmenu.md](globalmenu.md#shortcuts-are-a-list-not-a-string)),
-and the one [accelerators](#the-chord) follow: `useAccelerator([['Control',
-'K']])` is ⌘K on a Mac, and a drawn `ContextMenu` prints and answers `⌘S`.
+Menus and accelerators follow the same rule: `Control` in a `shortcut` means
+⌘ there ([globalmenu.md](globalmenu.md#shortcuts-are-a-list-not-a-string),
+[The chord](#the-chord)), so `useAccelerator([['Control', 'K']])` is ⌘K and a
+drawn `ContextMenu` prints and answers `⌘S`.
 
-The editing keys follow it as well. Where shortcuts are ⌘, `<textinput>` and
-`<textarea>` move and delete the Mac's way — AppKit's own bindings, the table
-every Cocoa field reads — so a Mac user's hands already know them:
+Where shortcuts are ⌘, `<textinput>` and `<textarea>` also move and delete
+with AppKit's bindings:
 
-| keys                   | does                                                                        |
-| ---------------------- | --------------------------------------------------------------------------- |
-| ⌥← ⌥→                  | a word back or forward                                                      |
-| ⌘← ⌘→, and ⌃← ⌃→       | the start or end of the line                                                |
-| ⌘↑ ⌘↓                  | the start or end of the value                                               |
-| ⌥↑ ⌥↓                  | the start or end of the paragraph, and on to the next                       |
-| ↑ ↓ in a `<textinput>` | its start and its end, as in an NSTextField                                 |
-| ⌥⌫ ⌥⌦                  | delete a word                                                               |
-| ⌘⌫                     | delete to the start of the line                                             |
-| ⌃⌫                     | take the accent off the character before the caret — é to e                 |
-| ⌃A ⌃E                  | the start or end of the paragraph                                           |
-| ⌃B ⌃F, ⌃P ⌃N           | a character back or forward, a line up or down                              |
-| ⌃H ⌃D                  | delete a character back or forward                                          |
-| ⌃K ⌃Y                  | kill to the end of the paragraph — its break, at its end — and yank it back |
+| keys                   | does                                                                 |
+| ---------------------- | -------------------------------------------------------------------- |
+| ⌥← ⌥→                  | a word back or forward                                               |
+| ⌘← ⌘→, and ⌃← ⌃→       | the start or end of the line                                         |
+| ⌘↑ ⌘↓                  | the start or end of the value                                        |
+| ⌥↑ ⌥↓                  | the start or end of the paragraph, and on to the next                |
+| ↑ ↓ in a `<textinput>` | its start and its end, as in an NSTextField                          |
+| ⌥⌫ ⌥⌦                  | delete a word                                                        |
+| ⌘⌫                     | delete to the start of the line                                      |
+| ⌃⌫                     | take the accent off the character before the caret — é to e          |
+| ⌃A ⌃E                  | the start or end of the paragraph                                    |
+| ⌃B ⌃F, ⌃P ⌃N           | a character back or forward, a line up or down                       |
+| ⌃H ⌃D                  | delete a character back or forward                                   |
+| ⌃K ⌃Y                  | kill to the paragraph's end (its break, if at the end); yank it back |
 
-Shift extends the selection with every move. "Line" is the line as it is
-drawn, wrapped, and "paragraph" runs between line breaks; in a
-`<textinput>` both are the whole value.
+Shift extends the selection. "Line" is the drawn, wrapped line; "paragraph"
+runs between line breaks; in a `<textinput>` both are the whole value.
+Elsewhere the bindings are GTK's, Qt's and Windows' (Ctrl+←/→ and Ctrl+⌫/⌦ by
+word, Ctrl+A select all) — never a mix. Home and End go to the ends of the
+line on every backend.
 
-Everywhere else the bindings are GTK's, Qt's and Windows': Ctrl+←/→ and
-Ctrl+⌫/⌦ by word, Ctrl+A to select all. The two sets disagree about Ctrl
-outright — ⌃← is the start of the line on a Mac, and ⌃A the start of the
-paragraph — so a backend has one set or the other, never a mix. Home and
-End move the caret to the ends of the line on every backend: AppKit scrolls without moving it, which a field — one
-line, its caret the point of the keystroke — has no use for.
-
-⌃K's kill buffer is the application's and not the pasteboard, as it is in
-AppKit: a kill leaves what ⌘C copied alone, ⌃Y in one field yanks what ⌃K
-killed in another, and kills one after another add up, so the two that take
-a line and then its break yank back as the line. A `sensitive` field kills
-into nothing, for the reason it offers no Copy.
-
-Any of them is the field's default action, so an `onKeyDown` that calls
-`preventDefault()` keeps the key, as it does every other.
+⌃K's kill buffer is the app's, not the pasteboard: ⌘C's copy is untouched,
+⌃Y in one field yanks what ⌃K killed in another, and consecutive kills add
+up. A `sensitive` field kills into nothing. All of these are the field's
+default action, so `preventDefault()` in `onKeyDown` keeps the key.
 
 ## Handlers
 
-| handler                                                           | notes                                                                                                                                                       |
-| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onClick`                                                         | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks                                                                       |
-| `onMouseDown` / `onMouseUp` / `onMouseMove`                       | move is coalesced to once per frame by ntk                                                                                                                  |
-| `onMouseEnter` / `onMouseLeave`                                   | do not propagate; synthesized by hover-path diffing, on motion and when a scroll moves content under a still pointer                                        |
-| `onWheel`                                                         | pixels, from the device or from X buttons 4–7; default action scrolls the nearest scroll container with somewhere to go                                     |
-| `onContextMenu`                                                   | right-click (button 3), after `onMouseDown`; default action opens the element's menu                                                                        |
-| `onKeyDown` / `onKeyUp`                                           | delivered to the focused node (or the window); Space/Enter click an `onClick`, [accelerators](#accelerators) fire and Tab cycles focus, unless it took them |
-| `onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` | text still being typed — a dead key, a Compose sequence; see below                                                                                          |
-| `onFocus` / `onBlur`                                              | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal                                                                                    |
-| `onDragEnter` / `onDragLeave`                                     | do not propagate; drag-path diffing, the same shape as the hover pair above                                                                                 |
-| `onDragOver` / `onDrop`                                           | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)                                                                              |
-| `onDragStart` / `onDrag` / `onDragEnd`                            | on a `draggable` node; the press is a click until it moves 4px                                                                                              |
+| handler                                                           | notes                                                                                            |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `onClick`                                                         | on the nearest common ancestor of press & release; `detail` counts clicks                        |
+| `onMouseDown` / `onMouseUp` / `onMouseMove`                       | move is coalesced to once per frame                                                              |
+| `onMouseEnter` / `onMouseLeave`                                   | do not propagate; hover-path diffing, on motion and when content scrolls under the pointer       |
+| `onWheel`                                                         | pixels ([below](#wheel)); default action scrolls the nearest container with somewhere to go      |
+| `onContextMenu`                                                   | right-click, after `onMouseDown`; default action opens the element's menu                        |
+| `onKeyDown` / `onKeyUp`                                           | to the focused node (or window); defaults: Space/Enter click, [accelerators](#accelerators), Tab |
+| `onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` | text still being typed — [below](#composition)                                                   |
+| `onFocus` / `onBlur`                                              | focus follows mousedown (nearest `focusable` ancestor) and Tab                                   |
+| `onDragEnter` / `onDragLeave`                                     | do not propagate; drag-path diffing, like hover                                                  |
+| `onDragOver` / `onDrop`                                           | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)                   |
+| `onDragStart` / `onDrag` / `onDragEnd`                            | on a `draggable` node; the press is a click until it moves 4px                                   |
 
 ## Space and Enter are a click {#space-and-enter-are-a-click}
 
-**An `onClick` on a focusable node is operable from the keyboard, with
-nothing else written.** Space or Enter on it dispatches the click — the whole
-press gesture, mousedown then mouseup then click, through the ordinary path —
-so a control hand-built out of a `<box>` behaves like a `<Button>`:
+**An `onClick` on a focusable node is keyboard-operable with nothing else
+written.** Space or Enter dispatches the whole press gesture — mousedown,
+mouseup, click — so a `<box>` control behaves like a `<Button>`:
 
 ```jsx
 <box focusable role="option" aria-selected={on} onClick={() => open(channel)}>
@@ -329,42 +248,28 @@ so a control hand-built out of a `<box>` behaves like a `<Button>`:
 </box>
 ```
 
-The keys are a **default action**, which is the whole of the contract:
+It is a **default action**, so:
 
-- `preventDefault()` in the node's own `onKeyDown` takes the key back — that
-  is how a widget that answers Enter with something other than its click
-  (a disclosure opens a branch; the click only moves the selection) keeps it;
-- a node with no `onClick` is untouched, whatever its `role` says. A role
-  advertises an action to an assistive technology, which has no other way to
-  ask; a key press is already at the node, so there is nothing to advertise
-  and nothing to activate. `role="button"` with only an `onKeyDown` stays
-  yours;
-- `<textinput>` and `<textarea>` never activate: their own `defaultKeyDown`
-  answers the keystroke, so Space types a space;
-- **a scroll pane keeps Space.** Space and Shift+Space page a scrolling `<box>`
-  ([elements.md](elements.md#scrolling)) — that is a default action too, and
-  the pane answers it before this one, so a clickable pane pages with Space
-  and activates with Enter. A focusable row _inside_ a pane is not affected
-  either way: default actions run on the focused node, and the pane is not
-  it;
-- **a chord is not a press.** With Ctrl, Alt or Super held — ⌘ or ⌃ or ⌥ on
-  the Cocoa backend — Space and Enter are a command, and the node leaves them
-  to whoever bound it: a menu's Ctrl+Return fires with focus on a clickable
-  box exactly as it does anywhere else ([accelerators](#accelerators)).
+- `preventDefault()` in the node's `onKeyDown` keeps the key (a disclosure
+  that opens on Enter while its click only selects);
+- a node with no `onClick` is untouched whatever its `role` —
+  `role="button"` with only `onKeyDown` stays yours;
+- `<textinput>` and `<textarea>` never activate: Space types a space;
+- **a scroll pane keeps Space**: Space and Shift+Space page a scrolling
+  `<box>` ([elements.md](elements.md#scrolling)), so a clickable pane pages
+  with Space and activates with Enter. A focused row _inside_ a pane is
+  unaffected;
+- **a chord is not a press**: with Ctrl, Alt or Super (⌘, ⌃, ⌥ on Cocoa)
+  held, Space and Enter go to whoever bound them, e.g. a menu's Ctrl+Return.
 
-Shift is not a command, and it travels: the synthesized click carries the key
-press's own modifier mask, so Shift+Enter reaches `onClick` as a shift-click.
-
-It is the same function an assistive technology's activation goes through, on
-purpose — one definition of "activate" for the pointer, the keyboard and
-Orca, which cannot then disagree about a control
+Shift travels: the click carries the key's modifier mask, so Shift+Enter is a
+shift-click. Assistive-technology activation goes through the same function
 ([accessibility.md](accessibility.md#at-driven-controls)).
 
 ## Accelerators {#accelerators}
 
-**A menu's `shortcut` is a binding.** `MenuBar` and `ContextMenu` answer their
-own items' chords while they are mounted, so the array that draws the menu is
-the array that binds it:
+**A menu's `shortcut` is a binding.** `MenuBar` and `ContextMenu` answer
+their items' chords while mounted, unopened:
 
 ```jsx
 <MenuBar
@@ -384,17 +289,11 @@ the array that binds it:
 />
 ```
 
-Ctrl+S calls `save()` without the menu being opened. The same array is what
-`aria-keyshortcuts` announces and what crosses the bus when the desktop's
-panel draws the menu ([globalmenu.md](globalmenu.md)) — and it stays bound in
-that case, because the panel draws the rows but the key is pressed in your
-window and nothing else is going to deliver it. (The macOS menu bar is the
-exception, and answers the ⌘ chords it shows by itself —
-[below](#the-macos-menu-bar).)
-
-For a shortcut that is not in a menu — there are always some —
-`useAccelerator` takes the same chords, so one can be moved into or out of a
-menu without being rewritten:
+The same array is announced as `aria-keyshortcuts` and crosses the bus when
+a desktop panel draws the menu ([globalmenu.md](globalmenu.md)); it stays
+bound then, since the key is still pressed in your window. (The macOS menu
+bar answers its ⌘ chords itself — [below](#the-macos-menu-bar).) For a
+shortcut in no menu, `useAccelerator` takes the same chords:
 
 ```jsx
 import { useAccelerator } from 'react-x11';
@@ -404,25 +303,20 @@ useAccelerator([['Control', 'K']], () => openPalette());
 
 ### The chord
 
-`[['Control', 'S'], ['F2']]` is dbusmenu's `aas`: a list of **alternatives**,
-each a list of modifier tokens — `Control`, `Alt`, `Shift`, `Super` — ending
-in the key. Any alternative fires; only the first is drawn, since a row has
-one shortcut column.
+`[['Control', 'S'], ['F2']]` is dbusmenu's `aas`: **alternatives**, each
+modifier tokens (`Control`, `Alt`, `Shift`, `Super`) ending in the key. Any
+alternative fires; only the first is drawn. Keys use X keysym names (as
+`gdk_keyval_name()` emits): `plus` not `+`, `Prior` not `PgUp`, `Return` not
+`Enter`; a one-character name is that character. `keysymFromName()` in
+`react-x11/keysyms` resolves names, and
+`matchesShortcut(ev, shortcut, { primary })` matches, for apps dispatching
+chords their own way.
 
-The key is named the way X names it, which is what `gdk_keyval_name()` emits
-and what a panel's importer parses: `plus` rather than `+`, `Prior` rather
-than `PgUp`, `Return` rather than `Enter`. A one-character name is that
-character. `keysymFromName()` in `react-x11/keysyms` is the resolver, and
-`matchesShortcut(ev, shortcut, { primary })` the matcher, for an application
-dispatching chords its own way.
-
-**`Control` is the app's primary modifier**: Ctrl, except on the Cocoa
-backend, where it is ⌘ — the key a Mac user saves with, the key a drawn row
-prints (`⌘S`, `⇧⌘Z`) and the key the binding answers
-([The primary modifier](#primary-modifier)). `Super` is ⌘ there too, so a
-chord cannot ask for ⌃ on a Mac; a chord is matched with it up. The menus and
-`useAccelerator` read the app's answer themselves, and `matchesShortcut` takes
-it as an option, since it is a pure function with no app to ask:
+**`Control` is the app's primary modifier**: ⌘ on the Cocoa backend (what a
+drawn row prints, `⌘S`, `⇧⌘Z`, and what it answers —
+[The primary modifier](#primary-modifier)), Ctrl elsewhere. `Super` is ⌘
+there too, so a chord cannot ask for ⌃ on a Mac. `matchesShortcut` is pure,
+so it takes the answer as an option:
 
 ```js
 import { matchesShortcut } from 'react-x11';
@@ -431,29 +325,23 @@ import { primaryModifier } from 'react-x11/keysyms';
 matchesShortcut(ev, [['Control', 'S']], { primary: primaryModifier(app) });
 ```
 
-Four rules, all of which a hand-rolled `onKeyDown` gets subtly differently:
+Matching is:
 
-- **exact on the four modifiers.** Ctrl+S does not fire on Ctrl+Shift+S.
-- **indifferent to the locks.** Caps Lock and Num Lock are not modifiers here
-  — `ctrlKey`/`altKey`/`shiftKey`/`metaKey` are the four named bits and
-  nothing else, so a chord keeps working with either light on.
-- **the key, not the character.** Matching is against `ev.keysym`, the Latin
-  keysym for the physical key, so a chord survives a layout switch
-  ([Layouts](#layouts)) — and `['Control', 's']` and `['Control', 'S']` are
-  one binding rather than two. A chord that names a **symbol** also matches
-  the character the key produced, because `+` is the shifted `=` and
-  `[['Control', 'plus']]` has to be pressable; letters stay out of that path,
-  since it is exactly what would make Ctrl+Shift+S fire a Ctrl+S binding.
-- **`enabled` and `visible` gate it.** A dimmed item's chord fires nothing,
-  and neither does an item inside a submenu whose parent is disabled — a
-  command you cannot reach by opening the menu is not one a key should reach.
-- **`Control` is the primary modifier**, above — exact on it as on the rest,
-  so ⌃⌘S does not fire a ⌘S binding either.
+- **exact on the four modifiers**, the primary one included: Ctrl+S does not
+  fire on Ctrl+Shift+S, nor ⌘S on ⌃⌘S.
+- **indifferent to Caps Lock and Num Lock.**
+- **by key, not character**: against `ev.keysym`, the Latin keysym of the
+  physical key, so a chord survives a layout switch ([Layouts](#layouts)) and
+  `'s'`/`'S'` are one binding. A chord naming a **symbol** also matches the
+  character produced (`+` is shifted `=`, and `[['Control', 'plus']]` must be
+  pressable); letters never do, or Ctrl+Shift+S would fire Ctrl+S.
+- **gated by `enabled` and `visible`**, including a disabled parent
+  submenu's.
 
 ### Who gets the key first
 
-Accelerators sit at the end of the same default-action chain Tab and
-Space/Enter are in, and `preventDefault()` is the word at every step:
+Accelerators sit in the default-action chain, and `preventDefault()` stops it
+at any step:
 
 1. the application's own `onKeyDown`, capture then bubble;
 2. composition — a dead key, a Compose sequence;
@@ -462,83 +350,57 @@ Space/Enter are in, and `preventDefault()` is the word at every step:
 4. **accelerators**;
 5. focus traversal, for Tab.
 
-So **a focused text field keeps the chords it answers**: Ctrl+C copies the
-selection and never reaches a menu item that also says Ctrl+C. Ctrl+S is not
-one of the field's, so it falls through to the menu — a control that swallowed
-every chord would be a control no application could put a shortcut behind.
+So **a focused text field keeps the chords it answers** (Ctrl+C copies the
+selection, never reaching a menu's Ctrl+C) and passes the rest (Ctrl+S
+reaches the menu). A `<textinput>` answers Return and Shift+Return with
+`onSubmit`; Ctrl, Alt or Super+Return (⌘↩ on Cocoa) are chords and reach the
+menu. With **no** `onSubmit` it does not answer Return at all, so a form's
+`[['Return']]` default button gets it. A `<textarea>` keeps Return and
+Shift+Return for the newline and Ctrl+Return (⌘↩) for `onSubmit` if it has
+one; Alt and Super+Return are chords, except on Cocoa, where ⌃↩ and ⌥↩ are
+AppKit's newline.
 
-Return is the same rule. A `<textinput>` answers Return and Shift+Return with
-`onSubmit`, and nothing else: Ctrl+Return, Alt+Return and Super+Return — ⌘↩
-on the Cocoa backend — are chords, and reach the menu that prints them. A
-field with **no** `onSubmit` has no answer for Return at all, so the key goes
-on to whatever binds it, a form's `[['Return']]` default button included. A
-`<textarea>` keeps Return and Shift+Return for the newline and Ctrl+Return
-(⌘↩) for `onSubmit` when it has one; Alt and Super on Return are chords there
-too, except on the Cocoa backend, where ⌃↩ and ⌥↩ are AppKit's newline.
+Nothing fires while:
 
-Two things suppress them entirely, both because something else has the
-keyboard:
-
-- **an open menu.** It is holding a pointer grab, and a chord firing a second
-  command out from under the one being pointed at is a bug nobody reproduces.
-- **a modal `<popup>`** (`trapFocus`, which is what `Dialog` sets). Ctrl+S
-  while a confirmation is up saves nothing. A menu declared _inside_ the modal
-  still works — the containment rule is the one Tab traversal already follows
-  — and `useAccelerator`'s `scope` option is how a hook-registered shortcut
-  joins it:
+- **a menu is open** (it holds a pointer grab);
+- **a modal `<popup>`** (`trapFocus`, as `Dialog` sets) is up — Ctrl+S under
+  a confirmation saves nothing. A menu declared _inside_ the modal still
+  works, as Tab traversal does, and `useAccelerator`'s `scope` joins a hook
+  binding to it:
 
   ```jsx
   const inDialog = useRef(null);
   useAccelerator([['Control', 'Return']], confirm, { scope: inDialog });
   ```
 
-A chord belongs to the window whose menu declared it, so a second top-level
-window does not answer it, and `enabled: false` unbinds one without unmounting
-anything. `accelerators={false}` on a `MenuBar` or `ContextMenu` turns the
-whole of this off for an application that already has a dispatcher.
-
-**An app with no `<window>` at all** — a menu-bar app, whose whole UI is the
-popover a tray click opens — binds against the root-level `<popup>` that took
-the keyboard instead
-([elements.md](elements.md#a-popover-under-a-tray-item)). There is nothing
-else for a shortcut to belong to, and it is the window the keys are arriving
-on. A binding that lands on nothing at all — no window and no popup either —
-warns once in development and names `scope`, rather than leaving a chord that
-is drawn, announced and dead.
+A chord belongs to the window whose menu declared it; another top-level
+window does not answer it. `enabled: false` unbinds one; `accelerators={false}`
+on a `MenuBar` or `ContextMenu` turns the whole mechanism off for an app with
+its own dispatcher. **An app with no `<window>`** (a menu-bar app) binds
+against the root-level `<popup>` that took the keyboard
+([elements.md](elements.md#a-popover-under-a-tray-item)); a binding with
+neither warns once in development and names `scope`.
 
 ### The macOS menu bar {#the-macos-menu-bar}
 
-On the Cocoa backend a `MenuBar` is drawn by the system
-([globalmenu.md](globalmenu.md)), which installs each item's chord as an
-`NSMenu` key equivalent where it can spell one — a single chord on a
-character key — and AppKit then runs the item on a ⌘ chord by itself. It does
-so _after_ the window has seen the key, whatever the window did with it. So
-those chords are **reserved**: the window's accelerators are not offered them
-at all, neither the bar's own binding nor a `useAccelerator` on the same
-chord, whichever mounted last, and the item runs once. A chord the menu bar
-cannot spell — a function key, a second alternative, `plus` — or one with no
-`Control` or `Super` in it stays the window's, and fires the way it does
-anywhere else.
-
-The reservation cannot reach steps 1 and 3 above, which run before it: an
-`onKeyDown` that answers ⌘S for itself, or a focused field answering ⌘C beside
-an Edit menu whose Copy says ⌘C, runs alongside the menu item rather than
-instead of it — `preventDefault()` there does not reach AppKit. Leave a chord
-the menu bar shows to the menu bar.
+On the Cocoa backend the system draws a `MenuBar`
+([globalmenu.md](globalmenu.md)) and runs an item on its ⌘ chord itself,
+after the window has seen the key, wherever it can spell the chord as a key
+equivalent (one chord on a character key). Those chords are **reserved**: the
+window's accelerators — the bar's own binding or a `useAccelerator` on the
+same chord — never see them, and the item runs once. A chord it cannot spell
+(a function key, a second alternative, `plus`) or one without `Control` or
+`Super` stays the window's. Steps 1 and 3 above run first and AppKit still
+runs the item afterwards, so an `onKeyDown` or a focused field answering ⌘C
+beside an Edit menu's ⌘C runs alongside it, `preventDefault()` or not —
+leave a chord the menu bar shows to the menu bar.
 
 ## The wheel {#wheel}
 
-`ev.deltaX` / `ev.deltaY` are **pixels**, positive down and right, and one
-notch of a wheel is 48 of them — the step an arrow key takes, so the two
-input routes move a list by the same amount.
-
-Where the server has XI2, those pixels are the distance the device actually
-measured. The core protocol has no wheel at all: a scroll arrives as a click
-of button 4/5/6/7, and a click carries no magnitude, which is why every
-scroll used to be exactly one notch. XI2 carries the same gesture as the
-device's own _scroll valuators_, so a touchpad's two-finger scroll reports
-the fractions of a notch it really was, and `deltaY` is `14.5` rather than
-`48` twice a second.
+`ev.deltaX` / `ev.deltaY` are **pixels**, positive down and right; one wheel
+notch is 48 — the step an arrow key takes. On X11 with XI2 they are the
+distance the device measured, so a touchpad reports fractions (`14.5`, not
+`48` twice a second); without XI2 every event is one whole notch.
 
 ```jsx
 <box
@@ -550,64 +412,39 @@ the fractions of a notch it really was, and `deltaY` is `14.5` rather than
 />
 ```
 
-`ev.smooth` says which kind of device this was, not whether this particular
-delta happened to be fractional: `true` means the valuators are flowing and
-the next event may be a third of a notch, `false` means the emulated button,
-which can only ever say one. It is the flag to branch on for anything that
-wants to animate a scroll — a whole notch is worth easing towards, a stream
-of measured pixels is not.
+`ev.smooth` is the kind of device, not of this delta: `true`, the next event
+may be a third of a notch; `false`, an emulated button that only ever says
+one. Branch on it to animate scrolling — ease towards a whole notch, never a
+stream of measured pixels.
 
-**Nothing is opted into.** A `<window>` selects XI2 the first time it is
-scrolled and falls back to the wheel buttons where the server has none, so a
-handler written against `deltaY` works on both and the difference is the
-value. A `<popup>` is on the buttons deliberately — it holds a pointer grab,
-and a core grab delivers core events — so a scroll inside an open menu moves
-a notch at a time. Needs ntk >= 7.5.0.
+**Nothing is opted into.** A `<window>` selects XI2 on its first scroll (it
+costs pointer-motion traffic, so windows that never scroll never pay) and
+falls back to buttons where the server has none. A `<popup>` stays on
+buttons, since it holds a pointer grab, so an open menu scrolls a notch at a
+time. `<window xi2>` selects at creation, for a touchpad app that wants its
+very first flick smooth; `<window xi2={false}>` never selects. Design notes:
+[design/events.md](../design/events.md#wheel).
 
-The selection waits for the first wheel because it is not free. An XI2
-selection _replaces_ the core one for the same event type, and an `XIMotion`
-is around 136 bytes on the wire where a core `MotionNotify` is 32 — measured
-against Xorg 21.1. Motion is the one event that keeps arriving at frame rate
-for as long as the pointer is over the window, so selecting it up front bills
-every window about 8 KB/s of pointer traffic while the pointer crosses it,
-including the dialogs, toolbars and forms that never see a wheel at all.
-
-What waiting costs is the opening event of the first gesture in a window's
-life, and it costs less than it sounds: a mouse wheel reports whole notches
-either way, and ntk treats the first valuator event as a seed with no
-distance to report, so under an eager selection that same first event moves
-nothing at all.
-
-`<window xi2>` selects at creation anyway, for an app whose whole interaction
-is a touchpad and which wants the very first flick smooth. `<window
-xi2={false}>` refuses the selection for the window's whole life.
-
-Shift turns a vertical scroll sideways for a device with only one axis (the
-convention every toolkit follows); a device that reports its own horizontal
-axis keeps what it reported. The default action is the hit node's own
-`defaultWheel` and then the scroll chain — see
-[extending.md](extending.md#behaviour-of-your-own) for the element whose
-wheel is a zoom rather than a scroll, and
-[extending.md](extending.md#scrolling-content-you-painted) for how anything
-joins the chain.
+Shift turns a vertical scroll sideways on a one-axis device; a device with
+its own horizontal axis keeps it. The default action is the hit node's
+`defaultWheel`, then the scroll chain
+([extending.md](extending.md#behaviour-of-your-own),
+[extending.md](extending.md#scrolling-content-you-painted)).
 
 ## Composition: dead keys and Compose {#composition}
 
-`é` is not a key. On a French, German or us-intl layout it is `dead_acute`
-then `e`, and a dead key is a keysym with **no code point at all** — so a
-renderer that types from `ev.codepoint` types the letter and drops the
-accent. That is most accented input in Europe, and it is invisible to anyone
-testing on a US layout (issue #272).
-
-A composition is text the user is still typing. It shows at the caret,
-underlined, and it is not the value until it commits:
+`é` is not a key: on a French, German or us-intl layout it is `dead_acute`
+then `e`, and a dead key has **no code point** — code typing from
+`ev.codepoint` drops the accent. Test text input on such a layout, not only
+US. A composition is text still being typed: it shows underlined at the
+caret, and is not the value until it commits:
 
 ```
 dead_acute        →  the field shows ´ (underlined). value unchanged.
 e                 →  the field shows é. value is now …é, one undo step.
 ```
 
-Everything about it is on by default and needs no configuration:
+On by default, no configuration:
 
 | you press                          | you get                                           |
 | ---------------------------------- | ------------------------------------------------- |
@@ -620,17 +457,15 @@ Everything about it is on by default and needs no configuration:
 | Compose `-` `-` `-`                | `—`                                               |
 | Escape mid-sequence                | nothing typed, and the accent goes away           |
 
-The dead keys are Unicode's own composition rather than a table somebody
-maintains, so `dead_breve` + `и` is `й` and `dead_acute` + `α` is `ά`
-without anyone having written those down. What is written down is the part
-Unicode has no rule for: `dead_stroke` + `o` is `ø`, and the `Multi_key`
-symbol sequences, which are conventions rather than compositions.
+Dead keys use Unicode composition, so `dead_breve` + `и` is `й` and
+`dead_acute` + `α` is `ά`; only what Unicode has no rule for is tabled
+(`dead_stroke` + `o` is `ø`, and the `Multi_key` sequences).
 
 ### Handling it yourself
 
-The three events mirror the DOM's. `data` is empty on the start, the text
-showing at the caret on each update, and the **committed text** at the end —
-empty when the sequence was abandoned.
+The three events mirror the DOM's: `data` is empty on start, the text at the
+caret on each update, and the **committed text** at the end (empty if
+abandoned).
 
 ```jsx
 <textinput
@@ -639,59 +474,38 @@ empty when the sequence was abandoned.
 />
 ```
 
-**A key an open composition took carries no text of its own.** `ev.key` and
-`ev.codepoint` are `undefined` on it and `ev.composing` is true, because its
-text arrives on the composition event instead — an application that types
-from `onKeyDown` would otherwise insert `o`, `c` and then `©`. The keysym is
-still there, so a chord still matches.
-
-The order is **application chords → composition → the element → focus
-traversal**: an `onKeyDown` that calls `preventDefault()` keeps its key and
-the composer never sees it, and a key the composer does take never reaches
-the element's `defaultKeyDown` — so a dead key cannot also fire an
-accelerator, and a Compose sequence containing `z` cannot undo halfway
-through.
-
-A composition is abandoned, never half-committed, when focus leaves, when the
-window loses the keyboard, or when a press puts the caret somewhere else.
-
-A screen reader is told the same story: the preedit is a text run of its
-own and its churn is marked as text the user did not type, so the accent is
-not read out and the character it commits is —
-[accessibility.md](accessibility.md#while-a-composition-is-open).
+**A key the composition took carries no text**: `ev.key` and `ev.codepoint`
+are `undefined` and `ev.composing` is true (its text comes on the
+composition event), but the keysym is there, so chords still match. The order
+is **application chords → composition → the element → focus traversal**:
+`preventDefault()` in `onKeyDown` hides a key from the composer, and a key
+the composer takes never reaches the element — a dead key cannot fire an
+accelerator, nor a Compose `z` undo. A composition is abandoned, never
+half-committed, when focus leaves, the window loses the keyboard, or a press
+moves the caret. Screen readers hear the committed character, not the accent
+([accessibility.md](accessibility.md#while-a-composition-is-open)).
 
 ### Input methods
 
-On the [Wayland backend](wayland-backend.md) the compositor's input method
-(IBus under GNOME) drives the same three events over `zwp_text_input_v3`,
-and on the Windows backend the system IME drives them over IMM32
-(`src/win32/ime.js`): its preedit arrives on `onCompositionUpdate` and the
-text it commits on `onCompositionEnd`, inserted the way a typed character
-is. Two things are only there:
+The [Wayland backend](wayland-backend.md)'s compositor input method (IBus
+under GNOME, via `zwp_text_input_v3`) and the Windows IME (IMM32) drive the
+same three events: preedit on `onCompositionUpdate`, the commit on
+`onCompositionEnd`, inserted like typing. Only there:
 
 - `ev.cursorBegin` / `ev.cursorEnd` on an update — code-point offsets into
-  `data` — when the engine says where inside its preedit the cursor is, or
-  which segment of a phrase it is converting (drawn with a heavier
-  underline). A dead key never sets them.
-- a commit with no preedit before it — an emoji picker, an engine that
-  commits directly — is a start and an end in one.
+  `data` for the engine's cursor or the segment being converted (drawn with
+  a heavier underline). A dead key never sets them.
+- a commit with no preedit (an emoji picker) is a start and an end in one.
 
-Keys the input method consumes never reach the application, so a dead key
-composed by IBus does not also reach the client-side table; a key that does
-arrive is one the input method declined. `<textinput sensitive>` offers the
-input method none of its text, and `inputMode` on a `<textinput>` tells it
-what to expect ([elements.md](elements.md#textinput)).
+Keys the input method consumes never reach the app, nor the client-side
+table. `<textinput sensitive>` offers it none of its text, and `inputMode`
+tells it what to expect ([elements.md](elements.md#textinput)).
 
-The **Cocoa backend has no input method yet** — `NSTextInputClient` is
-[macos.md](macos.md)'s IME work — so its text is what each key event says it
-typed. A dead key such as ⌥E types nothing and shows nothing, and the key
-after it types what macOS put on that key: `é` where the event carries the
-dead key's composition, the bare letter where it does not, never the two
-letters reading the key's own character used to type. A key that typed more
-than one character — the accent and a letter it does not combine with, `´s`
-— commits them as one composition, a start and an end in one, the way an
-input method's commit arrives. Press-and-Hold accents and CJK input wait on
-the same work.
+The **Cocoa backend has no input method yet**: ⌥E (a dead key) types and
+shows nothing, the next key types what macOS put there (`é`, or the bare
+letter), and a key that typed several characters (`´s`) commits them as one
+composition. Press-and-Hold accents and CJK input are not available there
+yet.
 
 ### Changing the table
 
@@ -708,59 +522,36 @@ const root = await createRoot({
 });
 ```
 
-`compose: 'system'` is the whole file shorthand, `compose: false` turns
-composition off for an app that does its own, and later definitions win over
-earlier ones — which is what makes a Compose file an override of the
-built-ins rather than an addition beside them. Parsing is X's own format;
-`include` directives are ignored, and a line naming keysyms outside ASCII
-and the dead-key block (`<Greek_alpha>`, `<Cyrillic_a>`) is skipped rather
-than guessed at.
-
-**What this is not is an input method.** There is no preedit arriving from
-another process and no candidate list, so CJK still needs XIM or an
-IBus/Fcitx client — issue #272 tracks it. The events above are the surface it
-will arrive on.
+`compose: 'system'` is shorthand for the file alone; `compose: false` turns
+composition off for an app that does its own. Later definitions override
+earlier ones. The format is X's; `include` is ignored, and lines naming
+keysyms outside ASCII and the dead-key block (`<Greek_alpha>`) are skipped.
+**On X11 this is not an input method** — no preedit from another process, no
+candidate list — so CJK input there needs XIM or an IBus/Fcitx client, which
+react-x11 does not have yet.
 
 ## Layouts {#layouts}
 
-A key event answers two questions and, the moment a non-Latin layout is
-active, it has to answer them differently:
+A key event answers two questions, differently under a non-Latin layout:
 
-- **what the key typed** — `ev.key` and `ev.codepoint`, the active layout,
-  the active level. A Cyrillic layout types Cyrillic.
+- **what the key typed** — `ev.key` and `ev.codepoint`, from the active
+  layout and level. A Cyrillic layout types Cyrillic.
 - **what the key is called** — `ev.keysym`, the **Latin** keysym for that
-  key, whichever group holds it. Shortcuts do not move with the layout, in
-  GTK, in Qt and in the browsers, and Ctrl+Z has to keep undoing while the
-  user is typing Russian.
+  key, whichever group holds it, because shortcuts do not move with the
+  layout (GTK, Qt and browsers agree): Ctrl+Z keeps undoing in Russian.
 
 So `ctrlChordLetter(ev) === keysymOf('z')` matches the physical Z key under
-every layout, and nothing in a widget has to know that a layout exists.
+every layout. `ev.group` is the active XKB group (0–3), for showing which
+layout is live; a switch sends no other notice. Under XQuartz, layout
+switches reach X only with Preferences → Input → "Follow system keyboard
+layout" on. Design notes: [design/events.md](../design/events.md#layouts).
 
-**⌥ types, on the Cocoa backend.** It is the layout's third and fourth level
-there rather than a modifier: ⌥S is `ß` on a US keyboard, and on a German one
-⌥L is `@` and ⌥5 and ⌥8 are `[` and `{` — the only keys that type them. So
-`ev.key` and `ev.codepoint` are what the layout typed, with ⌥, Shift and Caps
-Lock applied, while `ev.keysym` is still the key (`s`) and `ev.altKey` is
-true: an Alt+S accelerator still matches, and a field types `ß`. A ⌘ or ⌃
-chord types nothing and is named by its key, so ⌘⌥S is a chord on S — the
-same split the DOM makes on a Mac.
-`ev.group` is the active XKB group, 0-3, for an application that wants to
-show which layout is live — a switch sends no other notice.
-
-Where the Latin keysym comes from depends on how the layout got there, and
-the two mechanisms have nothing in common:
-
-- **Linux/XKB** loads every layout at once as a group and switches which one
-  is live; the keymap never changes and **no MappingNotify is sent**. The
-  Latin keysym is on the same keycode, in whichever group is the Latin one —
-  which under `ru,us` is the second.
-- **XQuartz** has no groups. It synthesizes the keymap from the active macOS
-  layout and _overwrites_ it when the input menu changes (Preferences →
-  Input → "Follow system keyboard layout"; without that, nothing downstream
-  can help), then sends MappingNotify. After a switch to Russian **no group
-  anywhere holds Latin**, and the only thing left that still means "the Z
-  key" is the keycode — so that is what is used, against the US position of
-  whichever keycode scheme the server speaks.
+**⌥ types, on the Cocoa backend**: it is the layout's third and fourth level
+(⌥S is `ß` on US; on German ⌥L is `@`, ⌥5 and ⌥8 `[` and `{`). `ev.key` and
+`ev.codepoint` are what was typed, with ⌥, Shift and Caps Lock applied, while
+`ev.keysym` is still the key (`s`) and `ev.altKey` is true — an Alt+S
+accelerator matches and a field types `ß`. A ⌘ or ⌃ chord types nothing and
+is named by its key (⌘⌥S is a chord on S), as in the DOM on a Mac.
 
 ```js
 const root = await createRoot({
@@ -771,20 +562,14 @@ const root = await createRoot({
 ```
 
 `accelerators` also takes a keycode→keysym table (`{ 52: 'z' }`) for a
-server whose keycodes are neither evdev's nor macOS's, which is the only
-case the two built-in ones do not cover.
-
-One thing the core protocol cannot express is the difference between two
-groups of two levels and one group of four, so **the AltGr row is not
-reachable**: `ev.keysym` and `ev.codepoint` read groups only. Resolving it
-needs XkbGetMap, which node-x11 does not implement.
+server whose keycodes are neither evdev's nor macOS's. **The AltGr row is not
+reachable** on X11: `ev.keysym` and `ev.codepoint` read groups only.
 
 ## Pointer capture
 
 `ev.capturePointer()` routes every following `mousemove` and `mouseup` to
-the capturing node instead of whatever is under the pointer, so a drag
-keeps working past the widget's own bounds — and a release far outside it
-still ends the gesture. This is what `Slider` is built on:
+the capturing node, so a drag keeps working past the widget and a release
+far outside still ends it. `Slider` is built on it:
 
 ```jsx
 onMouseDown: (ev) => {
@@ -795,54 +580,39 @@ onMouseMove: (ev) => { if (dragging) setValue(valueAt(ev)); },
 onMouseUp: () => setDragging(false),
 ```
 
-Capture is released automatically on `mouseup` (like the DOM's implicit
-pointer capture) and when the capturing node unmounts; `ev.releasePointer()`
-ends it early. While captured, hover stays where it was — dragging must not
-light up every widget the pointer crosses.
+Capture ends on `mouseup` (like the DOM's implicit capture), when the node
+unmounts, or on `ev.releasePointer()`. While captured, hover stays put.
 
 ## Focus
 
-`focusable` opts a node into focus (`<textinput>` is focusable by
-default, and so is a scroll container with somewhere to scroll), `autoFocus`
-takes it at mount, and every drawn node has
-`focus()` / `blur()` / `focused` on its ref — plus `focusWithin`, which is
-true while focus is on the node **or inside it**, the question a modal asks
-before taking focus itself. To _draw_ that rather than read it, there is a
-`':focus-within'` style block
-([styling.md](styling.md#inline-pseudo-states)), which is what a row
-containing a field wants. `focus()` hands the node back, so a component
-can forward it straight out of an imperative handle. Focusing a node inside a
-scroll container scrolls it into view — unless a press focused it, since
-the node is under the pointer. Mousedown focuses the nearest
-focusable ancestor of the hit node; Tab / Shift+Tab cycle through focusable
-nodes in tree order. Keyboard
-events route to the focused node's ancestor chain. `disabled` opts a node
-back out of focus, whatever else it says.
+`focusable` opts a node in (`<textinput>` and a scroll container with
+somewhere to scroll are focusable by default); `disabled` opts it out
+whatever else it says; `autoFocus` focuses at mount. Every drawn node's ref
+has `focus()` (which returns the node, for forwarding from an imperative
+handle), `blur()`, `focused`, and `focusWithin` — focus on the node **or
+inside it**; `':focus-within'` draws that
+([styling.md](styling.md#inline-pseudo-states)). Mousedown focuses the
+nearest focusable ancestor of the hit node; keyboard events route up the
+focused node's ancestor chain. Focusing a node in a scroll container scrolls
+it into view, unless a press focused it.
 
-**A focused node shows a ring**, and how focus arrived decides whether it
-does. A press sets `:focus`; everything else — Tab, `autoFocus`,
-`node.focus()`, a modal handing focus back as it closes — also sets
-`:focus-visible`, and that is the state the ring is drawn on. A press on a
-**text control** is the one press that sets both, because a field the
-keyboard is about to go to has to say so however focus got there. It costs no
-layout and needs no opt-in; see
-[styling.md](styling.md#the-focus-ring) for restyling it.
+**A focused node shows a ring** depending on how focus arrived: a press sets
+`:focus`; Tab, `autoFocus`, `node.focus()` or a modal handing focus back
+also set `:focus-visible`, which the ring is drawn on. A press on a **text
+control** sets both. No opt-in;
+[styling.md](styling.md#the-focus-ring) restyles it.
 
 ### Tab order
 
-`tabIndex` sets the sequential focus order, following the DOM's rules:
+`tabIndex` follows the DOM's rules:
 
-- nodes with a **positive** `tabIndex` come first, in ascending order;
-- then everything focusable without one (the implicit `0` group), in tree
-  order;
-- `tabIndex={-1}` is focusable — by a press, and by `focus()` — but Tab
-  never lands on it;
-- an explicit `tabIndex` makes a node focusable without also passing
-  `focusable`.
+- **positive** `tabIndex` first, ascending;
+- then everything focusable without one (the implicit `0`), in tree order;
+- `tabIndex={-1}` is focusable by a press or `focus()`, never by Tab;
+- an explicit `tabIndex` makes a node focusable without `focusable`.
 
-Tab out of a node that is not in the tab order (`tabIndex={-1}`, or a node
-outside the current focus scope) and traversal starts from the beginning of
-the order.
+Tab from a node outside the order (`tabIndex={-1}`, or outside the current
+focus scope) starts from the beginning.
 
 ```jsx
 <box tabIndex={1} />   {/* visited first  */}
@@ -851,27 +621,19 @@ the order.
 <box tabIndex={-1} />  {/* clickable, never tabbed to */}
 ```
 
-Traversal is a **default action** like any other, and it runs last: an
-`onKeyDown` that calls `preventDefault()` on Tab keeps it, and so does an
-element whose own `defaultKeyDown` consumes it — an editor indenting with
-Tab. An element that does owes the keyboard user a way out of it, which is
-the Escape-arms-one-Tab convention in
-[extending.md](extending.md#behaviour-of-your-own).
+Traversal is the last **default action**: `preventDefault()` on Tab keeps
+it, as does an element whose `defaultKeyDown` consumes it (an editor
+indenting) — which then owes the user the Escape-arms-one-Tab way out
+([extending.md](extending.md#behaviour-of-your-own)).
 
 ### Focus scopes (modals)
 
-`trapFocus` makes a node own a **focus scope**. While it is the innermost
-scope:
+`trapFocus` makes a node own a **focus scope**. While it is the innermost:
 
-- Tab / Shift+Tab only visit focusables inside it — the rest of the window
-  is unreachable by keyboard;
-- a press outside it does not move focus (poking at the window behind a
-  modal is inert as far as focus goes — the press itself still dispatches,
-  so pair it with `grab` + `onDismiss` for a real modal);
-- when the scope unmounts, focus goes back to whatever had it before the
-  scope opened — no bookkeeping in the widget.
-
-That is a modal dialog, with the popup taking focus at mount:
+- Tab / Shift+Tab visit only focusables inside it;
+- a press outside does not move focus (the press still dispatches — pair it
+  with `grab` + `onDismiss` for a real modal);
+- when it unmounts, focus returns to whatever had it before it opened.
 
 ```jsx
 function Dialog({ open, x, y, onClose }) {
@@ -893,106 +655,65 @@ function Dialog({ open, x, y, onClose }) {
 }
 ```
 
-Scopes nest (a modal opened from a modal); the innermost one wins, and
-popping it hands focus back to the outer one. Programmatic `focus()` is
-never blocked by a scope — the trap is about Tab and presses.
+Scopes nest; the innermost wins, and closing it hands focus back to the
+outer. Programmatic `focus()` is never blocked — the trap is about Tab and
+presses.
 
 ### Focus inside a `<popup>`
 
-An override-redirect window never receives the X input focus, so a popup
-cannot hold focus itself: the **owner window** does, and a node inside the
-popup can be the focused node of that window. Keys arrive at the owner
-window and are dispatched to it, then bubble out through the popup's
-position in the JSX tree into the owner's handlers, so nothing has to
-proxy them.
-
-One consequence worth knowing: a press inside a popup that lands on nothing
-focusable leaves the owner window's focus alone. Menus depend on it —
-their rows are not focusable, and the trigger keeps handling keys while the
-menu is open (`Menu`, `Select`).
-
-A popup with no owner window — a popover a tray click opened, in an app with
-no window of its own — has nowhere for its keys to arrive, and takes them
-itself with `grabKeyboard`
+A popup never holds input focus itself: its **owner window** does, and a
+node inside the popup can be that window's focused node. Keys arrive at the
+owner and bubble out through the popup's place in the JSX tree. A press in a
+popup on nothing focusable leaves focus alone — which is how menus and
+`Select` keep the trigger handling keys while open. A popup with no owner (a
+tray popover in a windowless app) takes keys itself with `grabKeyboard`
 ([elements.md](elements.md#a-popover-under-a-tray-item)).
 
 ### Window focus
 
-Node focus is per `<window>`, and the window itself may or may not be the
-one the X server sends keys to — that is the window manager's call.
-`<window onFocus>` / `<window onBlur>` report it (ntk ≥ 3.7.0, X
-`FocusIn`/`FocusOut`).
+Node focus is per `<window>`; whether the window gets the keys is the window
+manager's call, reported by `<window onFocus>` / `<window onBlur>`. In an
+unfocused window the focused node **keeps** focus (as
+`document.activeElement` does) but stops looking active: a `<textinput>`
+caret stops blinking until the window is focused again. `focus()` in an
+unfocused window asks for the input focus; the window manager may refuse.
 
-While the window is unfocused the focused node **keeps** focus, exactly as
-`document.activeElement` survives a window blur in a browser — it just
-stops looking active: a `<textinput>` caret stops blinking, and resumes
-when the window is focused again. Calling `focus()` on a node in a window
-that does not have the input focus asks for it (X `SetInputFocus`), though
-a window manager is free to refuse.
-
-Which of an application's windows a key is _delivered_ to is a separate
-question again, and not one the application answers: the server sends it to
-the window holding the input focus, or to whichever descendant of that
-window the pointer happens to be over. A nested `<window>` and a `<popup>`
-put the two apart — the field is focused inside them, the keyboard belongs
-to the top-level — so a key is dispatched to **the node that has focus**,
-whichever of that top-level's windows it arrived at, and bubbles from there
-out through the JSX tree. Where more than one window holds a focused node,
-the one focused last is where the user is typing and the one that answers.
-
-"Unfocused" is likewise the **focus's** answer rather than any one window's.
-A `<popup>` shares its owner's focus, and a managed one — a `<Dialog>` — is a
-real window the window manager focuses in its own right, so opening one takes
-the X focus off the owner at the moment the field inside the dialog starts
-receiving keys. The caret follows the window that actually holds the
-keyboard, whichever of the ones sharing that focus it is; asking the owner
-alone is how a focused field ends up with a `:focus` ring and no caret. By
-the same token, `focus()` on a node inside an open dialog does not ask the
-server for the input focus — the dialog already has it.
+A key goes to **the node that has focus**, whichever of a top-level's windows
+(nested `<window>`, `<popup>`) it arrived at; with several focused nodes, the
+last focused answers. "Unfocused" is the **focus's** answer, not one
+window's: a `<popup>` shares its owner's focus, a managed `<Dialog>` is
+focused by the window manager in its own right, and the caret follows
+whichever holds the keyboard. `focus()` inside an open dialog does not ask
+for input focus — the dialog has it.
 
 ### Focus and visibility
 
-**Focus follows visibility.** A subtree that goes off the screen gives up
-the keyboard: a `<Suspense>` boundary showing its fallback, an `<Activity
-mode="hidden">`, a `display: 'none'`, a `<popup>` being unmapped. The
-focused node fires `onBlur`, `:focus`/`:focus-within` come off, and keys go
-to the window instead — because a control nobody can see must not be
-collecting keystrokes, and the application's state must not advance from
-them. Tab skips invisible nodes for the same reason.
+**Focus follows visibility.** A subtree leaving the screen — a `<Suspense>`
+fallback, `<Activity mode="hidden">`, `display: 'none'`, an unmapped
+`<popup>` — gives up the keyboard: the focused node fires `onBlur`,
+`:focus`/`:focus-within` come off, and keys go to the window, so a hidden
+control never collects keystrokes. Tab skips invisible nodes.
 
-**And it comes back with it.** When the subtree is revealed, focus returns
-to where it was, ring and all, so a boundary that re-suspended mid-edit
-leaves the user typing where they were. Two rules keep that from being
-focus stealing:
-
-- it only happens when **nothing else has the keyboard** — anything focused
-  while the subtree was away keeps focus;
-- it is a restore rather than a navigation: no scrolling into view, and no
-  X `SetInputFocus`, so a background window revealing something never takes
-  the keyboard off another application.
-
-`createRoot({ restoreFocusOnReveal: false })` turns the second half off, for
-an app that wants the browser's answer — focus that fell to nothing stays
-there, and coming back is the user's own Tab. The release is not optional.
+**And it comes back with it**, ring and all, when the subtree is revealed —
+but only if **nothing else has the keyboard** by then, and as a restore: no
+scrolling into view and no request for the window system's focus, so a
+background window never takes the keyboard from another app.
+`createRoot({ restoreFocusOnReveal: false })` turns the restore off (focus
+that fell to nothing stays there, as in a browser); the release always
+happens.
 
 ## Cursors
 
 The `cursor` style property (`'pointer'`, `'text'`, `'wait'`, `'move'`,
-`'crosshair'`, `'ew-resize'`, `'ns-resize'`, `'grab'`, `'not-allowed'`, …)
-applies the deepest hovered node's cursor to the window, via ntk's cursor
-cache over the standard X cursor font.
-
-`cursor: 'none'` hides the pointer (ntk ≥ 4.2.0) — the kiosk case. It is
-the one name that is not a glyph in that font, so ntk builds it from an
-empty 1×1 mask. Note it is **not** the same as setting no cursor at all:
-with none of a node's ancestors naming one, the window inherits the root
-window's cursor and the pointer stays visible.
+`'crosshair'`, `'ew-resize'`, `'ns-resize'`, `'grab'`, `'not-allowed'`, …) of
+the deepest hovered node applies to the window. `cursor: 'none'` hides the
+pointer (the kiosk case) — unlike naming no cursor anywhere, which inherits
+the root window's visible one.
 
 ## Drag and drop {#drag-and-drop}
 
-Drag and drop rides this event system — same hit testing, same
-capture/bubble dispatch, same style states — so the props sit alongside the
-pointer handlers on any drawn element, `<window>` or `<popup>`:
+Drag and drop rides this event system — same hit testing, capture/bubble
+dispatch and style states — on any drawn element, `<window>` or `<popup>`:
 
 ```jsx
 <box
@@ -1002,24 +723,20 @@ pointer handlers on any drawn element, `<window>` or `<popup>`:
 />
 ```
 
-| handler                                | notes                                                                                   |
-| -------------------------------------- | --------------------------------------------------------------------------------------- |
-| `onDragEnter` / `onDragLeave`          | do not propagate — path diffing, like hover; paired with the `':drag-over'` state       |
-| `onDragOver`                           | per pointer position; `e.accept(action)` / `e.reject()` answer the source               |
-| `onDrop`                               | may be async — the protocol reply waits for the returned promise, bounded by a watchdog |
-| `onDragStart` / `onDrag` / `onDragEnd` | the source side of a `draggable` node; `':dragging'` styles it for the duration         |
+| handler                                | notes                                                                     |
+| -------------------------------------- | ------------------------------------------------------------------------- |
+| `onDragEnter` / `onDragLeave`          | do not propagate — path diffing, like hover; paired with `':drag-over'`   |
+| `onDragOver`                           | per pointer position; `e.accept(action)` / `e.reject()` answer the source |
+| `onDrop`                               | may be async — the reply waits for the promise, bounded by a watchdog     |
+| `onDragStart` / `onDrag` / `onDragEnd` | the source side of a `draggable` node; `':dragging'` styles it meanwhile  |
 
-Two things that differ from the events above. A press on a `draggable` node
-is still a **click** until the pointer moves 4px, and a completed drag
-suppresses the click that would otherwise follow — the same bargain the DOM
-makes. And a drag that leaves the app's own windows keeps working: it is
-promoted to the platform's own protocol — XDND on X11, AppKit's dragging on
-Cocoa, the data device on Wayland, OLE on Windows — and can be dropped into
-a file manager, an editor or another react-x11 process, with the handlers
-unchanged.
+A press on a `draggable` node is a **click** until it moves 4px, and a
+completed drag suppresses the click, as in the DOM. A drag leaving the app's
+windows becomes the platform's own — XDND on X11, AppKit dragging on Cocoa,
+the data device on Wayland, OLE on Windows — and drops into a file manager,
+an editor or another react-x11 process with the handlers unchanged.
 
-**The full reference is [drag-and-drop.md](drag-and-drop.md)**: the
-`dropAccept` matching rules, the event payload (`e.files`, `e.text`,
-`e.getData`, `e.items`), `dragData` and lazy payloads, the `useDropTarget`
-and `useDragSource` hooks, drag previews, interoperating with GTK and
-Firefox, and how to drive a drag in a test.
+**Full reference: [drag-and-drop.md](drag-and-drop.md)** — `dropAccept`
+matching, the payload (`e.files`, `e.text`, `e.getData`, `e.items`),
+`dragData` and lazy payloads, `useDropTarget`/`useDragSource`, previews, GTK
+and Firefox interop, and driving a drag in a test.

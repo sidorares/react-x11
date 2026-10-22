@@ -3,7 +3,7 @@
 // invalidate channel are the real ones — the mock harness mounts the tree —
 // and only the Core Animation bridge is faked, so this runs on every
 // platform and says nothing about pixels. What it does pin is the contract
-// docs/macos.md §"Custom drawing on a layer tree" makes: a registered
+// design/macos.md §"Custom drawing on a layer tree" makes: a registered
 // element that overrides `paint` works unchanged through the raster visual,
 // a damage claim — a node or a bare rect — is what re-rasters it, and a
 // bare rect repaints only that part of the raster, with `paintDamage()`
@@ -292,7 +292,7 @@ test('a claim made from inside a frame lands in the next one', async () => {
 
 // --- animations the render server runs --------------------------------------
 //
-// The presenter's half of docs/architecture/animation.md §4: a transition or
+// The presenter's half of design/architecture/animation.md §4: a transition or
 // a loop on a property the node's own layer expresses goes to the bridge as
 // an explicit animation — control points for the curve, additive for a
 // length, from the presentation value for a colour — and schedules no

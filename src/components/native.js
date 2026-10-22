@@ -1,4 +1,4 @@
-// The native half of the widget set (docs/macos.md §Native controls).
+// The native half of the widget set (design/macos.md §Native controls).
 //
 // House rule: **default native, seam out.** On a backend that renders the
 // platform's own control bezels — today the Cocoa backend — the core

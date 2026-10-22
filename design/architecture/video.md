@@ -10,7 +10,7 @@ the element, §7 the seam it rides, §8 the two consumers it is for, §12 what
 can be built now and in what order, and §13 the spikes every number came
 from — two of them new, and one of them overturning the conclusion the first
 version of this record drew for macOS. The mechanism it extends is
-[sprites](../extending.md#parts-of-your-drawing-on-layers-of-their-own),
+[sprites](../../docs/extending.md#parts-of-your-drawing-on-layers-of-their-own),
 which shipped where
 [element-owned layer contents](element-layer-contents.md) was designed; the
 constraint it runs into on X11 is the one
@@ -268,7 +268,7 @@ document.
 
 **GLX / direct GL.** Upload Y and CbCr as textures and convert in a
 fragment shader. This works **today**, through `<glarea>`, with no new
-protocol at all: see [gl.md](../gl.md) and the direct-GL notes in
+protocol at all: see [gl.md](../../docs/gl.md) and the direct-GL notes in
 [glx.md](../glx.md). It is the fastest thing to prototype and it costs a
 `<glarea>`'s constraints — the node owns a real child window or layer, and
 its pixels cannot be read back through the X path. It is also, as it
@@ -526,7 +526,7 @@ camera's native `2vuy` frame is a layer content the screen shows.
 Three things separate capture from playback, and only one of them is work.
 
 **The permission half is already built.** `camera` and `microphone` are
-first-class kinds in [permissions.md](../permissions.md) —
+first-class kinds in [permissions.md](../../docs/permissions.md) —
 `usePermission('camera')`, `permissionStatus`, `requestPermission`,
 `openPrivacySettings` — translated in `src/cocoa/permissions.js` onto the
 bridge's `authorizationStatus`/`requestAuthorization` verbs, which are
@@ -571,7 +571,7 @@ correctly signed `.app` carrying `NSCameraUsageDescription` and a
 `notDetermined` — a refusal that never prompted. Launched through
 LaunchServices (`open`), so that the app is its own responsible process,
 the same binary prompted and was granted. This is the same shape as the
-notification rung's trap in [packaging.md](../packaging.md), and the same
+notification rung's trap in [packaging.md](../../docs/packaging.md), and the same
 rule applies: **a falsy grant with the status still `notDetermined` is not
 a denial**, and code that reads it as one tells the user they declined
 something they were never asked.
@@ -579,7 +579,7 @@ something they were never asked.
 ## 4. Windows
 
 _Written on a Mac against the bridge's source at v0.0.6 and
-[windows.md](../windows.md). Nothing below has been run; §4.3 is what to
+[windows.md](../../docs/windows.md). Nothing below has been run; §4.3 is what to
 run first._
 
 ### 4.1 What the backend has
@@ -681,7 +681,7 @@ drawn by its own GLES rasterizer into a GPU target and handed over through
 `zwp_linux_dmabuf_v1`; `wl_shm` is bound for screen capture only; and
 `wl_subcompositor` is never bound, by design — a subsurface would be a
 second swapchain, a second frame clock and a second import per frame
-([wayland-backend.md](../wayland-backend.md)). Its `<glarea>` is a
+([wayland-backend.md](../../docs/wayland-backend.md)). Its `<glarea>` is a
 rectangle of the window's own target, not a surface of its own.
 
 That makes its video story the shortest one here and, for the frame sink,
@@ -825,7 +825,7 @@ all end in the same `push`.
 
 ## 7. The seam: a sprite whose content is a source
 
-Sprites ([extending.md](../extending.md#parts-of-your-drawing-on-layers-of-their-own),
+Sprites ([extending.md](../../docs/extending.md#parts-of-your-drawing-on-layers-of-their-own),
 `src/nodes/sprites.js`, `src/cocoa/sprites.js`) are how an element hands
 parts of its drawing to the surface presenter, which lifts each onto a
 `CALayer` above the window's bitmap under promotion's rules: asked every
@@ -980,7 +980,7 @@ piece of work, after this, on the same element.
 | bridge verbs, `@windowkit/appkit` | release A, the sink: `createVideoSurface({ width, height, format, colorSpace, range })` → `{ handle, iosurfaceId }` with the colour attachments set; `writeVideoSurface(handle, planes)`, which interleaves I420 into NV12; an optional `videoSurfacePlanes(handle)` answering `Buffer`s over the locked planes so a pipe read lands in the surface with no copy at all. Reuse, unchanged: `setLayerContentsIOSurface`, `surfaceIsInUse`, `surface-released`, `releaseSurface`. Release B, the player: `createPlayer({ url })`, `playerSet(id, { rate, volume, muted, loop })`, `playerSeek(id, seconds)`, `playerLayer(id)` answering a layer handle `addSublayer` takes, `playerCopyFrame(id)` answering a BGRA surface for the drawn presentation, `releasePlayer(id)`; events `player-metadata`, `player-time`, `player-rate`, `player-ended`, `player-error`. Release C, capture, later |
 | bridge verbs, `@windowkit/win32`  | after §4.3: `mediaCreate`, `mediaSet`, `mediaSeek`, `mediaFrame` (frame-server), `mediaRelease` and the engine's events; later `mediaAttach` onto a visual, over the pane host's `CreateSurfaceFromHandle`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Xv                                | a thin wrapper in ntk over node-x11's requests, port and format negotiation, `ShmPutImage` as the HD path, a clean decline where `QueryAdaptors` answers none                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| docs                              | a `<video>` section in [elements.md](../elements.md); the ladder in [macos.md](../macos.md) and [windows.md](../windows.md); the `contents` part in [extending.md](../extending.md); this file is the record they point at                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| docs                              | a `<video>` section in [elements.md](../../docs/elements.md); the ladder in [macos.md](../../docs/macos.md) and [windows.md](../../docs/windows.md); the `contents` part in [extending.md](../../docs/extending.md); this file is the record they point at                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | tests                             | `test/video.test.js` — pixels, fit, the poster, the refusal — on the mock and the in-process X server; `test/cocoa-video.test.js` over `test/helpers/cocoa-bridge.js` for which verbs a lift and a decline send; a real-bridge check through `snapshotWindow`; a sink scenario in `scripts/bench/protocol.js` and a rule in `presenters-gate.json` that a lifted sink paints no window frame per pushed frame                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | spikes                            | `scripts/spikes/video/` — `yuvscan.swift` and `sinkcost.swift`, this PR                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
@@ -998,7 +998,7 @@ piece of work, after this, on the same element.
 - **Seeking, buffering, HLS, DRM.** All the platform player's where there
   is one and entirely absent otherwise. Anything the element exposes that
   only works with `src` is documented as `src`-only, in the way
-  [macos.md](../macos.md) documents the rest of that backend's asymmetries.
+  [macos.md](../../docs/macos.md) documents the rest of that backend's asymmetries.
 - **A compressed-stream source.** `AVSampleBufferDisplayLayer` and its
   synchroniser are the right rung for one, no consumer has asked, and the
   verb count would double. When one does, it is a third source prop on the

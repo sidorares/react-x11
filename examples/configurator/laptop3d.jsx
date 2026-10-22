@@ -24,7 +24,7 @@
 // `'always'` loop would have been a GPU burning quietly behind a store page.
 //
 // **The pose is a pure function**, which is the only part a headless test can
-// see: GL renders where `GetImage` cannot read it (docs/glx.md), so there is
+// see: GL renders where `GetImage` cannot read it (docs/gl.md), so there is
 // no pixel to assert on and `npm run screenshots` skips this element.
 //
 // **The screen shows the page.** What the laptop is displaying is the

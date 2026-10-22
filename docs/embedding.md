@@ -1,18 +1,16 @@
 # Embedding other applications: `<foreign>`
 
-> **X11 only.** Cross-process window embedding does not exist on macOS:
-> there is no way to take another application's window into your own view
-> hierarchy, and this is not a gap waiting to be filled — the platform does
-> not offer the primitive. On the Cocoa backend `<foreign>` refuses: it lays
-> out as an empty box, never calls `onReady`, and calls `onError` once — and
+> **X11 only.** macOS offers no primitive for taking another application's
+> window into your own. On the Cocoa backend `<foreign>` lays out as an empty
+> box, never calls `onReady`, and calls `onError` once;
 > `useSupports('embedding')` is false there, so a component can ask before
-> rendering one. What does work there is [`<Frame>`](frame.md), which embeds
-> a pane of _your own_ application, and reaches the same place through
-> shared surfaces instead of reparenting.
+> rendering one. [`<Frame>`](frame.md) does work there: it embeds a pane of
+> _your own_ application through shared surfaces instead of reparenting.
 
-Everything else react-x11 draws, it draws itself. `<foreign>` is the one
-element that shows somebody else's pixels: another process's top-level X
-window, reparented into yours and laid out like any other child.
+`<foreign>` is the one element that shows somebody else's pixels: another
+process's top-level X window, reparented into yours and laid out like any
+other child — a terminal pane, a video surface, a docked tray icon, a
+control-panel applet.
 
 ```jsx
 <foreign
@@ -23,36 +21,27 @@ window, reparented into yours and laid out like any other child.
 />
 ```
 
-That is a terminal pane, a video surface, a docked tray icon and a
-control-panel applet — four things an application cannot draw for itself and
-has no business reimplementing.
-
-When the other process is a module of **your own application**, don't wire
-this up by hand: [`<Frame>`](frame.md) is `<foreign>` plus the process — the
-fork, the props, the callbacks, the bridged theme, the crash fallback. This
-page is the window half, and everything below about stacking, focus and
-teardown holds for a `<Frame>` pane too. The pane's own root window opts in
-with `<window embeddable>`: created **unmapped** — a window waiting to be
-embedded is unmapped, that is what waiting looks like — and mapped by the
-embedder once reparented. On X11 it is an XEmbed client for Tab: `FOCUS_IN`
-with `FIRST` or `LAST` lands on its first or last stop, and Tab off an end of
-its order sends `FOCUS_NEXT` or `FOCUS_PREV`, so Tab goes through a
-react-x11 guest as it goes through any subtree of the host's.
+For a module of **your own application**, use [`<Frame>`](frame.md):
+`<foreign>` plus the process — the fork, the props, the callbacks, the bridged
+theme, the crash fallback. Everything below about stacking, focus and teardown
+holds for a `<Frame>` pane too. The pane's root window opts in with
+`<window embeddable>`: created **unmapped**, which is what waiting to be
+embedded looks like, and mapped by the embedder once reparented. On X11 it
+speaks XEmbed's Tab, so Tab goes through a react-x11 guest as through any
+subtree of the host's.
 
 **Being the guest yourself** — a react-x11 app embedded in somebody else's UI
-— is that same prop plus one accessor: `windowHandleOf(ref)` (or
-`useWindowHandle(ref)`) is the number you hand the host, out of band, the way
-`xterm -into` is handed one. On X11 it is the window's XID and the host
-reparents it. On Windows it is a composition surface handle and the host
-binds it to a visual of its own, because a window there stops presenting the
-moment it becomes a child ([windows-embedding.md](windows-embedding.md) has
-the measurements). `null` means this backend has no way to be a guest — the
-capability, not a failure.
+— is that same prop plus `windowHandleOf(ref)` (or `useWindowHandle(ref)`):
+the number you hand the host, out of band, the way `xterm -into` is handed
+one. On X11 it is the window's XID, which the host reparents. On Windows it is
+a composition surface handle the host binds to a visual of its own, because a
+window there stops presenting the moment it becomes a child
+([design notes](../design/windows-embedding.md)). `null` means this backend
+has no way to be a guest — the capability, not a failure.
 
-The protocol underneath is [XEmbed](http://specifications.freedesktop.org/xembed/0.5/),
-implemented in ntk (`XEmbedSocket`, ntk ≥ 7.4.0). This page is the React half:
-what the element does, what it promises about a window it does not own, and
-what it does with the keyboard.
+The protocol underneath is
+[XEmbed](http://specifications.freedesktop.org/xembed/0.5/). Design notes:
+[design/embedding.md](../design/embedding.md).
 
 ## Two ways in
 
@@ -79,9 +68,8 @@ is in it — that is the point.
 ## Most clients do not speak XEmbed
 
 `xterm -into`, `mpv --wid`, VLC and Wine set no `_XEMBED_INFO` and want plain
-reparenting. A missing property is not an error and not a fallback: it is the
-ordinary case, and it is what makes a terminal pane work at all. `onEmbedded`
-reports which happened:
+reparenting. That is the ordinary case, not an error or a fallback, and it is
+what makes a terminal pane work at all. `onEmbedded` reports which happened:
 
 ```jsx
 onEmbedded={({ id, xembed, version }) => { … }}
@@ -96,18 +84,10 @@ client is mapped and unmapped as its own `XEMBED_MAPPED` bit asks.
 
 Unmounting a `<foreign>` **reparents the client back to the root window and
 drops it from the save set. It never destroys it.** A React tree changing
-shape is not a reason for another application to lose its window, and the
-first test in `test/foreign.test.js` is there to keep it that way.
+shape is not a reason for another application to lose its window.
 
 The same holds for `windowId` changing: the client that is leaving is handed
 back before the new one is taken.
-
-What this costs is an ordering rule, and it is the one thing worth knowing
-about the implementation: the reparent is issued **synchronously** during
-teardown, because `WindowNode` destroys its own X window in the same turn and
-`DestroyWindow` takes every inferior with it. The save set does not cover
-that — X processes it when a _connection_ closes, not when a window is
-destroyed.
 
 `onClientGone` fires when the client is destroyed by its own process, or
 reparented away by someone else. Nothing further is sent to a dead id.
@@ -116,32 +96,28 @@ reparented away by someone else. Nothing further is sent to a dead id.
 
 A released client is a top-level window again, and **a running window manager
 will manage it** — frame it, put it in the taskbar, place it wherever its
-policy says. That is the right outcome for an unmount (`examples/foreign.jsx`
-is built on it: detach the pane and the terminal is simply a terminal window
-on the desktop), and it is a trap for one thing:
+policy says. That is right for an unmount (`examples/foreign.jsx` is built on
+it: detach the pane and the terminal is simply a terminal window on the
+desktop), and a trap for one thing:
 
 > **Do not hand a client from one `<foreign>` to another by unmounting the
 > first and mounting the second with the same `windowId`.**
 
-The window is parked at the root for the moment in between, which is long
-enough to be offered to the window manager. The WM's `ReparentWindow` into a
-frame of its own then arrives _after_ the second pane has taken the client,
-undoes it, and the second pane reports `onClientGone` — for a client that is
-alive and now framed on the desktop. It is a race with another process, so it
-does not always happen, which is worse than if it always did.
+In between, the window is parked at the root long enough to be offered to the
+window manager, whose reparent into a frame can arrive _after_ the second pane
+has taken the client and undo it; the second pane then reports `onClientGone`
+for a client that is alive and framed on the desktop. It is a race with
+another process, so it does not always happen.
 
-Change `windowId` on **one** node instead. That path releases and re-embeds
-in order and is tested; the client is only ever at the root while nothing
-else wants it. (Re-embedding a window the WM has already framed also works —
-the reparent pulls it out and the WM unmanages it — the hazard is only the
-moment right after a release.)
+Change `windowId` on **one** node instead: that path releases and re-embeds in
+order. Re-embedding a window the WM has already framed also works — the
+hazard is only the moment right after a release.
 
 ## Layout and stacking
 
 The rect comes from yoga like any other child, and every change moves the
-client and sends it the synthetic ICCCM 4.1.5 `ConfigureNotify` — root-relative
-coordinates, which is the question a client actually asks and which its own
-`ConfigureNotify` (relative to the container it now sits in) cannot answer.
+client and tells it its root-relative position (the synthetic ICCCM
+`ConfigureNotify`).
 
 Two consequences of it being a real X window, both shared with
 [`<glarea>`](elements.md#glarea):
@@ -154,29 +130,15 @@ Two consequences of it being a real X window, both shared with
   hit testing, which is exactly right for a terminal or a video surface.
 
 `backgroundColor` in the `style` is what shows in the rect before a client
-arrives and after one leaves — it is the container window's background, painted
-by the server. There is no separate prop for it, so the name is the one used
-everywhere else.
+arrives and after one leaves — the container window's background, painted by
+the server. There is no separate prop for it.
 
 ## Focus, and who gets the keys
 
-X gives the input focus to one window. XEmbed's answer is that the embedder
-holds the real focus and gives the client a _logical_ one by message, and the
-classic implementation of that is a **focus proxy**: an invisible InputOnly
-window that takes the X focus and forwards keystrokes into the client with
-`SendEvent`.
-
-**react-x11 does not use a proxy**, and the reason matters if you are reading
-the code expecting one:
-
-- A proxy inside our own toplevel means the toplevel sees `FocusOut` the moment
-  the client is focused. react-x11 reads that as the window losing focus —
-  carets stop blinking, `<window onBlur>` fires — and the element would be told
-  to blur the client it had just focused.
-- A key that reaches a proxy has already gone past every handler in the React
-  tree, so an application chord could never be checked first.
-
-So the X focus stays on your window, and the rule is:
+X gives the input focus to one window. react-x11 keeps the X focus on your
+window and gives the client a _logical_ focus by XEmbed message — no focus
+proxy, which would make your window read the client's focus as its own blur
+and let keys past every handler in the React tree. So the rule is:
 
 > While a `<foreign>` holds focus, the application's handlers see every key
 > first. Anything they do not consume is forwarded to the client.
@@ -205,32 +167,30 @@ Edit menu's, which is what a user of that terminal expects. An application
 chord that must win everywhere goes in an `onKeyDown` like the one above,
 which is checked before either.
 
-Everything else about focus is the ordinary focus manager:
-
-| what happens                                 | what the client is told                                                                                                                      |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| the node takes focus by click or `focus()`   | `XEMBED_WINDOW_ACTIVATE`, then `XEMBED_FOCUS_IN` detail `CURRENT`                                                                            |
-| Tab into it                                  | `FOCUS_IN` detail `FIRST` — focus your first widget                                                                                          |
-| Shift+Tab into it                            | `FOCUS_IN` detail `LAST`                                                                                                                     |
-| focus leaves, or the window deactivates      | `FOCUS_OUT`, then `WINDOW_DEACTIVATE`                                                                                                        |
-| the client sends `XEMBED_REQUEST_FOCUS`      | the node is focused _through the focus manager_, so `:focus`, `:focus-within`, the previous node's `onBlur` and the AT-SPI bridge all see it |
-| the client sends `FOCUS_NEXT` / `FOCUS_PREV` | focus moves to the next/previous react-x11 focusable — Tab crosses the boundary as if it were one application                                |
+Everything else about focus is the ordinary focus manager. Clicking or
+`focus()`-ing the node activates the client and focuses it; Tab and Shift+Tab
+into it focus its first or last widget; focus leaving, or the window
+deactivating, unfocuses and deactivates it. A client asking for the focus
+(`onRequestFocus`) is focused _through the focus manager_, so `:focus`,
+`:focus-within`, the previous node's `onBlur` and the AT-SPI bridge all see
+it. The XEmbed message behind each step is in the
+[design notes](../design/embedding.md#focus-and-who-gets-the-keys).
 
 A `<foreign>` is focusable by default, like a `<textinput>`. `focusable={false}`
 opts out, which is what a video surface wants.
 
-Tab is _forwarded_ rather than acted on: an XEmbed client has a tab chain of its
-own and says so with `FOCUS_NEXT` when it runs off the end of it. A client that
-speaks no XEmbed — a terminal — keeps Tab for good, which is what a terminal is
-for; click elsewhere to leave.
+Tab is _forwarded_ rather than acted on. An XEmbed client has a tab chain of
+its own, and running off either end of it moves focus to the next or previous
+react-x11 focusable — Tab crosses the boundary as if it were one application.
+A client that speaks no XEmbed — a terminal — keeps Tab for good, which is
+what a terminal is for; click elsewhere to leave.
 
 **Dead keys and Compose stay out of it.** react-x11's own composition
 ([events.md](events.md#composition)) does not run while a `<foreign>` holds
-focus: the client is another program with an input method of its own, and an
-accent composed on this side would swallow the `KeyPress` on its way there
-and hand back a character with nowhere to put it. The raw key is forwarded
-and the client composes it, which is also what makes `é` work in an embedded
-terminal whatever the toolkit inside it is.
+focus: the client has an input method of its own, and an accent composed on
+this side would swallow the key on its way there. The raw key is forwarded and
+the client composes it, which is what makes `é` work in an embedded terminal
+whatever the toolkit inside it is.
 
 ### The one gap
 
@@ -243,24 +203,22 @@ would make in the other direction.
 ## Reparenting window managers
 
 A `<foreign>` inside a toplevel that the window manager has reparented into a
-frame is offset by that frame, and the root-relative coordinates in the
-synthetic `ConfigureNotify` have to account for it. react-x11 tracks the
-toplevel's screen origin from `ReparentNotify`/`ConfigureNotify` and asks the
-server rather than trusting reported geometry — the same problem
-`src/components/anchor.js` solves for popup placement.
+frame is offset by that frame. react-x11 tracks the toplevel's screen origin
+and tells the client its true root-relative position; nothing is needed from
+the app.
 
 ## Props
 
-| prop             |                                                                                                                               |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `windowId`       | the X window to embed. Changing it hands the old client back first. Omit it to adopt whatever is put inside the node instead. |
-| `onReady`        | `({ windowId })` — the node's own container id, offered before anything is embedded, to spawn a program into                  |
-| `onEmbedded`     | `({ id, xembed, version })` — a client is in                                                                                  |
-| `onClientGone`   | destroyed, or reparented away by someone else                                                                                 |
-| `onRequestFocus` | the client asked for the focus (it is then given through the focus manager)                                                   |
-| `onError`        | the embed failed — no such window, or it went away mid-handshake. Without a handler, a console warning.                       |
-| `focusable`      | default `true`; takes part in the focus manager and the tab chain                                                             |
-| `style`          | layout as usual; `backgroundColor` is what shows with no client in                                                            |
+| prop             |                                                                                                                |
+| ---------------- | -------------------------------------------------------------------------------------------------------------- |
+| `windowId`       | the X window to embed; a change hands the old client back first. Omit to adopt whatever is put inside the node |
+| `onReady`        | `({ windowId })` — the node's own container id, before anything is embedded, to spawn a program into           |
+| `onEmbedded`     | `({ id, xembed, version })` — a client is in                                                                   |
+| `onClientGone`   | destroyed, or reparented away by someone else                                                                  |
+| `onRequestFocus` | the client asked for the focus (then given through the focus manager)                                          |
+| `onError`        | the embed failed — no such window, or it went away mid-handshake; without a handler, a console warning         |
+| `focusable`      | default `true`; takes part in the focus manager and the tab chain                                              |
+| `style`          | layout as usual; `backgroundColor` shows with no client in                                                     |
 
 ## Example
 
@@ -275,14 +233,7 @@ FOREIGN_CMD="mpv --wid=%WID% video.mp4" npm run examples:foreign
 
 ## What is not here yet
 
-- **`<TrayHost>`** — owning the `_NET_SYSTEM_TRAY_S<screen>` manager selection
-  and rendering a `<foreign>` per docked icon, which is what makes a react-x11
-  panel a real desktop shell. The system tray is XEmbed's biggest surviving
-  consumer.
+- **`<TrayHost>`** — hosting other applications' tray icons (owning the
+  system tray selection, a `<foreign>` per docked icon).
 - **The plug side** — a react-x11 root that renders _into_ someone else's
-  socket, for shipping as a tray icon or a panel applet. Lower value and
-  deliberately last: GTK4 removed `GtkPlug` and Qt dropped `QX11Embed*` after
-  Qt4, so the population of hosts willing to embed us is shrinking while the
-  population of clients we can host is not.
-
-Both are tracked in [issue #269](https://github.com/sidorares/react-x11/issues/269).
+  XEmbed socket, as a tray icon or a panel applet.

@@ -1,4 +1,4 @@
-// The native-controls policy (docs/macos.md §Native controls): the theme's
+// The native-controls policy (design/macos.md §Native controls): the theme's
 // `controls` token and the per-instance `native` prop decide whether a
 // control wears the platform bezel, and a backend without the capability —
 // the mock, X11 — draws the themed controls under every setting. The bezels

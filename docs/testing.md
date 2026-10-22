@@ -2,23 +2,20 @@
 
 `react-x11/test` renders your app through a **real X11 protocol connection
 to a real X server, in this process** — no `$DISPLAY`, no Xvfb, no native
-dependency, works on macOS. So a test can read pixels back with `GetImage`
-and inject input through the server's own grab and focus machinery, which
-means a passing test has exercised the path a user actually takes.
-
-That server is node-x11's `lib/xserver`, written in JavaScript. It arrives
-with ntk, so there is nothing new to install.
+dependency, works on macOS. A test can read pixels back with `GetImage` and
+inject input through the server's own grab and focus machinery, so a
+passing test has exercised the path a user actually takes. The server is
+node-x11's `lib/xserver`, written in JavaScript; it arrives with ntk, so
+there is nothing new to install.
 
 **The harness drives the X11 backend**, on every platform including macOS —
 there is no `'cocoa'` backend for `renderX11()`, and `createRoot()`'s own
-choice does not apply here because the harness always passes it an `app`.
-That is deliberate rather than pending: the point of this harness is a real
-protocol connection to a real server in-process, and macOS has no protocol
-to connect to. What it means in practice is that an app targeting both
-backends tests its **tree, its queries and its behaviour** here — all of
-which are shared — while anything that is genuinely per-backend (a native
-bezel's pixels, an `NSMenu`, a pasteboard flavour) is covered by the
-renderer's own Cocoa tests against a fake bridge, and by looking at a Mac.
+choice does not apply because the harness always passes it an `app`. This
+is by design: macOS has no protocol to connect to in-process. An app
+targeting several backends tests its **tree, its queries and its
+behaviour** here — all shared — while anything genuinely per-backend (a
+native bezel's pixels, an `NSMenu`, a pasteboard flavour) is checked by
+running on that platform.
 
 ```js
 import { test, afterEach } from 'node:test';
@@ -45,10 +42,9 @@ test('adding a task', async () => {
 });
 ```
 
-The vocabulary is Testing Library's, because that is the one React
-developers already have. It is not Testing Library — there is no document
-for it to query — but `getByRole` / `userEvent.click` / `waitFor` mean here
-what they mean there.
+The vocabulary is Testing Library's. It is not Testing Library — there is
+no document for it to query — but `getByRole` / `userEvent.click` /
+`waitFor` mean here what they mean there.
 
 ## `renderX11(element, options)`
 
@@ -130,10 +126,9 @@ point `AT_SPI_BUS_ADDRESS` at an in-process bus instead — see
 
 ## Components
 
-The queries above see what a user sees. Sometimes a test needs the React
-side instead — _which component_ made this node, with what props and state —
-and this is the layer for it. Prefer the user-visible queries when either
-would do; reach here when the question is genuinely about a component.
+The queries above see what a user sees. When a test needs the React side
+instead — _which component_ made this node, with what props and state — this
+is the layer for it. Prefer the user-visible queries when either would do.
 
 ```js
 const row = screen.getByComponent('TaskRow'); // also RegExp or predicate
@@ -147,10 +142,10 @@ sourceOf(node); // { file, line, column } of the JSX that made it
 its output — the container `within()` wants next. Ownership is React's JSX
 owner (_who wrote the element_), so content passed as children belongs to
 the component whose JSX it appears in, and a miss lists the component names
-that are in the tree. All of this reads debug info development React records
-on every fiber (`_debugOwner`, `_debugStack` — the same data
-[click-to-component](click-to-component.md) navigates by), so it costs no
-setup and no dependency, and returns nothing in production builds.
+that are in the tree. All of this reads the debug info development React
+records on every fiber (the data [click-to-component](click-to-component.md)
+navigates by), so it needs no setup and no dependency, and returns nothing
+in production builds.
 
 ### `inspect(node)` and `setHook`
 
@@ -164,19 +159,17 @@ await c.setHook(0, 41); // set a useState/useReducer value…
 await c.setHook(1, ['filter', 'text'], 'milk'); // …or a path inside one
 ```
 
-This drives the **React DevTools backend in-process**: the same
-react-debug-tools inspection and the same override path the DevTools app
-uses, minus its WebSocket — nothing listens on anything, and `ws` is never
-loaded ([devtools.md](devtools.md) has the wiring). It needs the
-`react-devtools-core` package in your devDependencies; the queries above
-work without it.
+This drives the **React DevTools backend in-process** — the same inspection
+and override path the DevTools app uses, minus its WebSocket: nothing
+listens on anything, and `ws` is never loaded ([devtools.md](devtools.md)).
+It needs the `react-devtools-core` package in your devDependencies; the
+queries above work without it.
 
 What to know before leaning on it:
 
-- **Reading hooks re-runs the component.** That is how react-debug-tools
-  recovers hook names: the render function is invoked once under a stub
-  dispatcher, output discarded, `console` muted. A render-counting test
-  will see it.
+- **Reading hooks re-runs the component** once, output discarded and
+  `console` muted — that is how hook names are recovered. A render-counting
+  test will see it.
 - **Values:** `props` and editable hook values are the live objects;
   everything else is DevTools' copy — primitives exact, deep objects as
   the same previews the DevTools panel shows.
@@ -211,7 +204,7 @@ await userEvent.wheel(list, { deltaY: 0.25, smooth: true }); // a touchpad
 await userEvent.clickOutside(); // dismisses a menu — see below
 ```
 
-Two things this buys that emitting on the ntk window never could:
+Input goes through the server, so:
 
 **Grabs are real.** A `<popup grab>` is dismissed by a real press outside
 it. But note _where_ outside: react-x11's popups grab with **owner events**,
@@ -222,17 +215,15 @@ how a test says that; clicking another widget and expecting the menu to close
 is testing the wrong thing.
 
 **Focus is real**, so `trapFocus`, `autoFocus` and Tab traversal are
-exercised rather than simulated. Deciding which window gets the keyboard is a
-window manager's job and there is no window manager, so `renderX11` plays the
-part with one `SetInputFocus` at mount — otherwise keys would go to whatever
-the pointer happened to be over, which is a rule nobody should have to learn.
+exercised rather than simulated. There is no window manager, so `renderX11`
+gives the window input focus once at mount — otherwise keys would go to
+whatever the pointer happened to be over.
 
-**A smooth scroll is the one exception**, and says so. Whole notches go
-through the server as the button presses X really uses, but a touchpad's
-fraction of a notch is XI2, and the in-process server has no XInput — there
-are no valuators to inject. `{ smooth: true }` therefore delivers the `wheel`
-event ntk would have derived from them, straight to the window. Everything
-above it is still the real path: the dispatch, the chain, the default action.
+**A smooth scroll is the one exception.** Whole notches go through the
+server as the button presses X really uses, but a touchpad's fraction of a
+notch is XI2, which the in-process server lacks, so `{ smooth: true }`
+delivers the `wheel` event straight to the window. Everything above it is
+still the real path: the dispatch, the chain, the default action.
 
 **Typing works for text the layout does not have.** `userEvent.type(input,
 'héllo')` binds a spare keycode for `é` on both the server's keymap and the
@@ -349,12 +340,9 @@ event, a re-render of React state and a frame: `act` runs all three, so the
 repaint is on screen when `userEvent.hover` resolves.
 
 It `act`s once more after the attempt that passes, so what it resolves with
-is on screen. That matters for a node. What an attempt finds can have arrived
-in the pause before it — an fs read, a timer — and that commits outside
-`act`, on React's own scheduler, while the frame that lays it out runs on the
-third clock, which need not have ticked since. Without that last `act`, a
-row found that way could have no rect yet, and the click after it would throw
-`has no laid-out rect yet`.
+is on screen and laid out: a row that arrived from an fs read or a timer
+committed outside `act`, and without that last frame the click after it
+would throw `has no laid-out rect yet`.
 
 ```js
 const row = await waitFor(() => screen.getByText('notes.txt'));
@@ -397,14 +385,10 @@ await toPNG(ctx, '/tmp/shot.png', { width: 320, height: 240 });
 ```
 
 A pixel proves the tree, the layout, the clip, the paint order, the colour
-parsing and the wire encoding at once — and it is the only assertion that
-catches the class of bug where everything commits correctly and nothing
-reaches the screen. Two details it demands: the readback is straight
-**RGBA**, as on a canvas, and antialiasing means every comparison takes a
-**tolerance**.
-
-`toPNG` is also how a pull request gets a screenshot rendered by its own
-code, which this repo asks for ([AGENTS.md](../AGENTS.md), "Pull requests").
+parsing and the wire encoding at once — the only assertion that catches
+everything committing correctly and nothing reaching the screen. The
+readback is straight **RGBA**, as on a canvas, and antialiasing means every
+comparison takes a **tolerance**.
 
 ## Animations
 
@@ -420,17 +404,16 @@ clock.restore();
 
 Install it **before** the render. Every timestamp in the tree has to come
 from the same clock: mixing a real start time with a frozen `now` gives a
-transition that never progresses, which is a confusing way to spend an hour.
+transition that never progresses.
 
 ## The desktop's appearance
 
-The built-in palette follows the desktop, so `renderX11` **pins** it: an
-unpinned suite renders in whatever colours the machine running it is in, and
-a pixel assertion passes on a light desktop and fails on a dark one with
-nothing in the test to say why. The pin is light unless the render says
-otherwise, and it covers everything `useSystemAppearance()` reports — so a
-component that follows reduced motion, contrast or the accent is tested the
-way one that follows the scheme is:
+The built-in palette follows the desktop, so `renderX11` **pins** it —
+otherwise a pixel assertion would pass on a light desktop and fail on a
+dark one. The pin is light unless the render says otherwise, and it covers
+everything `useSystemAppearance()` reports, so a component that follows
+reduced motion, contrast or the accent is tested the way one that follows
+the scheme is:
 
 ```jsx
 await renderX11(<App />); // light
@@ -480,13 +463,12 @@ Three mistakes throw rather than pass quietly:
 - **`setAppearance` before `renderX11`.** The render pins as it mounts and
   would replace what was set, so it throws and says to pass `appearance`.
 
-`cleanup()` releases the pin, and only the pin: what a real desktop answered
-is not the harness's to throw away. A pinned value is never written to the
-cache a real app starts its first frame from ([appearance.md](appearance.md)),
-so a suite run on a developer's desktop leaves that desktop's remembered
-answer as it found it — and an answer the desktop sends while a pin is held,
-from a probe a `'system'` test started, is dropped rather than painted into
-the next test.
+`cleanup()` releases the pin, and only the pin. A pinned value is never
+written to the cache a real app starts its first frame from
+([appearance.md](appearance.md)), so a suite run on a developer's desktop
+leaves that desktop's remembered answer as it found it, and an answer the
+desktop sends while a pin is held is dropped rather than painted into the
+next test.
 
 ## The mock backend
 
@@ -502,13 +484,11 @@ rather than failing the mount. A component that asks before rendering one
 mounts its fallback here; one that does not still mounts.
 
 A batch records as the fills it stands for: `ctx.fillRects([[x, y, w, h], …])`
-leaves one `fillRect` operation per rectangle, because the only difference
-between them is a request count and there is no server here to send it to. So
-an assertion on what a drawing painted holds whether or not it batched.
+leaves one `fillRect` operation per rectangle, so an assertion on what a
+drawing painted holds whether or not it batched.
 
 ## Testing Library itself
 
 It does not work here and no shim will fix it: its queries are built on a
-document. The five failure modes are recorded in the
-[negative-results register](ecosystem.md#render-time). This page is the
-replacement, not a workaround for it.
+document ([ecosystem.md](ecosystem.md#render-time) lists the failure
+modes). This page is the replacement.

@@ -1,4 +1,4 @@
-// Threaded mode by default (docs/macos.md §"JS on a worker"). On macOS the
+// Threaded mode by default (design/macos.md §"JS on a worker"). On macOS the
 // process main thread is AppKit's — the only thread it lets own a window —
 // and while the app's JS runs there, every menu, drag, live resize and
 // modal panel stops it. So the first import of react-x11 on the main thread

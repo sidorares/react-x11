@@ -361,7 +361,7 @@ export class WindowInvalidate {
     }
     // A retained presenter keeps a per-node diff instead of damage rects,
     // and this is the one channel every change already announces itself on
-    // (docs/macos.md §"One renderer, two presenters"). Feature-detected: an
+    // (design/macos.md §"One renderer, two presenters"). Feature-detected: an
     // ntk window has no ear here and the X11 path is byte-identical. A
     // presenter that answers `true` has taken the claim onto a layer of its
     // own (src/cocoa/promotion.js): the bitmap owes nothing for it, and the

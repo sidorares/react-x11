@@ -7,7 +7,7 @@ built from it. Measured in the in-process X server with real text shaping
 (KaTeX Main), on one machine (Apple M1 Pro, node 26), and against Chrome 152. The outside facts in §8 are as of the date and linked; they will
 drift._
 
-_[styling.md](../styling.md#grid) is the reference for the style
+_[styling.md](../../docs/styling.md#grid) is the reference for the style
 properties; this is why they are the shape they are._
 
 ---

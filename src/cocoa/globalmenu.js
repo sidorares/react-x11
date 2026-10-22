@@ -1,4 +1,4 @@
-// The macOS menu bar as a global-menu export (docs/macos.md §Menus).
+// The macOS menu bar as a global-menu export (design/macos.md §Menus).
 //
 // The Linux global menu was built for exactly this moment: the item
 // vocabulary is data, and the pure snapshot/IdAllocator machinery in

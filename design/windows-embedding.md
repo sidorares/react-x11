@@ -133,7 +133,7 @@ is two facts the implementation rests on — both now asserted by the bridge's
 `SetParent` across processes works, and it is the closest thing Windows has to
 reparenting. It is also the one the platform warns about, and the warning is
 real: parenting across a process boundary attaches the two threads' input
-queues, so a hung child hangs the parent's input — docs/windows.md already
+queues, so a hung child hangs the parent's input — design/windows.md already
 says this of `<foreign>` and it is the reason to be slow here.
 
 It is worth noting what the X11 version is used for (docs/embedding.md): a

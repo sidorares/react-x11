@@ -1,6 +1,6 @@
 // Does core `<glarea>` work on the win32 backend?
 //
-// docs/windows.md answers this with ANGLE — EGL and GLES translated to
+// design/windows.md answers this with ANGLE — EGL and GLES translated to
 // Direct3D 11, presenting into a composition swapchain on a child visual, the
 // way the Cocoa `<glarea>` is an IOSurface sublayer. Two DLLs to ship, and
 // optional the way x11-dri is. This probe says what actually happens today.

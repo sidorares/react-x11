@@ -1,4 +1,4 @@
-// The window's half of XDND (docs/architecture/drag-and-drop.md): the drop
+// The window's half of XDND (design/architecture/drag-and-drop.md): the drop
 // targets registered under it and the types they accept.
 
 import {

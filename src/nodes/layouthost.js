@@ -2,7 +2,7 @@
 // in layouts.js arranges its children itself. Each child is a yoga root of
 // its own, and the host is a measured leaf in its parent — so what the
 // algorithm decides is on screen in the frame that asked.
-// docs/architecture/custom-layout.md is the design record.
+// design/architecture/custom-layout.md is the design record.
 
 import {
   createLayoutNode,

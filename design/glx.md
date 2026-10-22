@@ -1,9 +1,9 @@
 # 3D over indirect GLX
 
 How a 3D scene works over this transport, and what the transport can never
-do. `<glarea>` and the three ways underneath it are [gl.md](gl.md); the
+do. `<glarea>` and the three ways underneath it are [gl.md](../docs/gl.md); the
 scene graph that rides on this one is
-[`@react-x11/components/three`](ecosystem.md). This page is the design
+[`@react-x11/components/three`](../docs/ecosystem.md). This page is the design
 underneath both, kept because the constraints explain most of the API's
 shape — and because they are permanent: they are properties of a wire
 protocol frozen in the 1990s, not of any implementation.
@@ -13,7 +13,7 @@ default `glPolicy` everything drawn into it travels as **indirect GLX**: the
 GL protocol encoded into the same X connection as everything else. No direct
 rendering, no native bindings, no GPU driver bindings — the same pure-JS
 story as the rest of the stack. (The direct path, which does take a native
-addon, is [gl.md](gl.md)'s.)
+addon, is [gl.md](../docs/gl.md)'s.)
 
 The cost of that reach is a **fixed-function OpenGL 1.x pipeline**, and that
 single fact decides the rest.
@@ -92,7 +92,7 @@ context. To layout, `<glarea>` is a leaf sized by ordinary layout props.
 
 The r3f-shaped names this page used to map — `<mesh>`, the geometries, the
 materials, the lights, the camera prop — belong to
-[`@react-x11/components/three`](ecosystem.md) now, together with the display-
+[`@react-x11/components/three`](../docs/ecosystem.md) now, together with the display-
 list cache described above: it keeps its own reconciler and its own indirect
 renderer, built on exactly the constraints this page documents. What stays
 here is the transport, which is what those constraints come from.
@@ -124,7 +124,7 @@ replays the same protocol onto WebGL2.
   top of the parent's drawing, so the surface's own children are drawn on
   windows of their own stacked above it — opaque ones, one per region they
   reach, since a child window cannot be translucent without a compositor
-  (`src/gloverlay.js`, [elements.md](elements.md#glarea)). Except on
+  (`src/gloverlay.js`, [elements.md](../docs/elements.md#glarea)). Except on
   XQuartz, where the window server composites the surface above every X
   window, those included, and the children are not drawn at all.
 

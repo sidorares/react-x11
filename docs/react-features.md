@@ -1,29 +1,18 @@
 # React features
 
-You already know React. This page is about the parts where that knowledge
-transfers unchanged, the parts where it transfers with a caveat, and the
-four places where a habit from the DOM will quietly not work.
+**Everything in React core behaves as documented** — hooks, context, error
+boundaries, `<Suspense>`, `lazy`, `use`, transitions, `<Profiler>`,
+`<StrictMode>`. react-x11 is a normal React 19 renderer, and where React's
+behaviour does not depend on the DOM, it is the same behaviour. This page is
+the caveats, and the four places where a DOM habit quietly does not work.
 
-The short version: **everything in React core behaves exactly as documented.**
-Hooks, context, error boundaries, `<Suspense>`, `lazy`, `use`, transitions,
-`<Profiler>`, `<StrictMode>` — all of it. react-x11 is a normal React 19
-renderer, and where React's behaviour does not depend on the DOM, it is the
-same behaviour.
-
-Everything on this page is also something you can drive by hand — in the
-apps that depend on it rather than in a panel of its own:
+The examples that exercise it:
 
 ```sh
 npm run examples:monitor      # priority: a filter over ~780 live rows
 npm run examples:chat         # <Activity>, useOptimistic, <Suspense>
 npm run examples:timer        # error boundaries, and where a crash is logged
 ```
-
-Those replaced an `examples/react-features.jsx` that had a panel per feature.
-A panel proves the API exists; it cannot show you the choice, because nothing
-in it costs anything. `monitor`'s field is expensive because a process list
-is expensive, and that is the only condition under which deferring it is a
-decision rather than a demonstration.
 
 What differs is anything the DOM used to define for you:
 
@@ -37,25 +26,26 @@ What differs is anything the DOM used to define for you:
 
 ## At a glance
 
-|                                                                            |                                                                            |
-| -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `useState`, `useReducer`, `useContext`, `useMemo`, `useCallback`, `useRef` | unchanged                                                                  |
-| `useImperativeHandle`, `forwardRef`, `ref` as a prop, ref cleanup          | unchanged                                                                  |
-| `use(promise)`, `use(context)`, `React.lazy`                               | unchanged                                                                  |
-| `useOptimistic`, `useActionState`, `<Profiler>`, custom hooks              | unchanged                                                                  |
-| `useSyncExternalStore`                                                     | unchanged, and the best way to bridge non-React code                       |
-| `useTransition`, `startTransition`, `useDeferredValue`                     | work, and really do stay responsive                                        |
-| `useLayoutEffect` vs `useEffect`                                           | the difference is real — one paint versus two                              |
-| `<Suspense>`                                                               | works; read [Suspense and Activity](#suspense-and-activity) for `<window>` |
-| `<Activity>`                                                               | works; `mode="hidden"` around a `<window>` unmaps it                       |
-| Error boundaries                                                           | work — but **where you put one** decides if the window survives            |
-| `<StrictMode>`                                                             | safe to use; effects are not double-invoked on the first mount             |
-| `useId`                                                                    | works; there is very little here to use it for                             |
-| `createPortal`                                                             | use [`<popup>`](elements.md) instead — see [Portals](#portals)             |
-| `flushSync`                                                                | not exported; you almost certainly do not need it                          |
-| `useFormStatus`                                                            | not wired up                                                               |
-| React Server Components                                                    | not available                                                              |
-| anything imported from `react-dom`                                         | not available — see [Not available](#not-available)                        |
+|                                                                   |                                                                   |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `useState`, `useReducer`, `useContext`, `useRef`                  | unchanged                                                         |
+| `useMemo`, `useCallback`, custom hooks                            | unchanged                                                         |
+| `useImperativeHandle`, `forwardRef`, `ref` as a prop, ref cleanup | unchanged                                                         |
+| `use(promise)`, `use(context)`, `React.lazy`                      | unchanged                                                         |
+| `useOptimistic`, `useActionState`, `<Profiler>`                   | unchanged                                                         |
+| `useSyncExternalStore`                                            | unchanged, and the best way to bridge non-React code              |
+| `useTransition`, `startTransition`, `useDeferredValue`            | work, and really do stay responsive                               |
+| `useLayoutEffect` vs `useEffect`                                  | the difference is real — one paint versus two                     |
+| `<Suspense>`                                                      | works; [around a `<window>`](#suspense-and-activity) it unmaps it |
+| `<Activity>`                                                      | works; `mode="hidden"` around a `<window>` unmaps it              |
+| Error boundaries                                                  | work — but **where you put one** decides if the window survives   |
+| `<StrictMode>`                                                    | safe; effects are not double-invoked on the first mount           |
+| `useId`                                                           | works; there is very little here to use it for                    |
+| `createPortal`                                                    | use [`<popup>`](elements.md) instead — see [Portals](#portals)    |
+| `flushSync`                                                       | not exported; you almost certainly do not need it                 |
+| `useFormStatus`                                                   | not wired up                                                      |
+| React Server Components                                           | not available                                                     |
+| anything imported from `react-dom`                                | not available — see [Not available](#not-available)               |
 
 ## Effects, and the paint boundary
 
@@ -68,27 +58,24 @@ it has a directly observable consequence:
 | `useLayoutEffect`        | one frame, with the corrected value                     |
 | `useEffect`              | one frame with the old value, then a frame with the new |
 
-So an adjustment made in `useEffect` flickers. This is not a timing race you
-can get lucky with — updates from a layout effect are folded into the frame
-being prepared, and updates from a passive effect are not.
+So an adjustment made in `useEffect` flickers, every time: updates from a
+layout effect are folded into the frame being prepared, and updates from a
+passive effect are not.
 
 That holds for a correction computed from React state. One computed from
 **geometry** is a layout behind: a layout effect runs after the commit and
 before the layout pass, so `abs` there is still the previous frame's rect
-(zeros, on mount), and anything measured from it describes the frame
-before. For a size, let the element report it with `onLayout`
+(zeros, on mount). For a size, let the element report it with `onLayout`
 ([below](#measuring-a-node)); for a style that depends on one, write a
 container query ([styling.md](styling.md#container-queries)), which the
-pass answers in the same frame. `scrollIntoView` measures nothing when you
-call it, and neither does the part of a `scrollTo` past the extent the last
-pass measured, which is what `scrollTo(Infinity)` asks for when it follows
-rows this commit added. The pass answers both against the geometry it
-produces, so they are safe here ([elements.md](elements.md#scrolling)).
+pass answers in the same frame. `scrollIntoView` and `scrollTo` — including
+`scrollTo(Infinity)` to follow rows this commit added — are safe here: the
+pass answers them against the geometry it produces
+([elements.md](elements.md#scrolling)).
 
-The same boundary is why an event handler feels instant: react-x11 lands the
-React update caused by a click or a keystroke **before** the frame goes out,
-so the response and the default action paint together rather than a frame
-apart.
+The same boundary is why an event handler feels instant: the React update
+caused by a click or a keystroke lands **before** the frame goes out, so the
+response and the default action paint together.
 
 ```jsx
 // good — `tooTall` and `fits` are React state, so the corrected rows paint
@@ -101,9 +88,8 @@ useLayoutEffect(() => {
 ## Measuring a node
 
 **There is no forced synchronous layout.** Nothing you can call will make
-layout run so you can read the result. This is the DOM habit most likely to
-break on the way over, because in a browser `getBoundingClientRect()` both
-reads _and_ triggers.
+layout run so you can read the result, as `getBoundingClientRect()` does in a
+browser.
 
 A node's `abs` rect (and `getClientRects()`) reports what the **last** layout
 produced. On the very first render of a node, that is nothing yet.
@@ -179,11 +165,10 @@ say (see [Known gaps](#known-gaps)).
 really do keep the UI responsive — React will interrupt a transition render
 to handle an incoming click or keystroke.
 
-What is worth knowing is that **transitions are the mechanism that does
-this**. An ordinary `setState` — from a handler, a timer, a socket callback —
-renders in one uninterruptible pass, however much work it is. If a render is
-big enough to drop a frame, wrapping it in `startTransition` (or deferring
-its input with `useDeferredValue`) is not a micro-optimisation, it is the
+**Transitions are the only mechanism that does this.** An ordinary
+`setState` — from a handler, a timer, a socket callback — renders in one
+uninterruptible pass, however much work it is. If a render is big enough to
+drop a frame, `startTransition` (or `useDeferredValue` on its input) is the
 difference between a responsive window and a frozen one.
 
 ```jsx
@@ -203,17 +188,13 @@ Two smaller notes:
 - A `startTransition` inside a click handler is still a transition. It does
   not inherit the handler's urgency.
 
-react-x11 already classifies X11 input for you: presses, releases, keys,
-focus changes, window close and drops are urgent; pointer motion and
-drag-over are not, which is what keeps a motion burst from flooding the
-renderer. You do not have to do anything to get this.
+Input is already classified for you: presses, releases, keys, focus
+changes, window close and drops are urgent; pointer motion and drag-over are
+not, which keeps a motion burst from flooding the renderer.
 
-[`examples/monitor.jsx`](../examples/monitor.jsx) is this paragraph with a
-keyboard on it: a filter over hundreds of live rows, where one keystroke
-changes every row on screen. Without the deferral the caret waits for the
-table; with it the field stays under the fingers and the rows arrive a beat
-later. Two things there are worth copying, and both are one-line mistakes in
-the other direction: the expensive subtree is
+[`examples/monitor.jsx`](../examples/monitor.jsx) is the worked case: a
+filter over hundreds of live rows, where one keystroke changes every row on
+screen. Two things there are worth copying: the expensive subtree is
 `memo`ised (or the urgent render rebuilds it anyway, and deferring buys
 nothing), and no prop that changes on every update — not even a "stale"
 border — is passed into it.
@@ -221,22 +202,18 @@ border — is passed into it.
 ### Bridging non-React code
 
 `useSyncExternalStore` is the right tool for anything that lives outside
-React — a timer, a D-Bus signal, a socket, an ntk event. It is also faster
-here than a hand-rolled `setState` bridge: a store notification is applied
-urgently and lands in the next microtask, where the equivalent `setState`
-waits a turn longer.
-
+React — a timer, a D-Bus signal, a socket, an ntk event — and faster than a
+hand-rolled `setState` bridge: a store notification is applied urgently, in
+the next microtask, where the equivalent `setState` waits a turn longer.
 Every mainstream store (zustand, jotai, valtio, redux, XState) works with no
-adapter for this reason. The [window-manager
-example](../examples/wm.jsx) is the worked case: the WM core is a plain
-store, and the UI subscribes to it.
+adapter. The [window-manager example](../examples/wm.jsx) is the worked
+case: the WM core is a plain store, and the UI subscribes to it.
 
 ## Suspense and Activity
 
-`<Suspense>` works. The one thing to plan for is layout: a hidden subtree
-gives up its space entirely, so the fallback lays out as if the real content
-were not there. **Size your fallback deliberately**, or the window collapses
-to the fallback and jumps back on reveal.
+`<Suspense>` works. Plan for layout: a hidden subtree gives up its space
+entirely, so **size your fallback deliberately**, or the window collapses to
+the fallback and jumps back on reveal.
 
 ```jsx
 <Suspense fallback={<box style={{ height: 240 }} />}>
@@ -251,12 +228,11 @@ something else took focus meanwhile, so a boundary that re-suspends
 mid-edit does not drop the user out of what they were typing. See
 [events.md](events.md#focus-and-visibility) for the rules and the way out.
 
-**Scroll positions come back too.** What a hidden boundary holds is not
-placed while it is hidden — the same as under `display: 'none'` — so a scroll
-pane in it is not clamped to the start of content it no longer lays out,
-reports no `onViewport` or `onScroll` until it is shown, and is shown at the
-offset it was left at. A tab kept mounted under `<Activity>` reopens on the
-row the user was reading.
+**Scroll positions come back too.** A hidden boundary's content is not laid
+out while hidden (as under `display: 'none'`), so a scroll pane in it is not
+clamped, reports no `onViewport` or `onScroll` until shown, and reappears at
+the offset it was left at — a tab kept under `<Activity>` reopens on the row
+the user was reading.
 
 If a `<window>` is inside the boundary, hiding it **unmaps the real window**.
 The window manager treats the reveal as a new window: it may re-place it,
@@ -267,12 +243,11 @@ lost. Prefer suspending _inside_ a window over suspending the window itself.
 `import()` gets inlined — you keep lazy _evaluation_ but get no code
 splitting; see [packaging.md](packaging.md).
 
-`<Activity>` works, and `mode="hidden"` around a toplevel `<window>` reads
-the same way `<Suspense>` does: the window is unmapped, and one mounted
-hidden is never mapped at all — it is created, laid out and kept, but the
-window manager only ever hears about it on the reveal. The same caveat
-applies: what the user did to the window before it was hidden is the window
-manager's to remember, and it may not.
+`<Activity>` works, and `mode="hidden"` around a toplevel `<window>` unmaps
+it the same way; one mounted hidden is created and laid out but never
+mapped until the reveal. The same caveat applies: what the user did to the
+window before it was hidden is the window manager's to remember, and it may
+not.
 
 **Testing Suspense**: a promise that settles outside `act()` is not always
 picked up by an `await act()`, because React throttles the commit when a
@@ -281,11 +256,10 @@ see [testing.md](testing.md).
 
 ## Portals
 
-**Use `<popup>`.** It is what you want in almost every case where the DOM
-would reach for `createPortal`: a `<popup>` is written as an ordinary child
-in your JSX — so it sees context, state and props exactly where you wrote it
-— but it is a real top-level X window, so it escapes its parent's clipping
-and can extend past the window edge.
+**Use `<popup>`** where the DOM would reach for `createPortal`. A `<popup>`
+is an ordinary child in your JSX — it sees context, state and props where
+you wrote it — but a real top-level window, so it escapes its parent's
+clipping and can extend past the window edge.
 
 ```jsx
 <box>
@@ -323,8 +297,9 @@ yourself wanting it, you almost certainly want a second `<window>` or a
 
 ## Where to put an error boundary
 
-Boundaries work exactly as documented. The X11-specific decision is
-**placement**, and it decides whether the user's window survives:
+Boundaries work exactly as documented. The decision specific to a desktop
+renderer is **placement**, and it decides whether the user's window
+survives:
 
 ```jsx
 // good — the window and everything the WM knows about it survives
@@ -403,12 +378,12 @@ and the [hot-reload example](../examples/tasks.jsx), which is
 `flushSync`, `findDOMNode`, `hydrateRoot` and `unstable_batchedUpdates` are
 not part of react-x11.
 
-The trap is not the import error — it is that `react-dom` is a required peer
-of some libraries, so it can end up installed anyway. Then the import
-resolves, and `flushSync()` runs your callback **without flushing anything**,
-because it is talking to a renderer you are not using. If a library depends
-on synchronous flushing, check `npm ls react-dom`. The
-[ecosystem register](ecosystem.md) records which packages hit this.
+The trap: `react-dom` is a required peer of some libraries, so it can end up
+installed anyway. Then the import resolves, and `flushSync()` runs your
+callback **without flushing anything**, because it talks to a renderer you
+are not using. If a library depends on synchronous flushing, check
+`npm ls react-dom`; the [ecosystem register](ecosystem.md) records which
+packages hit this.
 
 **Server Components** are not available: there is no Flight client wired up.
 

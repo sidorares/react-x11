@@ -678,7 +678,7 @@ const isNtkApp = (v) =>
  *
  * `'auto'` — the default — is one rule: macOS gets the native Core
  * Animation backend, everything else gets X11 via `$DISPLAY`. (More rungs —
- * Wayland — join this ladder, not a new one; docs/wayland.md.) On a mac
+ * Wayland — join this ladder, not a new one; design/wayland.md.) On a mac
  * without the `@windowkit/appkit` bridge installed, auto falls back to X11 so
  * an XQuartz setup keeps working; asking for `'cocoa'` by name means the
  * bridge is required, and its absence is an error that says how to fix it.
@@ -809,7 +809,7 @@ export async function createRoot(options = {}) {
   // The cocoa backend's desktop is not freedesktop's: the AT-SPI bridge and
   // the D-Bus global menu have nothing to register against there, so they
   // default off (their macOS replacements are their own workstream —
-  // docs/macos.md). The appearance ladder stays on: its macOS rung is the
+  // design/macos.md). The appearance ladder stays on: its macOS rung is the
   // one that answers. An explicit `desktop` option still wins.
   setDesktopIntegration(
     rest.desktop ??

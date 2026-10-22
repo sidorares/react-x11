@@ -1,4 +1,4 @@
-// `<video src>` on macOS (docs/architecture/video.md §3.2, §9): a file or URL
+// `<video src>` on macOS (design/architecture/video.md §3.2, §9): a file or URL
 // played by AVFoundation through @windowkit/appkit's player verbs — the
 // platform's decoder, audio, seeking and HLS — with the picture on the
 // player's own AVPlayerLayer.

@@ -12,61 +12,53 @@ import { Frame } from 'react-x11';
 ```
 
 `<Frame>` mounts a module of your application in a **process of its own** and
-embeds its output here, laid out like any other child. It is this package's
-iframe: the same composition of a display boundary and a process boundary,
-behind one element, and it works on X11, Cocoa and win32. The
-[Wayland backend](wayland-backend.md) has neither of the mechanisms below, so
-a `<Frame>` there fails at once: `fallback` renders and no pane is started.
+embeds its output here, laid out like any other child — this package's
+iframe, on X11, Cocoa and win32. On the [Wayland backend](wayland-backend.md)
+a `<Frame>` fails at once: `fallback` renders and no pane is started.
 
-How the display boundary is drawn differs, and it is worth knowing which one
-you are on when reading a trace:
+- **X11** — the pane renders into a real window of its own, which the host
+  embeds over [`<foreign>`](embedding.md).
+- **Cocoa** — the pane has no `NSWindow` and runs no AppKit: it paints into
+  shared `IOSurface`s the host shows in a layer of its window, and every other
+  window it makes (a menu, a dropdown's sheet, a tooltip, a dialog) the host
+  shows in an `NSWindow` of its own.
+- **Windows** — the same, with a DirectComposition surface; the pane has no
+  HWND.
 
-- **X11** — the pane renders into a real window of its own and the host
-  embeds it over [`<foreign>`](embedding.md). Two boundaries that already
-  existed separately, with `<Frame>` as the contract between them.
-- **Cocoa** — there is no server to share, so the pane paints into
-  `IOSurface`s created shared and presents by message; the host points one
-  sublayer of its window at whichever surface the pane last presented. The
-  pane has no `NSWindow` at all, and runs no AppKit. Every other window it
-  makes — a menu, a dropdown's sheet, a tooltip, a dialog — it paints the
-  same way, and the host shows in an `NSWindow` of its own (see "Sizing,
-  stacking, input").
-- **Windows** — the same shape as Cocoa with a **DirectComposition surface
-  handle** in the IOSurface's place: the pane makes the handle, draws into it
-  through a composition swapchain, and duplicates it into the host, which
-  gives it to a visual in its own window. The pane has no HWND.
-  [windows-embedding.md](windows-embedding.md) has the reasoning; the one
-  thing worth knowing from here is that the handle is named **once**, not per
-  frame — after that the compositor scans out of whatever the pane last
-  presented, so a pane frame costs no message, no fence and no copy.
+The host owns layout and hit testing, the pane its drawing: **CPU
+offloading, not isolation**. What the process boundary buys:
 
-Either way the host owns layout and hit testing and the pane owns its
-drawing, which is the line that makes this **CPU offloading, not
-isolation**.
-
-What the process boundary buys is the part no amount of careful coding buys
-in-process:
-
-- **Parallelism where this framework is CPU-bound.** The pane's
-  reconciliation, layout, text shaping and painting run on another core. A
-  pane that grinds for 400ms does not delay the shell's input handling by a
-  microsecond — `npm run examples:frame` makes the difference visible with a
-  ticker you can watch freeze, or not.
+- **Parallelism.** The pane's reconciliation, layout, text shaping and
+  painting run on another core; a pane that grinds for 400ms does not delay
+  the shell's input (`npm run examples:frame` shows it with a ticker).
 - **Crash isolation.** An uncaught throw, a native-module crash, an OOM: the
-  pane dies, the `fallback` renders, `restart()` respawns. The shell never
-  knew.
-- **Leak isolation.** A pane that leaks is a killable leak, bounded by the
-  heap its `execArgv` gives it
-  ([The pane process](#the-pane-process-flags-and-environment)), and its GC
-  pauses are its own.
+  pane dies, `fallback` renders, `restart()` respawns.
+- **Leak isolation.** A leaking pane is a killable leak, bounded by the heap
+  its `execArgv` gives it, and its GC pauses are its own.
 
-And what it does not buy, said once here and again in
-[security.md](security.md): **it is not a security boundary.** On X11 the
+**It is not a security boundary** ([security.md](security.md)). On X11 the
 pane holds a full-privilege connection to the same X server — it can read
 keys, take screenshots, move windows — and on Cocoa it is an ordinary child
-process of your application with your file system and your network.
-`<Frame>` contains a pane's _failures_, not its intentions; code you would
-not run in-process is code you should not run at all.
+process with your file system and your network. `<Frame>` contains a pane's
+_failures_, not its intentions.
+
+| prop                  |                                                                          |
+| --------------------- | ------------------------------------------------------------------------ |
+| `src`                 | the pane module: a `URL` or an absolute path                             |
+| `props`               | data for the pane; functions in it become stubs                          |
+| `style`               | the pane's rect; `backgroundColor` shows while no pane frame does        |
+| `fallback`            | element or `({ error, restart }) => …` for a pane that died or never ran |
+| `bridge`              | bridged contexts: `true` (default), `false`, or a list of keys           |
+| `display`             | X display for the pane; default the inherited `$DISPLAY`                 |
+| `execArgv`, `env`     | flags and environment for the pane's process                             |
+| `watchdog`            | ms unanswered before the pane counts as stuck; 15000, or `false`         |
+| `focusable`           | whether the pane joins the tab order, like any `<foreign>`               |
+| `onStarted`, `onExit` | the pane mounted; its process ended                                      |
+| `transport`           | replaces the fork                                                        |
+| `ref`                 | `{ restart(), pid }`                                                     |
+
+Design notes (the display boundary per backend, and how a Cocoa pane's
+frames, windows and videos travel): [design/frame.md](../design/frame.md).
 
 ## The pane module
 
@@ -97,27 +89,24 @@ if (!isFramed() && !process.env.REACT_X11_NO_AUTORUN) {
 }
 ```
 
-The pane process inherits the parent's `execArgv`, which is what carries a
-dev loader (tsx, the refresh loader) into it during development; a bundled
-application forks plain JavaScript and needs none. It connects to the
-display the host names in `display`, or `$DISPLAY` like everything else.
-What else it is started with is the `<Frame>`'s to say — see
+The pane process inherits the parent's `execArgv`, which carries a dev loader
+(tsx, the refresh loader) into it during development; a bundled application
+forks plain JavaScript and needs none. It connects to the display the host
+names in `display`, or `$DISPLAY`. What else it is started with is the
+`<Frame>`'s to say — see
 [The pane process](#the-pane-process-flags-and-environment).
 
-On macOS a pane stays on its process's main thread, where an app moves onto
-a worker ([macos.md](macos.md#js-on-a-worker-a-ui-thread-of-the-bridges-own)):
-it has no AppKit for that thread to keep, and the IPC channel it talks to
-its host over is that thread's — a worker has no `process.send`. That holds
-under `--import react-x11/cocoa-main` too, which a pane inherits whenever its
-host was started under it.
+On macOS:
 
-Nor is a macOS pane an app of its own: it launches with AppKit's
-`prohibited` activation policy, so it has no Dock tile and no ⌘-Tab entry
-and is never the active app — its host's window has the focus and forwards
-what the pane is owed. Launched with the bridge's default, `regular`, every
-pane was another `node` in the Dock beside its host, one for each tab of the
-components' browser example. A root that names `cocoa.activationPolicy`
-itself still has the one it names.
+- A pane stays on its process's main thread, where an app moves onto a
+  worker ([macos.md](macos.md#js-on-a-worker-a-ui-thread-of-the-bridges-own)):
+  it has no AppKit for that thread to keep, and its IPC channel is that
+  thread's (a worker has no `process.send`). That holds under
+  `--import react-x11/cocoa-main` too, which a pane inherits from its host.
+- A pane launches with AppKit's `prohibited` activation policy: no Dock tile,
+  no ⌘-Tab entry, never the active app — its host's window has the focus and
+  forwards what the pane is owed. A root that names `cocoa.activationPolicy`
+  itself still has the one it names.
 
 ## Props: a bag of data, and stubs for the functions in it
 
@@ -130,17 +119,16 @@ travel in the **same message**, so a theme flip and the state change that
 caused it land in the pane as one commit rather than a torn pair.
 
 Functions anywhere in the bag become **fire-and-forget stubs** on the pane
-side: calling one sends its arguments back and returns `undefined`. The
-arguments are sanitized on the way — functions inside them are dropped, the
-data around them kept — because a pane calls `onPick(item, ev)` the way it
-would call any handler, and `ev` is full of methods.
+side: calling one sends its arguments back and returns `undefined`. Functions
+inside the arguments are dropped and the data around them kept, so a pane can
+call `onPick(item, ev)` the way it would call any handler, though `ev` is
+full of methods.
 
 Callback identity follows function identity: a handler the parent keeps
 stable (`useCallback`) keeps its id across updates, and an id from the
-previous update still lands — one update of grace, which is what covers a
-click racing a props change. A stub stashed outside the props flow and
-called two updates later is dropped with a warning, not delivered to the
-wrong function.
+previous update still lands — one update of grace, which covers a click
+racing a props change. A stub stashed outside the props flow and called two
+updates later is dropped with a warning, not delivered to the wrong function.
 
 Two rules of thumb that keep the wire small:
 
@@ -154,25 +142,18 @@ Two rules of thumb that keep the wire small:
 
 ## Context: bridged explicitly, theme by default
 
-React context cannot cross a process boundary, and most of it should not
-try: appearance, locale, desktop settings and fonts are resolved from the
-desktop identically on both sides, so each process just asks. The rule the
-bridge implements: **bridge what the app defines; let each process resolve
-what the desktop defines.**
+React context cannot cross a process boundary, and most of it need not:
+appearance, locale, desktop settings and fonts resolve identically on both
+sides. The rule: **bridge what the app defines; let each process resolve what
+the desktop defines.**
 
-The theme is the one ambient thing the app authors, so it crosses **by
-default**: a `<ThemeProvider>` above a `<Frame>` reaches the pane as a real
-`ThemeProvider` around it — both routes, `useTheme()` and `$token` styles —
-and it is in the pane's very first commit, so there is no frame of default
-palette first. The bridged provider wraps the pane's **window** itself, the
-position it held in the host: the window's own background follows the app's
-palette rather than the pane process's desktop, and the window is the top
-of the node tree every `$token` beneath it resolves through — so a theme
-toggle in the host moves the pane's background and its static text, not
-only what re-renders through `useTheme()`. With no provider above the
-frame, nothing is bridged and the pane follows the desktop by itself: same
-answer, no bridge. A pane that wants its own look mounts its own provider,
-which wins below the bridged one the way an inner provider always wins.
+The theme crosses **by default**: a `<ThemeProvider>` above a `<Frame>` wraps
+the pane's **window** as a real `ThemeProvider` — `useTheme()` and `$token`
+styles alike — from the pane's very first commit, so the pane's background
+and static text follow the app's palette and its toggles, not the pane
+process's desktop. With no provider above the frame, nothing is bridged and
+the pane follows the desktop by itself. A pane's own provider wins below the
+bridged one, as an inner provider always does.
 
 For a context of your own, create it with `createFrameContext` in a module
 **both sides import** — which the pane already does, since its components
@@ -202,20 +183,18 @@ re-bridges automatically, because the pane's providers republish what they
 received.
 
 **Bridged values are data.** A value that will not structured-clone is
-dropped with a warning naming the key, and that is deliberate: a bridged
+dropped with a warning naming the key. That is deliberate: a bridged
 `{ state, dispatch }` would hand live RPC stubs to every pane under the
-provider — invisible wiring, with an unanswerable question about which
-incarnation of a restarted pane holds which stub. Dispatchers travel in
-`props`, where the wiring is visible. `serialize`/`revive` options on
-`createFrameContext` cover a value that is data in spirit but a class in
-shape.
+provider, invisibly, and a restarted pane would leave it unclear which
+incarnation holds which stub. Dispatchers travel in `props`, where the wiring
+is visible. `serialize`/`revive` options on `createFrameContext` cover a
+value that is data in spirit but a class in shape.
 
-`bridge` is the off switch the default owes: `bridge={false}` bridges
-nothing, `bridge={['react-x11:theme', 'session']}` is an allowlist.
+`bridge` is the off switch: `bridge={false}` bridges nothing,
+`bridge={['react-x11:theme', 'session']}` is an allowlist.
 
-One honest limitation: the pane commits an IPC hop after the host, so a
-theme flip repaints the shell a frame before the panes. Every asynchronous
-boundary has this; nothing here pretends otherwise.
+The pane commits an IPC hop after the host, so a theme flip repaints the
+shell a frame before the panes.
 
 ## Lifecycle, from both sides
 
@@ -241,35 +220,31 @@ The pane's view:
 - **`useFrameClose(handler)`** — the host is letting the pane go: the
   `<Frame>` unmounted, or the host app is exiting. The handler may return a
   promise and may still call callback props — flushing through one is what
-  it is for. The patience is real but bounded: the host asks by message,
-  escalates to SIGTERM at 1.5s, SIGKILL at 4s. Not called on a crash; a
-  close handler is a courtesy, and anything that must survive a crash
-  belongs on disk before the close.
-- **`isFramed()`** — see above.
+  it is for. The patience is bounded: the host asks by message, escalates to
+  SIGTERM at 1.5s, SIGKILL at 4s. Not called on a crash; anything that must
+  survive a crash belongs on disk before the close.
+- **`isFramed()`** — see [The pane module](#the-pane-module).
 - A host that dies without asking takes the IPC channel with it, and the
   pane exits on the disconnect — no orphans either way.
 
 ## Sizing, stacking, input
 
-The embedded pane is a [`<foreign>`](embedding.md), and its rules apply
-verbatim. The rect comes from `style` and yoga like any child — there is no
-content-driven sizing across the boundary. The pane's window is a real X
-child window, so **host-drawn content cannot overlap it**; a HUD or a
+The embedded pane is a [`<foreign>`](embedding.md), and its rules apply. The
+rect comes from `style` and yoga like any child — there is no content-driven
+sizing across the boundary. On X11 the pane's window is a real X child
+window, so **host-drawn content cannot overlap it**; a HUD or a
 "reconnecting…" banner belongs in a sibling `<popup>`. Pointer events over
 the pane are the pane's without the host ever seeing them; keys follow
-[embedding.md's focus rules](embedding.md#focus-and-who-gets-the-keys) —
-the host's handlers see every key first, and what they do not consume is
+[embedding.md's focus rules](embedding.md#focus-and-who-gets-the-keys) — the
+host's handlers see every key first, and what they do not consume is
 forwarded.
 
-On Cocoa and Windows the pointer can never be over a pane's window,
-because the pane has none. The host hit-tests the frame's box and forwards
-the input over the channel. The cursor travels the other way. The pane's
-tree names its cursor as a window's would, the pane sends it
-(`pane-cursor`), and the host shows it over the box. It is the box's
-default cursor, so a `cursor` in the frame's `style` still wins. On X11 the
-pane's own window carries its cursor, as any window does. Keys go over as
-the box's default action, as `<foreign>` forwards them, so a chord the host
-answered above the frame never reaches the pane, and with their modifiers.
+On Cocoa and Windows the pane has no window for the pointer to be over: the
+host hit-tests the frame's box and forwards the input. Keys go over, with
+their modifiers, as the box's default action, as `<foreign>` forwards them, so
+a chord the host answered above the frame never reaches the pane. The cursor
+the pane's tree names is the box's default cursor, so a `cursor` in the
+frame's `style` still wins. On X11 the pane's own window carries its cursor.
 
 **Tab goes through a pane as through any subtree.** The frame is one stop in
 the host's order, and the pane's own order hangs off it: Tab arriving at the
@@ -278,164 +253,61 @@ Tab while the frame has the focus is the pane's; and the pane running off an
 end of its order hands Tab back, and the host goes on from the frame. The
 pane lets go of its focus as it does, so the stop it was at shows no ring
 while the host's next one does. A modal open in the pane keeps Tab going
-round inside it. On X11 this is XEmbed's own chain — `FOCUS_IN` with
-`FOCUS_FIRST` or `FOCUS_LAST` one way, `FOCUS_NEXT` or `FOCUS_PREV` the other,
-which the pane's window answers and sends as an XEmbed client
-(`_initXEmbedTab`). On Cocoa and Windows it is the same two messages over the
-channel, `tabenter` and `pane-tab-out` (`EventManager._tabEnter`,
-`_tabOut`). Before it, the host sent Tab on and cycled its own focus as
-well, so Tab went between one of the pane's stops and one of the host's, and
-on X11 Tab went round the pane's stops for good.
+round inside it.
 
-**A pane is drawn at the host's scale.** A pane process reads the screens
-when it starts, and the host read them when it did. A desk that changed in
-between gave the two different answers: a page forked for a new tab after
-the desk went to 1x (a mirror set for a projector) was laid out at 1x in a
-frame the host showed at 2x. Everything in it came out half the size of the
-tabs beside it, and every click it was sent landed twice as far in. So the
-host says what scale its window is drawn at, in the hello and in every
-`pane-rect` (`displayScale`), and a Cocoa or Windows pane takes that one
-instead of its own. Its window, its fonts and the windows it opens are made
-at it from the first commit, and a later `pane-rect` that names another
-scale lays the pane out again in the new unit. A `<box scale>` around the
-`<Frame>` is not part of it: the frame's box grows with the zoom, and the
-pane lays out at the window's scale in the room it was given.
+**A pane is drawn at the host's scale.** On Cocoa and Windows the host tells
+the pane the scale its window is drawn at, and the pane's window, fonts and
+the windows it opens are made at that scale from the first commit — even if
+the screens changed between the host's start and the pane's — and laid out
+again when it changes. A `<box scale>` around the `<Frame>` is not part of
+it: the frame's box grows with the zoom, and the pane lays out at the
+window's scale in the room it was given.
 
 **A pane's other windows.** On X11 a `<popup>` in a pane is a real window on
-the pane's own connection. A Cocoa pane process runs no AppKit, so a window
-made there exists and is never shown — a `<Select>` in a pane took the press
-and opened nothing (#824). So the pane paints each window it makes besides
-its own into a shared ring, as it paints itself (`CocoaPaneSubwindow`,
-`src/cocoa/panewindow.js`), and the host makes the `NSWindow` and shows the
-ring in it (`src/cocoa/panehost.js`):
+the pane's own connection. On Cocoa the host shows each window the pane makes
+besides its own — a `<popup>`, a menu, a `<Select>`'s list, a `<Dialog>` — in
+an `NSWindow` of its own:
 
-- **Where it goes is the pane's to say.** Every `pane-rect` carries
-  `screen`, where the frame's box is on the screen in device pixels, sent
-  again when the box or the window moves. A popup the pane anchors to one of
-  its nodes is placed against it exactly as a window's popup is
-  (`windowOrigin`, src/anchor.js), and the host puts the window where the
-  pane says.
-- **The window's life goes up, its input comes down.** `pane-window`
-  messages make, map, move, resize, grab with and destroy it, and its
-  `pane-present`s and `pane-cursor`s name it. Input on the host's window for
-  it goes back as `pane-event`s naming it. A grab is the host's, so a press
-  anywhere in the host's windows reaches the menu outside its bounds, which
-  is the dismissal. A managed window — a `<Dialog>` — also sends back the
+- A popup the pane anchors to one of its nodes is placed against it exactly
+  as a window's popup is, and placed again when the frame's box or the window
+  moves.
+- A grab is the host's, so a press anywhere in the host's windows reaches the
+  menu outside its bounds, which is the dismissal. A `<Dialog>` gets the
   user's moves and resizes and its close button.
-- **The window's focus goes down too.** The host's window gaining or losing
-  it is sent to the pane as `focus`/`blur`, so a menu that closes when its
-  window loses focus (`useDismissOnWindowBlur`) closes when the user goes to
-  another application.
-- **Nothing waits on the host until it is listening.** These messages are
-  held until the host's first `pane-rect`: it hears a pane from the moment
-  it has a `<Frame>`, and knows what to do with them only once the pane is
-  laid out in it. A window is then announced where it is, after that rect
-  has placed what is anchored to the pane again.
-- **The pane's windows go with it.** A pane that exits or unmounts takes
-  every window the host shows for it, and their grab.
+- The host window's focus is sent to the pane as `focus`/`blur`, so a menu
+  that closes when its window loses focus (`useDismissOnWindowBlur`) closes
+  when the user goes to another application.
+- A pane that exits or unmounts takes every window the host shows for it,
+  and their grab.
 
-**A pane's videos.** A Cocoa pane runs no AppKit, so a player it made would
-open the item and never hear AVFoundation say a word — a `<video src>` in a
-pane sat on its poster and could not be started. So the host plays it
-(`src/cocoa/paneplayer.js`): the hello tells the pane the host plays for
-it, which is what makes `useSupports('mediaPlayback')` true there, and the
-pane's `<video>` holds a player whose verbs go up as `pane-player` messages
-and whose events come back down. The picture comes down the way the pane's
-own goes up, the other way round: the host copies the frame showing into
-one of a ring of three shared IOSurfaces and names it, and the pane copies
-it out into the element's surface. A pane has no layers to lift a part
-onto, so its video is always drawn, which costs the copy a covered video
-costs in a window — the frame once into the ring, once out of it. A host
-over a bridge with no player says nothing in the hello, and the pane
-refuses `src` as X11 does. A pane that exits takes its players, and their
-sound, with it.
+**A pane's videos.** On Cocoa the host plays a pane's `<video src>` for it, so
+`useSupports('mediaPlayback')` is true in a pane whose host can play. A pane's
+video is always drawn — it has no layer to lift it onto — so it costs the copy
+a covered video costs in a window, twice: into a shared ring and out. A host
+over a bridge with no player plays nothing, and the pane refuses `src` as X11
+does. A pane that exits takes its players, and their sound, with it.
 
-**A pane resized.** On Cocoa the host gives the pane's layer its new size as
-the window lays out, and the pane's frame of that size comes a pane frame
-later. Core Animation's default stretched the frame the layer had to the new
-bounds in between, so a page in a pane had its left column drawn scaled a
-little at every step of a window dragged wider, and then drawn back at its
-size. A pane whose frames of a new size come within the window's
-live-resize budget, `createRoot({ cocoa: { resizeWait } })` (50 ms by
-default), has its last frame shown at its size from the top left instead:
-cropped on an axis the layer shrank on, and on one it grew on, its last
-pixel carried over the rest — the last column across a window dragged
-wider, the last row down one dragged taller. A page's edge is mostly its
-background, so the strip continues it, a gradient included, where the
-`<Frame>`'s own background showed through before. Where the edge crosses
-content, a bottom row through a line of text, that content runs down the
-strip in thin lines for the frame it lasts. One that falls behind the
-budget is stretched across, which is the better picture of a long wait: a
-width moves where a page's lines break, and a squeezed page is nearer to the
-page laid out again than one cut off with a strip beside it. Down the pane
-it stays at its size, cropped or its last row carried down, since a height
-moves nothing a page lays out, and stretched down it was the page drawn too
-tall for as long as the wait lasted. Behind is
-judged by the frames that land: two in a row later than the budget, or none
-at all for longer than it, and a frame well inside it shows the next at its
-size again. A size the pane is never sent, because a newer one replaced it
-while a frame was being painted, is no frame late, and a fast drag of a
-page that keeps up stays at its size rather than taking one look at every
-step and the other at every frame. Each gesture starts out at its size, and
-`resizeWait: 0` stretches always, both ways, as before. An app can choose
-apart from the budget, which is also how long AppKit holds the window's
-edge for a frame: `createRoot({ cocoa: { paneStretch } })`, or
-`REACT_X11_COCOA_PANE_STRETCH`, is `behind` for all of the above, `never`
-for a last frame kept at its size and its edge carried over however late
-the pane is, and `always` for one stretched both ways. And the pane hears that the window is being resized
-live — AppKit's drag of its edge, from its begin to its end, which a pane
-running no AppKit has no window to hear — with every size and on its own
-where only that changes (`pane-rect`'s `live`, `pane-live`): its window's
-`liveResizing` is the host's, so core defers measuring its content floors
-for the drag's length and catches up once it ends, as a window of its own
-does, and an element can put off what it would rather do once the drag is
-over.
+**A pane resized.** On Cocoa the pane's frame at a new size comes a pane frame
+after the host's window lays out. What shows in between is set by
+`createRoot({ cocoa: { paneStretch } })` or `REACT_X11_COCOA_PANE_STRETCH`:
 
-**A pane's frames are named by id, and the id outlives nothing.** On Cocoa
-a present carries the IOSurface's id, and the host looks it up when it
-reads the message. A resize has the pane make a new ring of buffers, and
-the system gives a freed id to the next surface anyone makes — the pane's
-next ring, another tab's, the host's own window. A present still in the
-channel when its ring was freed was looked up as whichever surface had
-the id by then: the pane's next frame cleared or half drawn, or another
-tab's page, on glass for a frame at every few steps of a drag. So the host
-answers each present it has looked up (`pane-shown`), and the pane keeps a
-buffer it retired until the present naming it is answered: that is one
-buffer as a rule, and never more than a ring of them, the oldest freed
-first if the host stops answering. A pane's video comes down the same way
-round: the pane answers each frame once it has looked its buffer up, and
-the host keeps a buffer of a ring it retired — a stream that switched
-renditions — until the frame naming it is answered. A lookup that finds a
-surface of another size than its frame says is not copied out of at all.
+- **`'behind'`** (the default) — while the pane keeps within the window's
+  live-resize budget, `createRoot({ cocoa: { resizeWait } })` (50 ms by
+  default), its last frame is shown at its size from the top left: cropped on
+  an axis the layer shrank on, its last column or row carried across one it
+  grew on. A pane two frames in a row later than the budget, or with none for
+  longer than it, is stretched across to its new width until a frame lands
+  well inside the budget; down the pane it stays at its size. Each gesture
+  starts out at its size, and `resizeWait: 0` stretches always, both ways.
+- **`'never'`** — at its size, its edge carried over, however late the pane
+  is.
+- **`'always'`** — stretched both ways.
 
-**A pane draws only into a buffer the host is done with.** The ring holds
-three buffers so that one present can be on its way while the next frame
-draws: one on the layer, one named in the channel, one free. Each is made
-the first time a frame takes it, copied over from the frame before: a drag
-gives each size one frame, and a ring made whole at each was two buffers
-made and cleared for nothing, 4.4 ms of every 12 ms frame of a drag of Zen
-Garden 101 in the browser example on a Mac. A host two
-presents behind — busy with a long frame of its own, a breakpoint's layout,
-a window resize — left the next frame nothing but the buffer on the layer or
-the one a present still in the channel named, and the frame drew into it
-anyway: the host then showed a frame half drawn. So a frame takes a buffer
-only once the host has answered a present after the last one that named it,
-and waits on the clock for the next answer when there is none. An answer
-says the host has looked the present up, not that the screen shows it, and
-a host back from a long frame has the buffer it showed throughout still on
-glass until its UI thread commits: so of the buffers the host is done with,
-a frame takes one the WindowServer has let go of too, and waits for one, a
-frame interval at most after the answer. A host that has not answered for
-250 ms no longer holds the pane up.
-
-The same answer gates the frame an input gets on the spot
-(`flushPendingFrames`): a pane paints on an input only once its last present
-is answered and a frame interval has passed since it went, and otherwise the
-next frame on the clock answers it. The interval costs an input a few
-milliseconds at the display's rate, and is what keeps a pane at one frame a
-refresh: without it, input faster than the display had a frame each — 245 a
-second on a 120Hz panel, at 250 inputs a second — and the frames that went
-faster than the WindowServer let go of buffers drew into ones it still read.
+A carried edge usually continues the page's background; where it crosses
+content, that content runs down the strip in thin lines for a frame. The
+pane's window's `liveResizing` is the host's, so content floors are measured
+once the drag ends, as in a window of its own, and an element can put off
+work until then too.
 
 `backgroundColor` in the frame's `style` is what shows before the pane's
 first frame and after one dies — the same server-painted rectangle
@@ -468,27 +340,25 @@ it inherits:
   `REACT_X11_FRAME` is how a pane knows it is one (`isFramed`), so the two
   are set after it and cannot be overridden here.
 
-Either is read by value: a pane started with the same flags in a new array
-— one written in place, as above, at every render — is the pane it was, and
-flags or variables that say something else restart it, as a new `src` does.
-Something a fork cannot take — a flag that is not a string — fails as a
-`spawn` error and starts nothing.
+Either is read by value: the same flags in a new array — one written in
+place, as above, at every render — keep the pane it was, and flags or
+variables that say something else restart it, as a new `src` does. Something
+a fork cannot take — a flag that is not a string — fails as a `spawn` error
+and starts nothing.
 
 ## A pane that stops answering
 
 A pane whose event loop is stuck — a loop that never ends, a page's script
-with no timeout around it — stays `running` as far as anything else can
-tell: it is sent updates it never reads, its window stays up showing its
-last frame, and on X11 it holds the keyboard while the pointer is over it.
-Nothing about it fails, so nothing says so.
+with no timeout around it — would otherwise stay `running`: it is sent
+updates it never reads, its window keeps showing its last frame, and on X11
+it holds the keyboard while the pointer is over it.
 
-So the host asks. About once a second it sends the pane a `ping`, and the
-pane answers from its event loop, which is the thing asked about. A pane
-that has not answered for `watchdog` ms — 15 seconds by default — has
-stopped, and goes the way a crashed one goes: the frame fails with phase
-`unresponsive`, `fallback` is shown and can `restart()` it, and the process
-is ended from outside, SIGTERM and then SIGKILL, since it cannot read an
-unmount. `onExit` reports it with `expected: false`.
+So the host asks. About once a second it sends the pane a `ping`, which the
+pane answers from its event loop. A pane that has not answered for
+`watchdog` ms — 15 seconds by default — goes the way a crashed one goes: the
+frame fails with phase `unresponsive`, `fallback` is shown and can
+`restart()` it, and the process is ended from outside, SIGTERM and then
+SIGKILL, since it cannot read an unmount. `onExit` reports it with `expected: false`.
 
 ```jsx
 <Frame
@@ -508,19 +378,17 @@ Three things keep it from ending a pane that is fine:
 
 - **The host's own late tick is no news of the pane's.** Where the host's
   timer comes late — the machine slept, or the host itself was stuck — the
-  count starts again from that tick, rather than taking the time nobody
-  was asking for as time the pane did not answer.
+  count starts again from that tick.
 - **A pane under the inspector is not watched.** `--inspect`,
   `--inspect-brk` or `--inspect-wait`, in its own `execArgv`, in this
   process's that it inherits, or in `NODE_OPTIONS`: a debugger stops a pane
   on purpose. The flags that only set the inspector up, which Node's test
-  runner hands every test process, are not it.
+  runner hands every test process, do not count.
 - **`watchdog={false}`** watches nothing, for a pane whose work is long
   and synchronous by design.
 
-The ping and the pong are messages of the protocol, so a pane of an older
-react-x11 fails the handshake, which says why, rather than being ended for
-not answering a question it does not know.
+A pane of an older react-x11 that does not know the ping fails the handshake,
+which says why, rather than being ended for not answering.
 
 ## What a pane costs
 
@@ -533,48 +401,36 @@ not.
 
 ## The transport seam
 
-Everything between the host and the pane is eight message types over an
-injectable transport, and `transport` replaces the fork wholesale — it is
-how the tests run a real pane (module, root, window, props, callbacks,
-close handlers) in-process over a loopback pair against the in-process X
-server, with `structuredClone` standing in for the fork's serialization
-(`test/helpers/frame-loopback.js`, and `runFrameChild` in
-`src/frame/childmain.js` is the pane's whole bootstrap behind the same
-seam). It is also the door to running a pane somewhere other than a child
-process without `<Frame>` learning about it.
+`transport` replaces the fork wholesale: it is the door to running a pane
+somewhere other than a child process without `<Frame>` learning about it
+(react-x11's own tests run a real pane in-process over a loopback pair this
+way). A transport is handed what the fork would be — `{ src, display,
+execArgv, env }` — and returns the parent's end of the wire: `send`,
+`onMessage`, `onExit`, and optionally `kill` and `pid` (`FrameTransport` in
+the types).
 
-A transport is handed what the fork would be — `{ src, display, execArgv,
-env }` — and a transport that still forks the pane, its own way (under a
-sandbox, with another runtime), forks the entry the default one does, which
-is on the exports map to be resolved: `fileURLToPath(import.meta.resolve(
+A transport that still forks the pane, its own way (under a sandbox, with
+another runtime), forks the entry the default one does, which is on the
+exports map to be resolved: `fileURLToPath(import.meta.resolve(
 'react-x11/frame/child'))`. It is a process's entry, not a module to import:
 outside a fork it says so and exits.
 
 ## Known gaps
-
-Named so they are not rediscovered:
 
 - **Accessibility**: a pane registers on the AT-SPI bus as its own
   application. Orca reads it, and Tab crosses the boundary, but the tree is
   not unified under the host's.
 - **DevTools**: a pane is its own React tree; `REACT_X11_DEVTOOLS=1` in the
   pane process attaches a separate DevTools, not a merged one.
-- **No intrinsic size**: the host decides the rect; a `measure` protocol
-  could exist and does not yet.
-- **A window a pane opens in its first commit is placed against a guess.**
-  The host has not laid the pane out yet, so the pane does not know where
-  it is. A popup anchored to a node is placed again when the first
-  `pane-rect` comes, before anyone sees it; a `<Dialog>` open from the start
-  is centred where the pane guessed it was, as it is not anchored.
-- **Windows** panes do not read `screen` yet: a popup a Windows pane
-  anchors is placed against the screen's corner, the second half of what
-  #824 fixed on Cocoa. Not run there.
+- **No intrinsic size**: the host decides the rect.
+- **A window a pane opens in its first commit is placed against a guess**,
+  since the host has not laid the pane out yet. A popup anchored to a node is
+  placed again before anyone sees it; a `<Dialog>` open from the start is
+  centred where the pane guessed it was.
+- **Windows** panes do not know where their frame is on the screen yet: a
+  popup a Windows pane anchors is placed against the screen's corner. Not run
+  there.
 - **A pane hears its window's focus, not its frame's.** Tab out of a pane
   takes its focus with it, but a click on the host does not: the stop the
   pane had focused keeps its focus, and its ring, while the host's is
-  elsewhere. On X11 the `<window embeddable>` underneath (created unmapped,
-  waiting for an embedder — see [embedding.md](embedding.md)) speaks
-  XEmbed's Tab and no more of its focus handshake — `FOCUS_CURRENT`,
-  `FOCUS_OUT` and window activation are left to the forwarding rules above —
-  and on Cocoa and Windows the pane is sent the host window's `focus` and
-  `blur` alone.
+  elsewhere.

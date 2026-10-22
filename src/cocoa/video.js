@@ -1,4 +1,4 @@
-// A video's frames on a layer of their own (docs/architecture/video.md §7):
+// A video's frames on a layer of their own (design/architecture/video.md §7):
 // what the surface presenter's sprites (src/cocoa/sprites.js) do with a part
 // whose `contents` is a `VideoFrames` sink instead of a `paint`.
 //

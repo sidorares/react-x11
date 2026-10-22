@@ -2,7 +2,7 @@
 // `contents` kind in src/cocoa/sprites.js) over the fake bridge: the real
 // CocoaApp, its window and promotion, the node tree and its frame clock —
 // only the natives are faked, so what a test pins is the call that went out
-// and the frame it went out in. The contract (docs/architecture/video.md
+// and the frame it went out in. The contract (design/architecture/video.md
 // §7): a video with a frame to show is one sprite part whose content is its
 // sink, lifted onto a layer where nothing is painted over it; from then on
 // every push writes a video surface and repoints the layer with no frame of
