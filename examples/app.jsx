@@ -17,11 +17,27 @@ import {
   Table,
   Tabs,
 } from '../src/index.js';
-import { FormPanel } from './form/index.jsx';
-import { WidgetsPanel } from './widgets.jsx';
-import { PasswordPanel } from './password.jsx';
-import { TasksPanel } from './tasks.jsx';
-import { ThemingPanel } from './theming.jsx';
+
+// Each of those examples starts itself when it is imported, unless
+// REACT_X11_NO_AUTORUN says not to, and a static import here ran all five:
+// `npm run examples:app` opened six windows. So they are imported with the
+// switch on, and it is put back for this file's own start below.
+const autorun = !process.env.REACT_X11_NO_AUTORUN;
+process.env.REACT_X11_NO_AUTORUN = '1';
+const [
+  { FormPanel },
+  { WidgetsPanel },
+  { PasswordPanel },
+  { TasksPanel },
+  { ThemingPanel },
+] = await Promise.all([
+  import('./form/index.jsx'),
+  import('./widgets.jsx'),
+  import('./password.jsx'),
+  import('./tasks.jsx'),
+  import('./theming.jsx'),
+]);
+if (autorun) delete process.env.REACT_X11_NO_AUTORUN;
 
 const s = createStyles({
   window: { backgroundColor: '$surfaceHover' },
@@ -182,7 +198,7 @@ function App() {
 
 export default App;
 
-if (!process.env.REACT_X11_NO_AUTORUN) {
+if (autorun) {
   const root = await createRoot();
   root.render(<App />);
 }
