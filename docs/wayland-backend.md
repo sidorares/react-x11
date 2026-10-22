@@ -82,9 +82,9 @@ env -u DISPLAY REACT_X11_BACKEND=wayland bun examples/widgets.jsx   # or node --
 
 Two are X11 by nature and say so: `examples/wm.jsx` is a window manager and
 `examples/xeyes.jsx` reads the root window's pointer — neither has a
-Wayland counterpart. `examples/viewer3d.jsx` runs but draws its model only
-through indirect GLX (it is fixed-function GL by design) and shows its own
-note here, as it does under `glPolicy: 'direct'` on X11.
+Wayland counterpart. `examples/viewer3d.jsx` draws its model here through
+its direct half, GLES on the window's own GPU target — the same half X11
+uses under `NTK_GL_POLICY=direct`.
 
 Two environment variables help when a desktop offers no screenshot API:
 `REACT_X11_WAYLAND_TRACE=1` writes a line per presented frame, and
