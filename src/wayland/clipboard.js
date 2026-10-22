@@ -67,17 +67,22 @@ class Selection {
     /** our own source while we own the selection */
     this.source = null;
     this.ownData = null;
-    this._pendingOffers = new Map(); // offer id -> types
+    this._pendingOffers = new Map(); // offer id -> { offer, types }
     /** `watch()` handlers, told when the selection changes hands */
     this.watchers = new Set();
 
     device.on('data_offer', (offer) => {
       const types = [];
-      this._pendingOffers.set(offer.id, types);
+      this._pendingOffers.set(offer.id, { offer, types });
       offer.on('offer', (mime) => types.push(mime));
     });
-    device.on('selection', (offer) => {
-      const id = offer?.id ?? offer;
+    // The offer arrives as an id: an `object` argument is a number off the
+    // wire, where `data_offer`'s `new_id` was a proxy. The proxy is what a
+    // read calls `receive` on, so it is found by the id — keeping the number
+    // made every read throw, and nothing another application copied could
+    // be pasted here.
+    device.on('selection', (offerArg) => {
+      const id = offerArg?.id ?? offerArg ?? 0;
       if (this.offer && this.offer.id !== id) {
         try {
           this.offer.$.destroy();
@@ -85,15 +90,17 @@ class Selection {
           /* gone */
         }
       }
-      if (!offer || offer === 0) {
+      const pending = id ? this._pendingOffers.get(id) : null;
+      this._pendingOffers.delete(id);
+      const offer = pending?.offer ?? (offerArg?.$ ? offerArg : null);
+      if (!offer) {
         this.offer = null;
         this.offerTypes = [];
         this._notify('closed');
         return;
       }
       this.offer = offer;
-      this.offerTypes = this._pendingOffers.get(id) ?? [];
-      this._pendingOffers.delete(id);
+      this.offerTypes = pending?.types ?? [];
       // an offer from our own source means we still own it; anyone else's
       // means we lost it
       if (this.source && !this._isOurs(offer)) this._dropSource();

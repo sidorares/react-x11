@@ -1261,6 +1261,22 @@ export class MockCompositor extends EventEmitter {
     this.send(toolId, 'removed');
   }
 
+  // ---- the clipboard, as another application takes it ----
+
+  /**
+   * Another application takes the clipboard: a data offer listing `mimes`,
+   * then `selection` naming it — as an object id, which is how the wire
+   * carries it. A `receive` on it is answered with `payload[mime]`.
+   */
+  selectionOffer(mimes, payload) {
+    const offer = this._newServerObject('wl_data_offer');
+    this.dndPayload = payload;
+    this.send(this.dataDevice, 'data_offer', offer);
+    for (const mime of mimes) this.send(offer, 'offer', mime);
+    this.send(this.dataDevice, 'selection', offer);
+    return offer;
+  }
+
   // ---- drag and drop injection (the compositor as the other application) ----
 
   /**
