@@ -6,6 +6,8 @@ export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
 export interface CreateOptions {
   /** Install the dependencies after writing the files. Default `true`. */
   install?: boolean;
+  /** Write AGENTS.md and CLAUDE.md, for coding agents. Default `true`. */
+  agentsMd?: boolean;
   /** Who installs them. Default: whichever launched the command. */
   manager?: PackageManager;
   /** Where progress goes. Default `console.log`. */
@@ -37,4 +39,5 @@ export function appFiles(options: {
   name: string;
   title?: string;
   manager?: PackageManager;
+  agentsMd?: boolean;
 }): Record<string, string>;

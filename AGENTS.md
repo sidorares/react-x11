@@ -354,6 +354,12 @@ no override-redirect staging (issue #4).
   be a manifest alone. Its checked-in version is a placeholder:
   `release-please.yml` stamps react-x11's version on it, and pins the
   dependency to that exact version, when it publishes the two together.
+  The app's AGENTS.md and DESIGN.md come from `src/cli/templates/*.template.md`,
+  named so that no agent working here reads them as this repo's own
+  instructions. The AGENTS.md one points at `node_modules/react-x11/docs/`,
+  which is why `files` ships `docs/` (the markdown, not the images):
+  `test/cli-create.test.js` fails when a page it names is renamed, and runs
+  the screenshot test it tells agents to write.
 
 ## Pre-release: there is nothing to be compatible with
 

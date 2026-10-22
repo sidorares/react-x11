@@ -8,7 +8,9 @@
   },
   "files": [
     "src",
-    "!src/cli/create-react-x11"
+    "!src/cli/create-react-x11",
+    "docs/*.md",
+    "docs/*/*.md"
   ],
   "scripts": {
     "test": "node --import tsx --test --test-timeout=60000",
