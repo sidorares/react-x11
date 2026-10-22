@@ -212,6 +212,15 @@ both the X core `keycode2keysyms` table the accelerator code already speaks
 and a full `decode()` for levels 3 and 4. Key repeat is synthesised at the
 seat's advertised rate; compositors do not repeat.
 
+**`useKeyboardState()` is the seat's.** There is no XKB extension to ask, so
+the locks and the group come from `wl_keyboard.modifiers` — Num Lock being
+whichever bit the keymap binds `NumLock` to — and the layout codes from the
+keymap's own `xkb_symbols` name, which libxkbcommon writes from the include
+string the rules built: `pc_us_ru_2_inet(evdev)` is `['us', 'ru']`. A keymap
+not built from the rules has no codes to give, and `layouts` stays empty.
+The protocol's one limit: modifiers go to the focused client only, so a lock
+toggled while another app has the keyboard shows when focus comes back.
+
 **The input method is told at the end of the frame.** `zwp_text_input_v3`
 wants to know which field has focus, what kind of text it holds, where its
 caret is and what surrounds it, and every one of those changes repaints the

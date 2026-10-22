@@ -374,6 +374,14 @@ to check when the difference between "off" and "not known" matters. Changes
 arrive as `XkbStateNotify`, with no polling, even while another application has
 the keyboard.
 
+The [native Wayland backend](wayland-backend.md) answers the same fields from
+its seat: the locks and the group from `wl_keyboard.modifiers`, the layout
+codes from the keymap the compositor sent. One difference is the protocol's
+rather than this library's — a compositor tells only the focused client, so a
+lock toggled while another app has the keyboard is seen when focus returns.
+For a password field, the case this hook exists for, the window is focused
+already.
+
 Which bit is which lock is worth writing down: Caps Lock is `LockMask`, fixed
 by the core protocol, and **Num Lock is not fixed by anything** — it is wherever
 the modifier map puts it, which is `Mod2` on every Linux and BSD desktop, on

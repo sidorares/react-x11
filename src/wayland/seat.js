@@ -26,7 +26,7 @@
 
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
-import { XkbKeymap } from './xkb.js';
+import { XkbKeymap, REAL_MODS, layoutsFromKeymap } from './xkb.js';
 
 /** `wl_seat.capability` bits. */
 export const SEAT_CAP = { POINTER: 1, KEYBOARD: 2, TOUCH: 4 };
@@ -185,7 +185,10 @@ export class WaylandSeat extends EventEmitter {
     this.xkb = null;
     /** X-style modifier mask: depressed | latched | locked */
     this.mods = 0;
+    /** the locked half alone — Caps Lock and Num Lock (keyboardState) */
+    this.locked = 0;
     this.group = 0;
+    this._layouts = null;
     /** pointer buttons currently held, as an X state mask */
     this.buttonMask = 0;
     this.repeat = { rate: 25, delay: 600 };
@@ -437,6 +440,7 @@ export class WaylandSeat extends EventEmitter {
             : null;
         this.keymap = { format, size, text };
         this.xkb = text ? XkbKeymap.parse(text) : null;
+        this._layouts = null;
         this.emit('keymap', this.keymap, this.xkb);
       } catch (err) {
         this.emit(
@@ -473,6 +477,7 @@ export class WaylandSeat extends EventEmitter {
     k.on('modifiers', (serial, depressed, latched, locked, group) => {
       this.lastSerial = serial;
       this.mods = (depressed | latched | locked) & 0xff;
+      this.locked = locked;
       this.group = group;
       this.emit('modifiers', {
         mods: this.mods,
@@ -499,6 +504,28 @@ export class WaylandSeat extends EventEmitter {
       this.repeat = { rate, delay };
       this.emit('repeat_info', this.repeat);
     });
+  }
+
+  /**
+   * The locks and the layout, in `useKeyboardState()`'s shape
+   * (src/keyboardstate.js). Caps Lock is Lock, which no keymap can move;
+   * Num Lock is wherever this keymap binds the virtual `NumLock`, with the
+   * X convention's Mod2 where it does not say.
+   *
+   * Only as fresh as the last `wl_keyboard.modifiers`, and a compositor sends
+   * those to the client with keyboard focus alone: a lock toggled while
+   * another app has the keyboard arrives when focus comes back. That is the
+   * protocol, not a shortcut — X11's StateNotify reaches every client.
+   */
+  keyboardState() {
+    const numLock = this.xkb?.maskOf('NumLock') || REAL_MODS.Mod2;
+    this._layouts ??= Object.freeze(layoutsFromKeymap(this.keymap?.text));
+    return {
+      capsLock: Boolean(this.locked & REAL_MODS.Lock),
+      numLock: Boolean(this.locked & numLock),
+      group: this.group,
+      layouts: this._layouts,
+    };
   }
 
   /** A key event in the shape events.js reads, decoded against the keymap. */

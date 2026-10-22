@@ -32,6 +32,18 @@
 // it answers atoms that have to be interned back one round trip each, and
 // what it returns is a description like `English (US)` where an indicator in
 // a status bar wants `us`.
+//
+// ## A backend with no X server
+//
+// The native Wayland backend has no XKB extension to ask, but its seat holds
+// the same three answers: the locked modifiers and the group from
+// `wl_keyboard.modifiers`, and the layout codes from the name of the keymap
+// the compositor sent (src/wayland/xkb.js, `layoutsFromKeymap`). It hands
+// them over through a two-method seam — `keyboardState()` and
+// `watchKeyboardState(fn)` — and this module publishes what it says the way
+// it publishes a StateNotify. The one difference is the protocol's:
+// a compositor tells only the focused client, so the locks are as of the last
+// time this app had the keyboard.
 
 import { requireExtension } from './extensions.js';
 
@@ -71,6 +83,7 @@ class KeyboardSession {
     this.armed = false;
     this.stopped = false;
     this._handler = null;
+    this._unwatch = null;
   }
 
   publish(values) {
@@ -106,6 +119,8 @@ class KeyboardSession {
 
   stop() {
     this.stopped = true;
+    this._unwatch?.();
+    this._unwatch = null;
     if (this._handler && this.app?.X?.off) {
       try {
         this.app.X.off('event', this._handler);
@@ -157,6 +172,19 @@ async function arm(session) {
   if (session.armed) return;
   session.armed = true;
   const app = session.app;
+
+  // A backend that answers for itself (the Wayland seat): subscribe, then
+  // read, for the same reason the XKB path below does.
+  if (typeof app?.watchKeyboardState === 'function') {
+    const read = () => {
+      const state = !session.stopped && app.keyboardState?.();
+      if (state) session.publish(state);
+    };
+    session._unwatch = app.watchKeyboardState(read);
+    read();
+    return;
+  }
+
   const xkb = await requireExtension(app, 'xkb');
   if (!xkb || session.stopped) return;
 

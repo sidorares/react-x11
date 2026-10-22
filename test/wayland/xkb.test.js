@@ -21,7 +21,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { XkbKeymap, REAL_MODS } from '../../src/wayland/xkb.js';
+import {
+  XkbKeymap,
+  REAL_MODS,
+  layoutsFromKeymap,
+} from '../../src/wayland/xkb.js';
 import { keysymFromName } from '../../src/wayland/keysymnames.js';
 
 const KEYMAP = `xkb_keymap {
@@ -649,4 +653,108 @@ test('libxkbcommon: the bare one-line form still reads', () => {
   assert.equal(km.decode(km.names.get('ESC'), 0, 0).keysym, 0xff1b);
   assert.equal(km.decode(km.names.get('RTRN'), 0, 0).keysym, 0xff0d);
   assert.equal(km.decode(km.names.get('SPCE'), 0, 0).codepoint, 0x20);
+});
+
+// ---------------------------------------------------------------------------
+// The layout codes, out of the symbols section's name
+// ---------------------------------------------------------------------------
+
+/** A symbols section the way libxkbcommon writes one: the name, then the
+ *  group descriptions. Every name below is libxkbcommon's own output for the
+ *  RMLVO in the comment beside it, compiled against xkeyboard-config. */
+const symbols = (name, ...groups) =>
+  `xkb_keymap {\nxkb_types "complete" {\n\t\tlevel_name[1]= "Base";\n};\n` +
+  `xkb_symbols "${name}" {\n` +
+  groups.map((g, i) => `\tname[${i + 1}]="${g}";\n`).join('') +
+  `};\n};\n`;
+
+test('layouts: the libxkbcommon fixture names its two groups', () => {
+  assert.deepEqual(layoutsFromKeymap(LIBXKBCOMMON), ['us', 'de']);
+});
+
+test('layouts: each group is the file before its number', () => {
+  // us,ru grp:alt_shift_toggle
+  assert.deepEqual(
+    layoutsFromKeymap(
+      symbols(
+        'pc_us_ru_2_inet(evdev)_group(alt_shift_toggle)',
+        'English (US)',
+        'Russian',
+      ),
+    ),
+    ['us', 'ru'],
+  );
+  // us,ru,de dvorak,phonetic_winkeys, — variants carry underscores of their
+  // own, and the group options carry group numbers of their own
+  assert.deepEqual(
+    layoutsFromKeymap(
+      symbols(
+        'pc_us(dvorak)_ru(phonetic_winkeys)_2_de_3_inet(evdev)' +
+          '_group(win_space_toggle)_1_group(win_space_toggle)_2' +
+          '_group(win_space_toggle)_3_compose(rctrl)_level3(ralt_switch)',
+        'English (Dvorak)',
+        'Russian (phonetic, Windows)',
+        'German',
+      ),
+    ),
+    ['us', 'ru', 'de'],
+  );
+  // gb,latam,fr ,,azerty
+  assert.deepEqual(
+    layoutsFromKeymap(
+      symbols(
+        'pc_gb_latam_2_fr(azerty)_3_inet(evdev)',
+        'English (UK)',
+        'Spanish (Latin American)',
+        'French (AZERTY)',
+      ),
+    ),
+    ['gb', 'latam', 'fr'],
+  );
+});
+
+test('layouts: one group is the file before the first extra', () => {
+  assert.deepEqual(
+    layoutsFromKeymap(symbols('pc_us_inet(evdev)', 'English (US)')),
+    ['us'],
+  );
+  // jp, with options that are files of their own
+  assert.deepEqual(
+    layoutsFromKeymap(
+      symbols(
+        'pc_jp_inet(evdev)_capslock(escape)_terminate(ctrl_alt_bksp)',
+        'Japanese',
+      ),
+    ),
+    ['jp'],
+  );
+  // a Mac model: the model's file is a vendor one, with an underscore in
+  // its directory
+  assert.deepEqual(
+    layoutsFromKeymap(
+      symbols('macintosh_vndr/apple(alukbd)_us_inet(evdev)', 'English (US)'),
+    ),
+    ['us'],
+  );
+  // and the raw include string, should a compositor ever pass it through
+  assert.deepEqual(
+    layoutsFromKeymap(
+      symbols('pc+us+ru:2+inet(evdev)', 'English (US)', 'Russian'),
+    ),
+    ['us', 'ru'],
+  );
+});
+
+test('layouts: a keymap that cannot say says nothing', () => {
+  // hand-written, or compiled from KcCGST rather than the rules
+  assert.deepEqual(layoutsFromKeymap(KEYMAP), []);
+  assert.deepEqual(layoutsFromKeymap(symbols('(unnamed)', 'Custom')), []);
+  // three groups described, two accounted for: no answer rather than a
+  // wrong one
+  assert.deepEqual(
+    layoutsFromKeymap(symbols('pc_us_ru_2_inet(evdev)', 'A', 'B', 'C')),
+    [],
+  );
+  assert.deepEqual(layoutsFromKeymap(symbols('pc_empty', 'Empty')), []);
+  assert.deepEqual(layoutsFromKeymap(null), []);
 });

@@ -542,6 +542,27 @@ export class WaylandApp extends EventEmitter {
 
   cancelAttention() {}
 
+  /**
+   * `useKeyboardState()`'s source on this backend: there is no XKB extension
+   * to ask, and the seat has the same answers from `wl_keyboard`
+   * (src/keyboardstate.js, `WaylandSeat.keyboardState`).
+   */
+  keyboardState() {
+    return this.seat?.keyboardState() ?? null;
+  }
+
+  /** Call `fn` when the locks, the group or the keymap change. */
+  watchKeyboardState(fn) {
+    const seat = this.seat;
+    if (!seat) return () => {};
+    seat.on('modifiers', fn);
+    seat.on('keymap', fn);
+    return () => {
+      seat.off('modifiers', fn);
+      seat.off('keymap', fn);
+    };
+  }
+
   async close() {
     for (const w of [...this.windows.values()]) w.destroy();
     this.windows.clear();
