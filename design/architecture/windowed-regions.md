@@ -680,7 +680,7 @@ phrased so they can be lifted directly into issue drafts (react-x11 / ntk / node
 - **[react-x11 docs]** Add a "when does an element get a real X window" section to
   `docs/elements.md`: the promotion policy (opaque + rectangular + region granularity; real
   windows for capability, never for "has handlers or a background"), the airspace constraints
-  (currently documented only in `docs/glx.md`), and the hazard list from §7. This makes the
+  (currently documented only in `design/glx.md`), and the hazard list from §7. This makes the
   policy user-visible instead of implicit in NEXT_STEPS.
 - **[react-x11 docs]** Annotate NEXT_STEPS §4's scroll pane sentence with a pointer to this
   document: the "clip rect + translation" decision is now conditional on the Phase-3 prototype's

@@ -101,7 +101,7 @@ composites and the pixel area those composites touch, against a checked-in
 baseline (`scripts/bench/baseline.json`, which is where the numbers in these
 docs come from).
 
-The Cocoa backend inverts this, and [docs/macos.md](docs/macos.md) is the
+The Cocoa backend inverts this, and [design/macos.md](design/macos.md) is the
 design record for why: there is no wire, the WindowServer is a retained
 compositor, and a React commit maps onto property mutations of persistent
 objects. Scrolling is a layer's `bounds.origin` rather than a repaint,
@@ -158,7 +158,7 @@ three:
   file associations, URL schemes and second launches — so an app that needs
   any of that on Windows _this month_ still wants Electron or Tauri.
   [docs/windows-integrations.md](docs/windows-integrations.md) is the
-  measured status and [docs/windows.md](docs/windows.md) the design. The three
+  measured status and [design/windows.md](design/windows.md) the design. The three
   targets are not the same app: the desktop-shell half of X11 (`<foreign>`
   embedding, panel struts, substructure redirect, the window-manager example
   below) has no macOS or Windows equivalent, and `react-x11/test` drives the
@@ -166,13 +166,13 @@ three:
 - **native Wayland — today.** The native backend is opt-in and young:
   windows, text, input, an input method, the clipboard, popups, drag and
   drop and layer-shell docks and panels run on mutter, sway and labwc, and
-  [docs/wayland-backend.md](docs/wayland-backend.md#what-is-left) lists what
+  [docs/wayland-backend.md](docs/wayland-backend.md#not-supported-yet) lists what
   is left — no multisampling, no `<Frame>` panes, no drag icon. Ordinary
   application windows also work on a Wayland desktop through Xwayland, which
   is not going away — but the desktop-shell half of X11 (`<foreign>`
   embedding, global key grabs, and the window-manager example below) needs a
   real X session. It is a **target beside X11, not a migration**;
-  [docs/wayland.md](docs/wayland.md) is the RFC it was built from.
+  [design/wayland.md](design/wayland.md) is the RFC it was built from.
 - **reusing web components.** There is no DOM. Your MUI, your Tailwind and
   your `recharts` do not come with you; the state, data-fetching, validation
   and math libraries mostly do. [docs/ecosystem.md](docs/ecosystem.md) says
@@ -204,7 +204,7 @@ protocol sent over the X connection, geometry compiled into a display list,
 a frame costing two matrices and one `CallList`. No native bindings, no GPU
 driver bindings — the same "JavaScript all the way down" story as the rest.
 (GL renders where the X server cannot read it back, so there is no
-screenshot of it here; see [docs/glx.md](docs/glx.md).)
+screenshot of it here; see [docs/gl.md](docs/gl.md#testing).)
 
 ## Quick start
 
@@ -375,7 +375,7 @@ way underneath it — three on the mature backends:
   X server involved.
 
 The two younger backends have their own: WGL on Windows, composited through
-DirectComposition ([docs/windows-gl.md](docs/windows-gl.md)), and on Wayland
+DirectComposition ([design/windows-gl.md](design/windows-gl.md)), and on Wayland
 a viewport into the window's own GLES target.
 
 ```jsx
@@ -390,7 +390,7 @@ a viewport into the window's own GLES target.
 A scene graph over it — `<mesh>`, geometries, materials, lights, and shaders
 or post-processing where the backend has them — is
 [`@react-x11/components/three`](https://github.com/sidorares/react-x11-components).
-See [docs/gl.md](docs/gl.md) and [docs/glx.md](docs/glx.md).
+See [docs/gl.md](docs/gl.md).
 
 Events are synthetic with capture/bubble phases and hit testing over the
 drawn tree: `onClick` (with DOM-style `detail` click counting),
@@ -596,8 +596,8 @@ indirect GLX.
 
 See [AGENTS.md](AGENTS.md) for architecture notes and contributor/agent
 guidance, [docs/](docs/README.md) for API documentation,
-[docs/architecture/](docs/architecture/) for the design records behind the
-bigger pieces, and [NEXT_STEPS.md](NEXT_STEPS.md) for the older roadmap it
+[design/](design/README.md) for the design records behind the bigger
+pieces and the backends, and [NEXT_STEPS.md](NEXT_STEPS.md) for the older roadmap it
 grew out of.
 
 The [documentation site](https://sidorares.github.io/react-x11/) lives in
@@ -683,7 +683,7 @@ against, is [docs/security.md](docs/security.md). To report something,
   desktop platforms for React Native. On Windows the new architecture's
   renderer targets Composition from the start, in Windows App SDK apps by
   default, with XAML islands for advanced controls; on macOS a fork of React
-  Native maps its UIKit views onto AppKit. [docs/windows.md](docs/windows.md)
+  Native maps its UIKit views onto AppKit. [design/windows.md](design/windows.md)
   cites its threading as prior art: JS on a thread of its own, and every
   mount posted to the UI thread that alone touches the visuals.
 - [React Native Skia](https://github.com/Shopify/react-native-skia) — 2D

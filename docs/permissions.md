@@ -25,26 +25,19 @@ function RecordButton() {
 
 ## The ladder
 
-The [file dialog](filedialog.md)'s shape again, with one rung that answers and
-one that only points:
+Like the [file dialog](filedialog.md)'s, chosen for you — one rung that answers
+and one that only points:
 
 |     |                                  |                                                                                                                                                                                                                 |
 | --- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | **the platform's authorization** | The [cocoa backend](macos.md): macOS's privacy (TCC) status per kind, and the system's own prompt where a framework offers one — `AVCaptureDevice` for the camera and microphone, `CoreLocation`, and the rest. |
 | 2   | **the Settings pane**            | `open x-apple.systempreferences:…` — any Mac, bridge or not. It cannot read a status or raise a prompt; it puts the user in front of the switch, which is all `openPrivacySettings` promises.                   |
 
-**On Linux nothing answers yet.** The freedesktop counterparts are the
-per-device portals (`org.freedesktop.portal.Camera`, `.Location`, …), which
-need no bridge and are
-[#466](https://github.com/sidorares/react-x11/issues/466)'s remaining half.
-Until then a status query says `'unknown'` and a request rejects with a
-**typed** `NoPermissionServiceError` — the signal to keep the feature behind
-the answer, not a crash. `usePermission().available` is that branch as render
-state.
-
-The top rung is never chosen by naming a backend: the call asks the connection
-the tree renders through whether it has an authorization API, and the cocoa
-backend says so by carrying one.
+**On Linux nothing answers yet** (the per-device portals,
+`org.freedesktop.portal.Camera`, `.Location`, …, are not wired up). A status
+query says `'unknown'` and a request rejects with a **typed**
+`NoPermissionServiceError` — the signal to keep the feature behind the answer,
+not a crash. `usePermission().available` is that branch as render state.
 
 ## The vocabulary
 
@@ -146,3 +139,5 @@ the request never prompts, or TCC ends the process. See
 - **`'unknown'` is not `'prompt'`.** An app that treats them alike will show
   an "Allow" button on Linux that rejects when pressed. Branch on `available`
   first.
+
+Design notes: [design/permissions.md](../design/permissions.md).

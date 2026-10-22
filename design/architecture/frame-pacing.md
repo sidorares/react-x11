@@ -3,7 +3,7 @@
 _Design record, 2026-09-07. Written against master at 25d6869 (react-x11
 2.8.3, ntk ^8.7.0, `@windowkit/appkit` ^0.6.0), for the `frameRate` prop
 that shipped with it. The user-facing account is
-[elements.md](../elements.md#framerate--pacing-the-frames-under-a-flood);
+[elements.md](../../docs/elements.md#framerate--pacing-the-frames-under-a-flood);
 this is why it is shaped the way it is, where it sits, and what it
 measured. The problem was found in `@react-x11/components`'s vt terminal
 (sidorares/react-x11-components#69, "PRD: adaptive frame pacing"), whose
@@ -135,7 +135,7 @@ so the frame that raised it is the one priced.
   moment the clock is due, so a paced claim lands at its wait rather than
   its wait rounded up to the pump. On X11 ntk's clock is untouched.
 - **Discrete input.** A click or a key paints the window at once
-  (`flushPendingFrames`, [events.md](../events.md)), held claims included —
+  (`flushPendingFrames`, [events.md](../../docs/events.md)), held claims included —
   a held claim is damage like any other, and the early flush stands the
   wait down. The debt is paid then. Answering the input is never held.
 - **Animations.** A transition's frames go through the same claims and are
@@ -175,7 +175,7 @@ Decided, and why (the PRD's §11, answered for core):
   budgets; a shared budget is a process-level clock and is not built.
 
 Observability: `REACT_X11_TRACE=requests` prints `waited=` on every frame
-the pacer held ([debugging.md](../debugging.md)), the `frame` trace hook
+the pacer held ([debugging.md](../../docs/debugging.md)), the `frame` trace hook
 carries it, and the pacer's counters — frames, held, coalesced, the last
 cost and the last wait — are on the node for a bench to print.
 
@@ -190,7 +190,7 @@ the clear, the window's background, and the backgrounds of the node and its
 ancestors. Clipping ancestors shrink the cover to what reaches the surface,
 a rounded one by its radius all round. The element claims its damage as a
 rect inside the answer, because a node claim carries a pixel of slop that
-lies outside it ([extending.md](../extending.md#an-element-that-covers-its-box)).
+lies outside it ([extending.md](../../docs/extending.md#an-element-that-covers-its-box)).
 Pinned by `test/opaque-content.test.js`: the fills skipped are exactly
 those, and a covered pass leaves the pixels a full repaint leaves.
 

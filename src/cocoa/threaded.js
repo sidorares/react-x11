@@ -1,4 +1,4 @@
-// Threaded mode's worker half (docs/macos.md §"JS on a worker: a UI thread
+// Threaded mode's worker half (design/macos.md §"JS on a worker: a UI thread
 // of the bridge's own"): with the launcher (src/cocoa/main.js) holding the
 // process main thread in the bridge's `runMain()`, the app's JS runs on a
 // `worker_threads` Worker, and this module is what that worker needs to

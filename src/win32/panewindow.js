@@ -1,4 +1,4 @@
-// The pane process's "window" on the Windows backend — docs/frame.md's child
+// The pane process's "window" on the Windows backend — design/frame.md's child
 // half, with the composition engine standing in for the X server.
 //
 // On X11 a pane renders into a real window of its own and the host reparents
@@ -6,7 +6,7 @@
 // the pane makes a DirectComposition surface handle, hangs a composition
 // swapchain off it, and draws through the same verb table a window draws
 // through; the host opens that handle and gives it to a visual of its own
-// (src/win32/panehost.js). See docs/windows-embedding.md for why this rather
+// (src/win32/panehost.js). See design/windows-embedding.md for why this rather
 // than a shared DXGI texture — in one line, nothing here has to synchronise.
 //
 // **The present is the hand-off.** Once the host holds the handle the
@@ -360,7 +360,7 @@ export class Win32PaneWindow {
    * On X11 that is the window's own id, because an XID means the same thing
    * in every process on the display. Windows has no such number: a window
    * cannot be embedded at all, because a composition target stops presenting
-   * the moment its window becomes a child (docs/windows-embedding.md, with
+   * the moment its window becomes a child (design/windows-embedding.md, with
    * the measurements). What crosses instead is the **buffer** — the same
    * composition surface handle a `<Frame>` pane publishes — and the host
    * binds it to a visual of its own rather than reparenting anything.

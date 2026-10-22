@@ -6,8 +6,8 @@ The yoga numbers are from a standalone spike (§6) run in-process on one
 machine (Apple M1 Pro, node 26); file references are to that branch and will
 drift._
 
-_[styling.md](../styling.md#custom-layouts) is the reference for the style
-properties and [extending.md](../extending.md#a-layout-algorithm-of-your-own)
+_[styling.md](../../docs/styling.md#custom-layouts) is the reference for the style
+properties and [extending.md](../../docs/extending.md#a-layout-algorithm-of-your-own)
 for the two registration contracts; this is why they are the shape they are._
 
 ---
@@ -50,7 +50,7 @@ What one change costs when an arrangement is done in React, with
 1. **Commit.** The nodes change and a frame is scheduled. `useLayoutEffect`
    runs here, before yoga has run for this commit: `abs` holds the previous
    frame's rect — zeros on a mount. There is no forced synchronous layout
-   ([react-features.md](../react-features.md#measuring-a-node)).
+   ([react-features.md](../../docs/react-features.md#measuring-a-node)).
 2. **The frame** (`WindowNode._flushFrame`): layout, the container queries,
    `absolutize`, the placement pass, damage, paint. **This frame shows the
    arrangement the effect has not corrected yet.**
@@ -84,7 +84,7 @@ most, because most layout passes are not React's:
   release, and `onLayout` is a `setImmediate`: an arrangement built on it
   freezes for the whole drag.
 - **A transition on a layout property**, which costs a layout pass per frame
-  ([styling.md](../styling.md#transitions)) — an effect-driven arrangement
+  ([styling.md](../../docs/styling.md#transitions)) — an effect-driven arrangement
   trails it by a frame on every frame.
 - **Everything else that changes a layout inside a frame:** a container
   query flipping, a font or image arriving through `invalidateMeasure`.

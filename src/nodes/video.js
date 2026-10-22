@@ -1,6 +1,6 @@
 // <video>: frames an application decodes (`frames`, a VideoFrames sink), or a
 // file or URL the platform plays (`src`, where there is a player), fitted
-// into the node's box (docs/architecture/video.md §6–7).
+// into the node's box (design/architecture/video.md §6–7).
 //
 // A drawn node like `<image>`: it joins yoga, it is in the paint order and it
 // is hit like anything else — which is the whole point. A video in a form

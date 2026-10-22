@@ -7,7 +7,7 @@
 // property reads — so answering from JS would pace the screen reader by the
 // application's busiest moment. The bridge therefore *pushes*, and
 // `windows/src/uia.cc` answers from its copy. The reasoning is
-// docs/windows.md §"Accessibility: UI Automation"; what matters here is the
+// design/windows.md §"Accessibility: UI Automation"; what matters here is the
 // consequence: **this file's job is a diff, not an answer.**
 //
 // Everything it pushes comes from `src/a11y.js`, which is pure functions over

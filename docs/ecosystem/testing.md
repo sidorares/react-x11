@@ -1,23 +1,21 @@
 # Testing
 
-None of Testing Library works here, and no amount of shimming will change
-that — the queries are built on a document, and there is no accessibility
-tree behind react-x11 today. All five failure modes are recorded in the
-[negative-results register](../ecosystem.md#render-time); do not spend an
-afternoon on a jsdom shim, because it only makes the query fail differently.
+Testing Library does not work here and no shim will fix it: its queries are
+built on a DOM document. Its five failure modes are in the
+[negative-results register](../ecosystem.md#render-time); a jsdom shim only
+makes the query fail differently.
 
-What replaces it ships in the box: **[`react-x11/test`](../testing.md)** —
+The replacement ships in the box: **[`react-x11/test`](../testing.md)** —
 `renderX11`, `screen`, `userEvent`, `waitFor` and pixel assertions, over a
-real X server running in your test process. Read that page first; everything
-below is the hand-rolled version it replaces, kept because it is still the
-right thing to reach for when you want the connection itself.
+real X server running in your test process. Read that page first. Below is
+the hand-rolled version, for a test that wants the connection itself, and
+the third-party runners and tools that work alongside it.
 
 ## The harness, by hand {#harness}
 
-node-x11 ships a pure-JS X server that runs in your test process, so a
-react-x11 test needs no `$DISPLAY`, no Xvfb, and no native dependency. This
-is what `renderX11` does for you; here it is spelled out, for a test that
-needs to hold the pieces directly.
+node-x11 ships a pure-JS X server that runs in your test process, so a test
+needs no `$DISPLAY`, no Xvfb, and no native dependency. This is what
+`renderX11` does, spelled out for a test that holds the pieces directly.
 
 ```jsx
 // helpers/harness.jsx
@@ -72,19 +70,17 @@ test('paints a box', async () => {
 });
 ```
 
-**The `tick()` is not optional.** `render`'s callback resolves at commit
-time; layout runs a task later on the frame clock, so every `abs` rect is
+**The `tick()` is not optional.** `render`'s callback resolves at commit;
+layout runs a task later on the frame clock, so every `abs` rect is
 `{x: 0, y: 0, width: 0, height: 0}` until you yield once. Assert on `kind`
-and `props` immediately if you like, but never on geometry.
+and `props` immediately, never on geometry.
 
 `wnd._reactX11Node` is the root of the drawn tree. Each node carries `kind`
-(the element name), `props`, `children`, and `abs` — its laid-out rect. That
-is the queryable surface: walk it. It is not a DOM and it does not pretend to
-be one. `ownerDocument` and `getClientRects()` do exist on nodes, but only
+(the element name), `props`, `children`, and `abs` (its laid-out rect):
+walk it. It is not a DOM; `ownerDocument` and `getClientRects()` exist only
 because React DevTools' `measureHostInstance` dereferences them.
 
-Text is a two-level structure: a `<text>` node holds `textchunk` children
-whose `.text` is the string. A collector is three lines:
+A `<text>` node holds `textchunk` children whose `.text` is the string:
 
 ```js
 export function textOf(node) {
@@ -97,19 +93,20 @@ export function textOf(node) {
 }
 ```
 
-If you want to run without any X server at all — faster, and enough for most
-component tests — write a small mock ntk app that records canvas operations
-instead of painting them, and hand it to `createRoot({ app })`. That is what
-the renderer's unit tests do; there is no mock published in the package, so
-it is yours to write and yours to keep minimal.
+To run with no X server at all — faster, and enough for most component
+tests — pass `createRoot({ app })` a mock ntk app that records canvas
+operations instead of painting them. `react-x11/test` exports the one the
+renderer's unit tests use, `createMockApp()`, and
+`renderX11(el, { backend: 'mock' })` builds it for you
+([mock backend](../testing.md#the-mock-backend)).
 
 ## Driving events {#driving-events}
 
-`@testing-library/user-event` throws on `setup()` — see the
-[register](../ecosystem.md#render-time). Emit the raw ntk event on the window
-instead. react-x11 subscribes to the ntk window's emitter, so this exercises
-the whole synthetic-event path: hit testing, capture, bubble, default
-actions.
+`@testing-library/user-event` throws on `setup()`
+([register](../ecosystem.md#render-time)); use `react-x11/test`'s
+`userEvent`, or emit the raw ntk event on the window. react-x11 subscribes
+to the ntk window's emitter, so this exercises the whole synthetic-event
+path: hit testing, capture, bubble, default actions.
 
 ```jsx
 test('a synthetic click reaches the handler', async () => {
@@ -132,27 +129,25 @@ test('a synthetic click reaches the handler', async () => {
 });
 ```
 
-Keyboard input is the same shape — `wnd.emit('keydown', { keycode, codepoint,
-buttons })` — with the keysym registered in `app.X.keycode2keysyms` so the
-renderer can resolve it. Note `button` is the X button number, so left is
-`1`, not `0`.
+Keyboard input is the same shape — `wnd.emit('keydown', { keycode,
+codepoint, buttons })` — with the keysym registered in
+`app.X.keycode2keysyms` so the renderer can resolve it. `button` is the X
+button number: left is `1`, not `0`.
 
 ## Runners {#runners}
 
-**`node:test` (built-in) is the baseline.** react-x11's own suite uses it, it
-needs no transform, and it handles the ESM graph without configuration. Run `.jsx` files through
+**`node:test` (built-in) is the baseline.** react-x11's own suite uses it,
+and it handles the ESM graph without configuration. Run `.jsx` files through
 `tsx`: `node --import tsx --test 'test/**/*.test.jsx'`.
 
 ### Vitest {#vitest}
 
 **Out of the box.** vitest@4.1.10.
 
-The familiar choice for anyone arriving from a web project: native ESM,
-built-in JSX and TypeScript transform, watch mode, snapshots. A `.test.jsx`
-file that mounts a tree, drives a prop update and asserts on both the node
-tree and the paint-op log runs green with no flags.
-
-The one setting that matters:
+Native ESM, built-in JSX and TypeScript transform, watch mode, snapshots. A
+`.test.jsx` that mounts a tree, drives a prop update and asserts on the node
+tree and the paint-op log runs green with no flags. The one setting that
+matters:
 
 ```js
 // vitest.config.mjs
@@ -164,15 +159,14 @@ export default defineConfig({
 });
 ```
 
-**Never `environment: 'jsdom'`.** react-x11 needs no DOM, and a jsdom
-environment _defines_ `window` and `document`, which silently flips
-environment detection in third-party libraries — `@tanstack/query-core`
-decides it is in a browser and changes retry and refetch behaviour, for one.
-`'node'` is Vitest's default; just do not cargo-cult a web project's config
-across.
+**Never `environment: 'jsdom'`.** It _defines_ `window` and `document`,
+which silently flips environment detection in third-party libraries —
+`@tanstack/query-core` decides it is in a browser and changes retry and
+refetch behaviour, for one. `'node'` is the default; do not copy a web
+project's config across.
 
 - Vitest runs test files in worker threads by default. The in-process X
-  server works there, but `pool: 'forks'` is the escape hatch if long-lived
+  server works there; `pool: 'forks'` is the escape hatch if long-lived
   server streams misbehave.
 - `vi.useFakeTimers()` shares the [sinon caveat](#sinon): pass an explicit
   `toFake` list, or React's scheduling and the renderer's paint scheduling
@@ -182,14 +176,12 @@ across.
 
 **Works, but only in real ESM mode.** jest@30.4.2.
 
-Jest's default CJS path cannot work at all. `babel-jest` down-compiles to
+Jest's default CJS path cannot work: `babel-jest` down-compiles to
 CommonJS, and `react-x11/src/Reconciler.js` and `src/DevToolsIntegration.js`
-both call `createRequire(import.meta.url)`, which has no CJS equivalent — so
-following Jest's own suggestions leads to
+call `createRequire(import.meta.url)`, which has no CJS equivalent, so Jest's
+own suggestions lead to
 `SyntaxError: Cannot use 'import.meta' outside a module`. Both dead ends are
-in the [register](../ecosystem.md#install-and-import-time).
-
-The configuration that does work:
+in the [register](../ecosystem.md#install-and-import-time). What works:
 
 ```js
 // jest.config.mjs — run with NODE_OPTIONS=--experimental-vm-modules
@@ -212,22 +204,19 @@ export default {
 };
 ```
 
-`modules: false` is the load-bearing part: stop transforming to CJS and Jest
-runs the same ESM graph everything else does. If you have the choice,
-`node:test` or Vitest need none of this.
+`modules: false` is the load-bearing part: with no CJS transform, Jest runs
+the same ESM graph as everything else. `node:test` and Vitest need none of
+this.
 
 ## msw {#msw}
 
 **Out of the box — `msw/node`.** msw@2.15.0.
 
-Request-level API mocking. In Node, `setupServer` patches the runtime's
-request internals (`http`, `https`, `fetch`/undici, `XMLHttpRequest`) so
-handlers written as `http.get(url, resolver)` intercept real requests — no
-service worker, no DOM, despite the name.
-
-A react-x11 app's data layer is ordinary Node networking, so msw slots in
-with zero adapter: components genuinely call `fetch`, msw answers, state
-updates, the renderer repaints.
+Request-level API mocking. In Node, `setupServer` patches `http`, `https`,
+`fetch`/undici and `XMLHttpRequest`, so `http.get(url, resolver)` handlers
+intercept real requests — no service worker, no DOM. A react-x11 app's data
+layer is ordinary Node networking: components call `fetch`, msw answers, the
+renderer repaints.
 
 ```jsx
 import { setupServer } from 'msw/node';
@@ -256,27 +245,24 @@ function User() {
 }
 ```
 
-- The fetch → `setState` → commit round trip is asynchronous, and a single
+- The fetch → `setState` → commit round trip is asynchronous, and one
   `setImmediate` tick is **not** enough. Poll the tree with a deadline.
-- `server.listen()` patches process-wide networking. Call `server.close()` in
-  `after`, or the X server harness and msw can both be left holding process
-  state between files.
-- Requests to the in-process X server are plain streams, not HTTP, so msw
-  never sees or interferes with the X11 connection.
-- `onUnhandledRequest: 'error'` turns any unmocked request into a loud
-  failure, which is the right default for hermetic UI tests.
-- nock also works. Prefer it only if you specifically need its scope-level
-  assertions (`scope.done()`) on legacy `http.request`-based clients.
+- `server.listen()` patches process-wide networking. Call `server.close()`
+  in `after`, or the harness and msw can leave process state between files.
+- The in-process X server connection is a plain stream, not HTTP; msw never
+  touches it.
+- `onUnhandledRequest: 'error'` makes any unmocked request a loud failure —
+  the right default for hermetic UI tests.
+- nock also works; prefer it only for its scope-level assertions
+  (`scope.done()`) on legacy `http.request`-based clients.
 
 ## fast-check {#fast-check}
 
 **Out of the box.** fast-check@4.9.0.
 
-Property-based testing: describe generators, state a property, and
-fast-check runs it against hundreds of random inputs, then _shrinks_ any
-failure to a minimal counterexample and prints a replay seed.
-
-This is a good fit because the renderer has oracles that cannot lie:
+Property-based testing: generators plus a property, run against hundreds
+of random inputs, with any failure _shrunk_ to a minimal counterexample and
+a replay seed. The renderer has two oracles that cannot lie:
 
 - **Convergence** — `mount(A)` then `update(A → B)` must produce the same
   tree as a fresh `mount(B)`.
@@ -346,31 +332,28 @@ await fc.assert(
 ```
 
 - Compare structure (`kind` plus `abs` rects), not paint-op logs: op logs
-  accumulate across paints on the update path, so they only match after
-  forcing a full repaint on both sides.
-- Keep trees shallow. Each run is a real yoga layout pass, so budget runs
-  accordingly in CI.
-- Include a mid-sequence unmount/remount and `key` permutations in generators
-  before trusting the property. Index keys exercise much less of
-  `insertBefore`/`removeChild` than keyed reorders do.
-- Sixty lines of seeded PRNG would also do this job with no dependency. What
-  fast-check buys is shrinking and `{ seed, path }` replay, which is worth
-  one dev-dependency for a differential suite meant to run forever.
+  accumulate across paints on the update path, so they only match after a
+  forced full repaint on both sides.
+- Keep trees shallow; each run is a real yoga layout pass.
+- Include a mid-sequence unmount/remount and `key` permutations in the
+  generators; index keys exercise much less of `insertBefore`/`removeChild`
+  than keyed reorders.
+- A seeded PRNG would also do with no dependency; fast-check buys shrinking
+  and `{ seed, path }` replay.
 
 ## sinon {#sinon}
 
 **Out of the box, with one required restriction.** sinon@22.1.0.
 
-Spies, stubs and `@sinonjs/fake-timers`. Fake timers work — a toast component
-that auto-dismisses via `setTimeout` dismisses on `clock.tick(1000)` — but
-the default configuration is a trap.
+Spies, stubs and `@sinonjs/fake-timers`. Fake timers work — a toast that
+auto-dismisses via `setTimeout` dismisses on `clock.tick(1000)` — but the
+default configuration is a trap.
 
 **Never fake `setImmediate` or `queueMicrotask`.** Sinon's default `toFake`
 list includes them; React's scheduler drives work with them in Node, and the
 renderer schedules paints via `setImmediate` when there is no frame clock.
-Fake them and every render, effect flush and repaint freezes until a
-`clock.tick`, which usually presents as a test that hangs at the first
-`await`. Always pass an explicit list:
+Faked, every render, effect flush and repaint freezes until a `clock.tick` —
+usually a test that hangs at the first `await`. Pass an explicit list:
 
 ```js
 const clock = sinon.useFakeTimers({
@@ -378,9 +361,8 @@ const clock = sinon.useFakeTimers({
 });
 ```
 
-Faking `Date` is more interesting than it looks: the renderer's animation
-clock reads `Date.now()` at call time, so a fake `Date` does reach style
-transitions.
+The renderer's animation clock reads `Date.now()` at call time, so a fake
+`Date` reaches style transitions.
 
 ```jsx
 test('toast auto-dismisses', async () => {
@@ -406,39 +388,34 @@ test('toast auto-dismisses', async () => {
 });
 ```
 
-- Two `setImmediate` ticks after `clock.tick`, not one — the timer callback's
-  `setState` commits on a later task than the tick itself.
+- Two `setImmediate` ticks after `clock.tick`, not one — the timer
+  callback's `setState` commits a task later.
 - `clock.restore()` in `finally`, every time. A leaked fake `Date` breaks
-  every subsequent test's transitions and timestamps in the same process.
-- The text-input caret blink uses `setInterval`; faking `setInterval` without
-  ticking leaves the caret timer pending. Mostly harmless, but it shows up in
+  later tests' transitions and timestamps in the same process.
+- The text-input caret blink uses `setInterval`; faking it without ticking
+  leaves the caret timer pending — harmless, but it shows in
   `clock.countTimers()`.
-- **Versus `node:test` mock timers**: both pass on the same component.
-  `t.mock.timers.enable({ apis: ['setTimeout'] })` plus
-  `t.mock.timers.tick(1000)` does the plain-timer case with zero dependencies
-  and auto-restores. Prefer it, and reach for sinon when you need fake `Date`
-  (the animation clock), `clock.countTimers()`, or spies and stubs.
+- **Versus `node:test` mock timers**: `t.mock.timers.enable({ apis:
+['setTimeout'] })` plus `t.mock.timers.tick(1000)` handles the plain-timer
+  case with no dependency and auto-restores. Prefer it; use sinon for fake
+  `Date` (the animation clock), `clock.countTimers()`, or spies and stubs.
 
 ## pixelmatch {#pixelmatch}
 
 **Out of the box.** pixelmatch@7.2.0.
 
-The standard perceptual image-diff primitive: two RGBA buffers plus an output
-buffer in, changed-pixel count and a painted diff image out. Anti-aliasing
-aware, zero dependencies.
+Perceptual image diff: two RGBA buffers plus an output buffer in,
+changed-pixel count and a painted diff image out. Anti-aliasing aware, zero
+dependencies. Render through the harness and read pixels back with
+`getImageData` — no display needed. `jest-image-snapshot` cannot do this (it
+wants a Buffer and receives a window object;
+[register](../ecosystem.md#render-time)), but the pipeline under it is four
+lines.
 
-react-x11 can screenshot itself with no display — render through the harness
-above and read pixels back with `getImageData`. `jest-image-snapshot` cannot
-do this for you (it wants a Buffer and receives a window object; see the
-[register](../ecosystem.md#render-time)), but the pipeline underneath it is
-four lines.
-
-Two impedance notes at the seam. `ctx.getImageData(x, y, w, h)` resolves to a
-canvas `ImageData`, and pixelmatch wants the bytes, not the object: hand it
-`.data`, which is already straight RGBA in a `Uint8ClampedArray`, opaque
-pixels at alpha 255, so there is nothing to swap or fix up. And pixel
-readback races the paint: poll a known pixel before taking the comparison
-frame.
+`ctx.getImageData(x, y, w, h)` resolves to a canvas `ImageData`; hand
+pixelmatch its `.data`, already straight RGBA in a `Uint8ClampedArray` with
+opaque pixels at alpha 255. Readback races the paint: poll a known pixel
+before taking the comparison frame.
 
 ```jsx
 import fs from 'node:fs';
@@ -457,44 +434,41 @@ const changed = pixelmatch(before, after, diff.data, 320, 240, {
 if (changed > 0) fs.writeFileSync('diff.png', PNG.sync.write(diff));
 ```
 
-- **Fonts are the determinism problem.** Glyph indices travel on the wire, so
-  pin every family with ntk's `StaticFontSource` and never let a snapshot
-  script fall through to `FontconfigFontSource`. Pinned, two renders of the
-  same tree diff to exactly zero pixels; unpinned, the diff is noise.
-- `threshold` is a per-pixel colour distance, not a pass/fail budget. Gate on
-  the returned count.
-- Buffers must have identical dimensions; pixelmatch throws otherwise. A
-  window resize between shots needs a re-read, not a crop.
+- **Fonts are the determinism problem.** Glyph indices travel on the wire,
+  so pin every family with ntk's `StaticFontSource`; never let a snapshot script fall through to
+  `FontconfigFontSource`. Pinned, two renders of the same tree diff to zero
+  pixels; unpinned, the diff is noise.
+- `threshold` is a per-pixel colour distance, not a pass/fail budget; gate
+  on the returned count.
+- Buffers must have identical dimensions, or pixelmatch throws. After a
+  window resize, re-read rather than crop.
 - fontkit version bumps change hinting and advance rounding. Treat pixel
-  diffs as tolerance-based regression testing, and use tree or op-log
-  assertions for exact CI gating.
-- Against a _real_ X server under Xvfb, expect nonzero noise from the
-  server's own rendering. The zero-noise floor is specific to the in-process
-  JS server.
+  diffs as tolerance-based regression tests; gate CI exactly on tree or
+  op-log assertions.
+- Under Xvfb, expect nonzero noise from the server's own rendering; the
+  zero-noise floor is specific to the in-process JS server.
 
 ## react-test-renderer {#react-test-renderer}
 
 **Works, but do not build on it.** react-test-renderer@19.2.8.
 
-React's own headless renderer treats _any_ string element type as a host
-element, so react-x11 vocabulary passes through untouched and coarse JSON
-snapshots work today. Two things keep it from being a recommendation:
+React's headless renderer treats _any_ string element type as a host
+element, so react-x11 vocabulary passes through and coarse JSON snapshots
+work. But:
 
 1. **It is deprecated.** Importing it prints
-   `react-test-renderer is deprecated`. It still ships and works in 19.2.x,
-   but the React team explicitly discourages new usage.
-2. **It bypasses the actual renderer.** No prop validation, no style
-   resolution, no yoga layout, no paint. A tree that snapshots fine under
-   react-test-renderer can still throw
-   `react-x11: <box width=…> is a style property` or lay out wrong under
-   react-x11.
+   `react-test-renderer is deprecated`; it still ships in 19.2.x, but React
+   discourages new usage.
+2. **It bypasses the actual renderer.** No prop validation, style
+   resolution, yoga layout or paint, so a tree that snapshots fine can still
+   throw `react-x11: <box width=…> is a style property` or lay out wrong
+   under react-x11.
 
 The harness above is barely more code and exercises the real
-`createInstance`/`commitUpdate` path, with layout, for the same "no X server"
-cost. Acceptable as a bridge for teams porting an existing
-react-test-renderer suite; wrong foundation for new react-x11 tests.
+`createInstance`/`commitUpdate` path with layout. Use react-test-renderer
+only as a bridge when porting an existing suite.
 
-- Set `globalThis.IS_REACT_ACT_ENVIRONMENT = true` in test setup or every
-  `act` call warns. Harmless, but noisy.
-- `toJSON()` records the raw props object with none of react-x11's
-  resolution, so snapshots are of _input_, not of what would render.
+- Set `globalThis.IS_REACT_ACT_ENVIRONMENT = true` in test setup, or every
+  `act` call warns.
+- `toJSON()` records the raw props, so snapshots are of _input_, not of what
+  would render.

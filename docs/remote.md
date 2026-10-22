@@ -1,12 +1,9 @@
 # Remote display
 
-This is the case the architecture is categorically better at, and the one
-nothing else on the page has told you about.
-
 A react-x11 app **draws over the wire**. It does not render pixels and ship
 them; it sends X11 drawing requests — rectangles, glyph runs, composites —
-and the X server on the far end turns them into pixels. So "running the app
-somewhere else" is not a feature bolted on top. It is what the protocol is,
+and the X server on the far end turns them into pixels. So running the app
+somewhere else is not a feature bolted on top: it is what the protocol is,
 and the program does not know the difference.
 
 ```sh
@@ -18,13 +15,12 @@ Nothing in the app changes. No VNC, no browser, no streaming daemon, no port
 to forward, no second copy of the UI.
 
 **This is the X11 backend**, and it is the reason X11 stays the flagship
-target rather than becoming the legacy one: the Cocoa, win32 and Wayland
-backends have no wire at all, so nothing on this page applies to them. That
-matters in one specific case — **an app running on a Mac or on Windows and
-drawing somewhere else**. `$DISPLAY` in the environment does not choose the
-backend there; `backend: 'auto'` sees darwin and picks Cocoa, or win32 and
-picks the win32 backend, and the window opens on the local machine. Say
-which you want:
+target: the Cocoa, win32 and Wayland backends have no wire at all, so
+nothing on this page applies to them. That matters in one case — **an app
+running on a Mac or on Windows and drawing somewhere else**. `$DISPLAY` in
+the environment does not choose the backend there; `backend: 'auto'` sees
+darwin and picks Cocoa, or win32 and picks the win32 backend, and the window
+opens on the local machine. Say which you want:
 
 ```sh
 REACT_X11_BACKEND=x11 DISPLAY=thin-client:0 npm start
@@ -37,67 +33,31 @@ and drawing to a Mac's XQuartz is not affected: both ends are X11 already.
 
 ## What it costs, measured
 
-The honest comparison is with pixel streaming (VNC, RDP, a
-`--remote-debugging` browser), because that is what people reach for
-instead. The trade is bytes-per-frame against round-trips-per-interaction.
+Bandwidth is small: **a whole window appears for about four kilobytes** of
+requests, and scrolling a 500-row table ten notches costs 11 kB, because
+only the damaged strip is redrawn — where a single frame of pixel streaming
+(VNC, RDP) is tens to hundreds of kilobytes, sent again whenever anything
+moves.
 
-From `scripts/bench/baseline.json`, which measures against node-x11's
-in-process server — so these are exact protocol costs, not estimates:
-
-| scenario                           | requests | bytes out | replies | stalls |
-| ---------------------------------- | -------- | --------- | ------- | ------ |
-| mount: a window, 40 boxes + labels | 110      | 4.2 kB    | 32      | 0      |
-| 50 filled rounded boxes            | 122      | 6.6 kB    | 7       | 0      |
-| a paragraph of text                | 39       | 6.0 kB    | 7       | 0      |
-| 10 wheel notches over 500 rows     | 224      | 11.2 kB   | 22      | 4      |
-| 5 drag steps of a card of widgets  | 72       | 4.3 kB    | 11      | 0      |
-
-**A whole window appears for about four kilobytes.** A single 1280×800 frame
-of VNC, even well compressed, is tens to hundreds of kilobytes, and it is
-sent again every time anything moves. Scrolling a 500-row table ten notches
-costs 11 kB here because only the damaged strip is redrawn (the
-[scroll-blit path](../AGENTS.md), issue #138); the same scroll under pixel
-streaming is ten full frames. Dragging a card with a background of its own
-is the same trade: each step copies the card where it went and draws the
-strip it uncovered, so its widgets are not drawn again
-([extending.md](extending.md#an-element-that-covers-its-box), issue #681) —
-the five steps in the table would be 24 kB drawn.
-
-What react-x11 pays instead is **latency sensitivity**. Bandwidth is not the
-scarce resource on a link like this — round trips are. A request that waits
-for a reply stalls the pipeline for a full RTT, so on a 60 ms link every
-reply is 60 ms of nothing.
-
-The last two columns are how that is watched, and the difference between
-them is the whole point. `replies` counts requests that carry an answer;
-`stalls` counts the ones whose reply arrived with **nothing pipelined behind
-them** — the request was the last thing sent, so the connection really did
-sit idle for a round trip. A pipelined reply costs a reply and no time: the
-mount's 32 are almost all `InternAtom`, fired off together while the window
-is built, and it stalls on none of them. (The bench's own `settle()` fences
-are a fixed floor in that column, so read growth rather than the absolute
-number.)
-
-So the rule — "avoid round trips", rule 4 in
-[AGENTS.md](../AGENTS.md#protocol-efficiency) — is really "avoid _blocking_
-round trips", which is why atoms, geometry and glyph pages are cached rather
-than re-asked, and why `stalls` is the column to watch on a slow link.
+What react-x11 pays instead is **latency**. A request that waits for a
+reply with nothing pipelined behind it stalls the connection for a full
+round trip, so on a 60 ms link every such reply is 60 ms of nothing. That is
+why atoms, geometry and glyph pages are cached rather than re-asked, and
+why the column to watch on a slow link is `stalls`, not `replies`:
 `npm run bench -- --hotspots` attributes them, request by request.
 
-Rules of thumb, from the shape of the protocol rather than from a benchmark
-we have not run:
+Rules of thumb, reasoned from the request and reply counts rather than
+measured over a shaped link:
 
 - **Under ~20 ms RTT** (a LAN, a nearby VPS): indistinguishable from local.
 - **20–80 ms** (a continent away): typing and scrolling stay responsive;
   window mapping and font setup have a visible beat.
 - **Above ~150 ms** or on a lossy link: X11's chattiness starts to show, and
   a pixel-streaming protocol designed for high latency will feel better.
-  This is not a react-x11 limitation, it is X11's, and it is the honest place
-  to say so.
+  This is X11's limit, not react-x11's.
 
-`unverified:` those bands are reasoning from the request/reply counts above,
-not measurements over a shaped link. Measuring them properly means `tc
-netem` between two hosts; if you do it, the numbers belong in this table.
+The per-scenario numbers are in the
+[design notes](../design/remote.md#what-it-costs-measured).
 
 ## `ssh -X` and `ssh -Y`
 
@@ -114,8 +74,7 @@ that does not":
 
 **Prefer `-X`.** react-x11 should work under it — it draws into windows it
 created, which is what untrusted mode is for. If something does not, that is
-a bug worth filing rather than a reason to reach for `-Y`. Most toolkits'
-documentation says "use `-Y` if `-X` misbehaves"; that advice hands every
+a bug worth filing rather than a reason to reach for `-Y`, which hands every
 program on the remote host the ability to read your screen and log your
 keystrokes.
 
@@ -178,15 +137,12 @@ the compositor is willing to expose), and `WM_TRANSIENT_FOR` and the
 `_NET_WM_STATE` work are among the things that survive the trip — see
 [elements.md](elements.md#transientfor--a-window-that-belongs-to-another).
 
-**Native Wayland: not remotely**, and the reason is not effort. Wayland has
-no drawing protocol. A Wayland client allocates a buffer, renders pixels into
-it _itself_, and hands the compositor a handle — there is nothing to send over
-a wire, and no server-side rendering to ask for. The entire premise of this
-page, that drawing crosses the connection, does not exist there. The Wayland
-backend (`backend: 'wayland'`, [wayland-backend.md](wayland-backend.md)) is
-therefore a different program under the same API — it rasterizes locally —
-which is why it is opt-in only and never what `'auto'` picks: on Linux the
-default stays X11, and with it everything on this page.
+**Native Wayland: not remotely.** Wayland has no drawing protocol: a client
+renders pixels into a buffer itself and hands the compositor a handle, so
+there is no drawing to send over a wire. The
+[Wayland backend](wayland-backend.md) rasterizes locally, which is why it is
+opt-in and never what `'auto'` picks: on Linux the default stays X11, and
+with it everything on this page.
 
 **XQuartz notes**, since it is the most common macOS path:
 
@@ -196,7 +152,7 @@ default stays X11, and with it everything on this page.
 - Put `/opt/X11/bin` first on `PATH`. Font family resolution shells out to
   `fc-match`, and Homebrew's fontconfig — which is usually found first —
   ships no macOS system-font aliases, so `sans-serif` resolves to a CJK
-  face. Issue [#86](https://github.com/sidorares/react-x11/issues/86).
+  face.
 
 ## Making it feel better
 

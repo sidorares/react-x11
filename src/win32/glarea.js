@@ -1,6 +1,6 @@
 // `<glarea>` on Windows: a WGL core context, composited as a visual.
 //
-// docs/windows-gl.md is the report behind this, and the route is the X11
+// design/windows-gl.md is the report behind this, and the route is the X11
 // model rather than ANGLE — a GL surface covers its rect and the tree draws
 // under it, positioned from the parent's yoga rect. src/glnodes.js already
 // expects exactly that, including the rule that the surface selects no
@@ -58,7 +58,7 @@ export class Win32GlWindow {
    * vendor driver: opengl32.dll is then the 1.1 software rasterizer, with no
    * shaders and no framebuffer objects — which is not a degraded direct
    * backend but the indirect one's feature set without its portability, and
-   * is docs/windows-gl.md's rung 2 rather than this one.
+   * is design/windows-gl.md's rung 2 rather than this one.
    */
   _onReady(ok, why = 0) {
     if (!ok) {
@@ -79,7 +79,7 @@ export class Win32GlWindow {
         'error',
         new Error(
           `react-x11: no OpenGL surface — ${REASONS[why] ?? 'the bridge refused it'}. ` +
-            'docs/windows-gl.md rung 2 (ANGLE) covers this case and is not built yet.',
+            'design/windows-gl.md rung 2 (ANGLE) covers this case and is not built yet.',
         ),
       );
       return;
@@ -540,7 +540,7 @@ export function installGl(app) {
       throw new Error(
         'react-x11: <glarea> has no GL surface — this machine has no vendor ' +
           'OpenGL driver, so only the 1.1 software rasterizer is available, ' +
-          'which has no shaders. docs/windows-gl.md rung 2 (ANGLE) covers ' +
+          'which has no shaders. design/windows-gl.md rung 2 (ANGLE) covers ' +
           'this case and is not built yet.',
       );
     });

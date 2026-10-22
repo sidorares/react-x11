@@ -13,7 +13,7 @@
 // features it uses, so a mismatch can be charged to one. Half the corpus
 // piles features together; the other half adds exactly one of the harder
 // features to a case otherwise made of plain ones, so each has cases of its
-// own (docs/architecture/grid-layout.md).
+// own (design/architecture/grid-layout.md).
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

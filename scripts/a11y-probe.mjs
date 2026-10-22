@@ -32,7 +32,7 @@
 // this".
 //
 // See docs/accessibility.md; the design record is
-// docs/architecture/accessibility.md.
+// design/architecture/accessibility.md.
 
 import { execFile } from 'node:child_process';
 import { ATSPI_STATE, ATSPI_STATE_NICK } from '../src/a11y.js';

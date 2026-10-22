@@ -36,7 +36,7 @@
 // overlapped, hidden, clipped, faded or non-plain returns to the bitmap in
 // the frame that finds it, the animation handed back to the clock — and a
 // loop the clock runs is offered again once the scene would take it
-// (`wouldTake`), where it is in its cycle. docs/macos.md §"Layer
+// (`wouldTake`), where it is in its cycle. design/macos.md §"Layer
 // promotion" is the account.
 import { now } from '../nodes/animation.js';
 import { BoxNode } from '../nodes/box.js';

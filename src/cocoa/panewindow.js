@@ -1,4 +1,4 @@
-// The pane process's "window" on the Cocoa backend — docs/frame.md's child
+// The pane process's "window" on the Cocoa backend — design/frame.md's child
 // half, with the X server replaced by shared memory.
 //
 // On X11 a pane renders into a real window of its own and the host embeds

@@ -1,4 +1,4 @@
-// The cocoa backend in threaded mode (docs/macos.md §"JS on a worker"), over
+// The cocoa backend in threaded mode (design/macos.md §"JS on a worker"), over
 // a fake bridge in the shapes windowkit/appkit#50–#54 give a worker: events
 // through `connect` in batches the test delivers, a window that is a handle
 // at the call and gets its number when AppKit makes it, a flip that is a

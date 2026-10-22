@@ -5,7 +5,7 @@
 // that stands in for the X socket.
 //
 // Two run loops. By default Node's loop is master and a timer pumps AppKit
-// (docs/macos.md §"Input and the run loop", option 1): input waits for the
+// (design/macos.md §"Input and the run loop", option 1): input waits for the
 // pump, and AppKit's modal loops (live resize, menu tracking, a drag) stall
 // JS timers — but not the delegate callbacks, which is why live resize
 // still relayouts: the resize event flushes the frame synchronously on its
@@ -13,7 +13,7 @@
 // Under the launcher (`node --import react-x11/cocoa-main`, src/cocoa/
 // main.js) the app runs on a worker instead, AppKit keeps the main thread
 // in a real `[NSApp run]`, and this object is fed by the bridge's batches
-// (`_routeBatch`) with no pump at all (docs/macos.md §"JS on a worker").
+// (`_routeBatch`) with no pump at all (design/macos.md §"JS on a worker").
 import { isMainThread } from 'node:worker_threads';
 
 import { cssColorStraight } from 'ntk/color';
@@ -64,11 +64,11 @@ const PUMP_INTERVAL_MS = 8;
 // The edge moves when the delegate returns, so the budget is how long a
 // slow frame may hold the drag back. 50 covers what a large tree costs —
 // the Cocoa `resize` cell measures 28ms a tick at 3,662 nodes
-// (docs/macos.md) — with room, where the bridge's own test met every tick
+// (design/macos.md) — with room, where the bridge's own test met every tick
 // in 3.1ms against 3ms of layout. Past three 60Hz frames an edge that waits
 // reads as the drag stuttering, so a tree slower than that lets the edge
 // go first and its frame land after (Flutter's Windows embedder waits up
-// to 100, docs/windows.md §"Resize"). `createRoot({ cocoa: { resizeWait } })`
+// to 100, design/windows.md §"Resize: where the threads meet"). `createRoot({ cocoa: { resizeWait } })`
 // sets it; 0 is no handshake at all.
 const RESIZE_WAIT_MS = 50;
 // What `createRoot({ cocoa: { paneStretch } })` and
@@ -272,7 +272,7 @@ export class CocoaApp {
     }
 
     // 'surface' (the measured default) or 'layers' — the retained CALayer
-    // presenter, opt-in while docs/macos.md's measure-first gate is open.
+    // presenter, opt-in while design/macos.md's measure-first gate is open.
     this._presenterMode =
       options.cocoa?.presenter ??
       process.env.REACT_X11_COCOA_PRESENTER ??
@@ -391,7 +391,7 @@ export class CocoaApp {
 
     // the global-menu exports, newest active: the macOS menu bar is one per
     // app, so the most recent MenuBar owns it (per-focused-window switching
-    // is the follow-up — docs/macos.md §Menus)
+    // is the follow-up — design/macos.md §Menus)
     this._globalMenus = [];
     this._activeGlobalMenu = null;
 

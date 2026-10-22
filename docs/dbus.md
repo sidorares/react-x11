@@ -18,19 +18,14 @@ function ColourScheme() {
 ```
 
 There is **nothing to wrap**. No provider, no prop drilling, no setup step
-for the app author — a component library can call this, which is the whole
-reason it is shaped this way.
+for the app author — a component library can call this.
 
 ## The rule everything else is subordinate to
 
 **Nothing throws at import time, and nothing crashes an app running where
-there is no session bus.**
-
-Concretely, that has to hold on XQuartz, under a bare `startx`, in CI, in an
-ssh session on a headless server, in a container, and on Node 20 where the
-transport is not installed at all. The ssh case is not an edge case — it is
-react-x11's flagship persona. **"No bus" is a first-class configuration, not
-a degraded one.**
+there is no session bus** — XQuartz, a bare `startx`, CI, an ssh session on a
+headless server, a container, Node 20 where the transport is not installed.
+**"No bus" is a first-class configuration, not a degraded one.**
 
 So `sessionBus()` answers `null` rather than rejecting, and `useSessionBus()`
 reports `'unavailable'` rather than throwing, when:
@@ -63,27 +58,16 @@ interface BusHandle {
 
 **The terse path is correct on its own.** `const { bus } = useSessionBus()`
 followed by `if (!bus) return fallback` is right, with no reference to
-`status`; if reading `status` were _required_ to avoid a bug the shape would
-be wrong. For a colour-scheme subscriber, `'connecting'` and `'unavailable'`
-render identically anyway. The states earn their keep in diagnostics ("why is
-my tray icon missing") and for an app that is itself a service.
-
-**"Idle" is not a fourth state.** The first render happens before the effect
-runs, so nothing has been attempted yet — calling that `'connecting'` is a
-small inaccuracy that becomes true within a tick, and an honest fourth state
-would give every consumer a branch that never needs different handling.
+`status`. The states are for diagnostics ("why is my tray icon missing") and
+for an app that is itself a service.
 
 **`'unavailable'` is a snapshot, not a verdict.** Failure is not cached: a
-session bus can appear later — `$XDG_RUNTIME_DIR/bus` exists the moment
-something starts one — and the next acquisition retries. Do not permanently
-disable a feature on seeing it. The name invites the opposite reading, which
-is why this paragraph exists.
+session bus can appear later, and the next acquisition retries. Do not
+permanently disable a feature on seeing it.
 
-**`'closed'` does not auto-retry, deliberately.** Silently re-acquiring would
-hand you a fresh `bus` under the same variable and hide the unique-name change
-(see [the sharing contract](#the-sharing-contract)). A feature-level hook that
-knows how to rebuild its bus-side state can call `retry()`; a generic one
-cannot, so the decision is yours.
+**`'closed'` does not auto-retry.** A new connection is a new unique name (see
+[the sharing contract](#the-sharing-contract)), so a hook that knows how to
+rebuild its bus-side state calls `retry()` itself.
 
 ## The imperative pair
 
@@ -100,58 +84,34 @@ interface BusRef {
 }
 ```
 
-This is what the hooks are built on, and it is public for two reasons that are
-not "completeness":
+For host-side code with no component to hang off, and for a click handler that
+wants to resolve at click time rather than render time:
 
-- **Host-side code has no component to hang off.** The plumbing that later
-  features add — a settings subscriber, a notification sender — is module code
-  and event-loop glue, some of which must run with no root mounted at all.
-- **A click handler wants to resolve at click time**, not at render time:
+```jsx
+<Button
+  onClick={async () => {
+    await using ref = await sessionBus({ required: true });
+    await ref.bus.proxy(/* … */);
+  }}
+/>
+```
 
-  ```jsx
-  <Button
-    onClick={async () => {
-      await using ref = await sessionBus({ required: true });
-      await ref.bus.proxy(/* … */);
-    }}
-  />
-  ```
+`required: true` converts unavailability into a rejection carrying the cause —
+for an app whose purpose is the bus. The default never rejects.
 
-`required: true` is the service-author escape hatch. `null` is right for
-feature-probing plumbing and hides _why_ from an app whose purpose is the bus,
-so `required` converts unavailability into a rejection carrying the cause. The
-default stays never-rejecting; the hooks use `required` internally purely to
-obtain the reason for `cause`.
-
-There is **no `busAddress` parameter**, deliberately: a per-call address is
-incoherent under sharing — two callers, two addresses, one socket, which
-would win? The address seam is D-Bus's own, `$DBUS_SESSION_BUS_ADDRESS`, plus
-an `$XDG_RUNTIME_DIR/bus` fallback until
-[dbus-native#389](https://github.com/sidorares/dbus-native/pull/389) lands.
-
-On **macOS** there is a third source and it is not a variable: D-Bus
-advertises the socket through launchd, and finding it means running
-`launchctl getenv`. That lookup is asynchronous and happens once per process,
-which is the whole of
-[#417](https://github.com/sidorares/react-x11/issues/417) — `dbus-native`
-would otherwise do it from a synchronous constructor with `spawnSync`, and
-120–150 ms of blocked event loop in front of the first frame is not a price
-for finding out whether there is a bus. See
-[desktop.md](desktop.md#not-blocking-the-first-frame-on-the-bus).
+There is **no `busAddress` parameter**: the connection is shared, so the
+address comes from `$DBUS_SESSION_BUS_ADDRESS`, falling back to
+`$XDG_RUNTIME_DIR/bus`. On **macOS** it is looked up from launchd
+(`launchctl getenv`), asynchronously and once per process, so it does not
+block the first frame
+([desktop.md](desktop.md#not-blocking-the-first-frame-on-the-bus)).
 
 ## One connection, on purpose
 
-`dbus-native`'s own `sessionBus()` is a constructor in disguise: every call
-opens a new socket with its own unique name. A menu, a tray and an app's own
-exported service would be three connections and three identities, and the
-desktop would see three half-applications.
-
-A D-Bus connection is **process** identity, so every consumer in the process
-shares one socket and one unique name. That is also why these hooks need no
-provider, where `useApp()` does: the X connection really is per-tree —
-`createRoot()` opens one per root and a process can drive several — but two
-roots on two X displays still share one session bus. Putting a process-global
-on a tree-scoped context would assert a relationship that does not exist.
+Every consumer in the process — the global menu, a tray, your own exported
+service — shares **one socket and one unique name**, so the desktop sees one
+application. That is also why these hooks need no provider: two roots on two X
+displays still share one session bus.
 
 ## Lifecycle: connect on first use, stay connected
 
@@ -162,35 +122,23 @@ The ref count drives the socket's **event-loop hold**, not its existence:
 | `>0` | connected, `ref()`d   | held open — someone is using the bus                      |
 | `0`  | connected, `unref()`d | not held; the connection stays warm and costs one idle FD |
 
-Releasing the last ref does **not** close the connection. A file dialog that
-mounts on click and unmounts on dismiss would otherwise tear the connection
-down and rebuild it every time — and the real cost is not the handshake, it is
-that **every reconnect is a new unique name**, with the daemon forgetting
-match rules and well-known names along with the old connection. StrictMode's
-double-mount becomes two counter flips rather than a full connect/disconnect
-cycle.
+Releasing the last ref does **not** close the connection, so a dialog that
+mounts and unmounts (or StrictMode's double mount) does not reconnect and get
+a new unique name each time.
 
 `closeBus(kind)` is the way out for an app that genuinely wants the connection
 gone. Rare, explicit, and never the automatic consequence of an unmount.
 
 ## The sharing contract
 
-One connection with many consumers only works if the things one consumer can
-break for another are named:
-
 - **Never close a shared bus.** `release()` is the only lifecycle verb a ref
   holder has. `ref.bus.close()` or `bus.connection.end()` tears the connection
-  out from under every other holder — libdbus makes closing a shared
-  connection a hard application error, and here it is a rule.
-- **react-x11 owns the connection's one `'error'` listener.** `dbus-native`
-  deliberately attaches none, because an unlistened `'error'` crashing the
-  process is the right contract for a caller-owned connection and the wrong
-  one for a shared one. Do not attach your own.
-- **A dead connection is not resurrected.** `dbus-native`'s reconnect stays
-  off: a new socket is a new unique name, and the daemon forgets names and
-  match rules with the old one. Refs on the dead connection fail their calls
-  with `ConnectionClosedError` and `release()` harmlessly; the next
-  `sessionBus()` dials fresh, and mounted hooks move to `'closed'`.
+  out from under every other holder.
+- **react-x11 owns the connection's one `'error'` listener.** Do not attach
+  your own.
+- **A dead connection is not resurrected.** Refs on it fail their calls with
+  `ConnectionClosedError` and `release()` harmlessly; the next `sessionBus()`
+  dials fresh (a new unique name), and mounted hooks move to `'closed'`.
 - **App-global stays app-global.** Well-known names (`RequestName` has no
   per-consumer refcount), exported object paths (re-exporting the same path
   and interface replaces silently) and `setValueShapes()` (which flips reply
@@ -202,7 +150,7 @@ break for another are named:
 
 An app that wants to _be_ on the bus gets the full `dbus-native` surface
 through `ref.bus`, on the **same connection and unique name** as react-x11's
-own plumbing — one socket, one identity on the desktop:
+own plumbing:
 
 ```js
 const ref = await sessionBus({ required: true });
@@ -211,16 +159,12 @@ ref.bus.exportInterface(impl, '/org/example/MyApp', description);
 // hold the ref for as long as you serve: it is what keeps the process alive
 ```
 
-Holding the ref is not bookkeeping — it is the event-loop hold above. Release
-it and nothing keeps the process running.
+Release the ref and nothing keeps the process running.
 
 The one service react-x11 exports for you is `org.freedesktop.Application`, so
 that a `myapp://…` link opens the app that is already running —
-[uri-schemes.md](uri-schemes.md). It is on this connection for exactly the
-reason above: a separately-dialled one would own the app's name under a
-different unique name than the one the global menu registers under and the one
-portals build Request paths from, and the desktop's model of "this
-application" would come apart.
+[uri-schemes.md](uri-schemes.md). It is on this same connection, so the app's
+name, its global menu and its portal requests share one identity.
 
 ## Installing, and Node 20
 
@@ -229,15 +173,12 @@ application" would come apart.
 ```
 
 `dbus-native` declares `engines: ">=22.12.0"` where react-x11 declares
-`">=20.19"`, so **npm skips it on Node 20** and the install succeeds exactly
-as before. There is no compiler and no install script either way — `npm i
-react-x11` still needs no toolchain.
+`">=20.19"`, so **npm skips it on Node 20** and the install still succeeds. No
+compiler and no install script either way.
 
 On Node 20, `useSessionBus()` reports `'unavailable'` with a `cause` that says
-the transport is missing. That is the same code path an ssh session or a Mac
-without a bus already takes: **"no transport installed" collapses into "no bus
-here" rather than adding a mode.** To have it on Node 20 anyway, install it
-explicitly:
+the transport is missing — the same path as an ssh session or a Mac without a
+bus. To have it on Node 20 anyway, install it explicitly:
 
 ```bash
 npm i dbus-native
@@ -251,27 +192,14 @@ directly and cast; it is the same object.
 
 ## Known sharp edges
 
-- **The `Hello` window is the one crash this layer cannot absorb.** A daemon
-  that authenticates and then never answers `Hello` throws from inside
-  `dbus-native` where nothing can catch it, 25 s in, from a timer tick —
-  [dbus-native#393](https://github.com/sidorares/dbus-native/issues/393). Small
-  window, real bug, tracked upstream.
-- **Identical match rules are refcounted by the daemon, not by the client** —
-  [dbus-native#394](https://github.com/sidorares/dbus-native/issues/394).
-  Dormant here, since reconnect is off; recorded so that nobody enables
-  reconnect without reading it.
+- **A daemon that authenticates and never answers `Hello`** crashes the
+  process from inside `dbus-native`, 25 s in, where nothing can catch it. A
+  small window, tracked upstream.
 
 ## Seeing it
 
-The bus explorer that used to live in `examples/` — session and system side
-by side, a tree of names → object paths → interfaces built from live
-introspection, a pane of an object's methods, signals and property values —
-has moved to
-[`@react-x11/components`](https://github.com/sidorares/react-x11-components).
-It was built on `Tree`, which now lives there too, and a browser of that shape
-is a component rather than a demonstration of this API.
+Point `DBUS_SESSION_BUS_ADDRESS` at nothing: a well-built consumer renders the
+`'unavailable'` state rather than failing to start. That is the thing to check
+in your own app.
 
-What it demonstrated of _this_ page still holds and is worth knowing: point
-`DBUS_SESSION_BUS_ADDRESS` at nothing and a well-built consumer renders the
-`'unavailable'` state rather than failing to start. That is the degradation
-rule above, and it is the thing to check in your own app.
+Design notes: [design/dbus.md](../design/dbus.md).

@@ -7,7 +7,7 @@ M1 Pro, node 26); nothing here was run against an X server, because nothing
 here needs one. file:line references are to that checkout and will drift._
 
 _Implemented after this was written, along the lines of §5 and §8:
-[styling.md](../styling.md#container-queries) is the reference and
+[styling.md](../../docs/styling.md#container-queries) is the reference and
 `examples/container-queries.jsx` the demonstration._
 
 ---
@@ -15,7 +15,7 @@ _Implemented after this was written, along the lines of §5 and §8:
 ## 0. TL;DR
 
 **Feasible, and most of the machinery already exists.** A window size query
-(`'@width >= 600'`, [styling.md](../styling.md#window-size-queries)) and a
+(`'@width >= 600'`, [styling.md](../../docs/styling.md#window-size-queries)) and a
 container query differ in exactly one structural way: a window's size is an
 _input_ to layout and a container's size is an _output_ of it. So a container
 query cannot be resolved where the window queries are resolved — before the
@@ -135,7 +135,7 @@ is _already_ independent of its subtree:
   off** — `minWidth: 0` plus a fixed `flexBasis` (or `flex: 1`, which expands
   to basis `0`). The automatic minimum is the one route by which content
   feeds back into a flex item's size, and `minWidth: 0` is its documented
-  switch ([elements.md](../elements.md#a-floor-the-content-decides));
+  switch ([elements.md](../../docs/elements.md#a-floor-the-content-decides));
 - a **scroller**: `overflow: 'scroll'` implies `minWidth: 0`,
   `minHeight: 0` and — when it grows — `flexBasis: 0`
   (`styles.js:1343`, `resolveComputedStyle`). Content overflows a scroller

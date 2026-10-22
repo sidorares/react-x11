@@ -1,9 +1,8 @@
 # Extending the element vocabulary
 
-`<box>`, `<text>`, `<glarea>` and the rest are built in, but the list is not
-closed. `registerElement()` adds an element from outside the package — a
-`<sparkline>`, a tray icon, an XEMBED `<foreign>` — so a sibling package can
-ship one without forking react-x11 and without the core growing.
+`<box>`, `<text>`, `<glarea>` and the rest are built in; `registerElement()`
+adds more from outside the package — a `<sparkline>`, a tray icon, an XEMBED
+`<foreign>` — so a sibling package can ship one without forking react-x11.
 
 ```js
 import { registerElement } from 'react-x11/host';
@@ -44,146 +43,124 @@ registerElement('sparkline', {
 />
 ```
 
-Register before you render. The registry is consulted when an element is
+Register before you render: the registry is consulted when an element is
 first created, so a late registration only affects trees mounted after it.
+
+Design notes (history, measurements, how core serves each hook):
+[design/extending.md](../design/extending.md).
 
 ## The definition
 
-| field                         |                                                                                                                                       |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `create(props, app, hostCtx)` | builds the node. `app` is the ntk connection — the second argument every built-in node constructor takes. Must return a `Node`.       |
-| `drawn`                       | default `true`: lays out with yoga and paints into the owning window. `false` for a node that owns a real child X window (see below). |
-| `semanticNames`               | prop names this element owns even though they are also style names                                                                    |
-| `selfDamagedProps`            | prop names whose damage the element's own `applyProps` claims (see [Drawing a scene](#drawing-a-scene-into-one-node))                 |
-| `childrenAllowed`             | default `true`; `false` rejects children by name instead of laying out something that never paints                                    |
-| `override`                    | replace an existing registration. Off by default — two packages claiming one name is a conflict worth hearing about                   |
+| field                         |                                                                                                      |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `create(props, app, hostCtx)` | builds and returns the `Node`; `app` is the ntk connection                                           |
+| `drawn`                       | default `true`: laid out by yoga, painted into the window. `false`: it owns a child X window (below) |
+| `semanticNames`               | prop names this element owns even though they are also style names                                   |
+| `selfDamagedProps`            | props whose damage your own `applyProps` claims ([Drawing a scene](#drawing-a-scene-into-one-node))  |
+| `childrenAllowed`             | default `true`; `false` rejects children by name rather than laying out what never paints            |
+| `override`                    | replace an existing registration. Off by default: two packages claiming one name is a conflict       |
 
-Two of these exist because getting them wrong fails a long way from the
-cause, so they are worth understanding rather than copying:
+**`drawn` decides whether your element paints at all.** A kind outside the
+set of drawn kinds lays out, reports a sensible `abs`, and never appears on
+screen, with no error. `registerElement` adds you unless you opt out.
 
-**`drawn` decides whether your element paints at all.** `paintOrder()`
-filters children on the set of drawn kinds; a node missing from it lays out
-correctly, reports a sensible `abs` rect, and never appears on screen, with
-no error anywhere. `registerElement` puts you in that set unless you opt out.
-
-**`semanticNames` is the difference between DEV and production.** react-x11
-throws in development on `<box width={10} />`, because `width` is a style
-property written flat — a real mistake with an unhelpful failure otherwise.
-An element whose own vocabulary overlaps the style vocabulary (`width`,
-`color`, `fontSize`) therefore has to say so, or it throws on its own props
-in development and works in production. `<window width>` is the built-in
-precedent: on a `<window>` it is the X window's width and never style.
-
-`react-x11/style`'s `isStyleProp(name)` is how to check whether a name you
-are about to use needs declaring.
+**`semanticNames` keeps development and production alike.** In development
+react-x11 throws on `<box width={10} />`, a style property written flat. An
+element whose own props overlap the style vocabulary (`width`, `color`,
+`fontSize`) must list them, or it throws on its own props in development
+only. `<window width>` is the built-in precedent: the X window's width,
+never style. `isStyleProp(name)` from `react-x11/style` says whether a name
+needs declaring.
 
 ## Registering under hot reload {#hot-reload}
 
-Register at module scope — the pattern everything above shows, and the one
-tree-shaking forces on a component library. That module scope re-runs when
-[`react-x11/refresh`](ecosystem/dev-tooling.md#react-refresh) hot-reloads
-the module, so `registerElement` has a re-registration policy rather than
-a footnote:
+Register at module scope (tree-shaking requires it of a component library).
+That scope re-runs when
+[`react-x11/refresh`](ecosystem/dev-tooling.md#react-refresh) hot-reloads the
+module, so:
 
-- **The same `create` reference is never a conflict.** A definition
-  arriving twice replaces silently, latest flags winning.
-- **Under an active hot-reload session, any duplicate replaces silently.**
-  The session begins with the first hot re-import and covers the rest of
-  the process: from then on, "already registered" would only mean
-  "registered by the previous version of yourself". Mounted nodes keep the
-  old prototype until they remount — the same staleness contract Fast
-  Refresh has for classes; new mounts get the new definition.
-- **Outside a session, a duplicate still throws.** Two packages claiming
-  one element name in a plain run is a conflict to be told about, and
-  `override: true` remains the way to say a replacement is deliberate.
+- **The same `create` reference is never a conflict**: it replaces
+  silently, latest flags winning.
+- **During a hot-reload session, any duplicate replaces silently.** The
+  session starts at the first hot re-import and lasts for the process.
+  Mounted nodes keep the old prototype until they remount (Fast Refresh's
+  contract for classes); new mounts get the new definition.
+- **Outside a session, a duplicate throws**; `override: true` says a
+  replacement is deliberate.
 
-One thing the hot loader adds: inside a hot module, call it through a
-namespace or default import (`Host.registerElement(...)`) — a _named_
-import called at module top level is a transform error there, because
-named-import bindings initialize in a microtask after a reload.
+In a hot module, call it through a namespace or default import
+(`Host.registerElement(...)`): a _named_ import called at module top level
+is a transform error there, because named-import bindings initialize a
+microtask after a reload.
 
 ## The node contract
 
-`Node` already implements the whole reconciler-facing surface, so an element
-that only draws needs a constructor and a `paint`. What you may override:
+`Node` implements the whole reconciler-facing surface; an element that only
+draws needs a constructor and a `paint`. What you may override:
 
-| method                         | when                                                                                                         |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `paint(ctx)`                   | draw. Call `super.paint(ctx)` first for background, border and clip, then draw inside `this.abs`.            |
-| `paintContent(ctx)`            | draw _between_ the background and the children — where the built-ins draw, and what a scroller needs (below) |
-| `opaqueRect()`                 | the rect you cover with opaque pixels on every paint, so a pass inside it skips the fills under you (below)  |
-| `viewportFixedRects()`         | what you draw fixed to your scroll pane's viewport, so its scroll's blit repaints it rather than copying it  |
-| `paintOverhang()`              | how far you draw past your box, so claims and culls cover it (below)                                         |
-| `applyProps(next, prev)`       | props changed. Call `super.applyProps(next, prev)`; invalidate if you cache anything derived.                |
-| `paintChanged(next, prev)`     | did anything you draw change? Only for an element that claims its own damage (below)                         |
-| `measureContent(constraints)`  | your content has a size of its own (below). Leaves only — an element that measures has no children.          |
-| `default*(ev)`                 | the element's own behaviour for a key, a press or focus (below) — what makes it _interactive_.               |
-| `hitTest(x, y)`                | non-rectangular hit areas. The default walks children in reverse paint order.                                |
-| `insertBefore` / `removeChild` | only if children mean something structural to you                                                            |
-| `destroySubtree()`             | release anything you allocated (pixmaps, fonts, timers). Call `super.destroySubtree()`.                      |
+| method                         | when                                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------------------- |
+| `paint(ctx)`                   | draw. Call `super.paint(ctx)` first (background, border, clip), then draw inside `this.abs` |
+| `paintContent(ctx)`            | draw _between_ background and children — where built-ins draw; what a scroller needs        |
+| `opaqueRect()`                 | the rect you cover opaquely every paint, so a pass inside skips the fills under it          |
+| `viewportFixedRects()`         | what you draw fixed to your scroll pane's viewport, so its blit repaints it                 |
+| `paintOverhang()`              | how far you draw past your box, so claims and culls cover it                                |
+| `applyProps(next, prev)`       | props changed. Call `super`; invalidate anything you derived                                |
+| `paintChanged(next, prev)`     | did anything you draw change? Only if you claim your own damage                             |
+| `measureContent(constraints)`  | your content has a size of its own. Leaves only: no children                                |
+| `default*(ev)`                 | your behaviour for a key, a press or focus — what makes it _interactive_                    |
+| `hitTest(x, y)`                | non-rectangular hit areas. The default walks children in reverse paint order                |
+| `insertBefore` / `removeChild` | only if children mean something structural to you                                           |
+| `destroySubtree()`             | release what you allocated (pixmaps, fonts, timers). Call `super`                           |
 
-And what you read:
+What you read:
 
 - `this.props` — the current props, replaced wholesale on update.
-- `this.style` — the flattened `style` prop with the active `:hover` /
-  `:focus` / `:active` / `:disabled` blocks overlaid, and `$token`
-  references already resolved against the theme. **Everything that paints or
-  lays out reads this, never `props`.**
-- `this.abs` — position and size within the owning window, valid after
-  layout.
-- `this.contentBox()` — `abs` inset by the border and the padding: where the
-  content goes, and where every built-in draws.
-- `this.scale` — device pixels per logical pixel ([scale.md](scale.md)).
-  `this.style`, `this.abs`, `contentBox()`, the paint context, every rect you
-  hand `invalidate` or `scrollContents` and every rect you report to a screen
-  reader are device pixels already; a synthetic event's `x`/`y` are logical,
-  so a hit test against `abs` reads `ev.nativeEvent.x`/`y`, or multiplies.
-  On a 1x display the two units coincide — which is exactly how an element
-  that mixes them passes every headless test and then hovers, drags and
-  frames at half the distance on a retina panel.
-  `renderX11(element, { scale: 2 })` is the test that catches it. It is a
-  per-node number rather than a per-window one — an enclosing `scale` prop
-  zooms a subtree ([scale.md](scale.md#a-subtree-of-its-own)) — so read it
-  off the node rather than caching one for the tree.
-- `this.resolvedTextStyle()` — the text style this node resolves to, ready to
-  hand to `app.fonts.layout` (below).
-- `this.resolveColor(value)` — a colour from this node's style as one a
-  context can paint: the value itself, or for
-  [`currentColor`](styling.md#currentcolor) the node's ink. Every colour
-  core paints goes through it, so a colour of yours read off `this.style`
-  should too — `ctx.strokeStyle = this.resolveColor(this.style.borderColor)`
-  — or it paints nothing where the app wrote the keyword. A node whose
-  style paints in `currentColor` repaints when its ink moves, without being
-  asked.
-- `this.direction` — which way this node reads, resolved: `'ltr'` or
-  `'rtl'`, never `'inherit'`. Yoga has already mirrored the boxes, so this
-  is for what you draw _inside_ one — which side a mark sits on, which way
-  a chevron points, what a pointer coordinate means
+- `this.style` — the flattened `style` with the active `:hover` / `:focus` /
+  `:active` / `:disabled` blocks overlaid and `$token`s resolved against the
+  theme. **Everything that paints or lays out reads this, never `props`.**
+- `this.abs` — position and size within the owning window, after layout.
+- `this.contentBox()` — `abs` inset by border and padding: where the content
+  goes, and where every built-in draws.
+- `this.scale` — device pixels per logical pixel ([scale.md](scale.md)),
+  per node (an enclosing `scale` prop zooms a subtree —
+  [scale.md](scale.md#a-subtree-of-its-own)), so read it off the node.
+  `style`, `abs`, `contentBox()`, the paint context and every rect you hand
+  `invalidate`, `scrollContents` or a screen reader are device pixels; a
+  synthetic event's `x`/`y` are logical, so hit-test `abs` with
+  `ev.nativeEvent.x`/`y`, or multiply. They coincide at 1x, so test with
+  `renderX11(element, { scale: 2 })`.
+- `this.resolvedTextStyle()` — this node's text style, ready for
+  `app.fonts.layout` (below).
+- `this.resolveColor(value)` — a style colour as a context can paint it: the
+  value, or the node's ink for [`currentColor`](styling.md#currentcolor).
+  Pass every colour you read off `this.style` through it
+  (`ctx.strokeStyle = this.resolveColor(this.style.borderColor)`), or the
+  keyword paints nothing. A node whose style paints in `currentColor`
+  repaints when its ink moves.
+- `this.direction` — `'ltr'` or `'rtl'`, never `'inherit'`. Yoga has already
+  mirrored the boxes; this is for what you draw inside one — which side a
+  mark sits on, which way a chevron points, what a pointer coordinate means
   ([styling.md](styling.md#direction-and-the-logical-edges)).
 - `this.root` — the owning `<window>` node; `this.app` — the ntk connection.
 - `this.theme` — the nearest theme at or above this node.
-- `this.paintDamage()` — the rect the pass being painted covers, or `null`
-  for a full one. Only an element that draws a whole scene needs it
-  ([below](#drawing-a-scene-into-one-node)).
+- `this.paintDamage()` — the rect the current pass covers, or `null` for a
+  full one ([below](#drawing-a-scene-into-one-node)).
 
-To ask for a repaint: `this.invalidate(layout, damage, reason)`. Pass the
-damage — `this` is usually it, or a rect when you know a tighter one. An
-invalidation with no bound repaints the whole window, which is this
-renderer's main performance bug class (see [debugging.md](debugging.md)).
-`reason` joins the closed set the diagnostics print. Damage is collected on
-the window node and `invalidate` on any node forwards there, so an element
-that is not attached yet invalidates nothing rather than throwing.
+`this.invalidate(layout, damage, reason)` asks for a repaint. Pass the damage
+— `this`, or a tighter rect: an unbounded one repaints the whole window, the
+main performance bug class here ([debugging.md](debugging.md)). `reason` is
+from the closed set the diagnostics print. On a node not yet attached it
+does nothing.
 
-And to take the keyboard focus: `this.focus()` moves it here as a click
-would and hands the node back, `this.blur()` gives it up, `this.focused` and
-`this.focusWithin` answer where it is. They claim their own damage — a
-focused control repaints itself, and its ring, without being asked.
+`this.focus()` takes the keyboard focus as a click would and returns the
+node; `this.blur()` gives it up; `this.focused` and `this.focusWithin` say
+where it is. A focus change repaints the control and its ring by itself.
 
 ### Text of your own
 
 An element that draws text — a badge, a code editor, a terminal — shapes it
-through ntk's font manager, and the two things it needs to do that are the
-two accessors above:
+through ntk's font manager with the two accessors above:
 
 ```js
 class BadgeNode extends Node {
@@ -202,50 +179,34 @@ class BadgeNode extends Node {
 }
 ```
 
-**`contentBox()` is not `abs` minus `style.padding`.** The insets come off
-the layout, which is where `padding: '10%'`, the per-side overrides and the
-border widths have already been resolved against this frame's size — so the
-box an element computes from the style bag agrees with the one `<text>` uses
-only by luck, and stops agreeing the next time the vocabulary grows another
-edge — the per-side border widths were the last one to arrive.
+**Use `contentBox()`, not `abs` minus `style.padding`.** Its insets come from
+layout, with `padding: '10%'`, per-side overrides and border widths
+resolved; a box derived from the style bag matches `<text>`'s only by luck.
 
-**`resolvedTextStyle()` is what makes the type of an app reach your
-element.** It is the node's own font properties over what it **inherits**
-from the elements around it, and under that what the palette says text with
-none of its own is set in — in the shape `fonts.layout` wants (`family`, not
-`fontFamily`; `variations`, not `fontVariationSettings`; `features`, what
-`fontVariantNumeric` and `fontFeatureSettings` resolve to together). An
-element that reads `this.style.fontFamily` instead is one that a
-`<ThemeProvider value={{ fontFamily: 'Inter' }}>` does not reach, and one
-that a `<box style={{ color: theme.dim }}>` around it does not dim — bugs an
-app author can only work around by growing props on your element and
-threading them in. Ask, and the element inherits exactly what a `<text>`
-sibling inherits, including a `:hover` block on the row it sits in
+**Use `resolvedTextStyle()`, not `this.style.fontFamily`.** It layers the
+node's own font properties over what it inherits from the elements around
+it and the palette's default, in the shape `fonts.layout` wants (`family`,
+not `fontFamily`; `variations`, not `fontVariationSettings`; `features`,
+what `fontVariantNumeric` and `fontFeatureSettings` resolve to). Read the
+style bag instead and a `<ThemeProvider>` font or an enclosing box's
+`color` never reaches your element; ask, and it inherits what a `<text>`
+sibling does, a row's `:hover` included
 ([styling.md](styling.md#inheritance-the-ink-the-face-and-the-size)).
 
-Both are read at paint time. `contentBox()` is computed each call, since the
-box changes with every layout; `resolvedTextStyle()` is memoised and dropped
-by everything that can move it — a style change, a state block, an
-animation tick, a theme swap, an element above it changing its own type — so
-reading it per frame costs a property lookup and never goes stale. If the
-text is also what _sizes_ the element, shape it in `measureContent` as well;
-`<text>` memoizes its layout per max-width for exactly that reason. An
-element that keeps a cache of its own keyed on the type — a shaped run, a
-rasterized label — should drop it in **`_textStyleMoved(cost)`**, which is
-called with `2` when a glyph can have moved and `1` when only the ink or the
-glyph rounding did. The default re-measures on the first and repaints on the
-second, which is right for most elements.
+Read both at paint time: `contentBox()` is computed per call;
+`resolvedTextStyle()` is memoised and dropped by whatever can move it (a
+style or state change, an animation tick, a theme swap, an ancestor's type
+changing). If the text also sizes the element, shape it in `measureContent`
+too. A cache of your own keyed on the type — a shaped run, a rasterized
+label — is dropped in **`_textStyleMoved(cost)`**: `2` when a glyph can
+have moved, `1` when only the ink or glyph rounding did. The default
+re-measures on `2` and repaints on `1`.
 
-**Text drawn where a context is not.** A GL surface's labels, or a signed
-distance field made from a string, need the text as pixels rather than
-drawn onto a surface — and a surface read back is a round trip for pixels
-the engine had, one that answers asynchronously and in the ink the screen
-gets (hinted, gamma and contrast applied). A layout answers
-**`coverage({ pad })`** instead (#673): how much of each device pixel its
-glyphs cover, one byte a pixel, synchronously — the layout box in whole
-pixels with `pad` round it, the layout's origin at `(pad, pad)`. Linear,
-grayscale, unhinted: the outlines' own coverage, which is what a raster that
-will be scaled wants.
+**Text as pixels.** A GL surface's labels or a signed distance field need
+glyph coverage, not a drawn surface. A layout's **`coverage({ pad })`**
+answers synchronously: one byte per device pixel, the layout box in whole
+pixels with `pad` round it, origin at `(pad, pad)` — linear, grayscale,
+unhinted, as a raster that will be scaled wants.
 
 ```js
 const coverage = layout.coverage?.({ pad: 4 }) ?? null;
@@ -254,18 +215,14 @@ if (!coverage) {
 }
 ```
 
-It is optional on purpose: ntk's layout answers it (X11, Wayland, the mock),
-and so do DirectWrite's (Windows) and CoreText's (macOS), each from the
-release that added it. Feature-detect, keep a readback, and never assume
-the two are pixel-identical — `draw` snaps and hints, coverage does
-neither.
+It is optional — ntk's layout (X11, Wayland, the mock), DirectWrite's and
+CoreText's answer it from the release that added it — so feature-detect and
+keep a readback. It is not `draw` pixel for pixel: `draw` snaps and hints.
 
 ### Answering for your own text
 
-_Issue #259._ An element that draws text can also let the user **select**
-it. There is no registration call and no list of blessed kinds: a
-`selectable` ancestor walks its subtree and asks every node four questions,
-and an element that answers them is part of the document.
+A `selectable` ancestor lets the user select the text of any descendant
+that answers four questions; there is no registration.
 
 ```js
 class LogViewNode extends Node {
@@ -317,52 +274,33 @@ class LogViewNode extends Node {
 }
 ```
 
-**Two spaces, and both are the ones already in use.** Indices are **code
-points** — the space ntk's `TextLayout.caretPosition`/`indexAt` speak, so an
-emoji is one position and not two — and rectangles are in the **owning
-window's** coordinates, the same as `abs` and `contentBox()`: device pixels.
-(A mouse event's `x`/`y` are the same coordinates in logical pixels —
-[scale.md](scale.md).) An element that answers in its own local coordinates
-is one whose highlight is drawn somewhere else on the screen.
+- **Indices are code points** (ntk's `TextLayout.caretPosition`/`indexAt`:
+  an emoji is one position). **Rects are the owning window's device
+  pixels**, like `abs`; a mouse event's `x`/`y` are the same in logical
+  pixels ([scale.md](scale.md)).
+- **Answer from what you draw**: one layout and origin for painting and all
+  four accessors. If the element scrolls, the origin includes the offset.
+- **One band per line, and per direction run.** A selection is contiguous
+  in logical order, a line laid out in visual order, so a Latin-to-Arabic
+  range covers disjoint stretches: walk ntk's `line.runs` and intersect each
+  with the range.
+- **An element that edits owns its selection**: `hasOwnSelection = true` in
+  the constructor, and a `selectable` document skips its subtree and its
+  presses.
+- **Presses arrive through the base class.** `Node`'s `defaultMouseDown`,
+  `defaultMouseDrag`, `defaultMouseUp` and `defaultKeyDown` hand the
+  gesture to the nearest `selectable` ancestor. Override one without
+  `super` and you take the gesture (right for an editor); to keep both, end
+  with `super.defaultMouseDown(ev)`.
 
-**Answer from what you draw.** `<text>` computes its layout and its origin
-in one place and uses it for painting and for all four accessors, because a
-caret answered from a differently-placed layout is a caret in the wrong
-place and nothing about it looks like a bug in the accessor. If your element
-scrolls, the origin has the scroll offset in it — that is what makes a hit
-test right after the user has scrolled.
-
-**One band per line, and one per direction run.** A selection is contiguous
-in _logical_ order and a line is laid out in _visual_ order, so a range that
-crosses from Latin into Arabic covers two disjoint stretches of pixels. If
-you are drawing with ntk's `TextLayout`, walk `line.runs` and intersect each
-one with the range rather than filling from one caret x to the other;
-`<text>` does this and `test/text-selection.test.js` pins it.
-
-**Say if you own a selection of your own.** An element that edits — anything
-with a caret the user moves — sets `hasOwnSelection = true` in its
-constructor. A `selectable` document then skips its subtree whole and never
-takes its presses, which is what keeps a `<textinput>` inside a document
-from having half of it lit by somebody else's drag.
-
-**Presses arrive through the base class.** `Node`'s `defaultMouseDown`,
-`defaultMouseDrag`, `defaultMouseUp` and `defaultKeyDown` hand the gesture
-to the nearest `selectable` ancestor, so an element that only draws needs to
-write none of them. An element that overrides one and does not call `super`
-has taken that gesture for itself — right for an editor, and the reason a
-drawing element that wants both should end its handler with
-`super.defaultMouseDown(ev)`.
-
-Everything about the surface side — what a copy assembles, what the
-separators are, which keys are bound — is in
+What a copy assembles, the separators, the keys:
 [elements.md](elements.md#selecting-text).
 
 ### A size of your own
 
-`<box>` is as big as its style and its children say; a gauge, a chart, a
-terminal or an editor is as big as its _content_ says. An element with a size
-of its own implements **`measureContent`**, and layout asks it whenever the
-size on an axis is the element's to give:
+An element as big as its content — a gauge, a chart, a terminal, an editor
+— implements **`measureContent`**, asked whenever the size on an axis is the
+element's to give:
 
 ```js
 const TICK = 30;
@@ -383,77 +321,61 @@ class GaugeNode extends Node {
 }
 ```
 
-`<gauge ticks={6} />` is then 180×24 with nothing in the style saying so, the
-way `<textarea rows={6}>` is six lines tall.
-
-It has to be a **method on the class**: the base `Node` constructor is what
-wires it to layout, so an element that assigns it in its own constructor is
-too late and never gets asked. `invalidateMeasure()` says so in development.
+`<gauge ticks={6} />` is then 180×24 with no style saying so. It must be a
+**method on the class**: the base constructor wires it to layout, so one
+assigned in your constructor is never asked (`invalidateMeasure()` says so
+in development).
 
 #### What it is asked
 
-The argument is `{ width, height, widthMode, heightMode }`. Each mode says
-what the number beside it means, and an unbounded axis arrives as `Infinity`
-rather than as a sentinel — so `Math.min(preferred, width)` is the right
-answer in all three, and the mode is there for the cases where it is not:
+`{ width, height, widthMode, heightMode }`, an unbounded axis as `Infinity`,
+so `Math.min(preferred, width)` is right in every mode; the mode is for when
+it is not:
 
-| asked with       | the element answers                                                                                                            |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `unconstrained`  | its natural size — nothing bounds this axis (`<textarea>`: its preferred width, `rows` tall)                                   |
-| `at-most`        | its natural size, clamped into the offer                                                                                       |
-| `at-most` with 0 | **the smallest it can be drawn at** — an editor: a character or two of one line; something that scrolls inside: honestly small |
-| `exactly`        | the style decided this axis; hand the number back and answer for the other one                                                 |
+| asked with       | the element answers                                                                    |
+| ---------------- | -------------------------------------------------------------------------------------- |
+| `unconstrained`  | its natural size (`<textarea>`: its preferred width, `rows` tall)                      |
+| `at-most`        | its natural size, clamped into the offer                                               |
+| `at-most` with 0 | **the smallest it can be drawn at** — an editor: a character or two; a scroller: small |
+| `exactly`        | the style decided; hand the number back and answer for the other axis                  |
 
-The `at-most 0` row is the one worth reading twice, because it is not only
-the layout that asks it. The renderer measures the smallest size every node
-can be drawn at — by laying the tree out with **no room at all** and asking
-each leaf directly — and writes that back as the element's own floor, so a
-row too narrow for it squeezes it that far and no further
-([elements.md](elements.md#everything-shrinks-nothing-shrinks-to-nothing)).
-The same measurement read at the top of the tree is what
-`<window minWidth="auto">` sends the window manager. An element that answers
-0 there is saying it can be squeezed to nothing, and both floors come out
-without it.
+The renderer asks `at-most 0` itself, laying the tree out with no room to
+find each leaf's floor: a row too narrow squeezes the element that far and
+no further ([elements.md](elements.md#everything-shrinks-nothing-shrinks-to-nothing)),
+and at the top of the tree it is what `<window minWidth="auto">` sends the
+window manager. Answer 0 and both floors are lost.
 
-`at-most` is what is _available_, not a cap that will be enforced: an element
-may answer larger and it will be laid out at what it asked for, overflowing
-whatever contains it. That is how `<text textWrap="nowrap">` works, and it is
-the honest answer for content that genuinely does not reflow — a code block
-that scrolls sideways rather than wrapping.
+`at-most` is available room, not a cap: answer larger and the element is
+laid out at that and overflows, as `<text textWrap="nowrap">` does — right
+for content that does not reflow.
 
 #### What it must not do
 
-`measureContent` is a **question about a hypothetical**, asked several times
-per layout and at sizes nothing will ever be drawn at. So:
+It is a question about a hypothetical, asked several times per layout at
+sizes nothing will be drawn at:
 
-- **do not read `this.abs`** — it is the result of the layout doing the
-  asking, and last frame's answer at that;
-- **do not paint, invalidate, or set state.** Cache derived work if it is
-  expensive (`<text>` memoizes its shaped layout per width), but keep the
-  answer a pure function of the content and the constraints;
-- **answer with finite numbers.** Content that has not arrived yet is
-  `{ width: 0, height: 0 }`, not `undefined` — anything else throws naming
-  the element, because a `NaN` would otherwise spread silently through every
-  ancestor's rect.
+- **do not read `this.abs`** — it is last frame's;
+- **do not paint, invalidate, or set state** — cache expensive work (as
+  `<text>` memoizes its layout per width), but answer as a pure function of
+  content and constraints;
+- **answer finite numbers** — `{ width: 0, height: 0 }` for content not yet
+  arrived; anything else throws naming the element.
 
-An element that measures itself **cannot have children**: layout sizes it
-from the measure function and gives its children no say, so rendering one
-inside it is an error naming both elements.
+An element that measures itself **cannot have children**; rendering one
+inside it is an error naming both.
 
 #### Saying the answer moved
 
-Layout caches what an element measured to. `invalidateMeasure(reason?)` is
-how the element says that cache is stale — a prop the measurement read
-changed, data arrived, a font loaded — and the next frame asks again. Nothing
-does this for you: only the element knows which of its inputs the measurement
-reads. `reason` joins the closed set the diagnostics print
-([debugging.md](debugging.md#invalidation-reasons)); the default is
-`'measure'`.
+Layout caches the measurement. Call `invalidateMeasure(reason?)` when an
+input it reads changes — a prop, arriving data, a loaded font — and the next
+frame asks again; nothing else knows your inputs. `reason` is from the
+diagnostics' closed set ([debugging.md](debugging.md#invalidation-reasons)),
+default `'measure'`.
 
 #### Content with an aspect ratio
 
-The `<image>`/`<svg>` shape — a natural size to keep the proportions of — is
-one call:
+`intrinsicSize` is the `<image>`/`<svg>` measurement, a natural size whose
+proportions are kept:
 
 ```js
 import { Node, intrinsicSize } from 'react-x11/node';
@@ -465,41 +387,36 @@ class ThumbNode extends Node {
 }
 ```
 
-It shrinks to the width on offer with the height following, and scales the
-width from a style height when only that axis is fixed — which is what an
-`<img>` does, and is the whole of `<image>`'s own measurement.
+It shrinks to the width on offer, the height following, and scales the
+width from a style height when only that is fixed, as `<img>` does.
 
 ### Behaviour of your own
 
-An element that _does_ something — an editor, a terminal, a table with cell
-editing, a tree with type-ahead — implements the **default actions**. They are
-the same seam `<textinput>`'s editing runs on, and the ordering is the whole
-point:
+An element that does something — an editor, a terminal, a table with cell
+editing, a tree with type-ahead — implements **default actions**, the seam
+`<textinput>` runs on. Order:
 
-1. the application's `onKeyDown` / `onMouseDown` / … handlers, capture then
-   bubble;
-2. **if none of them called `ev.preventDefault()`**, the element's `default*`
+1. the app's `onKeyDown` / `onMouseDown` / … handlers, capture then bubble;
+2. **unless one called `ev.preventDefault()`**, the element's `default*`
    method.
 
-So an app can veto the behaviour, or run something before it, without knowing
-how the element is built — which is what `<textinput onKeyDown>` has always
-been able to do, and is the reason to implement behaviour here rather than in
-a React component wrapping the element.
+So an app can veto or precede the behaviour without knowing how the element
+is built — the reason to put it here rather than in a wrapping component.
 
-| method                   | when                                                                                                                                                                                                                        |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `defaultKeyDown(ev)`     | a key, delivered to the focused node. `ev.keysym` is the `XK_*` constant — the Latin one, so a chord matches under any layout; `codepoint >= 0x20` is the test for "this is text"                                           |
-| `defaultKeyUp(ev)`       | that key was released. Rare — nothing in core needs it — and there for an element that answers the whole keystroke rather than the press, such as `<foreign>` forwarding into an embedded client                            |
-| `defaultComposition(ev)` | text still being typed — a dead key, a Compose sequence. `ev.type` is the phase, `ev.data` what to show, or at the end what to insert                                                                                       |
-| `defaultMouseDown(ev)`   | a press. Place a caret, grab a handle; `ev.capturePointer()` to keep the rest of the gesture                                                                                                                                |
-| `defaultMouseDrag(ev)`   | motion while _this_ element holds the press — including outside its box, which `onMouseMove` does not give you                                                                                                              |
-| `defaultMouseUp(ev)`     | that press was released                                                                                                                                                                                                     |
-| `defaultMouseMove(ev)`   | the pointer moved over this element, no button down — light the node, the edge, the handle it is over. The first one after it arrives is the enter                                                                          |
-| `defaultMouseLeave(ev)`  | …and the pointer left: put that back                                                                                                                                                                                        |
-| `defaultWheel(ev)`       | the wheel, before the scroll chain — for the element whose wheel is not a scroll. `ev.preventDefault()` consumes it                                                                                                         |
-| `defaultContextMenu(ev)` | right-click, after the press: open your own menu. Separate so suppressing it keeps the caret placement                                                                                                                      |
-| `defaultFocus(info)`     | this element became the focused node (or its window got the X focus back): start the caret blinking. `info` is `{ reason, backwards }` — `'key'` with a direction is a Tab, which is the only thing that has ever needed it |
-| `defaultBlur()`          | focus left, or the window lost it: stop it                                                                                                                                                                                  |
+| method                   | when                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------ |
+| `defaultKeyDown(ev)`     | a key, at the focused node. `ev.keysym`: the Latin `XK_*`, any layout; `codepoint >= 0x20`: text |
+| `defaultKeyUp(ev)`       | the key was released. Rare: for answering the whole keystroke, as `<foreign>` does               |
+| `defaultComposition(ev)` | a dead key or Compose in progress: `ev.type` the phase, `ev.data` what to show or insert         |
+| `defaultMouseDown(ev)`   | a press: place a caret, grab a handle; `ev.capturePointer()` keeps the gesture                   |
+| `defaultMouseDrag(ev)`   | motion while _this_ element holds the press, even outside its box                                |
+| `defaultMouseUp(ev)`     | that press was released                                                                          |
+| `defaultMouseMove(ev)`   | pointer motion over it, no button down. The first is the enter                                   |
+| `defaultMouseLeave(ev)`  | the pointer left: unlight it                                                                     |
+| `defaultWheel(ev)`       | the wheel, before the scroll chain, for a wheel that is not a scroll                             |
+| `defaultContextMenu(ev)` | right-click, after the press (preventing it keeps the caret): open your menu                     |
+| `defaultFocus(info)`     | it, or its window, got focus. `info`: `{ reason, backwards }`; `'key'` + direction is Tab        |
+| `defaultBlur()`          | focus left, or the window lost it: stop the caret                                                |
 
 ```js
 import { Node, CARET_BLINK_MS } from 'react-x11/node';
@@ -549,34 +466,19 @@ class EditorNode extends Node {
 }
 ```
 
-Details worth having in writing:
-
-**A gesture is vetoed once, at its press.** `defaultMouseDrag` and
-`defaultMouseUp` are the continuation of the press `defaultMouseDown` got, so
-a handler that prevented the press means none of the three run — an element
-never hears about motion it has no press behind, and does not need a
-`dragging` flag of its own to discover that.
-
-**Hover is motion, not a state you are handed.** `defaultMouseMove` runs for
-the element the pointer is over — coalesced to once per frame, like every
-motion — and `defaultMouseLeave` when it goes elsewhere, which is everything
-a scene element needs to light the node, edge or handle under the pointer and
-put it back. There is no `defaultMouseEnter`: the first motion after the
-pointer arrives _is_ the enter, and it carries the position an enter would
-have to be asked for. A capture suspends the pair — while a gesture owns the
-pointer, hover stays frozen where it was and the motion goes to
-`defaultMouseDrag` instead. And a node that unmounts while hovered is
-_forgotten_ rather than left, exactly as one that unmounts while focused is,
-so anything with a lifetime behind the highlight is released in
-`destroySubtree` as well.
-
-**The cursor is the point's.** `defaultCursor` is one cursor for the whole
-element. An element that draws a document, a graph or an editor has one per
-part — a link, a handle, text — and names it with `cursorAt(x, y)`, asked on
-every motion over it with the pointer in device pixels, the unit `abs` is
-in. It answers a cursor name, or null for nothing in particular, which falls
-through to `defaultCursor` and then to the parent. A `cursor` style on the
-element still wins, and a capture freezes the cursor with the rest of hover.
+- **A gesture is vetoed once, at its press**: a prevented press means no
+  `defaultMouseDown`, `defaultMouseDrag` or `defaultMouseUp`.
+- **Hover is motion.** `defaultMouseMove` runs for the element under the
+  pointer, coalesced to once per frame, and `defaultMouseLeave` when it
+  goes; the first motion is the enter (there is no `defaultMouseEnter`).
+  A capture freezes hover and sends motion to `defaultMouseDrag`. A node
+  unmounted while hovered is forgotten, not left: release in
+  `destroySubtree` what the highlight holds.
+- **The cursor is the point's.** `defaultCursor` covers the element;
+  `cursorAt(x, y)`, asked on every motion in device pixels like `abs`,
+  answers one per part (a link, a handle, text), or null to fall through to
+  `defaultCursor`, then the parent. A `cursor` style still wins; a capture
+  freezes it.
 
 ```js
 cursorAt(x, y) {
@@ -584,17 +486,12 @@ cursorAt(x, y) {
 }
 ```
 
-**The wheel that is not a scroll.** `canScroll`/`scrollBy`
-([below](#scrolling-content-you-painted)) route the wheel for content that
-scrolls, and they hand the element deltas only — which is the whole of the
-gesture when the answer is "move by that much". It is not the whole of a zoom
-about the pointer: that needs the point that must _not_ move (`ev.x`/`ev.y`)
-and the modifier that tells a zoom from a pan, and it answers the wheel
-whether or not anything "can scroll". `defaultWheel(ev)` is the whole event,
-at the node under the pointer, before the chain walks; `ev.preventDefault()`
-consumes it and the walk never runs. The deltas are as the device measured
-them, fractions included — the whole-pixel rule the chain follows is there
-for the scroll blit, and a zoom factor is continuous.
+- **A wheel that is not a scroll** — a zoom about the pointer — needs the
+  point (`ev.x`/`ev.y`) and the modifier, not just the deltas
+  `canScroll`/`scrollBy` get ([below](#scrolling-content-you-painted)).
+  `defaultWheel(ev)` gets the whole event at the node under the pointer
+  before the scroll chain walks; `ev.preventDefault()` stops the walk. Its
+  deltas keep their fractions.
 
 ```js
 defaultWheel(ev) {
@@ -604,41 +501,24 @@ defaultWheel(ev) {
 }
 ```
 
-**Focus is a prerequisite, not a consequence.** Keys are delivered to the
-focused node, and nothing focuses an element that has not said it can be:
-`focusableByDefault = true` makes it a tab stop and a press target the way
-`<textinput>` is one, and an application's `focusable={false}` or `tabIndex`
-still overrides it ([events.md](events.md#focus)).
-
-**Tab is an ordinary key here.** It reaches `defaultKeyDown` before focus
-traversal sees it, so an element can keep it — an editor indenting with Tab
-does not need a wrapping component to get it, which is what the ordering used
-to force. Consuming it means calling `ev.preventDefault()` from the default
-action: what that prevents is the default action _after_ this one, which for
-Tab is the focus cycle.
-
-**`super.defaultKeyDown(ev)` is the base class's own behaviour**, and there
-are two things in it: the text-selection keys, and Space/Enter dispatching
-the node's `onClick` as a click
-([events.md](events.md#space-and-enter-are-a-click)). An override that
-answers the keystroke itself — an editor, where Space types a space — simply
-does not call it, which is what `<textinput>` does. One that answers a few
-keys and leaves the rest, as the scroll pane does, ends its `default:` branch
-with `return super.defaultKeyDown(ev)` and keeps both.
-
-An element that eats Tab has taken the keyboard user's only way out of it, so
-it owes them another. The convention, above and worth converging on: **Escape
-arms one pass-through Tab.** Escape on its own does nothing visible, the next
-Tab leaves, and the one after that indents again — the same bargain a code
-editor on the web makes, and the reason a screen-reader user is not stuck in
-your element.
-
-**An element that types text implements `defaultComposition` too.** `é` is
-a dead key and then a letter, and the keys that make it never reach
-`defaultKeyDown` — so an element that only implements the key path types the
-letter and drops the accent, which is the bug
-[events.md](events.md#composition) describes. Three phases, and the third
-is the only one that inserts anything:
+- **Focus is a prerequisite.** Keys go to the focused node, and only an
+  element with `focusableByDefault = true` is focused (a tab stop and press
+  target, like `<textinput>`); the app's `focusable={false}` or `tabIndex`
+  still overrides it ([events.md](events.md#focus)).
+- **Tab is an ordinary key**: it reaches `defaultKeyDown` before focus
+  traversal, and `ev.preventDefault()` there keeps focus where it is.
+- **`super.defaultKeyDown(ev)`** is the text-selection keys, and Space/Enter
+  dispatching `onClick` ([events.md](events.md#space-and-enter-are-a-click)).
+  An editor that answers every key (Space types a space) skips it, as
+  `<textinput>` does; one answering a few keys ends with
+  `return super.defaultKeyDown(ev)`, as the scroll pane does.
+- **An element that eats Tab owes a way out.** The convention, shown above:
+  **Escape arms one pass-through Tab** — the next Tab leaves, the one after
+  indents again — so no keyboard or screen-reader user is trapped.
+- **An element that types text implements `defaultComposition`.** Dead keys
+  and Compose sequences never reach `defaultKeyDown`, so without it `é`
+  types as `e` ([events.md](events.md#composition)). Only the last phase
+  inserts:
 
 ```js
 defaultComposition(ev) {
@@ -652,32 +532,25 @@ defaultComposition(ev) {
 }
 ```
 
-**An element that forwards keys somewhere else sets `composes = false`**
-instead. Composition is ours to run only when the text lands in our tree;
-an element handing the raw key event to another program — `<foreign>` and
-its embedded client — wants the dead key itself, and the client's own input
-method takes it from there.
+The preedit is not part of your value: it never reaches `onChange` or the
+undo history, a controlled value rewritten mid-composition cannot corrupt
+it, and abandoning it (Escape, blur) drops a string, not an edit. An
+element holding no text can leave composition out; one that **forwards keys
+to another program** (`<foreign>`) sets `composes = false` so the dead key
+reaches the client's input method.
 
-The preedit is deliberately not part of your value: it never reaches
-`onChange` or the undo history, a controlled value rewritten mid-composition
-cannot corrupt it, and abandoning it — Escape, focus leaving — is dropping a
-string rather than undoing an edit. Not implementing it at all is a
-supported position for an element that holds no text; the composition then
-simply goes nowhere.
-
-**A caret blinks at `CARET_BLINK_MS`.** It is the cadence `<textinput>` uses,
-exported so that two carets on one screen are in step rather than a few tens
-of milliseconds apart. Stop the timer in `defaultBlur` _and_ in
-`destroySubtree`: a node that unmounts while focused is forgotten rather than
-blurred, so `defaultBlur` is not guaranteed to run.
+**A caret blinks at `CARET_BLINK_MS`**, `<textinput>`'s cadence, so carets
+blink in step. Stop the timer in `defaultBlur` _and_ `destroySubtree`: a
+node unmounted while focused is never blurred.
 
 ### Text a screen reader can read
 
-An element that draws text of its own is, to an assistive technology,
-nothing at all: a painted rectangle with no characters, no caret and no
-selection in it. `<textinput>` is not — it implements AT-SPI's `Text` and
-`EditableText` interfaces in full — and the difference is one method
-(issue #257):
+To an assistive technology, an element that draws its own text is a
+rectangle with no characters, caret or selection. `a11yTextState()` gives it
+what `<textinput>` has, through the same code: AT-SPI's `Text` (characters,
+words, lines, caret, selection, and the `text-changed` / `text-caret-moved`
+/ `text-selection-changed` events Orca narrates) and, for an editor,
+`EditableText`.
 
 ```js
 class EditorNode extends Node {
@@ -699,76 +572,41 @@ class EditorNode extends Node {
 }
 ```
 
-That alone buys the whole read side: character count, reading by character,
-word and line, the caret, the selection, and the `text-changed` /
-`text-caret-moved` / `text-selection-changed` deltas Orca narrates from —
-through the same code that serves `<textinput>`, so a third-party editor is
-read by the paths core is read by rather than by a parallel set of them.
+| member                              | when                                                                               |
+| ----------------------------------- | ---------------------------------------------------------------------------------- |
+| `a11yTextState()`                   | always, for an element holding text; `null` if none                                |
+| `notifyA11yTextChanged()`           | every edit, caret move, selection or composition change; state is then _pulled_    |
+| `a11ySetSelection(start, end)`      | an AT moved the caret (to `end`) or selected. Without it: read, not navigated      |
+| `a11yReplaceText(start, end, text)` | an AT inserted, deleted or set the lot. Without it: read, not typed in             |
+| `a11yRole`                          | the ARIA role if the app sets none (`'textbox'`, `'log'`…); set in the constructor |
 
-| member                              | when                                                                                                                              |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `a11yTextState()`                   | always, for an element holding text. `null` for one that holds none                                                               |
-| `notifyA11yTextChanged()`           | every edit, caret move, selection change and composition — the state is _pulled_ when this says it moved                          |
-| `a11ySetSelection(start, end)`      | an AT moved the caret or selected a range; the caret belongs at `end`. Without it the element is read but not navigated           |
-| `a11yReplaceText(start, end, text)` | an AT edited: replace that range. Insert, delete and set-the-lot all arrive here. Without it the element is read but not typed in |
-| `a11yRole`                          | the ARIA role this element is when the app writes none — `'textbox'`, `'log'`, `'document'`. Assign it in the constructor         |
+- **Viewer or editor.** A viewer (a document, a code block, a log, a
+  terminal) reports `value` and a selection: it gets `Text`, a `document`
+  role, and a selection an AT can read and set. An editor adds
+  `editable: true` and `a11yReplaceText` for the EDITABLE state and
+  `EditableText`; `editable` without `a11yReplaceText` is announced as
+  editable but not exposed as typeable.
+- **Offsets are code points into what you draw** (`Array.from(value)`), an
+  open composition included, since extents and magnifiers follow the
+  glyphs. Mark it with `preedit: { offset, text }` and its churn is reported
+  as text the user did not type
+  ([accessibility.md](accessibility.md#while-a-composition-is-open)).
+  Offsets you report are clamped.
+- **`notifyA11yTextChanged()` is free when nobody listens**: call it on
+  every path that moves the text.
+- **`a11yTextState()` runs several times per change**: answer from held
+  state; never shape, copy a buffer, or invalidate.
+- **Say `multiline`**, or neither state is claimed (a guess from the value
+  would flip the first time someone pressed Enter).
 
-**The two tiers are the two kinds of element.** A viewer — a markdown
-document, a code block, a log, a terminal — reports `value` and a selection
-and stops there: it gets the `Text` interface, a `document` role, and a
-selection an AT can read and set, which is the whole of what "select this
-paragraph and copy it" needs. An editor adds `editable: true` and
-`a11yReplaceText`, which is what turns on the EDITABLE state and the
-`EditableText` interface. An element that claims `editable` without
-implementing the write **is** still announced as editable and reports its
-own edits — it simply is not exposed as one an AT may type into, because an
-interface whose every method answered "no" is a lie an AT cannot see
-through.
-
-Four details, each of which is a defect the other way round:
-
-**Offsets are code points and they index what you draw.** `Array.from(value)`
-is the counting, and `value` is the string on the screen — an open
-composition included, because every geometric answer beside it (the extents
-of character _n_, a magnifier's highlight) is read off the glyphs a sighted
-user sees. Say which part is uncommitted with `preedit: { offset, text }`
-and its churn is marked as text the user did not type, exactly as
-`<textinput>`'s is ([accessibility.md](accessibility.md#while-a-composition-is-open)).
-Offsets you report are clamped for you, so a caret left stale between an
-edit and your own bookkeeping cannot become an out-of-range answer on the
-wire.
-
-**`notifyA11yTextChanged()` is free when nobody is listening** — one
-property read, the hook slots being empty until a bridge or the test spy
-fills them. So call it from every path that moves the text, rather than
-asking whether accessibility is on.
-
-**`a11yTextState()` is called several times per change**, for the role, the
-states and the diff. Answer from state the element already holds; it must
-not shape, copy a buffer, or invalidate.
-
-**Say `multiline`.** Left unsaid, neither the single-line nor the
-multi-line state is claimed — better than a guess read off the current
-value, which would report the element's shape _changing_ the first time
-somebody pressed Enter.
-
-The behaviour is assertable without a screen reader, a desktop or a bus:
-`renderX11(el, { a11y: true })` hands back a spy that records the same feed
-([accessibility.md](accessibility.md#asserting-what-a-screen-reader-would-hear)),
-and `test/a11y-custom-text.test.js` in this repo is a worked editor and a
-worked viewer driven through it.
+`renderX11(el, { a11y: true })` returns a spy recording the same feed
+([accessibility.md](accessibility.md#asserting-what-a-screen-reader-would-hear)).
 
 ### A scene a screen reader can walk
 
-_Issue #304._ An element that draws a hundred interactive things is still
-one node, so it is one accessible: a graph pane full of selectable,
-draggable, connectable nodes reads out as **"Flow graph, group"** and stops
-there. Nothing in it can be found, named, activated or told apart, and no
-amount of `role`/`aria-*` on the element itself changes that — the objects
-an assistive technology would need are not in the tree, because you drew
-them.
-
-Describe them and they are:
+An element that draws many interactive things is one node, so one
+accessible: a graph pane reads as **"Flow graph, group"**, nothing in it
+findable or actionable, whatever `role`/`aria-*` it carries. Describe them:
 
 ```js
 class FlowNode extends Node {
@@ -792,70 +630,48 @@ class FlowNode extends Node {
 }
 ```
 
-Each becomes a real child of your element's accessible: named, placed,
-walked into, focusable, with `selected` announced as it changes — the same
-model a `<box role="listitem" aria-selected>` goes through, because that is
-literally what these are read as. `id` is the whole of what core needs from
-you: it is what makes the child that was there last frame the same child
-this frame, and therefore what keeps every reference a screen reader is
-holding alive across a scene you rebuild sixty times a second.
+Each item becomes a real child accessible — named, placed, focusable,
+`selected` announced — read as `<box role="listitem" aria-selected>` would
+be. `id` keeps a child the same child across frames, so a screen reader's
+references survive a scene rebuilt every frame.
 
-| member                        | when                                                                                                                            |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `a11yScene()`                 | always, for an element that draws interactive things. Called once per question about your children — a cheap read, never a pass |
-| `notifyA11ySceneChanged()`    | the scene moved between commits: a drag, an animation, your own arrow keys. A commit re-reads it on its own                     |
-| `a11ySceneAction(id, action)` | an AT acted on one of them. Return `true` to claim it; anything else keeps core's answer                                        |
+| member                        | when                                                                                                 |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `a11yScene()`                 | for an element drawing interactive things. Called per question: keep it cheap                        |
+| `notifyA11ySceneChanged()`    | the scene moved between commits (a drag, an animation, your arrow keys); a commit re-reads it itself |
+| `a11ySceneAction(id, action)` | an AT acted on one. Return `true` to claim it, else core answers                                     |
 
 What one item may say:
 
-| field                  |                                                                                                                      |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `id`                   | required. Its name for as long as it is drawn — ids are matched within their parent, not globally                    |
-| `rect`                 | required. Where it is, in window coordinates: where AT focus is drawn and what a magnifier follows                   |
-| `role`                 | an ARIA role. `'group'` if it says none                                                                              |
-| `name` / `description` | what a screen reader says. An unnamed item announces as having none, which is the defect being loud                  |
-| `states`               | `selected`, `checked`, `expanded`, `disabled`, `busy`, and `focused` for your own keyboard cursor                    |
-| `focusable`            | default true                                                                                                         |
-| `props`                | anything else an element carries — `aria-posinset`/`aria-setsize` for Orca's "3 of 7", `aria-level`, `aria-valuenow` |
-| `children`             | a scene with structure: series and points, groups and nodes                                                          |
+| field                  |                                                                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| `id`                   | required. Its name while it is drawn, matched within its parent                             |
+| `rect`                 | required. Window coordinates: where AT focus is drawn, what a magnifier follows             |
+| `role`                 | an ARIA role; `'group'` if none                                                             |
+| `name` / `description` | what a screen reader says; an unnamed item announces as having none                         |
+| `states`               | `selected`, `checked`, `expanded`, `disabled`, `busy`; `focused` for your keyboard cursor   |
+| `focusable`            | default true                                                                                |
+| `props`                | other ARIA: `aria-posinset`/`aria-setsize` (Orca's "3 of 7"), `aria-level`, `aria-valuenow` |
+| `children`             | structure: series and points, groups and nodes                                              |
 
-Four things worth knowing before you write one:
+- **`focused` is the only way your cursor is reported**: the focus manager
+  holds your element, not the item your arrow keys move. Navigation stays
+  yours.
+- **Actions fall back.** Without `a11ySceneAction`, an activation is a
+  synthetic click at the item's `rect`, as a mouse user's would be; `focus`
+  focuses the element; `scroll` reveals the item. Claim with `true` only
+  what differs — a non-click activation, a cursor move, your own viewport.
+- **An action needs a role that promises one** (`button`, `option`,
+  `treeitem`, `checkbox`) or your `a11ySceneAction`; a bare `listitem` is
+  read, not clicked.
 
-**`focused` is the only way your cursor is reported.** The window's focus
-manager holds your element, not the thing inside it that arrow keys move —
-which is right, and it means the state has to come from you. Reporting it
-is all that is asked: navigation between items stays yours.
-
-**Actions fall back rather than fail.** With no `a11ySceneAction`, an
-activation is a synthetic click at the item's own rect — you hit-test your
-scene already, so the rect is the whole address and an AT's click is
-indistinguishable from a mouse user's. `focus` focuses the element,
-`scroll` reveals it. Implement the seam for the cases where that is wrong
-(an activation that is not a click, a cursor to move, a viewport of your
-own to scroll), claim those with `true`, and let the rest fall through.
-
-**An action needs a role that promises one** — `button`, `option`,
-`treeitem`, `checkbox` — _or_ your `a11ySceneAction`, which is the same
-promise made directly. A `listitem` with neither is read, not clicked, the
-same as everywhere else in ARIA.
-
-**`a11yScene()` is called once per question**, so answer from what you
-already hold. It is the same rule `a11yTextState()` follows, for the same
-reason: a shaping pass or a copy of your model behind it turns a screen
-reader walking the tree into a frame budget.
-
-Assertable with no bus and no desktop, through the same spy:
-`renderX11(el, { a11y: true })` records an item's states changing exactly as
-it records a `<Checkbox>`'s, and `test/a11y-scene.test.js` is a worked graph
-pane. The wire itself — children, extents, actions — is covered in
-`test/atspi.test.js`.
+The same spy records an item's states changing as it does a `<Checkbox>`'s.
 
 ### The standard edit menu
 
-A `<textinput>` gets a right-click Undo / Cut / Copy / Paste / Select All
-menu without being asked. An element that edits or selects text of its own
-gets **the same menu** — not one that looks like it — by naming its verbs
-and letting core do the rest (issue #256):
+An element that edits or selects text of its own gets `<textinput>`'s
+right-click Undo / Cut / Copy / Paste / Select All menu — the same one — by
+naming its verbs:
 
 ```js
 import { openEditMenu } from 'react-x11';
@@ -881,20 +697,14 @@ class EditorNode extends Node {
 }
 ```
 
-What that buys, and the reason it is worth an export rather than a recipe:
-the rows and their order, the enablement rules, Paste watching **selection
-ownership** instead of asking the server on the way to opening a menu
-([elements.md](elements.md#the-right-click-menu)), the arrow keys and
-Escape, the pointer grab that dismisses it, and handing the keyboard back to
-wherever it came from afterwards. `<textinput>` is a caller of this function,
-which is what keeps the two from drifting.
+Core supplies the rows and order, enablement, Paste following **selection
+ownership** rather than asking the server
+([elements.md](elements.md#the-right-click-menu)), the keys, the dismissing
+grab, and handing the keyboard back.
 
-**A verb you leave out is a row that is not there** — not a greyed one. It
-was `<textinput sensitive>` that motivated the rule, where a disabled Copy
-over a password reads as a bug in the application rather than as a decision,
-but it is also exactly what a **read-only** surface needs: a rendered
-document that can be selected and copied passes three things and gets a
-two-row menu, with no dead Undo, Cut or Paste to explain.
+**A verb you leave out is a row that is not there**, not a greyed one. A
+read-only surface passes three things for a two-row menu; no verbs, no
+menu:
 
 ```js
 openEditMenu(
@@ -908,82 +718,51 @@ openEditMenu(
 );
 ```
 
-Leave out every verb and nothing opens at all.
+**Enablement is core's.** Answer `canUndo`, `canRedo` and `canSelectAll`
+(default true; false when empty or all selected) and hand over
+`hasSelection`; Cut and Copy follow the selection, Paste what the server
+said about the clipboard. `at` is the pointer in the **owner window's**
+coordinates (a synthetic event's `x`/`y`); the menu is clamped into its
+monitor.
 
-**Enablement is not yours to decide row by row.** You answer three questions
-only the target can answer — `canUndo`, `canRedo`, `canSelectAll` (which
-defaults to true: the surface is empty, or all of it is selected already) —
-and hand over `hasSelection`. Cut and Copy follow the selection, Paste
-follows what the server has said about the clipboard. That is the part a
-second implementation would get subtly wrong.
+| function              |                                                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `editMenuOpen(node)`  | is it up? (it holds the keyboard; keep your selection lit)                                                         |
+| `closeEditMenu(node)` | close it if content changed under it or your surface scrolled (a choice, Escape, a press outside close it already) |
 
-`at` is where the pointer was, in the **owner window's** coordinates — the
-`x`/`y` a synthetic event carries. A surface with no caret has nothing else
-to offer, and this is what it already has; the menu is placed on the screen
-from there, clamped into the monitor it opens on.
-
-Two more functions come with it, both for the element rather than the menu:
-
-| function              |                                                                                                                                                              |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `editMenuOpen(node)`  | is the menu up? An element that paints a selection asks — the popup holds the keyboard, so the element is not focused, and the selection has to stay lit     |
-| `closeEditMenu(node)` | close it. The menu already closes itself on a choice, Escape and a press outside; this is for content that changed underneath it, or a surface that scrolled |
-
-They are exported from the **package root** rather than from
-`react-x11/node`, because the caller is not always an element: a component
-that wraps one opens the same menu from an `onContextMenu` handler and a ref.
+All three come from the **package root**, so a component wrapping an
+element can open the menu from `onContextMenu` and a ref.
 
 ### Scrolling content you painted
 
-A `<box overflow="scroll">` scrolls **children**: layout knows where they
-are, so the extent, the bars, the clamping and the wheel all follow from the
-tree. An editor, a terminal or a canvas-backed table has no children — its
-content is pixels it draws — and it still has a scroll position, an extent
-and a wheel gesture to answer. Two methods make it a member of the same
-machinery instead of an exception to it (issue #253):
+`<box overflow="scroll">` scrolls children. An editor, a terminal or a
+canvas-backed table scrolls pixels it draws, and joins the same machinery
+with:
 
-| method                   |                                                                                                     |
-| ------------------------ | --------------------------------------------------------------------------------------------------- |
-| `canScroll(dx, dy)`      | is there room to move on the axis this delta names? The wheel asks before it scrolls you            |
-| `scrollBy(by)`           | `scrollBy(dy)` or `scrollBy({x, y})` — move by that much                                            |
-| `measureScrollContent()` | `Scrollable` only: `{ width, height }`, how far the content reaches. The default walks the children |
+| method                   |                                                                                   |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| `canScroll(dx, dy)`      | is there room on the axis this delta names? The wheel asks first                  |
+| `scrollBy(by)`           | `scrollBy(dy)` or `scrollBy({x, y})`: move by that much                           |
+| `measureScrollContent()` | `Scrollable` only: `{ width, height }` the content reaches. Default: the children |
 
-**The wheel's default action is those first two and nothing else.** It walks
-out from the node the pointer hit, asks each one `canScroll(deltaX, deltaY)`,
-and the first that says yes gets `scrollBy` — up to the `<window>`, where the
-walk stops. So an element joins the chain by answering two questions, and it
-**chains** by answering the first of them honestly: say no when there is
-nothing left to move and the wheel goes to the pane or the window behind you,
-which is what a browser does and what a user flicking through a long page
-expects. `<textarea>` is the worked example in core — it scrolls wrapped text
-it painted, and since it answers `canScroll` off that text, a short one hands
-the gesture outward rather than swallowing it.
+**The wheel's default action is the first two.** It walks out from the hit
+node asking `canScroll(deltaX, deltaY)`; the first yes gets `scrollBy`, up
+to the `<window>`. Say no when there is nothing to move and the wheel
+chains to what is behind you, as in a browser (`<textarea>` does). Answer
+from the **extent, not the position**: a viewport at its bottom keeps the
+rest of a flick. The hit node's `defaultWheel`
+([above](#behaviour-of-your-own)) runs before the walk.
 
-The one thing ahead of the walk is the hit node's own `defaultWheel`
-([above](#behaviour-of-your-own)) — for an element whose wheel is not a
-scroll at all, a pane that zooms about the pointer. Consuming the event there
-is what keeps the walk from running; leaving it alone is what puts the
-element back in this chain.
-
-Answer `canScroll` from the **extent, not the position**: a viewport already
-scrolled to its bottom should keep the rest of a flick rather than pass it
-to whatever is behind it.
-
-Both deltas are **whole pixels**, and stay whole however the scroll was
-measured. A touchpad on a server with XI2 reports fractions of a notch and
-`ev.deltaY` carries them ([events.md](events.md#wheel)), but the default
-action spends only the whole part and carries the rest to the next event —
-because a fractional scroll offset is one the server-side blit cannot shift,
-and a smooth gesture that repainted every frame would cost more than it
-looks. So an element joining the chain never has to think about sub-pixels,
-and a slow scroll still moves: a pixel at a time.
+Deltas are **whole pixels**: a touchpad's fractions stay on `ev.deltaY`
+([events.md](events.md#wheel)), and the default action carries them to the
+next event, so a scroll can always be a blit and a slow one still moves.
 
 #### The mixin, for everything else
 
-`canScroll` + `scrollBy` buys the wheel. `Scrollable(Node)` buys the rest —
-the offsets, `scrollTo`/`scrollBy`/`scrollIntoView`, the drawn scrollbars and
-their drags, the scroll keys (arrows, Page, Home/End, Space), the tab stop
-and the AT-SPI scroll-pane role — and all of it reads one number pair:
+`Scrollable(Node)` adds the offsets, `scrollTo`/`scrollBy`/`scrollIntoView`,
+drawn scrollbars and their drags, the scroll keys (arrows, Page, Home/End,
+Space), the tab stop and the AT-SPI scroll-pane role, all reading one
+number pair:
 
 ```js
 import { Node, Scrollable } from 'react-x11/node';
@@ -1021,55 +800,29 @@ class EditorNode extends Scrollable(Node) {
 }
 ```
 
-Three things about that, each of which is a bug if you get it the other way
-round:
-
-**Draw in `paintContent`, not in `paint`.** `paint` draws the background,
-then `paintContent`, then the children, the border, and — for a
-`Scrollable` — the scrollbars last. An element that draws after
-`super.paint(ctx)` returns therefore paints _over its own thumb_.
-`paintContent` is the seam every built-in that draws uses, and it is where a
-drawing belongs whether it scrolls or not.
-
-**Offset the drawing yourself, and clip it.** A `<box>`'s children are moved
-by the scroll during layout; nobody moves pixels. `contentBox()` is the
-viewport to clip to and `scrollX`/`scrollY` are what to subtract — they are
-already clamped to the extent you reported, so there is nothing to bound
-again. `scrollX` is a distance from the edge the content _starts_ at, which
-is the right-hand one under `direction: 'rtl'`
-([styling.md](styling.md#direction-and-the-logical-edges)) — and the `width` you report is that
-same reach, so an element that draws in its own reading direction never has
-to ask which one it is in.
-
-**Do not assign `focusableByDefault`.** `Scrollable` answers it — a pane with
-somewhere to go is a tab stop, one that fits is not — and assigning over the
-getter throws. Override the getter if your element is focusable for a reason
-of its own.
-
-`measureScrollContent` is called at most once per layout pass, from
-`absolutize`, so it may read layout geometry, but it must not paint or
-invalidate. It has to return finite numbers: a `NaN` extent would otherwise
-become a `NaN` offset and a subtree laid out at `NaN`, so returning anything
-else throws naming the element, exactly as `measureContent` does. The answer
-is cached across passes that laid nothing inside the pane out again — a pass
-that merely scrolled reuses it, since a scroll cannot change how far the
-content reaches.
-
-When the drawing changes its own extent — a line was typed, rows arrived —
-say so the way any other layout change is said, with
-`this.invalidate(true, this, 'scroll')`; the next pass asks again. That call
-is also what re-arms the measurement above: content that grows silently and
-never invalidates would scroll against the stale extent.
+- **Draw in `paintContent`, not `paint`.** `paint` draws background,
+  `paintContent`, children, border and last a `Scrollable`'s scrollbars;
+  drawing after `super.paint(ctx)` covers your own thumb.
+- **Offset and clip yourself**: clip to `contentBox()` and subtract
+  `scrollX`/`scrollY`, already clamped to your extent. `scrollX` counts from
+  the edge the content starts at — the right one under `direction: 'rtl'`
+  ([styling.md](styling.md#direction-and-the-logical-edges)) — as does your
+  reported `width`, so drawing in your own direction needs no branch.
+- **Do not assign `focusableByDefault`**: `Scrollable` answers it (a tab stop
+  when there is somewhere to go) and assigning throws. Override the getter.
+- **`measureScrollContent` runs at most once per layout pass**, and is
+  reused when nothing inside was laid out again (a pure scroll). It may read
+  layout geometry; it must not paint or invalidate, and must return finite
+  numbers or it throws, naming the element.
+- **When your extent changes** (a typed line, arriving rows), call
+  `this.invalidate(true, this, 'scroll')`, or scrolling keeps the stale one.
 
 #### Scrolling the pixels, not just the offset
 
-`scrollBy` moves a number; nobody moves pixels. For a drawing that is cheap
-to redraw, that is the end of it — `paintContent` runs again at the new
-offset and the frame is correct. For one that is expensive per row and
-already lives in a retained buffer — a terminal grid, a log view, a minimap,
-a chart that pans — a scroll changes almost nothing: the band that stays
-visible is the same pixels, one shift away. A `Surface` can move that band
-itself, server-side:
+`scrollBy` moves a number; `paintContent` redraws at the new offset. A
+drawing that is expensive and kept in a retained buffer — a terminal grid, a
+log, a minimap, a panning chart — can shift its surviving band inside a
+`Surface` instead:
 
 ```js
 import { Node, Scrollable } from 'react-x11/node';
@@ -1112,34 +865,21 @@ class GridNode extends Scrollable(Node) {
 }
 ```
 
-`copyWithin(src, dx, dy)` shifts `src` (`{x, y, width, height}`, in surface
-coordinates) in place by an integer delta and answers **whether anything
-survived** — `false` means repaint the lot, which is the branch a fresh
-buffer, a jump to the far end and a resize all take. It is one `CopyArea`
-inside the pixmap: nothing crosses the wire but the request, the overlap is
-safe, and no exposure events come back.
+`copyWithin(src, dx, dy)` shifts `src` (`{x, y, width, height}`, surface
+coordinates) in place by whole pixels, overlap-safe, and returns **whether
+anything survived**; `false` (a fresh buffer, a far jump, a resize) means
+repaint the lot.
 
-The same element runs unchanged on the Cocoa, Wayland and win32 backends.
-`react-x11/ntk`'s `Surface` asks the app it is handed for the
-implementation — ntk's pixmap on an X connection, a CG bitmap on a Cocoa
-app, a GL render target on a Wayland one, a Direct2D bitmap on a win32 one
-— so the surface above is a bitmap there, `copyWithin` is one in-place copy
-of the band (on win32 it answers `false` for now, the bridge having no
-in-place blit for an offscreen bitmap, so the element repaints the rect),
-and `drawImage` is one composite, with the element naming no backend. The
-one thing to know: where a surface has one graphics state rather than a context per
-call — a bitmap, a render target — `getContext('2d')` answers the same
-context every time and its `destroy()` is a no-op (docs/macos.md "Custom
-drawing on a layer tree").
+`Surface` from `react-x11/ntk` is the backend's own — ntk's pixmap on X11,
+a CG bitmap on Cocoa, a GL render target on Wayland, a Direct2D bitmap on
+win32 — so the element runs unchanged; on win32 `copyWithin` returns
+`false` for now. Where a surface has one graphics state (a bitmap, a render
+target), `getContext('2d')` returns the same context each time and its
+`destroy()` is a no-op.
 
-**Drawing into a surface, whichever backend.** ntk's advice — a caller
-doing many draws takes `getContext('2d')` once and holds it, rather than
-one context per frame — holds everywhere, including the backends where the
-surface is a GPU target and every context in the process shares one GL
-device. A held context there takes the device back whenever it finds it in
-someone else's hands, so its draws land in its own surface even in the
-middle of the window's own paint, and the window's context does the same on
-its way back (issue #566). Nothing to branch on, and nothing to restore:
+**Hold one context**, taken once with `getContext('2d')`: on every backend,
+shared GL devices included, its draws land in its own surface even
+mid-paint.
 
 ```js
 drawRows(rows) {
@@ -1148,15 +888,11 @@ drawRows(rows) {
 }
 ```
 
-`surface.render(fn)` is the scoped alternative: it hands `fn` a context
-whose transform and clip start clean and flushes when `fn` returns. Use it
-for a whole-surface repaint; hold a context for a grid that is touched a
-few cells at a time. The one thing not to do is mix them and expect the
-held context's transform to survive a `render()` — it is the same context,
-and `render` resets it.
+`surface.render(fn)` is the scoped alternative for a whole-surface repaint:
+a clean transform and clip, flushed when `fn` returns. It is the same
+context, so it resets a held context's transform.
 
-If the surface is **opaque** — every pixel of it written, which a terminal's
-grid or a tiled scene is — say so, and the present stops blending:
+**An opaque surface composites with `copy`**, skipping the blend:
 
 ```js
 paintContent(ctx) {
@@ -1167,41 +903,21 @@ paintContent(ctx) {
 }
 ```
 
-`copy` is canvas's "replace these pixels, do not read what is under them",
-and it means the same thing on both backends: XRender's `PictOp.Src` on
-X11, and on Cocoa a row memcpy in place of the CGImage the blend would
-otherwise be built from — a 125x45 terminal grid composites in 0.42ms
-rather than 1.37 (docs/macos.md "Compositing a surface at a translate").
-Set it back, or set it inside a `save`/`restore` pair: it is context state,
-and the context is the window's. It is only right for a surface with no
-transparency to show through, and it is refused rather than approximated by
-a backend that cannot draw it — assign it and read the property back if you
-want to know which you got.
+Set it back (or `save`/`restore`): it is state on the window's context. Use
+it only where every pixel is opaque. A backend that cannot draw it refuses
+the assignment; read it back to know.
 
-Two things it lines up with. The deltas you are handed are already whole
-pixels — the sub-pixel carry described above exists so that a shift is
-always expressible — so an element scrolling this way never has a fraction
-to round. And `<box overflow="scroll">` has been doing the window-side half
-of this without being asked: a pure scroll of one viewport blits the
-surviving band inside ntk's backing pixmap rather than repainting it. This
-is that optimisation, for a buffer you retained yourself.
-
-An element that draws its content live rather than into a surface asks for
-the window-side half directly, with
-[`scrollContents`](#panning-a-scene-you-drew) — the same shift, one layer
-out.
+`<box overflow="scroll">` blits its own viewport on a pure scroll; an
+element that draws live asks for that with
+[`scrollContents`](#panning-a-scene-you-drew).
 
 #### Drawing what stays put while the pane scrolls
 
-That window-side blit copies everything in the pane's viewport with its
-content, which is right for everything that scrolls. An element that
-paints part of itself **against the pane's viewport** rather than against
-its own box has pixels the copy gets wrong: a document with a fixed
-background or a `position: fixed` header, drawn by one element inside a
-`<box overflow="scroll">`, had its header dragged along with the text and
-its background scrolling away. `viewportFixedRects()` is the element's word
-for those parts: window coordinates, device pixels, like `abs`, or `null`,
-the default.
+The scroll blit copies a pane's whole viewport. An element that paints part
+of itself against that viewport — a fixed background, a `position: fixed`
+header in a document it draws — names it in `viewportFixedRects()` (window
+coordinates, device pixels; default `null`), and a blitting scroll
+repaints those rects where they are and where the copy dragged them:
 
 ```js
 class DocumentNode extends Node {
@@ -1224,28 +940,17 @@ class DocumentNode extends Node {
 }
 ```
 
-A scroll of the pane that blits repaints those rects where they are and
-where the copy dragged their image, as it does the corners of a rounded box
-around the pane; one that pins most of the viewport — a fixed background
-behind all of it — makes the scroll a repaint, which draws it right. Only
-the nearest scroll pane asks: a pane further out moves the inner one with
-its content, and what is fixed to it with it. The answer is read on each
-scroll the pane blits, after layout, and nowhere else.
+Rects covering most of the viewport make the scroll a repaint. Only the
+nearest scroll pane asks (an outer pane moves the inner one with what is
+fixed to it), after layout, on each scroll it blits.
 
 #### Keeping what the viewport shows while your content moves
 
-A document laid out again at another width breaks its text above the fold
-into more lines or fewer, so the paragraph at the top of the viewport moves
-down the document or up it by the difference, and a pane that keeps its
-offset shows the reader whatever is at that offset now: a window dragged
-narrower scrolled them away from where they were reading. A browser keeps
-the paragraph where it was on screen instead, and moves the offset by as
-much (CSS Scroll Anchoring 1). `anchorScrollBy(dx, dy)` is how an element
-asks its scroll pane for that: its content moved by (dx, dy) device pixels
-under the viewport, in the layout pass running now, and the nearest scroll
-pane moves its offsets by as much, after it measures what it holds and
-before it places it, so the frame that lays the content out again shows it
-where it was.
+Laid out at a new width, a document rewraps above the fold and the
+paragraph at the top of the viewport moves. `anchorScrollBy(dx, dy)` keeps
+it on screen, as CSS Scroll Anchoring does: your content moved (dx, dy)
+device pixels in this layout pass, and the nearest scroll pane shifts its
+offsets by as much before placing it, in the same frame.
 
 ```js
 class DocumentNode extends Node {
@@ -1260,37 +965,24 @@ class DocumentNode extends Node {
 }
 ```
 
-Ask it from the layout pass — `measureContent`, or what it calls — where
-the pane places what it holds after; shifts asked in one pass add up, and
-one asked outside a pass waits for the next and asks for it. A `scrollTo`
-the application made since the last pass drops it, since the shift was
-measured against the offsets before that scroll; a `scrollIntoView` lands
-after it; and the result is clamped to what the pane holds, as any scroll
-is. It returns false where nothing scrolls the element.
+Call it in the layout pass. Shifts in one pass add up; one outside a pass
+waits for, and requests, the next. An app `scrollTo` since the last pass
+drops it; a `scrollIntoView` lands after it; the result is clamped. It
+returns false where nothing scrolls the element.
 
 ### Drawing a scene into one node
 
-_Issue #301._ A frame repaints **rects, not windows**: claims coalesce into
-disjoint rectangles, each gets its own clipped pass, and a subtree that lands
-outside the pass being painted emits no drawing at all. All of that has one
-granularity — the retained node — which is exactly right until your element
-_is_ the scene. A graph view, a chart, a timeline, a code editor: the tree
-says "one node, 1100×700", so a pass over the 80×40 box a dragged node moved
-through redraws all three hundred nodes, all seven hundred edges, the grid
-and the minimap into a clip that throws almost all of it away.
+A frame repaints damaged **rects**, each in a clipped pass that skips
+subtrees outside it — at node granularity. When your element is the scene (a
+graph, a chart, a timeline, a code editor), a small rect still redraws all
+of it into the clip. Two opt-in accessors fix that; say nothing and core's
+answer stands.
 
-Two accessors make such an element a member of the same machinery rather
-than the one exception to it. Both are opt-in, and both keep core's answer
-when you say nothing.
-
-**Painting: `paintDamage()`.** The rect this pass covers, in the owning
-window's coordinates — the same space as `abs`, in device pixels — or `null`
-when the frame is unbounded and everything has to be drawn. Cull
-against it the way core culls the tree, where a pixel short of the rect
-still counts as inside it: antialiasing puts ink just past the bounds you
-computed, and the pass is clipped to the rect, so drawing a near miss costs
-one draw and loses nothing. Here `overlaps(a, b, 1)` asks whether two rects
-come within a pixel of each other:
+**Painting: `paintDamage()`** — this pass's rect (window coordinates,
+device pixels), or `null` when everything must be drawn. Cull with a pixel
+of slack, as core does: antialiasing inks just past computed bounds, and
+the pass is clipped anyway. `overlaps(a, b, 1)` here asks whether two rects
+come within a pixel:
 
 ```js
 class FlowNode extends Node {
@@ -1311,13 +1003,10 @@ class FlowNode extends Node {
 }
 ```
 
-**Committing: `selfDamagedProps`.** `applyProps` damages the whole node when
-any non-event prop changes identity, which is right for every element whose
-node _is_ what changed and always-everything for a scene pane. A controlled
-graph app commits a new `nodes` array per drag step, so each step is one
-scoped claim from the gesture plus one full-pane claim from the commit — and
-the full-pane claim wins. Name the props whose damage your own `applyProps`
-claims and the commit contributes none of its own:
+**Committing: `selfDamagedProps`.** A new identity for any non-event prop
+damages the whole node, so a controlled scene committing a new `nodes`
+array per drag step repaints the pane. Name the props whose damage your
+`applyProps` claims, and the commit claims none:
 
 ```js
 registerElement('flow', {
@@ -1345,9 +1034,8 @@ class FlowNode extends Node {
 }
 ```
 
-When the answer depends on the _values_ rather than the names, override
-**`paintChanged(next, prev)`** instead — it is what the list feeds, so the
-two are the same seam:
+To decide on values rather than names, override
+**`paintChanged(next, prev)`**, which the list feeds:
 
 ```js
 paintChanged(next, prev) {
@@ -1358,53 +1046,27 @@ paintChanged(next, prev) {
 }
 ```
 
-Three things about that contract, in the order they bite:
+- **Hand what you do not recognise to `super`**, which is conservative, or
+  a prop you never thought of (`aria-label`, `title`) leaves stale pixels.
+- **A style change never reaches either seam**: core compares `style` by
+  value and repaints what `Node.paint` draws.
+- **Claim before you skip**: `selfDamagedProps` claims nothing for you; a
+  named prop you forget to invalidate renders nothing.
+- **Not inside `paintCached`**
+  ([below](#drawing-once-instead-of-every-frame)): a copy culled by window
+  damage is cached half-drawn.
 
-**Everything you do not recognise goes to `super`.** An element that answers
-"nothing changed" about a prop it does not actually claim shows a stale
-pixel, and nothing comes back to fix it — so the override answers for the
-props it knows and hands the rest to core, which is conservative on purpose.
-That is what keeps an `aria-label`, a `title`, or a prop the element grows
-next year correct without anybody remembering this method exists.
-
-**A style change is not yours to excuse.** `style` is compared by value by
-the caller and never reaches either seam: what it moves is the background,
-the border and the clip that `Node.paint` draws for you.
-
-**Claim before you skip.** `selfDamagedProps` only says the commit will not
-claim — it does not claim anything on your behalf. An element that names a
-prop and then forgets to invalidate for it renders nothing at all on that
-change, which at least fails loudly the first time you drag something.
-
-And one place `paintDamage()` does not belong: inside `paintCached`
-([below](#drawing-once-instead-of-every-frame)). That draws into a surface in
-its own coordinates, and a copy culled against the window's damage is stored
-half-drawn under a key that says it is whole — so every later frame that hits
-the key gets the hole.
-
-The same scene has a second one-node problem, in the accessible tree rather
-than in the frame: see [A scene a screen reader can
-walk](#a-scene-a-screen-reader-can-walk).
-
-Worth it because the numbers are not small. `@react-x11/components`' `<Flow>`
-on a 300-node / 745-edge scene at 1100×700 costs ~2470 X requests and ~150 ms
-per drag step redrawing the pane, and ~400 requests / ~30 ms with the two
-seams — the same frame, with the parts of it nobody can see left unsent.
-`REACT_X11_DEBUG_PAINT=1` is how to watch it: the pass's rect is stroked in
-the frame's colour, so a scene that is still repainting whole strobes across
-the pane instead of outlining what moved ([debugging.md](debugging.md)).
+The accessible tree has the same one-node problem: [A scene a screen reader
+can walk](#a-scene-a-screen-reader-can-walk). On a 300-node `<Flow>` the
+seams take a drag step from about 150 ms to 30 ms.
+`REACT_X11_DEBUG_PAINT=1` strokes each pass's rect, so a scene still
+repainting whole strobes across the pane ([debugging.md](debugging.md)).
 
 #### Panning a scene you drew
 
-_Issue #303._ The two seams above scope a frame to the part of the scene
-that changed. A **pan** has no such part: it translates every pixel, so the
-honest claim is the whole pane and the honest frame is a full repaint — of a
-picture that is already on screen, one shift away from being right.
-
-That is the shape `<box overflow="scroll">` has been treating as a special
-case since issue #138: blit the band that survives inside ntk's backing
-store, repaint only the strip the shift exposed. `scrollContents` is that
-same dance, for a viewport of your own:
+A pan moves every pixel of a picture already on screen. `scrollContents`
+does for your viewport what `<box overflow="scroll">` does: blit the
+surviving band, repaint the exposed strip.
 
 ```js
 class FlowNode extends Node {
@@ -1426,43 +1088,24 @@ class FlowNode extends Node {
 }
 ```
 
-The call claims `rect` — the conservative answer, and the one that stands if
-anything declines — and arms the frame to blit instead. At frame time core
-asks ntk to move the surviving band and **narrows that claim to the band the
-shift exposed**, which is what `paintDamage()` then hands your paint. So the
-element draws the strip and nothing else without ever asking whether the
-blit happened, and every gate below falls back to repainting `rect`, which is
-the behaviour without the call at all.
+The call claims `rect` and arms a blit; at frame time core shifts the band
+and **narrows the claim to the exposed strip**, which `paintDamage()` hands
+your paint. If anything declines, `rect` is repainted as without the call;
+the element never needs to know which.
 
-Four things worth knowing, in the order they bite:
+- **`dx`/`dy` are how far the pixels moved** (`copyWithin`'s sense, not a
+  scroll offset's): panning right by ten is `dx: 10`, exposing the left
+  edge. Whole device pixels; `rect` in window coordinates, inside your
+  node. Diagonal is fine.
+- **You promise that inside `rect` the frame is exactly that translation.**
+  Core declines on the rest: a claim from elsewhere reaching into `rect` by
+  even a pixel, a sibling drawing over it, a child laid out over it, your
+  own border ring or rounded corner, a layout change, a region too small or
+  a shift too large. Pans in one frame coalesce by net shift; two regions
+  of one node fall back.
 
-**`dx`/`dy` are how far the pixels moved.** The sense `Surface.copyWithin`
-and ntk's `scrollRegion` use, not a scroll offset's: panning the scene right
-by ten is `dx: 10`, and the exposed band is down the left edge. Both whole
-device pixels — a fractional shift is not a copy — and `rect` in window
-coordinates (the same space as `abs` and `contentBox()`: device pixels) and
-inside your node.
-
-**You promise one thing: that inside `rect` the frame really is that
-translation.** Everything else is core's to check, and each of them declines
-rather than misrenders — a claim from anywhere else reaching into the rect, a
-sibling drawing over it, a child of your node laid out on top of it, your own
-border ring or rounded corner, a layout pass that moved something, a region
-too small or a shift too large to be worth it. Several pans in one frame
-coalesce into one blit by their net shift; two different regions of one node
-do not, and fall back.
-
-**Diagonal is fine here**, unlike the scroll containers' one-axis-at-a-time
-rule. That rule exists because the L of exposed strips overlaps the scrollbar
-rects and the merges balloon back towards the whole viewport; with no bars
-the L is two disjoint rects and stays two. A drag-pan is diagonal almost
-every frame, so this is the case rather than the corner.
-
-**Every gate above is about `rect`, not about your node.** A pane usually
-has furniture — a minimap, zoom controls, a HUD strip — that has to repaint
-on a pan frame and whose pixels must _not_ ride the blit. A strip along one
-edge can be carved out of the region you shift and claimed the ordinary way;
-the claim lands beside the rect and the frame stays a blit:
+**Furniture along an edge** — a HUD strip — is carved out of the region and
+claimed beside it; sibling overlay panels outside `rect` work the same way:
 
 ```js
 onDragPan(dx, dy) {
@@ -1475,17 +1118,12 @@ onDragPan(dx, dy) {
 }
 ```
 
-A claim that _reaches into_ the rect — by so much as a pixel — still declines
-the frame (issue #309). Overlay panels mounted as sibling nodes work the same
-way, as long as they sit outside the rect: one drawing over it is dragged
-along by the blit, so it declines instead.
-
-**Furniture in a corner is pinned, not carved.** What shifts is one
-rectangle, so carving a minimap out of the bottom-right corner takes the rows
-beside it too, and zoom controls in the other bottom corner make that a band
-the pane's full width — repainted on every pan frame, with every card, label
-and edge in it (issue #682). Hand over the whole pane instead, and name the
-furniture that stays put:
+**Furniture in a corner is pinned**, since carving takes the rows beside it.
+Pass the rects that stay put; core repaints each, and the stale image the
+copy dragged, every pan frame — so the furniture may change (a minimap's
+viewport box) and claim inside its rect without declining. A claim
+elsewhere in the region still declines, as does furniture over three
+quarters of the pane.
 
 ```js
 onDragPan(dx, dy) {
@@ -1499,40 +1137,15 @@ onDragPan(dx, dy) {
 }
 ```
 
-The copy drags a stale image of each piece along by (dx, dy), and core
-repaints the pinned rect and that image: two small rects a piece, on every
-pan frame, whether the furniture changed or not. So what the furniture shows
-can follow the pan — a minimap's viewport box — without a claim of its own,
-and a claim it makes anyway is yours as long as it lies inside a pinned rect.
-A claim anywhere else in the region still declines the frame, and so does
-furniture that is most of the pane: past three quarters of it repainted, the
-blit is buying a shift and paying for the region anyway.
+Core pins the four radius-sized corners of a rounded box around your
+element itself; your element's own border ring and corners decline. A node
+mounted over the region inside a pinned rect (a zoom button, a legend) is
+furniture too: pin the rect it claims, `node.paintBounds()`, slop included,
+or its hover declines.
 
-**A rounded box around your element is pinned the same way.** The arc of a
-rounded corner does not translate, but it lives in the four radius-sized
-squares at the corners and nowhere else, so core pins those squares itself:
-the whole region shifts, and each square is repaired where it is and where
-the copy dragged it — a few pixels a corner (issue #691). A graph pane
-inside a rounded card is the common shape. Its own border ring and corners
-are different: those are the element's paint, not its drawing, and they
-decline the blit.
-
-The rects a pan frame repaints — its strips, the furniture, the corners —
-are merged down to a few passes, and merged together, so the small ones
-join their neighbours before a large box can swallow them: a diagonal pan
-of a rounded pane with furniture in both bottom corners repaints under a
-fifth of it.
-
-A node mounted over the region inside a pinned rect — a zoom button, a
-legend — is furniture too: it does not decline the blit, and its pixels are
-repaired with the rest. Its claims carry the pixel of slop every node's do,
-so the rect to pin is the one it claims, `node.paintBounds()`, or its hover
-declines the frame it lands in.
-
-**Unless its pixels are meant to move with it.** A graph whose cards carry
-real widgets mounts them beside the pane, all in one box it moves with the
-pan — and that box is over the rect every frame. Name it as a rider and it
-rides the blit instead of declining it:
+**Riders move with the pan.** Widgets mounted beside the pane in a box moved
+by exactly (dx, dy) this frame, and changed in no other way, ride the blit
+when named:
 
 ```js
 onDragPan(dx, dy) {
@@ -1543,45 +1156,20 @@ onDragPan(dx, dy) {
 }
 ```
 
-A rider promises what your drawing promises: that it moves by exactly
-(dx, dy) this frame and changes nothing else. Then its commit claims nothing,
-the blit carries its pixels with yours, and its move claims only what it
-leaves or reaches _outside_ the rect — so clip it to your element, with a
-box around it that paints nothing of its own, and that is nothing at all.
-Anything else it does — moving by some other amount, a widget in it
-changing, one mounting as the pan brings it in — is claimed the ordinary
-way, which declines that frame's blit; the next one blits again.
+A rider's commit then claims nothing, and its move only what lies outside
+`rect` — nothing, if a box that paints nothing clips it to your element.
+Anything else it does is claimed normally and declines that frame's blit.
 
-**Zoom is not a blit.** Scaling resamples; it is a full repaint and should
-be. That is the right trade: a zoom is a gesture step, a pan is sixty of them
-a second.
-
-The protocol bench prices it at five diagonal pan steps over a 374-cell scene
-— 627 requests / 308 composites / 0.06 Mpx, against 6550 / 3269 / 2.38 for
-the same five steps under `REACT_X11_NO_SCROLL_BLIT=1`, which is exactly the
-fallback every gate here takes. With a HUD strip claimed beside the region
-they cost 1993 / 993 / 0.43 — the blit plus the strip. With furniture in two
-bottom corners they cost 1622 / 790 / 0.30 pinned, where carving the band
-between the corners costs 2736 / 1349 / 0.70, and 1892 / 920 / 0.31 in a
-rounded pane.
-
-If your element keeps its drawing in a `Surface` of its own rather than
-drawing it live, the shift you want is
-[`copyWithin`](#scrolling-the-pixels-not-just-the-offset) on that surface —
-same idea, one layer in.
+**Zoom is not a blit**: scaling resamples and repaints. A retained `Surface`
+shifts with [`copyWithin`](#scrolling-the-pixels-not-just-the-offset)
+instead. `REACT_X11_NO_SCROLL_BLIT=1` forces the fallback
+([debugging.md](debugging.md#react_x11_no_scroll_blit1)).
 
 ### An element that covers its box
 
-A terminal, a media frame, a chart with a retained surface: an element that
-composites a bitmap of its own over its whole content box, every paint,
-leaves nothing of what was painted under it. Core does not know that. A
-pass inside the element still fills the window's background, the
-background of every ancestor and the element's own before `paintContent`
-composites the bitmap over all three — composites the server ran for
-nothing on X11, and on macOS full-area CoreGraphics passes that were a
-fifth of a streaming terminal's frame.
-
-`opaqueRect()` is the element's word for it:
+An element compositing an opaque bitmap over its whole content box every
+paint (a terminal, a media frame) hides what is under it, but core still
+fills the window's, ancestors' and its own backgrounds first unless told:
 
 ```js
 class TerminalNode extends Node {
@@ -1597,52 +1185,33 @@ class TerminalNode extends Node {
 }
 ```
 
-A pass that lies inside the answer is painted without the fills that would
-be under it — the window's background, this node's own and every
-ancestor's. Whole pixels only, window coordinates like `abs`: a fractional
-edge is antialiased and an antialiased pixel is not opaque, so core takes
-the whole pixels inside what you answer. A clipping ancestor shrinks the
-cover to what reaches the surface, a rounded one by its radius all round.
-The promise is yours to keep — every pixel, alpha one, on every paint,
-whatever the props — and an element that is translucent, or paints a
-background only sometimes, answers `null`, the default. The answer is read
-per pass, so it may follow `contentBox()`, and it costs nothing on a pass
-it does not cover.
+A pass inside the answer skips those fills. Window coordinates like `abs`;
+core uses the whole pixels inside it; clipping ancestors shrink it, rounded
+ones by their radius. The promise — every pixel, alpha one, every paint,
+whatever the props — is yours: a translucent element, or one with an
+occasional background, answers `null` (the default). It is read per pass, so it may follow
+`contentBox()`.
 
-**The same promise lets a move be copied** (issue #681). A subtree whose
-only change in a frame is where it is — a terminal dragged across a
-desktop, a card of widgets dragged across a graph — is already on the
-surface, one shift away. When something in it covers its box, nothing under
-it shows through there, so core copies its pixels where they went
-(`CopyArea` on X11, the backing's own copy on Cocoa and Windows) and paints
-only what the copy cannot supply: the strip the move uncovered, the
-corners a radius gives up, and whatever is drawn over it. What covers is
-an element answering `opaqueRect()`, a box with a `backgroundColor`
-nothing shows through, or either of those inside boxes that hold nothing
-else — the wrappers a card is positioned and scaled by. A card with no background of its own is drawn over what is
-under it, and is repainted where it was and where it went.
+**It also lets a move be copied.** When a subtree only moved this frame (a
+terminal across a desktop, a card across a graph) and something in it
+covers its box, core copies its pixels and repaints only the uncovered
+strip, the corners a radius gives up, and what is drawn over it. Covering
+means an `opaqueRect()` element or a box with a `backgroundColor` nothing
+shows through, possibly inside boxes holding nothing else. A card without
+a background is repainted where it was and where it went.
 
-The frame's other claims are sorted by whose they are. One from an element
-painted **under** the moved subtree is repainted around the copy but not
-through it, since nothing of it shows there — a graph pane that claims the
-box its card moved through, with the card's mounted body over it, pays for
-the card's header and edges and not for the body. One from inside the
-subtree, over it, or from a claim core cannot place is repainted in full,
-and where the copy carried what it covered. When those repaint most of the
-copy, or would take more damage rects than the window affords a frame —
-on X11, four: a rounded card's corners and the strip it uncovered are
-already five — the move is repainted where it was and where it went, as
-it always was. `REACT_X11_NO_SCROLL_BLIT=1` turns the copy off with the
-other blits ([debugging.md](debugging.md#react_x11_no_scroll_blit1)).
+Other claims that frame: one from an element **under** the subtree repaints
+around the copy, not through it; one from inside, over, or unplaceable
+repaints in full. If those cover most of the copy, or need more damage
+rects than a frame allows (four on X11: a rounded card's corners plus strip
+are five), the move repaints in both places. `REACT_X11_NO_SCROLL_BLIT=1`
+turns it off ([debugging.md](debugging.md#react_x11_no_scroll_blit1)).
 
 ### An element that draws past its box
 
-Core claims a node's damage, culls it out of a pass and sizes a fade's
-surface by its box — grown by its outline and its shadow, the two things a
-box draws outside itself. An element that draws anything else out there has
-to say how far, or it is claimed by its box alone: when it changes, the old
-ink's edge outside the box stays on the screen and the new one's is not
-drawn, and scrolled just out of a pane it drops the ink it still puts in.
+Core claims, culls and sizes a fade's surface by a node's box grown by its
+outline and shadow. Declare ink beyond that, or it is left on screen when
+the element changes and dropped when scrolled just out of a pane:
 
 ```js
 class RichTextNode extends Node {
@@ -1654,17 +1223,13 @@ class RichTextNode extends Node {
 }
 ```
 
-Device pixels, every side. It is read when core rebuilds its cached paint
-bounds, which a claim of the node does, so answer a bound for anything the
-element may draw rather than for what it drew last — the claim after a
-change is what has to cover the frame before's ink.
+Device pixels, every side, read when core rebuilds cached paint bounds (on
+a claim): bound anything the element may draw, not what it drew last.
 
 ### Drawing once instead of every frame
 
-A drawing that does not change between frames does not have to be redrawn
-between frames. Implement two more methods and your element is rendered once
-and composited on later repaints, sharing one rendered copy with every other
-node that produces the same key:
+A drawing that does not change can be rendered once and composited on later
+repaints, one copy shared by every node producing the same key:
 
 | method                  |                                                                               |
 | ----------------------- | ----------------------------------------------------------------------------- |
@@ -1692,40 +1257,28 @@ paintCached(ctx, box) {
 }
 ```
 
-`format: 'a8'` stores coverage rather than colour and paints through `tint`,
-so one rendered copy serves every colour the drawing is ever asked for — the
-right choice for a monochrome drawing, and it keeps the colour out of the key.
+`format: 'a8'` stores coverage and paints through `tint`: one copy serves
+every colour of a monochrome drawing, and colour stays out of the key.
 
 **The key is the entire correctness surface.** It must name every input
-`paintCached` reads, and it should be derived from the same values
-`applyProps` compares so the two cannot drift. A key that misses something
-shows stale pixels, which is the hardest kind of bug to see — so develop with
-`REACT_X11_PAINT_CACHE=verify`, which re-renders every hit and complains
-loudly when the drawing changed while the key did not. Return `null` for
-anything animated, hovered, focused or blinking.
+`paintCached` reads, derived from what `applyProps` compares; a missed one
+shows stale pixels. Develop with `REACT_X11_PAINT_CACHE=verify`, which
+re-renders every hit and complains when the drawing changed under the same
+key. Return `null` while animated, hovered, focused or blinking.
 
-Two footguns worth naming. `paintCached` draws in **surface-local**
-coordinates: reaching for `this.abs.x` inside it is the first thing to check
-when a cached element paints in the wrong place. And the cache is per X
-connection and keyed only on your string, so make the key specific enough
-that two different drawings cannot collide — prefix it with your element
-name, as above.
-
-`globalAlpha`, the clip and any ancestor translation are applied when the
-cached copy is composited, so an ancestor animating opacity is a cache hit
-rather than a reason to opt out.
+`paintCached` draws in **surface-local** coordinates. The cache is per X
+connection, keyed only on your string: prefix keys with your element name.
+`globalAlpha`, the clip and ancestor translation apply at composite time, so
+an ancestor's opacity animation still hits.
 
 ### Parts of your drawing on layers of their own
 
-An element that draws a scene has animations inside it — a document's CSS
-animation on one element, a cursor's blink, an edge's dash, a tooltip's
-fade — and each is a frame of JavaScript: restyle, claim, repaint. On macOS
-the render server can run such an animation itself, with no frame at all, if
-what moves is on a layer of its own. Layer promotion does that for a plain
-`<box>` ([macos.md](macos.md#layer-promotion-the-animated-few-on-their-own-layers-above-the-surface-presenter));
-an element whose content is its own `paint` answers **sprites**: the parts
-of its drawing it would like lifted, each with what the layer shows and what
-runs on it.
+On macOS the render server can run an animation — a cursor's blink, an
+edge's dash, a tooltip's fade — with no JavaScript frame, if what moves is
+on a layer of its own. Layer promotion does that for a `<box>`
+([macos.md](macos.md#layer-promotion-the-animated-few-on-their-own-layers-above-the-surface-presenter));
+an element that paints its own content answers **sprites**: parts of its
+drawing to lift, each with what its layer shows and runs.
 
 ```js
 sprites() {
@@ -1761,91 +1314,63 @@ spriteAnimationEnded(key, id, finished) {
 }
 ```
 
-| method                                    |                                                                             |
-| ----------------------------------------- | --------------------------------------------------------------------------- |
-| `sprites()`                               | the parts on offer, or `null`; asked every frame, after layout              |
-| `spritesLifted(keys)`                     | which of them are on layers now — before the frame paints                   |
-| `spriteAnimationEnded(key, id, finished)` | the render server is done with one: it ran out, or its layer went           |
-| `spritesChanged()`                        | ask for that frame when the parts changed and nothing the element draws did |
+| method                                    |                                                                   |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| `sprites()`                               | the parts on offer, or `null`; asked every frame, after layout    |
+| `spritesLifted(keys)`                     | which are on layers now, before the frame paints                  |
+| `spriteAnimationEnded(key, id, finished)` | the render server is done with one: it ran out, or its layer went |
+| `spritesChanged()`                        | ask for a frame when the parts changed and nothing you draw did   |
 
-A part is its `key`, its `rect` (and a `reach`, if it draws past it, and a
-`clip`, if you cut it to one, with a `clipRadius` where the clip's corners
-are round), a `paint` that draws it **where it is in the
-window, at opacity 1 and untransformed** — the layer carries both — and a
-`version` whose change paints it again. Its `opacity` and its `transform`, CSS's `matrix(a, b, c,
-d, e, f)` as an array with `e` and `f` in device pixels, about an `origin`
-that defaults to the rect's centre, are what the layer shows at rest. A
-part turned out of the plane hands over `matrix3d()`'s sixteen numbers
-instead, column by column, its translation and the distance its perspective
-divides by in device pixels: Core Animation draws the layer through the
-whole matrix, perspective and all, on the GPU. The presenter lifts such a
-part only where none of its corners is behind the viewer, at rest or in
-any keyframe, since past that plane its picture has no bounds, and asks
-about it where its corners are seen rather than where it was laid out. Its
-`animations` are keyframes for one of those two properties each: `values`,
-`keyTimes`, a `timings` curve per segment, a `duration`, a `repeat`
-(`Infinity` loops), `autoreverse`, and `hold` to stay on the last value. A
-CSS animation goes over as it plays: an opacity's keyframes with their
-curves, and a transform **sampled** into matrices from the element's own
-interpolation, which is what makes a full turn turn and a mixed function
-list interpolate as CSS says — Core Animation's own interpolation would do
-neither.
+A part has:
 
-The rules the presenter decides by, every frame, are promotion's, asked of
-the element at **everywhere the part can be** — its reach through every
-transform it is animated through:
+- `key`; `rect` (device pixels, window coordinates); `reach` if it draws
+  past `rect`; a `clip`, with `clipRadius` for round corners.
+- `paint(ctx)`, drawing it **where it is, at opacity 1, untransformed** (the
+  layer applies both), and a `version` whose change paints it again.
+- At rest, `opacity` and `transform`: CSS's `matrix(a, b, c, d, e, f)` as an
+  array, `e`/`f` in device pixels, about `origin` (default the rect's
+  centre); out of the plane, `matrix3d()`'s sixteen numbers column by
+  column, translation and perspective distance in device pixels — lifted
+  only if no corner is ever behind the viewer.
+- `animations` of `opacity` or `transform`: `id`, `property`, `values`,
+  `keyTimes`, `timings` (a curve per segment), `duration`, `delay`, `repeat`
+  (`Infinity` loops), `autoreverse`, `hold` (stay on the last value). Hand a
+  CSS transform animation over **sampled** into matrices from your own
+  interpolation; Core Animation's would not turn a full turn or mix
+  functions as CSS does.
+
+Every frame the presenter applies promotion's rules **everywhere the part
+can be** through its animations:
 
 - **Nothing painted after the element reaches into what shows of it** — no
-  later sibling, no ancestor's border, ring or scrollbar. What shows is
-  what is inside its `clip` and inside every clipping ancestor with square
-  corners: the layer goes in a box that masks it to them, so a carousel's
-  slide under `overflow: hidden`, or a part scrolled half out of its pane,
-  is cut there as the bitmap is. A rounded ancestor has to hold all of it,
-  since one box cannot take its corners. A `clip` of your own may have
-  round corners — a card with a radius, cutting what it holds — and the
-  box takes them; an ancestor with square corners that cuts it again puts
-  that box in a box of its own. A part none of which shows — scrolled out
-  of its pane, or outside its own clip — stays on its layer, cut to show
-  nothing, so that its animation runs where it would and none of yours is
-  spent on it; past a budget of raster for such parts (32 MB a window), it
-  is yours to draw.
-- **Neither the element nor any ancestor fades**: their group on the bitmap
-  would leave the layer out of it.
-- **Your inside is yours.** Offer only a part that nothing you draw after it
-  overlaps — but for another part you offer after it, since that one's layer
-  stands above: list your parts in the order you paint them, and they stack
-  in it. The presenter cannot see inside your `paint`, so a part it turns
-  down is yours to draw, in the bitmap under every layer, and every part
-  listed before it that it overlaps is turned down with it, in that frame;
-  one it does not reach keeps its layer.
+  later sibling, no ancestor's border, ring or scrollbar. The layer is
+  masked to its `clip` and square-cornered clipping ancestors (a carousel
+  slide under `overflow: hidden`); a rounded ancestor must hold all of it.
+  A part wholly clipped out stays lifted showing nothing, its animation
+  running, up to 32 MB of such raster per window; past that, yours to draw.
+- **Neither the element nor any ancestor fades.**
+- **Your inside is yours.** Offer only parts nothing you draw later
+  overlaps, except later parts; list them in paint order. A part turned
+  down is yours to draw, and turns down every earlier part it overlaps.
 
-A part can be inside another of yours — a spinner in a card that fades —
-by naming it as its `parent`, earlier in the list. Its layer goes in the
-parent's layer, so it fades, turns and is cut with it, and it is asked
-about nothing more than staying inside the parent's raster everywhere it
-can be: the parent was asked about all of that. Its `rect`, `origin` and
-`clip` are where it is in the window with its parent untransformed. The
-parent's `paint` is handed the keys of the parts lifted inside it, and
-leaves them out; the presenter paints it again whenever they change, in
-the frame they do. A part whose parent is not lifted, or that reaches out
-of it, is yours to draw — in the parent's raster, where the parent is
-lifted.
+A part may name an earlier one as `parent` (a spinner in a fading card):
+its layer goes in the parent's, fading, turning and clipping with it, and
+must stay inside the parent's raster. Its `rect`, `origin` and `clip` are
+with the parent untransformed. The parent's `paint` gets the keys lifted
+inside it and leaves them out, and is repainted in the frame they change.
+A child whose parent is not lifted, or that reaches out of it, is yours to
+draw, in the parent's raster where that is lifted.
 
 A lifted part is a hole in your drawing from the frame `spritesLifted` says
-so, and a part the set no longer holds is yours to draw again in that same
-frame — the bitmap under it is claimed as it comes back. Declining is always
-safe, and it is what happens everywhere but on macOS: X11, Wayland, the
-layer presenter and a scene that refuses never ask, and your `paint` draws
-everything as it always did, so the same element runs on every backend and
-the animation runs on your own clock there.
+so; one dropped from the set is yours again that frame. Declining is always
+safe: X11, Wayland, the layer presenter and a scene that refuses never ask,
+`paint` draws everything, and animations run on your clock.
 
 #### A part that shows a source
 
-A part may show something the presenter does not paint at all: its
-`contents`, in place of `paint` and `version`. Today that is a
-`VideoFrames` sink ([elements.md](elements.md#video)) — a camera feed in a
-chart's corner, a preview inside a document — whose every `push` reaches the
-part's layer by itself, with no frame of the window's and no `paint`:
+`contents`, in place of `paint` and `version`, is today a `VideoFrames` sink
+([elements.md](elements.md#video)) — a camera feed in a chart, a preview in
+a document — whose every `push` reaches the layer with no window frame:
 
 ```js
 sprites() {
@@ -1861,40 +1386,29 @@ paint(ctx) {
 }
 ```
 
-The layer is exactly `rect` — the picture scaled into it — so put its edges
-on whole pixels, or the hole you leave and the layer that fills it meet with
-a seam. Everything else is a part's: the rules above, a `clip` if you cut it,
-`spritesChanged()` when the part comes or goes. A presenter that cannot show
-the source — any bridge without video surfaces, and every backend but macOS —
-declines the part, and drawing the newest frame yourself is the same code
-that runs in every frame something is painted over it. `<video>` is built
-exactly this way (src/nodes/video.js).
+The layer is exactly `rect`, the picture scaled in, so keep it on whole
+pixels or a seam shows; `spritesChanged()` when it comes or goes. A
+presenter without video surfaces — every backend but macOS — declines, and
+you draw the newest frame. `<video>` is built this
+way (`src/nodes/video.js`).
 
-Three things to know about ids and time. An animation is attached **once per
-`id`**: one that changed is a new id, and one the render server finished is
-not started again while you still list it. Its `delay` counts from the frame
-that asks, so it is a fresh number every frame and read only on the first.
-And a part is painted once unless its `version` changes — a move by whole
-pixels moves the layer, but a move to another fraction of a pixel, or a new
-size, paints it again.
+For every part: an animation is attached **once per `id`**; change the id
+to restart it, and a finished one is not restarted while listed. `delay`
+counts from the asking frame and is read only on the first. A part repaints
+only on a new `version`, a fractional move or a resize; a whole-pixel move
+just moves the layer.
 
-Sprites need `@windowkit/appkit` 0.19 or later, which takes a transform as
-a matrix or a matrix3d and a negative delay as one begun in the past: on an
-older bridge nothing is asked, and the element draws everything. A bridge
-that lists `matrix` and not `matrix3d` among its `transformForms()` lifts
-the parts in the plane and leaves those out of it to their elements.
+Sprites need `@windowkit/appkit` 0.19 or later; on an older bridge nothing
+is asked. A bridge whose `transformForms()` lacks `matrix3d` leaves parts
+out of the plane to their elements.
 
 #### A part that is its shadows
 
-A part may be **shadows** alone: CSS's outer `box-shadow`, which the
-render server draws on the GPU where your `paint` would blur a glow a pixel
-at a time. It has `shadows` in place of `paint`, its `rect` is the box that
-casts them — none of them falls inside it, with `rectRadius` corners, as an
-outer shadow is never drawn under its box — and each shadow is the shape it
-is the shadow of, with its corners' `radius`, an offset `x` and `y`, CSS's
-`blur` radius and a `color`, `[r, g, b, a]` in straight sRGB from 0 to 1.
-The first is on top, as CSS lists them; a spread is yours to fold into
-the shape.
+`shadows` in place of `paint` makes a part CSS outer `box-shadow`s, blurred
+on the GPU. `rect` is the casting box, with `rectRadius`; nothing is drawn
+inside it. Each shadow: a `rect` and its corners' `radius`, offsets `x` and
+`y`, CSS's `blur` and `color` as straight-sRGB `[r, g, b, a]` in 0–1. The
+first is on top; fold a spread into the shape yourself.
 
 ```js
 sprites() {
@@ -1923,59 +1437,41 @@ sprites() {
 }
 ```
 
-Their `animations` are of `'shadowBlur'`, `'shadowColor'` and
-`'shadowOffset'`, with `shadow` saying which: blurs and `[x, y]` offsets in
-device pixels, colours as above, and an `opacity` and a `transform` on the
-whole part as any part has. A transition between two lists of shadows is
-yours to pad, as CSS pads it, and to sample where Core Animation's straight
-interpolation of a colour would not be CSS's. Where they can reach is
-worked out from the shadows through every keyframe, and that is everywhere
-the part is asked about: a part that is its shadows stands over what is
-under its glow, so nothing painted after your element may reach into it.
-Leave the box itself in your bitmap and draw everything but its shadows
-there while the part is lifted. A part that is its shadows is never inside
-another's.
+Animations: `'shadowBlur'`, `'shadowColor'`, `'shadowOffset'` (`shadow`
+the index; blurs and `[x, y]` in device pixels), plus `opacity` and
+`transform` on the whole part. Pad between different shadow lists as CSS
+does, and sample colours where Core Animation's straight interpolation is
+not CSS's. Nothing painted after your element may reach into the glow,
+through any keyframe. While lifted, draw the box minus its shadows. Such a
+part is never inside another.
 
 ### Elements that own a real X window
 
-`drawn: false` is for a node backed by its own child X window rather than
-painted into its parent — a GL surface, an XEMBED socket, a video overlay.
-There are two worked examples, and they are worth reading in this order.
+`drawn: false` is for a node with its own child X window — a GL surface, an
+XEMBED socket, a video overlay. Read the two examples in order.
 
-`GlAreaNode` (`src/glnodes.js`) is the simple one: it holds no paint code,
-and the owning `WindowNode` realizes it in the commit phase
-(`_realizeChildWindows`) so the child window names its real parent from the
-start. The ordering constraint — no X calls in the render phase, because the
-render phase is discardable — is the part that is easy to get wrong.
+`GlAreaNode` (`src/glnodes.js`) has no paint code; the owning `WindowNode`
+realizes it in the commit phase, so the child names its real parent from
+the start. **No X calls in the render phase**, which can be discarded.
 
-Input is the other thing a child window decides without being asked. X
-delivers a device event to the first window up the hierarchy that selected
-it, so a window that selects nothing hands the pointer over it to the window
-the tree lives in — which is how a `<glarea>`'s presses reach the tree — and
-one that selects `ButtonPress` keeps every press for itself. Select only
-what the element needs from the server, and remember that ntk selects
-whatever a window is listened to for. The panes a `<glarea>`'s children are
-drawn on (`src/gloverlay.js`) select nothing for the same reason. The owning
-window's hit test knows about `<glarea>` surfaces and their children and
-asks them before the tree (`GlAreaNode.hitSurface`); it does not know about
-a registered element's window, so a point over one lands on whatever the
-tree has behind it.
+X delivers a device event to the first window up the hierarchy that
+selected it: a child that selects nothing passes the pointer to the tree's
+window (as `<glarea>` does), one that selects `ButtonPress` keeps every
+press. Select only what you need; ntk selects whatever a window is listened
+to for. The owning window's hit test knows `<glarea>` surfaces, not your
+window, so a point over yours lands on what the tree has behind it.
 
-`ForeignNode` (`src/foreignnodes.js`) is the same shape with the stakes
-raised, and it is the one to read if your element touches a resource you did
-not create. Three things it has to do that a GL surface does not:
+`ForeignNode` (`src/foreignnodes.js`), for a resource you did not create:
 
-- **Nothing in the render phase, for a sharper reason.** A `CreateWindow`
-  from a discarded render leaks a server resource; a `ReparentWindow` from
-  one has moved another application's window for real.
-- **Teardown is synchronous.** `WindowNode.destroySubtree` destroys its own
-  X window in the same turn your node's does, and `DestroyWindow` takes every
-  inferior with it — so a release that waits for a round trip releases a
-  window that no longer exists. Compute what you would have asked for; the
-  requests are ordered on the connection, which is what makes "hand it back,
-  _then_ destroy the container" a guarantee.
-- **Give it back, do not destroy it.** The element's own test file asserts
-  that first, because it is the failure this shape is most able to cause.
+- **Nothing in the render phase.** A `CreateWindow` from a discarded render
+  leaks a server resource; a `ReparentWindow` has moved another program's
+  window for real.
+- **Teardown is synchronous.** `WindowNode.destroySubtree` destroys its X
+  window in the same turn as your node, and `DestroyWindow` takes every
+  inferior, so a release awaiting a round trip is too late. Requests are
+  ordered on the connection, which makes "hand it back, _then_ destroy the
+  container" a guarantee.
+- **Give it back, do not destroy it.**
 
 ## A layout algorithm of your own
 
@@ -2014,63 +1510,54 @@ registerLayout('radial', {
 ```
 
 **One function, two questions.** `layout(children, constraints, options,
-info)` is asked how big the box's content is for `constraints` —
-`{ width, height, widthMode, heightMode }`, the vocabulary `measureContent`
-speaks, with `Infinity` for no bound — several times a pass, at sizes
-nothing is drawn at. When both modes are `'exactly'` the box has its size,
-and the answer places too: `children`, one rect per child, `{ x, y }` from
-the content box's corner, with a `width` and a `height` to lay the child out
-at — either one left out is the child's own. So it is a question about a
-hypothetical, under the rules `measureContent` has
-([above](#what-it-must-not-do)): no reading `abs`, no state, finite numbers.
+info)` is asked how big the content is for `constraints` (as
+`measureContent` gets them, `Infinity` for no bound), several times a pass,
+at sizes nothing is drawn at. When both modes are `'exactly'` the answer
+places too: `children`, one rect per child — `{ x, y }` from the content
+box's corner, plus a `width` and `height` to lay it out at, either left out
+being the child's own. `measureContent`'s rules apply
+([above](#what-it-must-not-do)): no `abs`, no state, finite numbers.
 
 **What it gets of a child** is a `LayoutChild`, never a node:
 
-| member                  |                                                                                                                                           |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `measure(constraints?)` | the child's size under the constraints. A number with no mode is `'exactly'`, an axis left out `'unconstrained'`, `'at-most'` fit-content |
-| `intrinsicSizes()`      | `{ minContentWidth, maxContentWidth }`: the narrowest it can be drawn at — its content floor — and the width it takes with no bound       |
-| `options`               | its `layoutItem`, against your `childOptions`                                                                                             |
-| `style`                 | its own resolved style, read-only, in device pixels — what `grid` places a child by (`gridColumn`) and aligns it with (`alignSelf`)       |
-| `index`                 | its place in the list                                                                                                                     |
+| member                  |                                                                                                    |
+| ----------------------- | -------------------------------------------------------------------------------------------------- |
+| `measure(constraints?)` | its size. A bare number is `'exactly'`, an omitted axis `'unconstrained'`, `'at-most'` fit-content |
+| `intrinsicSizes()`      | `{ minContentWidth, maxContentWidth }`: its content floor, and its width with no bound             |
+| `options`               | its `layoutItem`, against your `childOptions`                                                      |
+| `style`                 | its resolved style, read-only, device pixels (`gridColumn`, `alignSelf`…)                          |
+| `index`                 | its place in the list                                                                              |
 
-Every size is the child's **margin box** — a margin is part of the room a
-child takes — so an algorithm that lines children up is right about margins
-without knowing they exist; and every size is in device pixels, like
-`measureContent`'s.
+Every size is the child's **margin box**, in device pixels, so lining
+children up is right about margins without knowing they exist.
 
-**Options are declared, and typed.** `options` and `childOptions` map each
-name to `{ type, default }`: `'length'`, `'number'`, `'integer'`,
-`'boolean'`, `'string'`, `'any'`, or an array of the values it may take. A
-`length` is written in logical pixels in the style and arrives in device
-pixels, so an algorithm never multiplies by the scale. A value of the wrong
-type, or an option you did not declare, is reported naming it, and takes
-the default. What the box's own style already says — `gap`,
-`justifyContent`, `alignItems` — is `info.style`: read it rather than
-declaring options that mean the same thing. `info.scale` is the box's device
-pixels per logical pixel, for a length the schema cannot see: one inside a
-string, like a grid's track list. `info.report(message, consequence)` says
-that something in a style is wrong but can be laid out around — a grid area
-nobody named — once, the way a bad style value is said; a throw is for what
-cannot be laid out at all.
+**Options are declared, and typed.** `options` and `childOptions` map names
+to `{ type, default }`: `'length'`, `'number'`, `'integer'`, `'boolean'`,
+`'string'`, `'any'`, or an array of allowed values. A `length` is written in
+logical pixels and arrives in device pixels. A wrong-typed value or an
+undeclared option is reported by name and takes the default. The box's own
+style (`gap`, `justifyContent`, `alignItems`) is `info.style`, so do not
+declare look-alikes. `info.scale` is for a length the schema cannot see (in
+a string, like a grid's tracks). `info.report(message, consequence)`
+reports once something wrong that can be laid out around (an unnamed grid
+area); throw only for what cannot be laid out at all.
 
-**What core does, so the algorithm does not have to.** It lays each child
-out at its rect, mirrors the slots when the box reads right to left and
-rounds them to whole pixels, places absolutely positioned children by their
-insets, measures the children's content floors, carries a child's change
-into the next pass, and — when the algorithm throws, or answers something
-that is not a size — reports it and lays the box out as flexbox, in the same
-frame.
+**What core does.** It lays each child out at its rect, mirrors the slots
+for right-to-left and rounds them to whole pixels, places absolutely
+positioned children by their insets, measures content floors, carries a
+child's change into the next pass, and — when the algorithm throws or
+answers something that is not a size — reports it and lays the box out as
+flexbox in the same frame.
 
-Register before you render, as for an element. A name registered twice with
-a different function throws unless `override: true`; under hot reload a
-module re-registering its own replaces it, and a mounted box keeps the
-definition it started with until its style names a layout again. The
-built-in `masonry` and `equal-row` are worked examples (`src/layouts.js`),
-and so is `grid` (`src/grid.js`), which takes no options: it reads the box's
-tracks from `info.style` and each child's place from the child's `style`.
+Register before you render. Registering a name twice with a different
+function throws unless `override: true`; under hot reload a module
+re-registering its own replaces it, and a mounted box keeps its definition
+until its style names a layout again. Worked examples: `masonry` and
+`equal-row` (`src/layouts.js`), and `grid` (`src/grid.js`), which takes no
+options and reads tracks from `info.style` and places from each child's
+`style`.
 
-In TypeScript, augment `CustomLayouts` with your layout's options and
+In TypeScript, augment `CustomLayouts` and
 `layout: { name: 'radial', radius: 40 }` type-checks, typos included;
 `CustomLayoutItem` is what a child may say:
 
@@ -2087,8 +1574,8 @@ declare module 'react-x11/host' {
 `registerPosition` adds a positioning scheme
 ([styling.md](styling.md#custom-positions)): the box is laid out in flow, as
 `relative` is, and after every layout pass `place(node, context)` says how
-far to move it from there. A drop's flight home — from where the pointer let
-go to where layout put the item:
+far to move it. A drop's flight home, from where the pointer let go to where
+layout put the item:
 
 ```js
 import { registerPosition } from 'react-x11/host';
@@ -2112,86 +1599,64 @@ registerPosition('landing', {
 });
 ```
 
-`place` returns `{ x, y }` — how far to move the node, in device pixels, which
-are rounded to whole ones for you — or null to leave it where layout put it;
-`again: true` asks for another frame, which runs the placement pass with
-nothing to lay out. It resizes nothing and sets no state: it runs on every
-layout pass, a scroll's included, which is what lets what it moves land in
-the frame that scrolled.
+`place` returns `{ x, y }`, how far to move the node in device pixels
+(rounded for you), or null to leave it; `again: true` asks for another
+frame, which runs placement with nothing to lay out. It resizes nothing and
+sets no state: it runs on every layout pass, a scroll's included, so what
+it moves lands in the frame that scrolled.
 
-What it is handed, in window coordinates and device pixels, the space `abs`
-is in:
+Its context, in window coordinates and device pixels:
 
-| field               |                                                                                                                    |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `laidOut`           | `{ x, y, width, height }`: where layout put the node, before any placement moved it                                |
-| `pane`              | the nearest scroll pane: its `scrollport` — inside its border, over its padding — and `scrollX`/`scrollY`; or null |
-| `container`         | the box it is contained by: its parent's content box, or the whole scrolled content for a direct child of a pane   |
-| `margin`            | its margins                                                                                                        |
-| `direction`/`scale` | the node's                                                                                                         |
-| `now`               | the frame clock, in ms                                                                                             |
-| `options`           | its options, resolved as a layout's are                                                                            |
+| field               |                                                                                               |
+| ------------------- | --------------------------------------------------------------------------------------------- |
+| `laidOut`           | `{ x, y, width, height }`: where layout put the node, before placement                        |
+| `pane`              | nearest scroll pane: `scrollport` (inside border, over padding), `scrollX`/`scrollY`; or null |
+| `container`         | the parent's content box, or for a pane's direct child its scrolled content                   |
+| `margin`            | its margins                                                                                   |
+| `direction`/`scale` | the node's                                                                                    |
+| `now`               | the frame clock, in ms                                                                        |
+| `options`           | its options, resolved as a layout's are                                                       |
 
-`node` is the node itself, for its `style`: the insets are the scheme's to
-read — sticky reads them as thresholds — and yoga never sees them as
-offsets.
+`node` is the node, for its `style`: the insets are the scheme's to read
+(sticky reads them as thresholds); yoga never sees them as offsets.
 
-**What core does.** It re-derives where layout put the node on every pass
-(nothing may remember an offset: the scroll fast path moves a node with its
-pane, offset and all), claims where it was and where it went as damage —
-into the scroll blit's ledger, so a pane of placed nodes keeps the blit —
-lifts it over its siblings of the same `zIndex` for paint and for hit
-testing, and when `place` throws, reports it once and leaves the node where
-layout put it until its style names another position. `position: 'sticky'`
-is written against exactly this context (`placeSticky` in `src/layouts.js`).
+**What core does.** It re-derives the laid-out position every pass, so
+nothing remembers an offset; claims where the node was and went as damage,
+keeping a pane's scroll blit; lifts it over siblings of the same `zIndex`
+for paint and hit testing; and when `place` throws, reports it once and
+leaves the node where layout put it until its style names another position.
+`position: 'sticky'` is written against exactly this (`placeSticky` in
+`src/layouts.js`).
 
 In TypeScript, augment `CustomPositions` the way `CustomLayouts` is.
 
 ## The subpath exports
 
-| subpath             |                                                                                                                                                              |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `react-x11/host`    | `registerElement`, `registerLayout`, `registerPosition` and their `unregister…`/`registered…` pairs, `hostTypes`, `knownElements`, `drawnKinds`              |
-| `react-x11/node`    | `Node`, the built-in node classes, `Scrollable`, `intrinsicSize`                                                                                             |
-| `react-x11/style`   | `createStyles`, `flattenStyle`, `isStyleProp`, `resolveTokens`, the rest of the vocabulary                                                                   |
-| `react-x11/yoga`    | the layout engine — `Yoga`, `loadLayout`, `layoutLoaded`. Rarely needed; see below                                                                           |
-| `react-x11/ntk`     | ntk itself, re-exported — `Path2D`, `Image`, `Pixmap`, the font sources, `createClient` — `Surface`, on whichever backend the app is, and `decodeImageBytes` |
-| `react-x11/keysyms` | the `XK_*` constants, `keysymOf`, `charOf`, `MOD`, `ctrlChordLetter`                                                                                         |
+| subpath             |                                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `react-x11/host`    | `registerElement`/`Layout`/`Position`, their `unregister…` and `registered…s`, `hostTypes`, `knownElements`, `drawnKinds` |
+| `react-x11/node`    | `Node`, the built-in node classes, `Scrollable`, `intrinsicSize`                                                          |
+| `react-x11/style`   | `createStyles`, `flattenStyle`, `isStyleProp`, `resolveTokens`, the rest of the vocabulary                                |
+| `react-x11/yoga`    | the layout engine: `Yoga`, `loadLayout`, `layoutLoaded`. Rarely needed (below)                                            |
+| `react-x11/ntk`     | ntk (`Path2D`, `Image`, `Pixmap`, font sources, `createClient`), the backend's `Surface`, `decodeImageBytes`              |
+| `react-x11/keysyms` | the `XK_*` constants, `keysymOf`, `charOf`, `MOD`, `ctrlChordLetter`                                                      |
 
-**Reach ntk through `react-x11/ntk`, not a second dependency.** Two copies
-of ntk in one process means two font caches and two glyph atlases, and a
-node built against one cannot be painted by the other — a failure that
-looks like a drawing bug rather than a dependency bug. It is also where a
-drawing-adjacent name gets its backend-neutral answer: `Surface` from here
-is a pixmap on X11, a CG bitmap on the Cocoa backend, a GL render target on
-Wayland and a Direct2D bitmap on win32, where `Surface` from `ntk` is the
-pixmap only. And it is where an element that draws images of its own
-decodes them: `decodeImageBytes` is the ladder `<image>` reads
-bytes with — WebP everywhere, and under Bun every format Bun reads, off the
-JavaScript thread — where ntk's `decodeImage` is PNG and JPEG, synchronously
-([formats](elements.md#formats-and-what-decodes-them)).
+**Reach ntk through `react-x11/ntk`, never a second dependency.** Two copies
+mean two font caches and glyph atlases, and a node built against one cannot
+be painted by the other — it looks like a drawing bug. Its `Surface` is the
+backend's own (above), where ntk's is the X11 pixmap; its
+`decodeImageBytes` is what `<image>` uses — WebP everywhere, under Bun every
+format Bun reads, off the JavaScript thread — where ntk's `decodeImage` is
+PNG and JPEG, synchronously ([formats](elements.md#formats-and-what-decodes-them)).
 
-**An element does not need the layout engine, and that is deliberate.**
-`measureContent` is handed its constraints in words (`'exactly'`,
-`'at-most'`, `'unconstrained'`) rather than yoga's integers, so an element
-never links against it and yoga's ABI never becomes part of this seam. If you
-are writing an element and reaching for `react-x11/yoga`, the answer is
-almost certainly `measureContent`.
-
-`react-x11/yoga` is for the case that is genuinely different. A layout that
-arranges a box's children is `registerLayout`
-([above](#a-layout-algorithm-of-your-own)) and never needs it; what does is
-an element laying out content it draws itself that wants to delegate part
-of that to flexbox. `@react-x11/components`'s `<Html>` is the worked example
-— its `display: flex` builds a small yoga tree, asks it, and reads the
-answer back rather than re-deriving flexbox, which is long, subtle, and
-silently wrong when it is wrong.
-
-Such a package must use **this** engine rather than its own `yoga-layout`
-dependency, for the same reason it must reach ntk through `react-x11/ntk`:
-two instances are two WebAssembly modules, and a node created by one cannot
-be inserted into a tree owned by the other. That failure surfaces as a crash
-inside the engine, naming nothing you wrote.
+**An element does not need the layout engine**: `measureContent` gets its
+constraints in words, not yoga's integers, and arranging a box's children
+is `registerLayout` ([above](#a-layout-algorithm-of-your-own)).
+`react-x11/yoga` is for an element laying out content it draws that wants
+flexbox for part of it (`@react-x11/components`' `<Html>` does, for
+`display: flex`). Use **this** engine, never your own `yoga-layout`: two
+WebAssembly instances cannot share nodes, and mixing them crashes inside
+the engine, naming nothing you wrote.
 
 ```ts
 import { Yoga, loadLayout } from 'react-x11/yoga';
@@ -2201,15 +1666,14 @@ const root = Yoga.Node.create();
 root.setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
 ```
 
-The enum constants are readable from the first tick; `Node` and `Config`
-throw until the assembly is loaded, which `createRoot()` awaits before it
-builds anything (docs/packaging.md explains why it is loaded rather than
-imported).
+The enum constants are readable at once; `Node` and `Config` throw until
+the assembly is loaded, which `createRoot()` awaits
+([packaging.md](packaging.md)).
 
 ## Typing
 
-The element also has to be declared to JSX, which is module augmentation —
-the same mechanism [typescript.md](typescript.md) describes:
+Declare the element to JSX by module augmentation, as
+[typescript.md](typescript.md) describes:
 
 ```ts
 import type { Style } from 'react-x11/style';
@@ -2228,15 +1692,9 @@ declare module 'react-x11/jsx-runtime' {
 }
 ```
 
-`test/types/extend.tsx` in this repo compiles exactly that, so the story
-stays true as the declarations move.
-
-The drawing side is declared too. `Context2D` from `react-x11/node` is the
-canvas-shaped subset the backends implement — ntk's context over
-XRender, and the one `src/backend/context2d.js` wraps over CoreGraphics on
-Cocoa and Direct2D on win32 — so `paintContent(ctx: Context2D)`
-type-checks every call an element makes, and a member not every backend
-has is optional there (`globalCompositeOperation`, which a native context
-takes only for the modes its bridge draws — assign it and read it back) or
-absent. `paintCachePlan`, `paintCached`, `opaqueRect` and the rest of the
-contract above are on the class, with `PaintCachePlan` for the plan.
+`Context2D` from `react-x11/node` is the canvas-shaped subset every backend
+implements, so `paintContent(ctx: Context2D)` type-checks every call; a
+member not every backend has is optional (`globalCompositeOperation`, which
+a native context takes only for modes its bridge draws — assign and read
+back) or absent. `paintCachePlan`, `paintCached`, `opaqueRect` and the rest
+of the contract are on the class, with `PaintCachePlan` for the plan.

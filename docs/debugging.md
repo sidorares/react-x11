@@ -6,20 +6,17 @@ raises: _what went on the wire_ (`REACT_X11_TRACE`), _what got repainted_
 both). They complement [devtools.md](devtools.md) (component tree) and
 `REACT_X11_DEBUG_LAYOUT=1` (outline every drawn node, colour by depth).
 
-X11 is a network protocol even on a local socket, and the renderer's
-performance model — damage rects, one `CopyArea` per presented rect — is
-invisible at runtime without these. The failure mode they exist for is the
-silent full-window repaint: correct pixels, quietly costing the whole
-window every frame.
+The failure mode they exist for is the silent full-window repaint: correct
+pixels, quietly costing the whole window every frame. X11 is a network
+protocol even on a local socket, and damage rects are invisible at runtime
+without these.
 
-Everything here is built to cost nothing when off: the environment
-switches are read **once at startup** (a `process.env` read is a real
-environment lookup, and these sit on the frame path), the tracer module is
-not even imported unless `REACT_X11_TRACE` is set or you import
-`react-x11/debug` yourself, stacks are only captured under
-`REACT_X11_DEBUG_PAINT=full` or `+stacks`, and the per-frame reason
-bookkeeping is a handful of set insertions. Measuring the renderer must
-not change what it measures.
+Everything here costs nothing when off. The environment switches are read
+**once at startup** unless a section says otherwise, and the `NO_…` and
+`STRICT_…` switches answer only to `1` — any other value leaves the default
+in place. The tracer module is not imported unless `REACT_X11_TRACE` is set
+or you import `react-x11/debug` yourself, and stacks are captured only under
+`REACT_X11_DEBUG_PAINT=full` or `+stacks`.
 
 ## Protocol tracing — `REACT_X11_TRACE`
 
@@ -37,21 +34,16 @@ REACT_X11_TRACE=summary npm run examples:dashboard
 - `requests` — one stderr line per request as it is sent
   (`x11 → Render.FillRectangles 36B`), plus one line per painted frame
   (`frame 412: 320x24@8,40 reasons=style-state landed=16.4ms`). X errors are
-  decoded and name the failing request. `landed` is ntk's `frameLatency`:
-  how long the previous frame took to be answered, which means different
-  things on the two frame clocks. On ntk >= 7 a window presents by default
-  and its frames end on the display, so this is time-to-display and reads
-  about **one refresh period** — 16ms on a 60Hz screen is the system
-  working. Client work and server work still separate here, but the question
-  to ask of a large number is which clock produced it: on `frameClock: 'fence'`
-  it is a server round trip, and a paint that builds in 0.3ms
-  against 20ms there _is_ a server-side problem (software-fallback RENDER
-  ops, a virtualized GPU) rather than a renderer one.
-  `npm run bench:frames` reports the same split as a summary. A frame the
-  frame pacer held ([elements.md](elements.md#framerate--pacing-the-frames-under-a-flood))
+  decoded and name the failing request. `landed` is how long the previous
+  frame took to be answered. A window presents by default, so this is
+  time-to-display and reads about **one refresh period** — 16ms on a 60Hz
+  screen is the system working. On `frameClock: 'fence'` it is a server
+  round trip instead, and a paint that builds in 0.3ms against 20ms there
+  _is_ a server-side problem (software-fallback RENDER ops, a virtualized
+  GPU) rather than a renderer one. A frame the frame pacer held
+  ([elements.md](elements.md#framerate--pacing-the-frames-under-a-flood))
   carries `waited=18.0ms` — how long the claim waited before the clock got
-  it; a frame that was not held carries nothing, so the default's lines are
-  the lines they always were.
+  it.
 - `chrome:/tmp/trace.json` — [Chrome Trace Event
   JSON](https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU),
   written at exit. Open it in Perfetto or `about:tracing`: React commits
@@ -60,15 +52,14 @@ REACT_X11_TRACE=summary npm run examples:dashboard
   `CompositeGlyphs32` inside one commit".
 
 Append `+stacks` to `requests` or `chrome` to capture a JS stack per
-request (node-x11's seq2stack mechanism). An X error is asynchronous — it
-arrives long after the call that caused it returned — and the captured
-stack is the only thing that maps it back to your code. It costs an
-`Error` capture per request, so it is opt-in.
+request. An X error arrives long after the call that caused it returned,
+and the captured stack is the only thing that maps it back to your code. It
+costs an `Error` capture per request, so it is opt-in.
 
 The tracer attaches to a connection _after_ its handshake, so the
-connection-setup packet — the one carrying the X auth cookie — is
-structurally invisible to it, and payload bytes are never recorded: only
-opcode, length and direction.
+connection-setup packet — the one carrying the X auth cookie — is never
+seen, and payload bytes are never recorded: only opcode, length and
+direction.
 
 ### `startTrace()` — the same thing as an API
 
@@ -81,12 +72,9 @@ const { requests, bytesOut, replies, byOpcode } = trace.stop();
 ```
 
 With no `app` the trace follows every connection the renderer has open or
-opens later; pass `startTrace({ app })` to trace one specific connection
-(the bench harness does this). `byOpcode` maps decoded request names —
-`'CopyArea'`, `'Render.CompositeGlyphs32'` — to counts. This is the same
-splitter `npm run bench` uses, promoted to a runtime feature; for
-committed regression numbers still use the bench (`scripts/bench/`), whose
-in-process server keeps them deterministic.
+opens later; pass `startTrace({ app })` to trace one specific connection.
+`byOpcode` maps decoded request names — `'CopyArea'`,
+`'Render.CompositeGlyphs32'` — to counts.
 
 ## Repaint flashing — `REACT_X11_DEBUG_PAINT`
 
@@ -114,71 +102,67 @@ Error: invalidated here
     at ...
 ```
 
-Full repaints are the renderer's main performance bug class (see
-"Protocol efficiency" in AGENTS.md); before this switch nothing surfaced
-them. Expected full repaints exist too — a resize, the first frame after a
-mount, ntk invalidating its backing store — and their reasons say so.
+Full repaints are the main performance bug to look for. Expected ones exist
+too — a resize, the first frame after a mount, the backing store being
+invalidated — and their reasons say so.
 
-A bounded frame can still be doing the work of an unbounded one, and this is
-where to notice it: an element that draws a whole **scene** into one node — a
-graph view, a chart, an editor — is one node to the damage machinery, so a
-tight outline around what moved can sit over a pane that redrew all of
-itself inside it. Such an element reads the pass's rect and claims its own
-commits ([extending.md](extending.md#drawing-a-scene-into-one-node)).
+A bounded frame can still be doing the work of an unbounded one: an element
+that draws a whole **scene** into one node — a graph view, a chart, an
+editor — is one node to the damage machinery, so a tight outline around
+what moved can sit over a pane that redrew all of itself inside it. Such an
+element reads the pass's rect and claims its own commits
+([extending.md](extending.md#drawing-a-scene-into-one-node)).
 
 ## `REACT_X11_NO_SCOPED_FLOORS=1`
 
 Measures the content floors over the whole tree on every layout change,
-the way they were measured before a change inside an absolutely positioned
-box with its own width and height was measured in that box alone — and
-before a change down a column whose height is its content's (a document, a
-log, a feed in a scroll pane) was measured alone and the column summed. For
-measuring the two against each other on the same build, and as first aid if
-a box ever comes out the wrong size after its content changes. Read once at
-startup; answers only to `1`.
+instead of measuring a change inside an absolutely positioned box with its
+own width and height in that box alone, or a change down a column whose
+height is its content's (a document, a log, a feed in a scroll pane) alone
+with the column summed. For comparing the two on the same build, and as
+first aid if a box ever comes out the wrong size after its content changes.
 
 ## `REACT_X11_NO_UNREAD_WIDTHS=1`
 
 Measures every box's min-content width in the width passes — over the whole
-tree, and over a box measured alone — the way it was measured before a pass
-read only the widths a floor is written from. Without it, a leaf that nothing
-reads the width of — a paragraph down a column in a document, where no row's
-floor depends on it — is not set a word to a line to find one, which on
-600 KB of Markdown was a second of the first frame. For measuring the two against each other, and as first aid if
+tree, and over a box measured alone — instead of only the widths a floor is
+written from. By default a leaf whose width nothing reads (a paragraph down
+a column in a document) is not set a word to a line to find one, which
+matters for a large first frame. For comparing the two, and as first aid if
 something in a row ever comes out narrower than its content after the first
-frame. Read once at startup; answers only to `1`.
+frame.
 
 ## `REACT_X11_NO_REFIT_HOLD=1`
 
-Lays an `'auto'`-sized window out at the size it has on the frame its
-content asked for a new one, the way it did before that frame waited for the
-server's answer ([elements.md](elements.md#natural-size)). On X11 that frame shows
-the new content at the old size — a label that grew wraps, and is cut off —
-for the round trip before the resize lands. For measuring the two against
-each other, and as first aid if an `'auto'` window ever stops repainting
-after its content changes. Read once at startup; answers only to `1`.
+By default, the frame on which an `'auto'`-sized window's content asks for a
+new size waits for the server's answer ([elements.md](elements.md#natural-size)).
+This switch lays it out at the size it has on that frame instead, so on X11
+that frame shows the new content at the old size — a label that grew wraps,
+and is cut off — for the round trip before the resize lands. For comparing
+the two, and as first aid if an `'auto'` window ever stops repainting after
+its content changes.
 
 ## `REACT_X11_NO_SCROLL_BLIT=1`
 
-Disables the scroll-blit fast path (a pure scroll `CopyArea`s the
-surviving band and repaints only the exposed strip), so a scroll frame
-repaints its whole viewport again. For measuring the blit against the
-plain path on the same build, and as first aid if a scroll ever
-misrenders. Read once at startup, like the switches above, and like them
-it answers only to `1` — any other value leaves the blit on.
+Disables the scroll-blit fast path (a pure scroll copies the surviving band
+and repaints only the exposed strip), so a scroll frame repaints its whole
+viewport again. For measuring the blit against the plain path on the same
+build, and as first aid if a scroll ever misrenders.
 
-It covers the element-owned form of the same shift as well —
-[`scrollContents`](extending.md#panning-a-scene-you-drew), which a pane
-that pans a scene it drew itself calls — so a scene that misrenders while
-panning is one variable away from being told apart from one that misdraws.
-And it covers the `<glarea>` overlay's copy: a child of a surface that only
-moved is moved on its pane rather than repainted
-([elements.md](elements.md#glarea)), and with this set it is repainted
-there instead. So too the window's own copy of a subtree that only moved: a
-card with a background nothing shows through, dragged across a pane, is
-copied where it went and the frame paints the strip it uncovered
-([extending.md](extending.md#an-element-that-covers-its-box)); with this
-set it is repainted where it was and where it went.
+It also covers the other paths that move retained pixels instead of
+repainting them:
+
+- [`scrollContents`](extending.md#panning-a-scene-you-drew), which a pane
+  that pans a scene it drew itself calls — so a scene that misrenders while
+  panning is one variable away from being told apart from one that misdraws;
+- the `<glarea>` overlay's copy, where a child of a surface that only moved
+  is moved on its pane rather than repainted ([elements.md](elements.md#glarea));
+- the window's own copy of a subtree that only moved: a card with a
+  background nothing shows through, dragged across a pane, is copied where
+  it went and the frame paints the strip it uncovered
+  ([extending.md](extending.md#an-element-that-covers-its-box)).
+
+With this set, each of them repaints instead.
 
 ## `REACT_X11_NO_PANE_SHAPE=1`
 
@@ -188,8 +172,7 @@ actually paints ([elements.md](elements.md#glarea)). A rectangle covers the
 GL frame with the surface's `clearColor` wherever the child's reach goes
 past its ink — a `<Flow>` graph's edges stop short of every card and lose
 their arrowheads — so this is for measuring the cut against the rectangle,
-and as first aid if a pane's cut is ever wrong. Read once at startup; it
-answers only to `1`.
+and as first aid if a pane's cut is ever wrong.
 
 ## `REACT_X11_STRICT_TOKENS=1`
 
@@ -199,11 +182,10 @@ By default a token the palette in force does not define is dropped, named
 loudly on stderr — token, element, owning component, and every token the
 palette _does_ have — and counted as a failure through `process.exitCode`.
 The widget paints one property short, which is visible, and the rest of the
-app keeps running. That is the default because the check runs when a node's
-ancestry completes, and on most of those paths a throw cannot be caught: on
-a fresh mount React is completing the `<window>`, so the error is attributed
-above every boundary inside it, and a desktop light/dark switch reaches the
-tree from an X event with no React on the stack at all.
+app keeps running. (A throw there could not be caught by most boundaries:
+the check runs as a node's ancestry completes, often while React completes
+the `<window>` or from a desktop light/dark switch with no React on the
+stack.)
 
 Set this when you would rather stop than paint something wrong — a kiosk, or
 a CI job that should fail at the first bad token rather than at the
@@ -213,84 +195,64 @@ screenshot diff:
 REACT_X11_STRICT_TOKENS=1 npm run examples:theming
 ```
 
-Strict mode still throws somewhere useful. The error is raised from the
-offending node's own `commitMount`, on its own fiber, so an
-[error boundary](react-features.md) at any depth inside the window catches
-it and renders a fallback for that subtree rather than losing the window.
-With no boundary above it, it reaches `onUncaughtError` and the process
-stops — which is the point. The one path that cannot be routed is the
-desktop appearance switch; there strict mode crashes.
-
-Read once at startup like the switches above, and answers only to `1`.
+The error is raised from the offending node's own `commitMount`, on its own
+fiber, so an [error boundary](react-features.md) at any depth inside the
+window catches it and renders a fallback for that subtree rather than
+losing the window. With no boundary above it, it reaches `onUncaughtError`
+and the process stops. The one path that cannot be routed is the desktop
+appearance switch; there strict mode crashes.
 
 ## `REACT_X11_NO_BOUNDS_CACHE=1`
 
-Disables the cached paint reach. A bounded frame asks every subtree on the
-way to its rect whether it reaches in, and the answer — the node's rect
-unioned with its descendants' — is kept until something that moves it says
-so: a rect assigned by layout, a child list change, a style swap, a state
-flip, a change the node announces about itself. Recomputing it per pass made
-a one-cell repaint cost the whole tree (1.25ms at 3,600 nodes, 0.37ms
-cached). With this set every walk is fresh, so if a node ever goes missing
-from a bounded repaint — culled by a reach nobody updated — this is the
-first thing to try, and a fix that lands here is a change nobody announced
-through `invalidate`. Read once at startup; answers only to `1`.
+Disables the cached paint reach — the rect of a node unioned with its
+descendants', which a bounded frame asks of every subtree on the way to its
+rect, and which is kept until layout, a child list change, a style swap, a
+state flip or the node's own `invalidate` moves it. With this set every walk
+is fresh, so if a node ever goes missing from a bounded repaint — culled by
+a reach nobody updated — this is the first thing to try, and a fix that
+lands here is a change nobody announced through `invalidate`.
 
 ## `REACT_X11_NO_STROKE_CHUNKING=1` (macOS, Windows)
 
-Makes the 2d context the Cocoa and win32 backends share
-(`src/backend/context2d.js`) hand every stroke to the platform in one call —
-one `CGContextStrokePath` on CoreGraphics — instead of splitting a path with
-many subpaths into several —
-[docs/macos.md](macos.md#stroking-a-path-with-many-subpaths) for what the
-split buys (a 4,000-subpath stroke goes from 986ms to 113ms) and
-the one thing it costs (the antialiased fringe where two subpaths' strokes
-overlap is half-covered twice rather than covered once, and reads a little
-lighter). Set this to compare the two on the same build, or as first aid if
-a drawing that strokes thousands of subpaths ever looks wrong at its seams.
-`ctx.strokeChunking = false` is the same switch for one context. Read once
-at startup, like the switches above, and answers only to `1`.
+The 2d context the Cocoa and win32 backends share splits a stroke with many
+subpaths into several platform calls, which makes a stroke of thousands of
+subpaths many times faster; the antialiased fringe where two subpaths'
+strokes overlap is then half-covered twice rather than covered once, and
+reads a little lighter. This switch hands every stroke to the platform in
+one call. Set it to compare the two on the same build, or as first aid if a
+drawing that strokes thousands of subpaths ever looks wrong at its seams.
+`ctx.strokeChunking = false` is the same switch for one context.
 
-Nothing on X11 reads it: there a stroke is one coverage mask over the
-path's bounding box, so a bigger path is _fewer_ uploads and the split
+Nothing on X11 reads it: there a stroke is one coverage mask, so splitting
 would be a loss.
 
 ## `REACT_X11_NO_TRANSPARENCY=1`
 
 Makes every display answer the way one with no 32-bit visual does:
 [`transparent`](elements.md#transparent--rounded-corners-and-translucency)
-is ignored, windows are created on
-the ordinary visual, `'@supports transparency'`
-([styling.md](styling.md#capability-queries)) never matches, and
-`useSupports('transparency')` is false.
+is ignored, windows are created on the ordinary visual,
+`'@supports transparency'` ([styling.md](styling.md#capability-queries))
+never matches, and `useSupports('transparency')` is false.
 
 ```sh
 REACT_X11_NO_TRANSPARENCY=1 npm run examples:tooltips
 ```
 
-It exists because the fallback design is otherwise unreachable on the
-machine you work on. Rounded menus, the tooltip's arrow and any
-`@supports` block of your own have a second look for displays that cannot
-composite — and the only way to see it used to be stopping the compositor,
-which takes every other window on the desktop with it. Both halves answer
-this switch at once, deliberately: a window that took the ARGB visual under
-a `useSupports` that said no would size a popup for chrome it then refused
-to draw.
+It lets you see the fallback design — rounded menus, the tooltip's arrow,
+any `@supports` block of your own — without stopping the compositor, which
+would take every other window on the desktop with it. Both halves answer
+this switch at once, so a window never takes the ARGB visual under a
+`useSupports` that said no.
 
 What it models is a display with **no 32-bit visual** — XQuartz, a plain
 remote server. The other degraded case, an ARGB window with _nothing
-compositing it_, is the one where a cleared corner comes out black rather
-than showing the desktop; that one needs a real session with the compositor
-off (or `setCompositingForTests`), since the visual has to be taken for the
-question to arise. Both render the same by design, which is the invariant
-worth checking.
+compositing it_ (a cleared corner comes out black rather than showing the
+desktop), needs a real session with the compositor off, or
+`setCompositingForTests`. Both should render the same.
 
-Like the switches above it answers only to `1`, so a stale
-`NO_TRANSPARENCY=0` cannot quietly mean the opposite of what it says.
-Unlike them it is read per call rather than once at startup — it is asked
-when a window is created and when a `@supports` block resolves, never on
-the frame path, and being live is what lets a test turn it on around a
-single mount.
+Unlike the switches above it is read per call rather than once at startup —
+when a window is created and when a `@supports` block resolves, never on the
+frame path — so a test can turn it on around a single mount.
 
 ## The paint cache — `REACT_X11_NO_PAINT_CACHE`, `REACT_X11_PAINT_CACHE=verify`
 
@@ -327,35 +289,16 @@ Three switches, all read once at startup:
 
 ## Rounded boxes — the corner-glyph fast path
 
-A rounded box is the most common non-rectangular thing a UI draws and,
-historically, the most expensive: its corners become a polygon, and a
-polygon becomes either server-side trapezoids (which glamor does not
-accelerate — measured at ~5.6ms per operation on a virtualized GPU) or a
-client-side coverage mask that is uploaded again every frame.
+On X11, a `fill()` or `stroke()` whose path is exactly one axis-aligned
+`roundRect` on integer geometry — what every `borderRadius` box draws — goes
+out as four cached corner glyphs plus rectangles, with nothing rasterized or
+uploaded in steady state. A box that falls back still renders, identically,
+as a polygon, which on a server without accelerated trapezoids (a
+virtualized GPU) can cost an order of magnitude more per frame. The fallback
+is silent, so the counters below are how you notice it.
 
-ntk 6.7.0 recognizes the shape instead. A `fill()` or `stroke()` whose path
-is exactly one axis-aligned `roundRect` on integer geometry goes out as
-**four cached corner glyphs plus `FillRectangles`** — the corners ride the
-glyph path every X server optimizes, cached server-side after first use,
-and the straight runs between them are plain rectangles. Nothing is
-rasterized or uploaded in steady state. `_paintBackground` and
-`_paintBorder` already draw exactly that shape, so every `borderRadius` box
-takes the route with no change to your code.
-
-What it is worth, measured on this repo's `bench:frames` cards mode against
-a glamor/virgl server — 48 cards, all recoloured every frame:
-
-|                          | fps  | paint   | landed  | wire/frame |
-| ------------------------ | ---- | ------- | ------- | ---------- |
-| `--border=2` (fast path) | 57.8 | 0.78 ms | 0.70 ms | 13 KB      |
-| `--border=2 --no-glyphs` | 3.8  | 7.53 ms | 287 ms  | 342 KB     |
-
-(measured on the fence clock, where the column is server drain — on the
-default vertical-blank clock the fast-path row would read about one refresh
-period instead, and the cliff would show in `fps` and `dropped`)
-
-A bail-out is a silent perf cliff — the box still renders, identically,
-just via the route above — so the counters matter more than usual.
+Design notes and measurements:
+[design/debugging.md](../design/debugging.md#rounded-boxes--the-corner-glyph-fast-path).
 
 ### Seeing which boxes took it
 
@@ -371,43 +314,25 @@ REACT_X11_TRACE=summary npm run examples:tasks
 
 The same tally is on `trace.stop().shapes` as `{ hits, misses }`, and ntk
 prints a process-wide version under `NTK_DEBUG_SHAPES=1`. In the opcode
-histogram the route shows up directly: `Render.CompositeGlyphs8` and
-`Render.FillRectangles` where `Render.Trapezoids`, `Render.AddTraps` or a
-`PutImage`-heavy `Render.Composite` used to be.
+histogram the fast path shows as `Render.CompositeGlyphs8` and
+`Render.FillRectangles`; the fallback as `Render.Trapezoids`,
+`Render.AddTraps` or a `PutImage`-heavy `Render.Composite`.
 
 ### Why a box falls back
 
 `misses` counts by reason. In rough order of how often they bite:
 
-- `fractional` — the box, or the stroke's band, is not on whole pixels.
-  Usually **fractional layout geometry**: a box laid out on a half-pixel
-  bails whatever its border width is.
-
-  On ntk < 7 an _odd_ border width bailed too, and it was the one to know
-  about. `_paintBorder` strokes the box inset by half the border width,
-  putting the stroke's centre-line radius at `borderRadius - borderWidth/2`
-  — half-integer whenever the border is odd — and the stroke path wanted an
-  integer radius. A 1px or 3px rounded border therefore kept its corners on
-  the polygon route while the fill underneath took the fast one, which on
-  the 48-card wall was 26x the wire per frame (341 KB against 13 KB) and 5x
-  the client paint. ntk 7 takes those radii (sidorares/ntk#218), so a 1px
-  border is now as cheap as a 2px one and no border width needs choosing
-  around this.
-
+- `fractional` — the box, or the stroke's band, is not on whole pixels:
+  usually a box laid out on a half-pixel. Any border width, odd or even,
+  takes the fast path.
 - `radius-cap` — the corner radius is over `shapePolicy.maxRadius` (64 by
-  default; glyph-atlas behaviour past that is driver-specific). Also what
-  the off switch reports.
+  default). Also what the off switch reports.
 - `gradient` — the fill or stroke style is not a solid colour.
 - `clip-mask` — a non-rectangular clip is in effect. Rectangular clips are
-  fine; they go out as picture clip rectangles. A box's own `overflow` with
-  a `borderRadius` is not one of these on X11: its children are clipped to
-  its rectangle and the corner squares they reach are put back afterwards
-  (`src/nodes/roundclip.js`, issue #685), so everything inside a rounded
-  card or pane stays on the route. The exceptions still clip to the
-  outline: a box that is corner all the way along a side (a pill whose
-  corner squares would overlap), and one laid out off the pixel grid. So a
-  `clip-mask` miss points at one of those, or at a clip an element sets
-  itself.
+  fine, and so, on X11, is a rounded box's own `overflow` clip: everything
+  inside a rounded card or pane stays on the fast path. The exceptions are a
+  box that is corner all the way along a side (a pill), one laid out off the
+  pixel grid, and a clip an element sets itself.
 - `dashes` — `borderStyle: 'dashed'`.
 - `transform` — the context's matrix is not translate-only.
 - `composite-op`, `geometry`, `radii-mix`, `join` — a non-`source-over`
@@ -425,40 +350,22 @@ root.app.shapePolicy = { maxRadius: 32, cacheBytes: 128 << 10 };
 ```
 
 `NTK_NO_SHAPE_GLYPHS=1` does the same from the environment. Both are for
-A/B measurement and for cornering a suspected rendering difference — the
-route is not something an application should need to turn off.
-
-```sh
-npm run bench:frames -- cards 8 --border=2              # fast path
-npm run bench:frames -- cards 8 --border=2 --no-glyphs  # same scene, polygons
-npm run bench:frames -- cards 8 --border=1              # the odd-width cliff
-```
-
-The two routes are not bit-identical: they rasterize the same arc by
-different means, so corner pixels differ by antialiasing — under 4/255 for
-fills, up to 48/255 on a stroked corner. Everything outside the corner
-boxes is exact, which is the property the decomposition rests on (the
-glyphs and the rectangles partition the pixels, so no pixel is painted
-twice and translucent colours are safe). `test/rounded-box-glyphs.test.js`
-asserts exactly that split.
-
-In practice the difference does not reach a screenshot: regenerating
-`docs/img/*.png` with the route off moves between 0 and 0.06% of pixels,
-by at most 8/255. If `npm run screenshots` ever produces a bigger diff than
-that after a toolkit bump, the cause is somewhere else — ntk 6.7.0's other
-change, an arc flattener that subdivides curves more exactly, moved those
-same screenshots far more than this route did.
+A/B measurement and for cornering a suspected rendering difference — an
+application should not need to turn it off. The two routes differ only in
+corner antialiasing (under 4/255 for fills, up to 48/255 on a stroked
+corner); every pixel outside the corners is exact, and translucent colours
+are safe.
 
 ## Invalidation reasons
 
-Every internal `invalidate()` call now names why it ran, from a small
-closed set (`INVALIDATE_REASONS` in `src/nodes/damage.js`, which says what
-each one means): `props`, `position`, `style-state`, `shadow`, `outline`,
-`theme`, `ink`, `direction`, `scale`, `units`, `animation`, `scroll`, `text`,
-`selection`, `content`, `measure`, `child-list`, `focus`, `caret`, `resize`,
-`mount`, `expose`, `highlight`, `trace-updates`, `capabilities`, `layout`. The
-frame's collected reasons are what `REACT_X11_TRACE=requests` frame lines,
-the chrome trace's frame slices, the full-repaint warning and
-`examples/stress/perf.js` print. After a frame they are readable on the
-window node as `root._lastReasons` (instrumentation surface, like
+Every internal `invalidate()` call names why it ran, from a small closed
+set: `props`, `position`, `style-state`, `shadow`, `outline`, `theme`,
+`ink`, `direction`, `scale`, `units`, `animation`, `scroll`, `text`,
+`selection`, `content`, `measure`, `child-list`, `focus`, `caret`,
+`resize`, `mount`, `expose`, `highlight`, `trace-updates`, `capabilities`,
+`layout` (`INVALIDATE_REASONS` in `src/nodes/damage.js` says what each one
+means). A frame's collected reasons are what `REACT_X11_TRACE=requests`
+frame lines, the chrome trace's frame slices and the full-repaint warning
+print. After a frame they are readable on the window node as
+`root._lastReasons` (an instrumentation surface, like
 `root._lastDamageRects` — not public API).

@@ -28,27 +28,19 @@ every backend — so the whole error path for a file dialog is one `if`.
 
 ## The ladder
 
-There is no single answer to "show a file dialog" across the machines this
-runs on, so this is a ladder and the rung is chosen for you:
+The rung is chosen for you, top to bottom:
 
-|     |                         |                                                                                                                                                                                                                                                                                                                                                                             |
-| --- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **the native panel**    | `NSOpenPanel` / `NSSavePanel` in this process, on the [cocoa backend](macos.md) (`@windowkit/appkit` ≥ 0.5). A **sheet** on the window that asked, with every filter the OS type database knows. On the [win32 backend](windows.md) Windows' own open/save dialog, owned by the window that asked, takes the same rung (`fileDialogBackend()` reports it as `'cocoa'` too). |
-| 2   | **the portal**          | `org.freedesktop.portal.FileChooser` over D-Bus. The desktop's own dialog, drawn by GTK or KDE in another process, with the user's bookmarks and recent files.                                                                                                                                                                                                              |
-| 3   | **`osascript`**         | macOS on the X11 backend with no portal — which is every XQuartz install that has not gone out of its way. `choose file` _is_ `NSOpenPanel`, in a third process.                                                                                                                                                                                                            |
-| 4   | **the built-in dialog** | A browser react-x11 draws itself. ssh, a bare `startx`, a container: everywhere there is a display and nothing else.                                                                                                                                                                                                                                                        |
+|     |                         |                                                                                                                                                                                                                                                                                                                                                            |
+| --- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **the native panel**    | `NSOpenPanel` / `NSSavePanel` on the [cocoa backend](macos.md) (`@windowkit/appkit` ≥ 0.5): a **sheet** on the window that asked, with every filter the OS type database knows. On the [win32 backend](windows.md), Windows' own open/save dialog, owned by the window that asked, takes the same rung (`fileDialogBackend()` reports `'cocoa'` for both). |
+| 2   | **the portal**          | `org.freedesktop.portal.FileChooser` over D-Bus: the desktop's own GTK or KDE dialog, with the user's bookmarks and recent files.                                                                                                                                                                                                                          |
+| 3   | **`osascript`**         | macOS on the X11 backend with no portal (every ordinary XQuartz install). `choose file` _is_ `NSOpenPanel`, in a third process.                                                                                                                                                                                                                            |
+| 4   | **the built-in dialog** | A browser react-x11 draws itself. ssh, a bare `startx`, a container: everywhere there is a display and nothing else.                                                                                                                                                                                                                                       |
 
-The top rung is never chosen by naming a backend: the dialog asks the window
-it belongs to which connection it is on, and an app that can show native
-panels says so. That is what keeps the ladder one ladder as backends join it.
-
-`fileDialogBackend()` reports which one this machine lands on, without showing
-anything — useful for a diagnostics panel, and for a menu that wants to say so.
-
-**The ladder is the design, not a fallback chain bolted on.** react-x11's
-flagship case is an app running on one machine and drawing to another, and a
-file dialog that only worked on a full GNOME session would be useless to
-exactly the person the renderer exists for.
+The top rung is chosen by the window the dialog belongs to, never by naming a
+backend. `fileDialogBackend()` reports which rung this machine lands on,
+without showing anything — for a diagnostics panel, or a menu that wants to
+say so.
 
 ## `useFileDialog()`
 
@@ -60,8 +52,8 @@ saveFile(options?): Promise<string | null>;      // one path, may not exist yet
 selectFolder(options?): Promise<string[] | null>;
 ```
 
-The hook is the surface to reach for, because it is the only one with a tree to
-draw in — so it never runs out of rungs and never rejects for lack of a dialog.
+The hook is the surface to reach for: it has a tree to draw the built-in dialog
+in, so it never runs out of rungs and never rejects for lack of a dialog.
 
 | option                        |                                                   |
 | ----------------------------- | ------------------------------------------------- |
@@ -80,39 +72,29 @@ win.
 
 ### The dialog parents itself
 
-The dialog is `transientFor` the window the component is in — `parent_window`
-for the portal — which is what makes the window manager treat it as belonging
-to your window: stacked above it, and not a second entry in the task switcher.
+The dialog is `transientFor` the window the component is in (`parent_window`
+for the portal), so the window manager stacks it above your window and keeps
+it out of the task switcher. **You do not pass anything for that**:
+`useFileDialog()` resolves the owner window through `useTopLevelWindow()` when
+the dialog opens.
 
-**You do not pass anything for that.** `useFileDialog()` resolves the owner
-window through `useTopLevelWindow()` at the moment a dialog opens, by which
-time the window is mounted and has an XID.
+On the [native Wayland backend](wayland-backend.md) the portal is handed an
+**xdg-foreign** export of the window (`wayland:<handle>`), which GNOME and KDE
+both parent to. Where the compositor has no xdg-foreign the dialog opens
+unparented.
 
-On the [native Wayland backend](wayland-backend.md) the window has no XID,
-and the portal is handed an **xdg-foreign** export of it instead —
-`wayland:<handle>`, which GNOME and KDE both parent to. Where the compositor
-has no xdg-foreign the handle is empty and the dialog opens unparented.
+The owner is inferred from the top-level windows this connection is rendering:
 
-Why inference rather than a lookup: a hook has no position in the host tree.
-React context cannot come from a host element, the host context
-`getChildHostContext` builds reaches `createInstance` and not components, and a
-`<window>` has no XID until the commit phase. So it answers from what the
-renderer does know — the top-level windows this connection is rendering:
+- **one top-level window** — that one; nearly every app.
+- several, one focused — the focused one.
+- several with nothing to separate them — the most recently opened, plus a
+  development warning naming `parentWindow`.
+- **none at all** — the root-level `<popup>` that took the keyboard (a
+  menu-bar app's popover,
+  [elements.md](elements.md#a-popover-under-a-tray-item)).
 
-- **one top-level window is exact.** The component is in it, because there is
-  nowhere else to be. That is nearly every app.
-- several, one focused: that one. You clicked in it a moment ago, which is why
-  a dialog is opening.
-- several with nothing to separate them: the most recently opened, plus a
-  development warning naming `parentWindow` as the way to be exact.
-- **none at all: the root-level `<popup>` that took the keyboard.** A menu-bar
-  app is a tray item and the popover a click on it opens, and nothing else
-  ([elements.md](elements.md#a-popover-under-a-tray-item)) — so the popup is
-  the top of that tree, and answering nothing left every hook that reads this
-  one with no owner to belong to.
-
-So `parentWindow` survives as the **override for multi-window apps**, and takes
-a `<window>` ref, an XID, or anything `windowIdOf()` accepts:
+`parentWindow` is the **override for multi-window apps**, and takes a
+`<window>` ref, an XID, or anything `windowIdOf()` accepts:
 
 ```jsx
 const win = useRef(null);
@@ -126,8 +108,9 @@ first render, so a value read then would be `null` on the render that matters �
 which drops into `parentWindow`, `transientFor`, or `windowIdOf()`.
 
 **The portal never embeds the dialog.** It is a top-level window in another
-process, and logical parenting is all there is. There is no version of this
-where the file list appears inside your window.
+process; the file list never appears inside your window.
+
+Design notes: [design/filedialog.md](../design/filedialog.md).
 
 ## The imperative functions
 
@@ -145,40 +128,29 @@ to hang off. In a component, use the hook.
 
 ## What differs between the rungs
 
-Most of the API is the same everywhere. These are the places it genuinely is
-not, stated here rather than discovered:
-
 - **MIME-type filters do not reach `osascript`.** `extensions` translate
   exactly to every rung; `mimeTypes` reach the portal and the native panel
-  (the cocoa backend asks the OS's own type database, so `image/png` is
-  `public.png` there) and are dropped by `osascript`, because AppleScript's
-  `of type` wants extensions or UTIs and guessing a UTI wrong hides the user's
-  file with no way to get at it. Give `extensions` where you can.
+  (the cocoa backend maps `image/png` to `public.png` through the OS type
+  database) and are dropped by `osascript`, where a wrong UTI guess would hide
+  the user's file. Give `extensions` where you can.
 - **`osascript` ignores `parentWindow`; the native panel is a sheet on it.**
-  XQuartz windows are `NSWindow`s owned by X11.app, macOS has no cross-process
-  transient-for, and `osascript` is a third process besides: its panel
-  appears over the app but is not attached to it, and application modality
-  works only because your code is awaiting the promise. On the cocoa backend
-  the panel is a **sheet** on that window, and the app keeps running while it
-  is up. With no window at all — a bare `openFile()` with nothing in
+  The `osascript` panel appears over the app but is not attached to it;
+  application modality holds only because your code is awaiting the promise.
+  On the cocoa backend the panel is a **sheet**, and the app keeps running
+  while it is up. With no window at all — a bare `openFile()` with nothing in
   `parentWindow` and no tree to infer one from — the native panel is
   app-modal and **blocks the process**, timers included, until it is
   dismissed. `useFileDialog()` always names the window, so it never lands
   there.
 - **The built-in dialog has never seen the user's bookmarks.** It offers the
-  filesystem, a filter, hidden files, and a path you can type into. It is
-  deliberately not a re-creation of GTK's chooser.
+  filesystem, a filter, hidden files, and a path you can type into — not a
+  re-creation of GTK's chooser.
 - **`multiple` in the built-in dialog is a tick column**, not ctrl-click.
 
 In the built-in dialog a double click opens a directory or picks a file, Enter
-does the same to the selected row, `Up` goes to the parent, and Escape cancels
-— and a selected directory is drawn in the selection's own text colour rather
-than the accent it wears at rest, since the selected row is filled with that
-accent in both schemes.
+does the same to the selected row, `Up` goes to the parent, and Escape cancels.
 
 ## Running it where there is no bus
-
-The interesting configurations, and what each one does:
 
 | where                                                  | rung                                                                                                              |
 | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
@@ -190,17 +162,13 @@ The interesting configurations, and what each one does:
 | Node 20, where npm skips `dbus-native`                 | built-in on Linux, `osascript` on a Mac                                                                           |
 
 The `osascript` rung is reached by _not_ finding a portal, so it also covers a
-Mac that has a session bus for other reasons. If you do run a portal shim on a
-Mac (see [issue #111](https://github.com/sidorares/react-x11/issues/111)), it
-wins on the X11 backend, which is what you asked for by running it; on the
-cocoa backend the native panel is above it either way.
+Mac that has a session bus for other reasons. A portal shim on a Mac wins on
+the X11 backend; on the cocoa backend the native panel is above it either way.
 
 ## The portal machinery, if you need it directly
 
-`portalRequest()` is exported for building other portals on. Every portal
-method that shows UI returns an object path immediately and answers later with
-a `Request.Response` signal — and the path is predictable **by design**, so the
-client subscribes _before_ it calls and cannot lose the answer:
+`portalRequest()` is exported for building other portals on. It calls a portal
+method that shows UI and resolves with its `Request.Response`:
 
 ```js
 const { response, results } = await portalRequest(busRef, {
@@ -212,16 +180,15 @@ const { response, results } = await portalRequest(busRef, {
 });
 ```
 
-It owns the three things every portal caller otherwise re-solves: subscribing
-first, `Request.Close()` on abort (which emits **no** `Response`, so the
-promise has to be settled locally), and no timeout on the answer — a dialog can
-legitimately be open for an hour, and only the initial call is deadlined.
+It subscribes to the response before calling, so the answer cannot be lost;
+an abort sends `Request.Close()` and settles the promise locally (the portal
+emits no `Response` for it); and only the initial call has a deadline — the
+answer has none, because a dialog can legitimately be open for an hour.
 
-The default argument shape is FileChooser's, `(s parent_window, s title, a{sv}
-options)` — and that shape is FileChooser's alone. Every other Request-shaped
-portal has its own leading arguments, so a caller states them, as `signature`
-and `args` together; the [eyedropper](eyedropper.md)'s `PickColor`, which has
-no title, is the worked example:
+The default argument shape, `(s parent_window, s title, a{sv} options)`, is
+FileChooser's alone. Any other Request-shaped portal states its leading
+arguments as `signature` and `args` together; the
+[eyedropper](eyedropper.md)'s `PickColor`, which has no title:
 
 ```js
 await portalRequest(busRef, {
@@ -232,21 +199,18 @@ await portalRequest(busRef, {
 });
 ```
 
-The signature must end in `a{sv}` — the options dict is where `handle_token`
-rides, so a method without one does not answer through a `Request` and wants a
-plain `bus.invoke` instead.
+The signature must end in `a{sv}` (the options dict carries `handle_token`); a
+method without one does not answer through a `Request` and wants a plain
+`bus.invoke` instead.
 
 `hasService(name)` answers whether a service is reachable — owned now **or
-activatable on demand**. `NameHasOwner` alone is the wrong question:
-`org.freedesktop.portal.Desktop` is D-Bus-activatable, so on a healthy desktop
-where no app has touched a portal yet it has no owner, and a feature gated on
-that takes the fallback path forever.
+activatable on demand**. (`NameHasOwner` alone is the wrong question: the
+portal is D-Bus-activatable and often has no owner until first use.)
 
-`portalVersion(iface)` answers the question `hasService()` cannot: whether the
-portal's backends provide one _interface_, and at what version — `0` when it
-is not there at all. Capability lives in the interface's own `version`
-property, and gating on the service alone breaks exactly on the desktops that
-provide some portals and not others (XFCE has FileChooser and no Screenshot).
+`portalVersion(iface)` answers whether the portal's backends provide one
+_interface_, and at what version — `0` when it is not there at all. Gate on
+this rather than on the service: desktops provide some portals and not others
+(XFCE has FileChooser and no Screenshot).
 
 See [dbus.md](dbus.md) for the connection these sit on.
 

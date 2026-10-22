@@ -1,5 +1,5 @@
 // `VideoFrames`: a sink an application pushes decoded video frames into,
-// and a `<video frames>` shows (docs/architecture/video.md §6.3).
+// and a `<video frames>` shows (design/architecture/video.md §6.3).
 //
 // react-x11 decodes nothing. Where the bytes come from — an `ffmpeg` child
 // writing rawvideo to a pipe, a WASM decoder, an addon over libmpv — is the

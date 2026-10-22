@@ -98,7 +98,7 @@ export function Switch({
   );
 
   // NSSwitch's own pixels, on/off as two cached bezels. The knob slide is
-  // the fidelity this loses for now (docs/macos.md flags the switch as the
+  // the fidelity this loses for now (design/macos.md flags the switch as the
   // one control worth revisiting if that disappoints); the press keeps its
   // answer as the wash, since NSSwitch renders no pressed state offscreen.
   if (nativeControls) {

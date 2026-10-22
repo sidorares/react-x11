@@ -1,7 +1,7 @@
 // A canvas-shaped 2d context over a **verb table** — the drawing dialect
 // every native backend answers, and the one place it is written down.
 //
-// This is macos.md §"The split" step 4, taken when a second native backend
+// This is design/macos.md §"The split" step 4, taken when a second native backend
 // started: the class takes its `native` as a constructor argument and calls
 // nothing else, so one wrapper drives @windowkit/appkit's CoreGraphics verbs
 // and @windowkit/win32's Direct2D verbs alike. A bridge that lacks an
@@ -16,7 +16,7 @@
 //
 // On the surface presenter this is the whole drawing path; on the layer
 // presenter it stays as the fallback every painted-code node (<canvas>,
-// <svg>, registered elements) rasters through — docs/macos.md §"Custom
+// <svg>, registered elements) rasters through — design/macos.md §"Custom
 // drawing on a layer tree".
 //
 // The native surface holds the real graphics state (paths, CTM, clip); this
@@ -322,7 +322,7 @@ const NON_RECT = Symbol('non-rectangular clip');
  * linear in it: 14ms, 29ms, 56ms, 113ms. The driver is the subpath count,
  * not the vertex count — one 26,000-vertex subpath strokes in 4ms where
  * two thousand 13-vertex ones take 208. The full table, the two shapes
- * left whole and why, are in docs/macos.md
+ * left whole and why, are in design/macos.md
  * §"Stroking a path with many subpaths".
  *
  * Note the X11 context wants the opposite — there a stroke is an a8

@@ -1,4 +1,4 @@
-// Cocoa presenter benchmark: the measure-first gate of docs/macos.md, as a
+// Cocoa presenter benchmark: the measure-first gate of design/macos.md, as a
 // number — and the stress rig for "state update → pixels" and "interaction
 // → pixels" on a live display. One scenario, N presenters/backends, the same
 // ticks — and every frame broken into the stages that can be the bottleneck:

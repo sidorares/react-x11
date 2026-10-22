@@ -22,42 +22,15 @@ against React's namespace, which describes the DOM.
 
 ## Why a JSX runtime and not an augmentation
 
-The usual way a library adds elements to JSX is to merge into React's
-namespace:
-
-```ts
-declare module 'react' {
-  namespace JSX {
-    interface IntrinsicElements {
-      window: WindowProps;
-    }
-  }
-}
-```
-
-That cannot work here. Five element names — `text`, `image`, `canvas`,
-`html`, `svg` — are also HTML or SVG element names, already declared by
-`@types/react` with completely different props, and declaration merging
-cannot replace an existing member:
-
-```
-Interface 'IntrinsicElements' incorrectly extends interface 'ReactX11Elements'.
-  The types of 'text.ref' are incompatible between these types.
-    Type 'Ref<SVGTextElement>' is not assignable to type 'Ref<DrawnNode>'.
-```
-
-So react-x11 provides its own JSX source instead — `react-x11/jsx-runtime`,
-which re-exports React's actual runtime and carries a `JSX` namespace of its
-own. That turns out to be the better answer regardless: the namespace holds
-the X11 elements _and nothing else_, so
+react-x11 cannot merge its elements into React's `JSX` namespace: `text`,
+`image`, `canvas`, `html` and `svg` are already declared there by
+`@types/react` with DOM props, and declaration merging cannot replace them.
+So `react-x11/jsx-runtime` re-exports React's runtime with a `JSX` namespace
+of its own that holds the react-x11 elements _and nothing else_:
 
 ```tsx
 <div /> // error: Property 'div' does not exist on type 'JSX.IntrinsicElements'
 ```
-
-is caught at compile time rather than throwing at runtime. An augmentation
-could never have done that, because `@types/react` declares every HTML and
-SVG tag unconditionally.
 
 If you need extra elements of your own, `IntrinsicElements` is an interface,
 so merging still works:
@@ -99,19 +72,4 @@ the four yoga values, a state block only takes paint properties (the same
 rule `createStyles` enforces at runtime), and `width` takes
 `number | '50%' | 'auto'`.
 
-## Keeping them honest
-
-Hand-written declarations drift. `test/types/api.tsx` is compiled by
-`npm run typecheck` — in CI alongside lint — and exercises the API the way
-the examples do, including `@ts-expect-error` lines for things that must
-_not_ compile:
-
-```tsx
-// @ts-expect-error — layout properties may not go in a state block
-createStyles({ bad: { ':hover': { padding: 4 } } });
-```
-
-Those fail the build if the rejection stops happening, which is the half of
-a type test that usually goes missing.
-
-When you change a prop, change the declaration and add a line to that file.
+Design notes: [design/typescript.md](../design/typescript.md).

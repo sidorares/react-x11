@@ -1,7 +1,7 @@
 # A native Wayland backend
 
 **Status: research RFC, since built.** The backend it plans landed in #548
-as `src/wayland/`, opt-in; [wayland-backend.md](wayland-backend.md) is the
+as `src/wayland/`, opt-in; [wayland-backend.md](../docs/wayland-backend.md) is the
 record of what was built, and where the two disagree that one ran. The RFC
 below was written before any code, 2026-08, against react-x11 2.2.1,
 ntk 8.7.0, node-x11 4.1.0, x11-dri 0.6.0; the line counts and library
@@ -15,7 +15,7 @@ upstream capability landed just before it
 ## What this is, and is not
 
 This is a plan for a **second backend, not a migration**. X11 stays a
-first-class target: the remote case ([remote.md](remote.md)) is the
+first-class target: the remote case ([remote.md](../docs/remote.md)) is the
 flagship reason this project exists, old X11-only systems stay supported,
 and nothing below proposes touching how the X11 path works. The question
 this document answers is what it would take to run the same React tree
@@ -87,7 +87,7 @@ Two things get simpler, and they are not small:
   id, refresh interval and flags. For a project whose stated first goal is
   input-to-photon, this is the first target where **photon time is
   observable**, not inferred.
-- **Scale.** The four-generation ladder in [scale.md](scale.md) —
+- **Scale.** The four-generation ladder in [scale.md](../docs/scale.md) —
   environment, XSETTINGS, `Xft.dpi`, RandR-millimetre audit — collapses to
   `wl_output.scale` plus
   [fractional-scale-v1](https://wayland.app/protocols/fractional-scale-v1)
@@ -131,10 +131,10 @@ and a client-side **glyph atlas** where the server-side `GlyphSet` used to
 be. That is the gap, whatever tier below fills it.
 
 Desktop integration is the pleasant surprise: it was built D-Bus- and
-portal-first, X as a fallback rung ([dbus.md](dbus.md),
-[filedialog.md](filedialog.md), [appearance.md](appearance.md),
-[eyedropper.md](eyedropper.md), [globalmenu.md](globalmenu.md), AT-SPI in
-[accessibility.md](accessibility.md)). On Wayland those modules mostly
+portal-first, X as a fallback rung ([dbus.md](../docs/dbus.md),
+[filedialog.md](../docs/filedialog.md), [appearance.md](../docs/appearance.md),
+[eyedropper.md](../docs/eyedropper.md), [globalmenu.md](../docs/globalmenu.md), AT-SPI in
+[accessibility.md](../docs/accessibility.md)). On Wayland those modules mostly
 _lose a rung_ rather than gain one. The X-only integration channels
 (`xsettings.js`, startup-notification's X path, the eyedropper's crosshair
 grab) simply end at the ladder's portal rung.
@@ -225,7 +225,7 @@ The shopping list, mapped to what each protocol replaces here:
 | fractional-scale-v1 + viewporter                                           | the whole of `scale.js`'s ladder                                  |
 | [presentation-time](https://wayland.app/protocols/presentation-time)       | Present completions; adds real photon timestamps                  |
 | cursor-shape-v1                                                            | server-side cursor names                                          |
-| primary-selection                                                          | the PRIMARY half of [clipboard.md](clipboard.md)                  |
+| primary-selection                                                          | the PRIMARY half of [clipboard.md](../docs/clipboard.md)          |
 | xdg-activation                                                             | `_NET_ACTIVE_WINDOW` + startup notification's focus half          |
 | [layer-shell](https://wayland.app/protocols/wlr-layer-shell-unstable-v1)   | `_NET_WM_STRUT_PARTIAL` — panels/docks (wlroots + KDE; not GNOME) |
 | ext-session-lock, ext-idle-notify                                          | lock screens; `useIdle()`                                         |
@@ -364,10 +364,10 @@ GL backends already are.
 | frame clock (Present + fence + refresh estimator)                      | `wl_surface.frame` + presentation-time                                                                           | simpler and more honest; photon time becomes measurable                          |
 | `keyboardstate.js` (XKB over the wire)                                 | keymap arrives as an fd; interpret with libxkbcommon (`bun:ffi`, ~300 lines) — do not hand-write a keymap parser | maps; `keyboard.js`'s Latin-accelerator resolution survives unchanged above it   |
 | clipboard/DnD (selections, INCR, XDND)                                 | `wl_data_device`: offers are pipe fds, content streams                                                           | maps; the INCR machinery dies unmourned; MIME plumbing in `transfer.js` reusable |
-| `<foreign>` / `<Frame>` (XEmbed,[embedding.md](embedding.md))          | `wl_subsurface` is same-client; xdg-foreign is parenting, not embedding                                          | **gone by design**; `<Frame>` becomes a parented toplevel or an in-process pane  |
+| `<foreign>` / `<Frame>` (XEmbed,[embedding.md](../docs/embedding.md))  | `wl_subsurface` is same-client; xdg-foreign is parenting, not embedding                                          | **gone by design**; `<Frame>` becomes a parented toplevel or an in-process pane  |
 | `examples/wm.jsx`, window lists, global grabs, `GetImage` screen reads | compositor-private                                                                                               | **gone by design**; portals cover capture with consent                           |
 | eyedropper X rung                                                      | portal `PickColor` rung already first                                                                            | loses the fallback rung only                                                     |
-| `ssh -X` remoting ([remote.md](remote.md))                             | no network transparency; [waypipe](https://gitlab.freedesktop.org/mstoeckl/waypipe) proxies fds over ssh         | X11 backend remains the remote answer                                            |
+| `ssh -X` remoting ([remote.md](../docs/remote.md))                     | no network transparency; [waypipe](https://gitlab.freedesktop.org/mstoeckl/waypipe) proxies fds over ssh         | X11 backend remains the remote answer                                            |
 | tray                                                                   | StatusNotifierItem was always D-Bus                                                                              | unchanged                                                                        |
 
 The one to sit with is the popup row: `anchor.js` exists because a
@@ -429,7 +429,7 @@ What the backend does today was built and checked on one machine — a
 virtual GNOME/mutter desktop on virgl, one virtual monitor, a mouse and a
 keyboard — and some of it was built to the specification because this
 machine cannot exercise it. Each item names the check that would close it;
-[wayland-backend.md](wayland-backend.md) has the design behind each.
+[wayland-backend.md](../docs/wayland-backend.md) has the design behind each.
 
 - **Monitors.** Two outputs, one at 200% and one at 100%: `useScreens()`
   lists both in left-to-right order with per-screen `scale`; the first

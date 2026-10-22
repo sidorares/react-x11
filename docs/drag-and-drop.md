@@ -18,10 +18,9 @@ Both work on any drawn element and on `<window>` / `<popup>`. Their
 _presence_ is what registers the node — there is no provider to mount and
 no context to thread.
 
-> The design rationale — why the API is shaped this way, why the XDND
-> advertisement is unconditional, what was rejected — is a separate
-> document: [architecture/drag-and-drop.md](architecture/drag-and-drop.md).
-> This page is the reference.
+Design notes — why the API is shaped this way, what was rejected, the
+protocol details: [design/architecture/drag-and-drop.md](../design/architecture/drag-and-drop.md)
+and [design/drag-and-drop.md](../design/drag-and-drop.md).
 
 ## Accepting drops
 
@@ -52,11 +51,10 @@ What the node will take. Four shapes:
 | `(types) => boolean`                 | your own predicate, given the offered type names          |
 | _absent_                             | anything — a bare `onDrop` is a valid dropzone            |
 
-The three groups exist because the same payload arrives under different
-names depending on who is dragging, and exact-match filtering silently
-misses most of the desktop. The clipboard uses the same table, on purpose —
-what a file manager offers on a drop is what it offers on a copy, so
-[`clipboard.read('files')`](clipboard.md#reading) resolves it the same way:
+The groups exist because the same payload arrives under different names
+depending on who is dragging, and exact-match filtering misses most of the
+desktop. The clipboard uses the same table, so
+[`clipboard.read('files')`](clipboard.md#reading) resolves the same way:
 
 | group     | matches                                                                                                    |
 | --------- | ---------------------------------------------------------------------------------------------------------- |
@@ -71,11 +69,10 @@ catches only the last of those. Groups do not overlap: a Firefox link is
 `text/x-moz-url`, which is in `uris`, so accept `['uris', 'text']` if you
 want both. A group only ever expands to its own list.
 
-`dropAccept` is **data, not a callback**, and that is load-bearing rather
-than stylistic: the protocol's accept/reject answer is computed straight
-from it, inside the X message handler, without entering React. A window
-that is slow to answer stalls the drag cursor in _the other application_,
-which is a user-visible freeze in a program you do not own.
+`dropAccept` is **data, not a callback**: the accept/reject answer to
+another application is computed straight from it, without entering React,
+because a window that is slow to answer freezes the drag cursor in _the
+other application_.
 
 ### The drag events
 
@@ -108,7 +105,7 @@ and `dropped: false` — so releasing state there is safe.
 Which node is _the_ target, when they nest: the accept decision picks the
 **deepest** node whose `dropAccept` matches, skipping any node marked
 `disabled`, so a `<window>`-level `dropAccept` is a fallback that loses to
-any matching descendant. Two wrinkles worth knowing:
+any matching descendant. Two wrinkles:
 
 - `onDrop` still dispatches capture → bubble along the whole ancestor path
   of the node under the pointer, so an ancestor with an `onDrop` sees the
@@ -149,14 +146,12 @@ rather than whether it would be taken (see [The drop](#the-drop)):
 
 `onDrop` may be `async`. For a drop from **another application** the
 protocol reply is held until the returned promise settles, so `await`ing a
-write is correct; a watchdog sends the reply anyway after 10 s, because a
-forgotten `await` in your app must not hang the drag gesture in someone
-else's.
+write is correct; a watchdog sends the reply anyway after 10 s, so a
+forgotten `await` cannot hang the other application's drag.
 
-For an **in-app** drop there is no protocol reply to hold, so nothing waits:
-`onDragEnd` fires immediately and an async `onDrop` finishes on its own
-afterwards. Do not rely on the drag being "over" only once your handler has
-resolved — if the source needs to know, have the handler tell it.
+For an **in-app** drop nothing waits: `onDragEnd` fires immediately and an
+async `onDrop` finishes on its own afterwards. If the source needs to know
+when the handler resolved, have the handler tell it.
 
 The event adds three ways to reach the payload:
 
@@ -187,10 +182,9 @@ onDrop={async (e) => {
   applications, which is also how you tell the two apart without checking
   `e.source`.
 
-There is deliberately **no `e.dataTransfer`**. X selection transfer is
-asynchronous and the DOM's `getData()` is synchronous; a lookalike
-returning a promise would stringify to `"[object Promise]"` in template
-literals with no error anywhere. The different name is the warning.
+There is deliberately **no `e.dataTransfer`**: X selection transfer is
+asynchronous, and a DOM lookalike whose `getData()` returned a promise
+would stringify to `"[object Promise]"` with no error anywhere.
 
 `onDrop` can also settle what the drop _did_, which is what the source is
 told afterwards:
@@ -215,17 +209,13 @@ what it was given, so **the drop is refused**, exactly as if it had called
 ([events.md](events.md#when-a-handler-throws)): the handler name, the
 element, and the component that rendered it.
 
-Refusing is the part worth knowing about. A `move` source deletes its own
-copy on the strength of being told the drop was taken, so a failed import
-that reported success is how a file goes missing. A later handler on the
-path can still `accept()`; the refusal is the failed one's answer, not the
-whole dispatch's.
+Refusing matters because a `move` source deletes its own copy when told
+the drop was taken. A later handler on the path can still `accept()`; the
+refusal is the failed one's answer, not the whole dispatch's.
 
 An `async` failure is reported when the promise rejects. For a drop from
 another application that is before the protocol reply goes out, so the
-source hears about it. In-app it is after `onDragEnd` has already fired,
-for the same reason nothing else in that path waits — which is why it is
-reported rather than only returned.
+source hears about it; in-app it is after `onDragEnd` has already fired.
 
 ### Sources that ask
 
@@ -248,14 +238,11 @@ onDrop={async (e) => {
 `actionDescriptions` is positional and the source's own wording — a `null`
 means it offered that action without describing it, so use your own label.
 Both arrays are empty for every other kind of drag, so they can be read
-without guarding, and nothing is read off the source's window unless a
-position actually asks.
+without guarding.
 
-The menu is yours to draw. A built-in one would have to hold the protocol
-reply open for as long as it stayed up, and that reply is the only thing
-keeping the other application's drag cursor from freezing — so the choice
-of how long to make someone wait belongs to the app, not the toolkit.
-`ContextMenu` is the obvious thing to build it from.
+The menu is yours to draw (`ContextMenu` is the obvious thing to build it
+from): the protocol reply is held while it is open, and how long the other
+application's drag cursor waits is the app's choice.
 
 ### `:drag-over`
 
@@ -265,12 +252,9 @@ follows, resolved the same way (a repaint, no React render). For most
 dropzones that is the whole highlight feature, with no handler and no
 state.
 
-One thing it does **not** do: it is not filtered by `dropAccept`. A node
-lights up because the pointer is over it, not because it would take the
-drop, so a zone that accepts only `image/png` still highlights while a text
-drag passes over. Where the difference matters — showing "yes" versus "no"
-feedback — use `useDropTarget` and style from `isAccepted`, which is
-exactly the distinction it exists to draw:
+It is **not** filtered by `dropAccept`: a zone that accepts only
+`image/png` still highlights while a text drag passes over. For "yes"
+versus "no" feedback, use `useDropTarget` and style from `isAccepted`:
 
 ```jsx
 <box {...dropProps} style={[s.zone, isOver && (isAccepted ? s.yes : s.no)]} />
@@ -284,23 +268,20 @@ Nothing opts in: it applies to any scroll container a drag passes over,
 from this application or another one.
 
 The viewport it scrolls is the nearest scroll _container_ enclosing the
-pointer, walked out the same way the wheel walks. Something that scrolls
-pixels of its own without being a container — `<textarea>` and anything else
-that answers `canScroll` alone
-([extending.md](extending.md#scrolling-content-you-painted)) — is
-deliberately excluded: nothing can be dropped into one, so scrolling it
-during a drag would only move content out of reach.
+pointer, found the way the wheel finds one. Something that scrolls pixels
+of its own without being a container — `<textarea>` and anything else that
+answers `canScroll` alone
+([extending.md](extending.md#scrolling-content-you-painted)) — is excluded:
+nothing can be dropped into one.
 
-Two consequences worth knowing:
+Two consequences:
 
 - **The content moves under a stationary pointer**, so `onDragEnter`,
   `onDragLeave` and `onDragOver` keep firing while it scrolls, and
-  `:drag-over` follows. That is the point — the node under the pointer
-  really is changing.
-- **Do not `e.freeze()` a zone inside a scroll container.** Freezing tells the
-  source to stop sending positions, and for a drag from another
-  application those positions are what start the scrolling in the first
-  place.
+  `:drag-over` follows.
+- **Do not `e.freeze()` a zone inside a scroll container.** For a drag from
+  another application, the positions freezing stops are what drive the
+  scrolling.
 
 ### `useDropTarget`
 
@@ -322,11 +303,9 @@ return (
 );
 ```
 
-`accept` is the hook's name for `dropAccept` (inside a hook called
-`useDropTarget` the shorter word is unambiguous, and it is what
-react-dropzone users expect); `onDragOver`, `onDragEnter` and `onDragLeave`
-pass through. `isOver` is true whenever a drag is over the node,
-`isAccepted` only when it matches.
+`accept` is the hook's name for `dropAccept` (as in react-dropzone);
+`onDragOver`, `onDragEnter` and `onDragLeave` pass through. `isOver` is
+true whenever a drag is over the node, `isAccepted` only when it matches.
 
 ## Starting drags
 
@@ -361,12 +340,13 @@ happens to it:
 | any other object        | **by reference**, on `e.items` | `JSON.stringify`d                              |
 | a function (thunk)      | called on drop                 | called when the drag first leaves your windows |
 
-Thunks are why a payload nobody asks for is never built. Offer
+Thunks keep a payload nobody asks for from being built. Offer
 `'text/uri-list': () => buildUriList(selection)` and the list is assembled
-only when it is needed — at the drop for an in-app drag, and at the moment
-the pointer first leaves your windows for an external one. Note the second:
-crossing the window edge is enough to resolve every thunk, whether or not
-the drag is ever dropped.
+at the drop for an in-app drag, and the moment the pointer first leaves your
+windows for an external one — crossing the window edge resolves every
+thunk, whether or not the drag is ever dropped. (On win32 every thunk
+resolves when the drag starts; see
+[platform notes](#interoperating-with-other-applications).)
 
 Type names are yours to choose. Use real MIME types for anything another
 application might want (`text/uri-list` is what every file manager reads),
@@ -385,18 +365,16 @@ target is told the one action you prefer, not the list, so
 choice. In-app targets see the same single requested action on `e.action`
 and can still answer with any of them.
 
-Note what this does _not_ include: **there is no modifier-key
-negotiation.** Holding Ctrl or Shift during a drag does not switch copy to
-move the way a desktop file manager does — the requested action is fixed
-when the drag starts, and only the target can change it.
+**There is no modifier-key negotiation.** Holding Ctrl or Shift during a
+drag does not switch copy to move the way a desktop file manager does — the
+requested action is fixed when the drag starts, and only the target can
+change it.
 
-Modifier state is readable on the **source** side, where the events carry
-the real X motion event: `e.ctrlKey` and `e.shiftKey` are meaningful in
-`onDrag`. On the **target** side they are always `false` —
-`onDragEnter`/`onDragOver`/`onDragLeave`/`onDrop` are built from a
-synthesized event with no button mask — so a dropzone cannot see what the
-user is holding. Decide the action from what is being dragged and where it
-lands.
+Modifier state is readable on the **source** side: `e.ctrlKey` and
+`e.shiftKey` are meaningful in `onDrag`. On the **target** side
+(`onDragEnter`/`onDragOver`/`onDragLeave`/`onDrop`) they are always
+`false`, so a dropzone cannot see what the user is holding — decide the
+action from what is being dragged and where it lands.
 
 ### The gesture
 
@@ -456,16 +434,14 @@ return (
 ```
 
 `position` is `{ x, y, accepted }` in screen coordinates while dragging and
-`null` otherwise. **`dragPreview` on the `<popup>` is required**: it tells
-the router that this window is the preview, not something under the
-pointer, and without it the drag would immediately land on its own preview.
+`null` otherwise. **`dragPreview` on the `<popup>` is required**: it marks
+the window as the preview, not something under the pointer — without it
+the drag would immediately land on its own preview.
 
-`transparent` is not required, but a preview usually wants it: the popup is
-a real window, so a card with a `borderRadius` on an opaque one shows the
-window's own ground in the four corners the radius gives up. With it, the
-corners are the desktop, antialiased — and where no compositor is running
-the window falls back to filling itself square, which is what it looked
-like anyway. See
+`transparent` is optional but usually wanted: the popup is a real window,
+so a card with a `borderRadius` shows the window's ground in its corners
+unless the window is transparent. Where no compositor is running the window
+falls back to filling itself square. See
 [`transparent`](elements.md#transparent--rounded-corners-and-translucency).
 
 ## The two transports
@@ -483,17 +459,14 @@ apart unless they ask.
 
 The switch is automatic and reversible: leave your windows and the drag is
 promoted to XDND; come back and it demotes again. Reorderable lists, trees
-and kanban boards therefore cost nothing on the wire, while the _same_
-component can also be dropped into GIMP.
+and kanban boards cost nothing on the wire, while the _same_ component can
+also be dropped into GIMP.
 
-On the [cocoa backend](macos.md) the external transport is AppKit's own —
-`NSDraggingSource` and `NSDraggingDestination` on every window — and the
-switch is drawn differently: once your press crosses the threshold, AppKit
-tracks the gesture everywhere, and a drop on one of your own windows comes
-back through that window's destination with the payload still by reference
-(`e.source === 'internal'`, `e.items` live), so the table above holds. What
-another application reads is the pasteboard, where a `dragData` thunk is a
-promise the system asks for only when a consumer actually reads that type.
+On the [cocoa backend](macos.md) the external transport is AppKit's drag
+session, and the table still holds: a drop on one of your own windows
+arrives with `e.source === 'internal'` and `e.items` live. Another
+application reads the pasteboard, where a `dragData` thunk is resolved only
+when a consumer actually reads that type.
 
 ## Interoperating with other applications
 
@@ -513,75 +486,46 @@ managers, editors and upload widgets will take it.
 Platform notes:
 
 - **Linux / XWayland** — works both directions, including to and from
-  native Wayland applications, which is what makes this worth having on a
-  modern desktop.
-- **The Wayland backend** — works both directions too, over
-  `wl_data_device` (`src/wayland/dnd.js`): a drag from another application
-  arrives as the same `DropSession` the X11 path drives, and a drag out is a
-  `wl_data_source` the compositor carries from the press serial on. As on
-  the cocoa backend, the payload is read at the drop.
-- **Windows, the win32 backend** — works both directions with the desktop,
-  over OLE: `IDropTarget` on every window with a `dropAccept` under it,
-  `DoDragDrop` out of one. Files arrive as CF_HDROP and become one
-  `text/uri-list`, text as CF_UNICODETEXT, and anything else as a clipboard
-  format registered under its MIME name — which two react-x11 apps agree on
-  for free and nothing else will, exactly as an X11 atom behaves.
-
-  Two things differ. A `dragData` **thunk is not lazy**: every type's bytes
-  are resolved when the drag starts, because a data object that asked JS for
-  them from inside `DoDragDrop`'s modal loop would be reaching across the
-  bridge's thread split at the one moment its UI thread cannot wait. And the
-  shell's question "may this be dropped here" is answered one motion late —
-  it picks a cursor, and the bridge returns the previous answer rather than
-  blocking. The drop itself is answered exactly, because whether it was a
-  copy or a move decides whether the source deletes its original.
-
-- **macOS, the cocoa backend** — works both directions with the desktop:
-  files from the Finder arrive as `['files']` (each file is a pasteboard
-  item of one `public.file-url`; they become one `text/uri-list`), text from
-  any app as `['text']`, a URL from Safari as `['uris']`. Pasteboard types
-  are UTIs, and react-x11's MIME vocabulary maps onto them through the OS's
-  own type database — a private `application/x-myapp-…` travels between two
-  react-x11 apps as a `dyn.*` type every process computes alike. Two things
-  differ from X11. The payload is read **at the drop** (the pasteboard is the
-  source's promise, and it may withdraw it once its session ends), so
-  `getData()` answers from that read. And the gesture runs inside AppKit's
-  own tracking loop, which owns the thread from the threshold to the
-  release: no timer of ours fires and no frame clock ticks in between, so
-  every frame of a drag is painted from the callback that reported it, and
-  every render a drag schedules — a `<popup dragPreview>` following
-  `useDragSource().position`, a `useDropTarget` hint, an insertion marker —
-  is dispatched at discrete priority and landed there. The preview follows
-  the pointer as it does on X11, and because a `<popup>` here is a
-  non-activating panel at the pop-up-menu window level — above every other
-  application's windows, which sit at the normal level — it is what the
-  desktop sees while the pointer is over Finder or a browser. It is also
-  the first window the window server finds when the pointer comes back
-  over one of yours, and AppKit does not look past it: a window with no
-  dragged types registered is still the one found, the drag then has no
-  destination, and the window beneath never hears of it. So the popup is
-  made transparent to the pointer — `dragPreview` sets the bridge's
-  `ignoresMouseEvents` (@windowkit/appkit 0.6.0) — and the hit passes
-  through it to the window it covers: the same exclusion the router makes
-  on X11, made where the window server can see it. It registers no
-  pasteboard types either, having nothing to accept with. What AppKit's own
-  session carries is still a blank image: the drag has no bitmap of the
-  system's, only the preview you draw. For the same reason the session's
-  slide-back is off: left on, AppKit animates that blank image home over
-  about a second _before_ it reports the release, so a drop nothing took
-  reached `onDragEnd` — and the preview stayed frozen where the pointer let
-  go — only after a pause spent animating nothing. The release ends the
-  gesture the moment it happens, as on X11, and a return animation is the
-  app's to draw from `onDragEnd`.
+  native Wayland applications.
+- **The Wayland backend** — works both directions, over `wl_data_device`.
+  As on the cocoa backend, the payload is read at the drop.
+- **Windows, the win32 backend** — works both directions, over OLE. Files
+  arrive as CF_HDROP and become one `text/uri-list`, text as
+  CF_UNICODETEXT, and any other type as a clipboard format registered under
+  its MIME name — which two react-x11 apps agree on and nothing else will.
+  Two differences: a `dragData` **thunk is not lazy** — every type's bytes
+  are resolved when the drag starts — and the shell's "may this be dropped
+  here" (the cursor) is answered one motion late. The drop itself is
+  answered exactly.
+- **macOS, the cocoa backend** — works both directions: Finder files arrive
+  as `['files']` (one `text/uri-list`), text as `['text']`, a Safari URL as
+  `['uris']`. MIME names map onto UTIs through the OS's type database; a
+  private `application/x-myapp-…` travels between two react-x11 apps as a
+  `dyn.*` type. Differences from X11:
+  - The payload is read **at the drop**, and `getData()` answers from that
+    read.
+  - The gesture runs inside AppKit's tracking loop, from the threshold to
+    the release: **no timer fires and no frame clock ticks** in between.
+    Renders a drag schedules (a `<popup dragPreview>` following
+    `useDragSource().position`, a `useDropTarget` hint, an insertion marker)
+    are dispatched at discrete priority and painted from the drag callback.
+  - The `<popup dragPreview>` sits above every other application's windows,
+    so it stays visible over the Finder or a browser, and lets the pointer
+    pass through to the window beneath. The system draws no drag image of
+    its own — only your preview.
+  - There is no slide-back animation: the release reaches `onDragEnd` the
+    moment it happens, as on X11, and a return animation is the app's to
+    draw from there.
 - **macOS / XQuartz** — X client to X client works. Dragging from **Finder**
-  into an X11 window does not, and never has:
-  [XQuartz#173](https://github.com/XQuartz/XQuartz/issues/173). That is the
-  X server's gap, not react-x11's; test against another X client — or run
-  the cocoa backend, which has the Finder.
+  into an X11 window does not
+  ([XQuartz#173](https://github.com/XQuartz/XQuartz/issues/173)); test
+  against another X client, or run the cocoa backend.
 - **Over `ssh -X`** — each pointer position during an external drag costs a
-  few round trips while resolving the foreign window under the cursor, so a
-  drag feels heavier on a link than a click does. In-app drags cost
-  nothing extra. See [remote.md](remote.md).
+  few round trips, so a drag feels heavier on a link than a click does.
+  In-app drags cost nothing extra. See [remote.md](remote.md).
+
+Design notes on each platform:
+[design/drag-and-drop.md](../design/drag-and-drop.md#interoperating-with-other-applications).
 
 ## Testing
 
@@ -606,8 +550,12 @@ await act(async () => {
 
 `onDragStart`, `onDrop` and `onDragEnd` all run, and `e.items` carries the
 live payload. Drops from _other_ applications need a second X connection
-playing the foreign source — `test/dnd.test.js` in this repo does exactly
-that if you need the pattern. See [testing.md](testing.md).
+playing the foreign source — `test/dnd.test.js` in the react-x11 repository
+shows the pattern. See [testing.md](testing.md).
+
+Runnable demonstrations of both halves, as two separate processes, are
+[`examples/dnd-source.jsx`](../examples/dnd-source.jsx) and
+[`examples/dnd-target.jsx`](../examples/dnd-target.jsx).
 
 ## Limits and defaults
 
@@ -620,44 +568,18 @@ that if you need the pattern. See [testing.md](testing.md).
 | XDND protocol version              | 5 (the current one; older sources are negotiated down) |
 | requires                           | ntk ≥ 5.4.0                                            |
 
+On X11 every top-level window advertises XDND, whether or not it mounts a
+drop target; one with none mounted refuses drags over it. Child windows
+(`<glarea>`, a nested `<window>`) and a `<popup dragPreview>` never
+advertise — drags over a child arrive at its top-level and are routed down.
+
 Not supported, deliberately or not yet:
 
 - **Motif drag and drop**, the pre-XDND protocol. Some legacy Motif and
   AWT applications speak only that and will not interoperate.
 - **XdndDirectSave (XDS)** — "drag out of the app to save a file into the
   file manager". A separate protocol layered on XDND.
-- **A built-in menu for `XdndActionAsk`.** The choices are handed to you —
-  see [Sources that ask](#sources-that-ask) — but the menu itself is yours
-  to draw. A built-in one would have to hold the reply while it was open,
-  and the reply is what keeps another application's drag from freezing.
+- **A built-in menu for `XdndActionAsk`** — the choices are handed to you
+  ([Sources that ask](#sources-that-ask)); the menu is yours to draw.
 - **`react-dnd`** and other DOM drag libraries — see
   [ecosystem.md](ecosystem.md).
-
-## Protocol notes
-
-For anyone watching the wire, or debugging against another toolkit:
-
-- `XdndAware` (version 5) is written on every **top-level** window
-  unconditionally at realize time. Child windows — `<glarea>`, a nested
-  `<window>` — never advertise, per XDND v3+; drags over them arrive at the
-  top-level and are routed down in JavaScript. A `<popup dragPreview>`
-  never advertises either: it follows the pointer, and a window that is
-  never under it has nothing to accept.
-- A window with **no drop targets mounted** answers with a refusal covering
-  the whole window, so a well-behaved source stops asking while the pointer
-  stays inside it. What an app that never uses drag and drop still pays:
-  the `XdndAware` property, one batch of atom interns, and a session object
-  per top-level window, all once at realize — plus one refusal per drag
-  that crosses it.
-- The drop conversion uses the timestamp from `XdndDrop`, as the protocol
-  requires, and `XdndSelection` is released at drag end with the timestamp
-  it was acquired with (ICCCM 2.3.1).
-- As a source, the foreign window under the pointer is resolved per motion
-  frame rather than from a cache built at drag start — correct, and a few
-  round trips heavier on a remote display.
-
-The reasoning behind each of those, and the measurements that produced
-them, are in [architecture/drag-and-drop.md](architecture/drag-and-drop.md).
-Runnable demonstrations of both halves, as two separate processes, are
-[`examples/dnd-source.jsx`](../examples/dnd-source.jsx) and
-[`examples/dnd-target.jsx`](../examples/dnd-target.jsx).

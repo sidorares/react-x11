@@ -9,14 +9,14 @@
 > Animation, which is [docs/macos.md](docs/macos.md).
 >
 > The current design records live in
-> [docs/architecture/](docs/architecture/), one per piece, each written
+> [design/](design/README.md), one per piece, each written
 > against a named commit. [docs/README.md](docs/README.md) is the reference.
 > This file is kept for the reasoning behind the decisions of its era.
 
 > **Status (2026-07-30, audited against the tree):** Phases 0–5 are done and
 > merged, and so is the **3D work over indirect GLX** in full — `<glarea>`,
 > the `<mesh>` scene tree on a display-list compiler, lights, textures and
-> mesh pointer events. [docs/glx.md](docs/glx.md) is no longer a plan: #93
+> mesh pointer events. [design/glx.md](design/glx.md) is no longer a plan: #93
 > turned it into the design document behind the shipped API.
 >
 > Since then: a **documentation site** with react-x11 running in the browser

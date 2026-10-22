@@ -310,7 +310,7 @@ export class NodeAnimation {
   // loop-stop rule and `sameAnimation` all see it — but it contributes no
   // value to the style, is skipped by the tick, and keeps the node out of the
   // window's animating set. The X11 path has none of these hooks and is
-  // byte-identical (docs/architecture/animation.md §4).
+  // byte-identical (design/architecture/animation.md §4).
 
   _offload(prop, entry) {
     const wnd = this.root?.window;

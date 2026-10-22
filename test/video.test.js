@@ -1,4 +1,4 @@
-// <video>, VideoFrames and objectFit (docs/architecture/video.md §6).
+// <video>, VideoFrames and objectFit (design/architecture/video.md §6).
 //
 // The sink's contract is pure and is tested as such; the element's drawn
 // presentation — the one every backend has, and the one a lifted video falls

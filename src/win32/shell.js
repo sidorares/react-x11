@@ -236,7 +236,7 @@ async function badgePixels(app, label, accent) {
  * What this rung cannot do, and says so by not implementing it: actions,
  * replacing a notification in place, and an icon of the app's own. Those want
  * the Windows App SDK's notification manager and an AppUserModelID the system
- * knows — docs/windows.md §"The desktop around the app". Until then the
+ * knows — design/windows.md §"The desktop around the app". Until then the
  * balloon is shown by the shell in the same place, with the same sound, and
  * kept in the same action centre.
  */

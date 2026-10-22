@@ -1,6 +1,6 @@
 // The Windows text engine: DirectWrite behind the same `app.fonts` contract
 // ntk's FontManager answers on X11 and CoreText answers on macOS. The renderer
-// touches exactly this surface (docs/windows.md §"Text"):
+// touches exactly this surface (design/windows.md §"Text"):
 //
 //   fonts.layout(spans, base, { maxWidth, align, lineHeight, maxLines,
 //                               overflow, direction })

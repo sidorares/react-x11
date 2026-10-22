@@ -39,7 +39,7 @@ const FENCE_TIMEOUT_MS = 100;
 // (`_takeBack`). Three, a `CAMetalLayer`'s depth, is what an animation
 // mostly needs; an input answered between two of its frames puts two flips
 // inside one refresh, and four kept every write of a clicked 120Hz animation
-// off a held buffer (docs/macos.md, "Measured: the swapchain and the
+// off a held buffer (design/macos.md, "Measured: the swapchain and the
 // WindowServer's hold").
 const MAX_BUFFERS = 4;
 // Past this many rects, what a buffer missed is copied whole: a buffer left
@@ -235,14 +235,14 @@ export class CocoaWindow {
     // change.
     this.damageRectCap = 16;
 
-    // The retained layer presenter (docs/macos.md Tier L), behind
+    // The retained layer presenter (design/macos.md Tier L), behind
     // REACT_X11_COCOA_PRESENTER=layers while the surface path is the
     // measured default. Its hooks exist only in this mode, so the feature
     // detection in src/nodes/ keeps the surface path byte-identical; the
     // scroll blit is shadowed off because a layer frame has no backing
     // bitmap to blit. The last two are the animation seam: a transition or
     // a loop the presenter takes runs in the render server and schedules no
-    // frames here (docs/architecture/animation.md §4).
+    // frames here (design/architecture/animation.md §4).
     if (app._presenterMode === 'layers') {
       this._presenter = new CocoaLayerPresenter(this);
       this.presentFrame = (windowNode) => this._presenter.frame(windowNode);
@@ -659,7 +659,7 @@ export class CocoaWindow {
    * A new size retires the chain, released on the spot (`_releaseBacking`):
    * left to the handles' finalizers, a forty-tick drag of the two-buffer
    * chain this used to be held 800MB until a collection happened to run —
-   * the `rss +80MB` docs/macos.md measured. The layer keeps its own
+   * the `rss +80MB` design/macos.md measured. The layer keeps its own
    * reference to whichever IOSurface it is still showing, so the free is
    * safe while that frame is on glass. A new chain starts with the one
    * buffer its first frame paints: a live-resize tick paints its size once,

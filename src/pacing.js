@@ -49,7 +49,7 @@
 // Off by default: `'display'` is the built-in, and paints every frame the
 // clock gives, after React's own batching — a UI answers its input as
 // quickly as it can unless it says otherwise. `'adaptive'` is what a window
-// that streams asks for. docs/architecture/frame-pacing.md is the account.
+// that streams asks for. design/architecture/frame-pacing.md is the account.
 
 export const DEFAULT_FRAME_RATE = 'display';
 

@@ -10,7 +10,7 @@
 // command stream and no GPU is involved at any point; the direct backend
 // needs a local server, ntk's optional `x11-dri` addon, and hardware. And on
 // a real display the surface cannot be *screenshotted* — GL renders where
-// `GetImage` cannot reach it (docs/glx.md), which is why `npm run
+// `GetImage` cannot reach it (docs/gl.md), which is why `npm run
 // screenshots` skips the 3D examples. So this is a lab: run it, look at it,
 // read the terminal for the numbers.
 //

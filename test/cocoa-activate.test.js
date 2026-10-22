@@ -1,4 +1,4 @@
-// `activateWindow()` on the cocoa backend (docs/macos.md §"Windowing
+// `activateWindow()` on the cocoa backend (design/macos.md §"Windowing
 // semantics", the `activateWindow` row).
 //
 // There is no window manager and no `_NET_ACTIVE_WINDOW` here: the raise is

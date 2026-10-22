@@ -1,19 +1,15 @@
 # Headless components
 
-"Headless" is a promise that gets broken a lot. A library that returns DOM
-prop bags — `getInputProps()`, `useButton()` — is not headless in any sense
-that helps here; it is DOM-coupled with the rendering deferred. The two
-packages below are the real thing: they own state and collections, return
-plain values, and never touch a ref.
+A library that returns DOM prop bags — `useButton()` and the like — is
+DOM-coupled with the rendering deferred, not headless in a sense that helps
+here. The two packages below own state and collections, return plain values,
+and never touch a ref. Headless UI and the Radix primitives render DOM hosts
+and fail ([register](../ecosystem.md#what-does-not-work)); downshift's
+`getInputProps()` works on a `<textinput>` ([forms](forms.md)).
 
-Everything else that markets itself as headless is in the
-[negative-results register](../ecosystem.md#what-does-not-work) — Headless
-UI, the Radix primitives and downshift all fail, the last one silently until
-the first keystroke.
-
-For finished widgets, react-x11 ships its own: `Button`, `Checkbox`,
+For finished widgets react-x11 ships its own: `Button`, `Checkbox`,
 `Radio`/`RadioGroup`, `Switch`, `ProgressBar`, `Select`, `Slider`, `Tooltip`,
-`Dialog`, `MenuBar`/`ContextMenu`, `Tabs`, `Table`, `SplitPane`. See
+`Dialog`, `MenuBar`/`ContextMenu`, `Tabs`, `Table`, `SplitPane` — see
 [components](../components.md).
 
 ## react-stately {#react-stately}
@@ -25,13 +21,9 @@ The state-machine half of React Aria: `useListState`, `useTreeState`,
 `useComboBoxState`, `useMenuTriggerState`, `useNumberFieldState` and about
 thirty-five more, plus the `Item`/`Section` collection API. Each hook owns
 selection, disabled-key traversal, expansion and typeahead-ready collections
-— everything a widget needs _except_ rendering and event binding, which is
-exactly the part react-x11 supplies.
-
-There is no seam to bridge: the hooks take props, return state, and never
-touch a ref. A scan of the shipped `dist/` finds no runtime reference to
-`document`, `window` or `getBoundingClientRect` in any hook, and its
-dependencies (`@internationalized/*`, `@react-types/shared`,
+— everything but rendering and event binding, which react-x11 supplies. No
+hook references `document`, `window` or `getBoundingClientRect` at runtime,
+and the dependencies (`@internationalized/*`, `@react-types/shared`,
 `use-sync-external-store`) are DOM-free.
 
 ```jsx
@@ -76,21 +68,18 @@ function Picker() {
 }
 ```
 
-- **Only `react-stately` is portable.** `react-aria` (the hooks that produce
-  DOM props and bind DOM events) and `react-aria-components` are not — do not
-  follow Adobe's docs into `useListBox` or `useButton`, which return DOM prop
-  bags.
-- As of 3.48 the package is consolidated: the old `@react-stately/*` packages
-  are bundled in, with per-hook subpath exports
-  (`react-stately/useListState`) for lean imports.
-- The collection API wants `<Item>`/`<Section>` elements, or an `items` plus
-  render-function pair. It is a compile target of its own, slightly
-  ceremonious for a three-entry menu.
-- `useAsyncList` pulls in fetch-based loading state — fine under Node, but it
-  is the one hook with I/O opinions.
-- Drag-and-drop hooks (`useDraggableCollectionState`) hold state fine, but
-  everything that would _feed_ them events is DOM-side. Expect to write the
-  event plumbing.
+- **Only `react-stately` is portable.** `react-aria` (hooks that produce DOM
+  props and bind DOM events) and `react-aria-components` are not — do not
+  follow Adobe's docs into `useListBox` or `useButton`.
+- Since 3.48 the old `@react-stately/*` packages are bundled in, with
+  per-hook subpath exports (`react-stately/useListState`) for lean imports.
+- The collection API wants `<Item>`/`<Section>` elements, or `items` plus a
+  render function — ceremonious for a three-entry menu.
+- `useAsyncList` carries fetch-based loading state — fine under Node, the
+  one hook with I/O opinions.
+- Drag-and-drop hooks (`useDraggableCollectionState`) hold state, but
+  everything that would _feed_ them events is DOM-side; write the event
+  plumbing yourself.
 
 ## `@tanstack/react-table` {#tanstack-table}
 
@@ -98,21 +87,16 @@ function Picker() {
 react-store 0.11.1).
 
 A headless table engine: column defs, row models, sorting, filtering,
-grouping, pagination, column sizing, visibility and pinning — as pure state
-plus derived row models. It renders nothing; you map `getHeaderGroups()` and
-`getRowModel().rows` to whatever the host renderer draws.
+grouping, pagination, column sizing, visibility and pinning, as pure state
+plus derived row models. You map `getHeaderGroups()` and
+`getRowModel().rows` to react-x11 elements.
 
-v9 talks about "adapters", and the word means the framework, not the
-renderer: `@tanstack/react-table` _is_ the React adapter, wiring the
-framework-agnostic core's store to React's subscription model. react-x11 is
-React, so that adapter is already ours and there is nothing renderer-shaped
-to write. It still never touches `react-dom` or `document` at runtime —
-though v9 moves two of this page's checks, see the react-dom and `flexRender`
-bullets below. `column.getToggleSortingHandler()` still goes straight onto a
-header `onClick`.
-
-v9's API is modular where v8's was monolithic: features and row models are
-registered up front through `tableFeatures`, and the hook is `useTable`.
+v9's "adapters" are per framework, not per renderer: `@tanstack/react-table`
+_is_ the React adapter, so there is nothing to write, and it never touches
+`react-dom` or `document` at runtime (but see the react-dom and `flexRender`
+bullets). `column.getToggleSortingHandler()` goes straight onto a header
+`onClick`. Features and row models are registered up front through
+`tableFeatures`, and the hook is `useTable`.
 
 ```jsx
 import React from 'react';
@@ -173,47 +157,38 @@ function Servers({ data }) {
 }
 ```
 
-Sorting is uncontrolled here — the table's own store holds it, and the
-header click re-renders through the adapter's subscription. Pass
-`state`/`onSortingChange` as before to control it, or a selector as
-`useTable`'s second argument to subscribe a component to only some slices.
-
-The natural pairing is inside the existing `Table` component, or raw
-`<box style={{ flexDirection: 'row' }}>` rows: TanStack owns the data logic,
-react-x11 owns painting.
+Sorting is uncontrolled here — the table's store holds it, and the header
+click re-renders through the adapter's subscription. Pass
+`state`/`onSortingChange` to control it, or a selector as `useTable`'s
+second argument to subscribe a component to only some slices. Render into
+the built-in `Table` component or raw `<box style={{ flexDirection: 'row' }}>`
+rows.
 
 - **`coreRowModel` is opt-in, and forgetting it fails silently.** Without
-  `coreRowModel: createCoreRowModel()` in `tableFeatures`, the table
-  constructs, headers render, and `getRowModel().rows` is `[]` — no error.
-  The official examples lean on framework presets that include it; register
-  it yourself.
+  `coreRowModel: createCoreRowModel()` in `tableFeatures`, headers render
+  and `getRowModel().rows` is `[]`, with no error. The official examples get
+  it from framework presets; register it yourself.
 - **npm installs a `react-dom` you must not keep.** `@tanstack/react-store`
-  declares a `react-dom` _peer_ dependency, which npm 7+ auto-installs. The
-  shipped code never imports it — grep test 2 on all four `@tanstack`
-  packages finds one `"button"` in a doc comment, and this section was
-  verified with `node_modules/react-dom` deleted — but a resident react-dom
-  is exactly the [silent-failures](../ecosystem.md#silent-failures) hazard.
-  Install with `--legacy-peer-deps`, or delete it and let `npm ls react-dom`
-  stay empty.
-- **`flexRender` now returns a React element even for a plain string cell**
-  (v8 returned the string itself). Inside `<text>` that is fine — the string
-  arrives as a text chunk and paints identically — but a test or a11y walk
-  that reads a `<text>` node's `children` prop now sees an element object.
-  Read the rendered chunks, not the prop. A column def whose `cell` returns
-  DOM elements still throws the renderer's unknown-element error; return
-  strings or react-x11 elements.
-- Column _resizing_ helpers (`header.getResizeHandler`) still expect DOM
-  mouse or touch events with `clientX`, and now fall back to a
-  `document`-listener drag loop (injectable as `_contextDocument`). Simpler
-  to ignore the helper: write your own drag handling off
-  `onMouseDown`/`onMouseMove` — react-x11 events carry `x`/`y` — and call
+  declares a `react-dom` _peer_, which npm 7+ auto-installs. The shipped
+  code never imports it (test 2 finds one `"button"`, in a doc comment, and
+  the table works with `node_modules/react-dom` deleted), but a resident
+  react-dom is the [silent-failures](../ecosystem.md#silent-failures)
+  hazard. Install with `--legacy-peer-deps`, or delete it so
+  `npm ls react-dom` stays empty.
+- **`flexRender` returns a React element even for a plain string cell** (v8
+  returned the string). Inside `<text>` it paints identically, but a test or
+  a11y walk reading a `<text>` node's `children` prop sees an element
+  object; read the rendered chunks. A `cell` that returns DOM elements
+  throws the unknown-element error; return strings or react-x11 elements.
+- Column _resizing_ helpers (`header.getResizeHandler`) expect DOM mouse or
+  touch events with `clientX` and fall back to a `document`-listener drag
+  loop (injectable as `_contextDocument`). Simpler: handle the drag off
+  `onMouseDown`/`onMouseMove` (react-x11 events carry `x`/`y`) and call
   `table.setColumnSizing` (needs `columnSizingFeature` registered).
-- `useTable` probes `typeof window` to pick `useLayoutEffect`; under Node it
-  gets the `useEffect` branch. That is a grep-test-3 hit of the harmless
-  kind — timing, not a feature gate — and the sorted re-render above runs
-  through it.
-- For thousands of rows, pair it with a virtualizer — see
-  [layout](layout.md#tanstack-virtual). TanStack Table will happily hand you
-  10,000 row objects and let the renderer drown.
+- `useTable` probes `typeof window` to pick `useLayoutEffect` and gets
+  `useEffect` under Node — a harmless test-3 hit (timing, not a feature
+  gate).
+- For thousands of rows, pair it with a
+  [virtualizer](layout.md#tanstack-virtual).
 - State updates driven from outside a React event land one frame later than
-  the call, the same as any react-x11 update.
+  the call, as with any react-x11 update.

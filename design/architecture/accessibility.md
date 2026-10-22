@@ -1,7 +1,7 @@
 # Accessibility: an AT-SPI2 bridge with no mirror, and where it lives
 
 Design record for the accessibility layer that shipped in core — the _why_
-behind [accessibility.md](../accessibility.md), which is the reference for
+behind [accessibility.md](../../docs/accessibility.md), which is the reference for
 what the API is. Written as built, not as proposed: the alternatives below
 were live options at the time and the reasons they lost are the useful part.
 
@@ -55,7 +55,7 @@ Three personas had veto power:
    macOS/XQuartz, bare `startx`. react-x11's flagship configurations. The
    layer must cost them nothing: no import weight, no connection attempts
    that log, no event-loop hold, no new mode. This is the same rule
-   [dbus.md](../dbus.md) established: "no bus" is a first-class
+   [dbus.md](../../docs/dbus.md) established: "no bus" is a first-class
    configuration.
 2. **The screen-reader user on a desktop.** For them the tree has to be
    _correct_, not merely present: states that match the pixels, focus

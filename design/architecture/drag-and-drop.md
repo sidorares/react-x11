@@ -25,7 +25,7 @@ at that SHA.
 > is the audit; the body below is corrected, not annotated.
 >
 > **What shipped, and where it diverged.** This is the design as argued, kept
-> as the record of _why_; [drag-and-drop.md](../drag-and-drop.md) is the
+> as the record of _why_; [drag-and-drop.md](../../docs/drag-and-drop.md) is the
 > reference for what the API actually is. Phases 0–3 shipped in #162 and
 > #165. Four things landed differently from the sketch below, and the
 > reference page is authoritative on all of them: the floor is **ntk 5.4.0**,
@@ -534,12 +534,12 @@ once.
 
 ## 5. Lens 3 — reuse of the npm React ecosystem
 
-| Package                                     | Status                         | Why                                                                                                                                                                                                                                                                   |
-| ------------------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`react-dnd`**                             | **the prize**                  | `dnd-core` is deliberately DOM-free and backends are pluggable (constructor takes a manager, plus `setup()`/`teardown()`). A `react-x11` backend brings `useDrag`/`useDrop` and everything built on them.                                                             |
-| `react-dropzone`                            | unusable, but _copy its shape_ | Already documented as failing twice ([ecosystem.md](../ecosystem.md)) — `<input>`, then `window is not defined` in its own mount effect. Its hook shape (`getRootProps()`, `isDragActive`, `acceptedFiles`) is nonetheless what React developers know for file drops. |
-| `@dnd-kit/core`                             | unusable                       | Sensors are pluggable but the core measures with `getBoundingClientRect` and synthesises DOM `PointerEvent`s. A backend is not the seam it offers.                                                                                                                    |
-| `react-beautiful-dnd` / `@hello-pangea/dnd` | unusable                       | DOM-only by design, and its use case (in-app reorder) is fully served by §6's local path.                                                                                                                                                                             |
+| Package                                     | Status                         | Why                                                                                                                                                                                                                                                                           |
+| ------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`react-dnd`**                             | **the prize**                  | `dnd-core` is deliberately DOM-free and backends are pluggable (constructor takes a manager, plus `setup()`/`teardown()`). A `react-x11` backend brings `useDrag`/`useDrop` and everything built on them.                                                                     |
+| `react-dropzone`                            | unusable, but _copy its shape_ | Already documented as failing twice ([ecosystem.md](../../docs/ecosystem.md)) — `<input>`, then `window is not defined` in its own mount effect. Its hook shape (`getRootProps()`, `isDragActive`, `acceptedFiles`) is nonetheless what React developers know for file drops. |
+| `@dnd-kit/core`                             | unusable                       | Sensors are pluggable but the core measures with `getBoundingClientRect` and synthesises DOM `PointerEvent`s. A backend is not the seam it offers.                                                                                                                            |
+| `react-beautiful-dnd` / `@hello-pangea/dnd` | unusable                       | DOM-only by design, and its use case (in-app reorder) is fully served by §6's local path.                                                                                                                                                                                     |
 
 Two conclusions:
 
@@ -935,7 +935,7 @@ Unusually strong here, and worth exploiting.
   `close`).
 - In-tree: [events.js](../../src/events.js), [nodes/window/droptarget.js](../../src/nodes/window/droptarget.js),
   [Reconciler.js](../../src/Reconciler.js), [styles.js](../../src/styles.js),
-  [windowed-regions.md](windowed-regions.md), [ecosystem.md](../ecosystem.md);
+  [windowed-regions.md](windowed-regions.md), [ecosystem.md](../../docs/ecosystem.md);
   ntk 5.3.0 `lib/clipboard.js`, `lib/window.js`, `lib/cursor.js`,
   `lib/index.js`; node-x11 `lib/framebuffer.js`,
   `lib/xserver/properties.js`, `lib/xcore.js`.

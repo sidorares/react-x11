@@ -1,5 +1,5 @@
 // Native control bezels — AppKit's own pixels for the core controls, cached
-// as surfaces the ordinary 2d paint path can blit (docs/macos.md §Native
+// as surfaces the ordinary 2d paint path can blit (design/macos.md §Native
 // controls). The mechanism is offscreen NSCell/NSControl rendering, the
 // WebKit/Gecko form-control technique: interaction, focus and keyboard stay
 // the shared component implementation, and only the *bezel* — the pixels of

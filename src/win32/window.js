@@ -252,7 +252,7 @@ export class Win32Window {
   }
 
   /** The size limits Windows asks for synchronously in WM_GETMINMAXINFO, so
-   * they are pushed ahead rather than answered on demand — docs/windows.md
+   * they are pushed ahead rather than answered on demand — design/windows.md
    * "What Windows asks synchronously, and JS can know in advance". */
   setSizeHints(hints = {}) {
     this._native.setSizeHints?.(this.id, hints);
@@ -691,7 +691,7 @@ export class Win32Window {
   }
 
   /** A DirectComposition surface is write-only, so a window's pixels are not
-   * readable the way an IOSurface's or an X drawable's are. docs/windows.md
+   * readable the way an IOSurface's or an X drawable's are. design/windows.md
    * answers this with PrintWindow once the commit has completed; not bound
    * yet, and it says so rather than answering with something wrong. */
   /**

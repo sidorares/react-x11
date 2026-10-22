@@ -94,7 +94,7 @@
 // **On X11, nobody can screenshot it.** On XQuartz, GL renders into a Metal
 // surface the compositor owns rather than into the X drawable, so `GetImage`
 // reads back the window's background and `npm run screenshots` skips the 3D
-// examples (docs/glx.md). The 2D chrome around the surface is capturable;
+// examples (docs/gl.md). The 2D chrome around the surface is capturable;
 // the surface is not. That is why the tests assert the *command stream* —
 // which is where the property that matters lives anyway. Wayland is the
 // exception: the surface is drawn into the window's own target, and

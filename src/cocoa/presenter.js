@@ -1,4 +1,4 @@
-// The retained layer presenter — Tier L of docs/macos.md: one CALayer per
+// The retained layer presenter — Tier L of design/macos.md: one CALayer per
 // drawn node, React commits landing as property sets inside a single
 // disabled-actions CATransaction per frame, the WindowServer compositing.
 //
@@ -350,7 +350,7 @@ export function stylePaintsPlain(node, style = node.style ?? {}) {
 /**
  * Style property → the key path on a PropBox's own layer, for the
  * animations the presenter takes off the frame clock and hands to the
- * render server (docs/architecture/animation.md §4.2). Only what the layer
+ * render server (design/architecture/animation.md §4.2). Only what the layer
  * expresses as a property of itself qualifies: a colour on `<text>` is a
  * re-raster per frame, a layout property moves the siblings, and both stay
  * on the JS loop. `scaled` values go out in points, as `_syncPropBox`

@@ -1,29 +1,25 @@
 # Ecosystem
 
-react-x11 is a React renderer with no DOM: there is no `document`, no
-`window` global, no CSSOM, and the host elements are `<box>`/`<text>`/`<svg>`
-rather than `<div>`/`<span>`. So any package that only touches React —
-hooks, context, state, reconciliation — works unchanged, and any package
-that reaches for `document`, `window`, `HTMLElement`, CSS, or renders a
-`<div>` does not.
+react-x11 is a React renderer with no DOM: no `document`, no `window`
+global, no CSSOM, and the host elements are `<box>`/`<text>`/`<svg>`, not
+`<div>`/`<span>`. A package that only touches React — hooks, context, state,
+reconciliation — works unchanged; one that reaches for `document`, `window`,
+`HTMLElement`, CSS, or renders a `<div>` does not.
 
-That one rule decides every verdict below. Each of them was established by
-running the library against react-x11 1.2.0, not by reading its
-documentation — the two exceptions are React DevTools and Fast Refresh,
-which are already wired into this repo, so their pages document the working
-setup rather than re-deriving it.
+That rule decides every verdict below. Each was established by running the
+library against react-x11 1.2.0, not by reading its documentation; React
+DevTools and Fast Refresh, which react-x11 wires up itself, are documented as
+working setups instead.
 
 ## The 30-second test
 
-Before installing anything, ask the four questions in order. Each one has a
-command.
+Before installing anything, ask four questions in order. Each has a command.
 
 1. **Does it import?** `node --input-type=module -e "import('the-package')"`.
    A package that hard-requires `react-dom`, or whose `exports` map has only
-   browser conditions, fails here — see
-   [import time](#install-and-import-time) below. Caveat: if anything else in
-   your tree already pulled `react-dom` in, this test passes and the problem
-   moves to the [silent](#silent-failures) column. Run
+   browser conditions, fails here ([import time](#install-and-import-time)).
+   If something else in your tree already pulled in `react-dom`, this passes
+   and the problem moves to the [silent](#silent-failures) column — run
    `npm ls react-dom` before you trust a pass.
 2. **Does it render host elements?** Grep the shipped code for tag names:
 
@@ -32,8 +28,8 @@ command.
      node_modules/the-package --include='*.js' --include='*.mjs' | sort -u
    ```
 
-   Anything that emits DOM tags cannot render here, no matter how headless
-   the README says it is. This one is a reliable verdict: zustand and
+   Anything that emits DOM tags cannot render here, however headless the
+   README says it is. This one is a reliable verdict: zustand and
    `@tanstack/react-table` print nothing; recharts, react-select and Headless
    UI print a list.
 
@@ -44,32 +40,31 @@ command.
      node_modules/the-package --include='*.js' --include='*.mjs'
    ```
 
-   This one is a pointer, not a verdict — _read the hits_. A minified UMD
-   bundle and an `isSSR = typeof window === "undefined"` default both match
-   harmlessly. What you are looking for is an environment probe whose result
-   gates a feature, because that is the silent-failure shape: the library
-   decides it is doing SSR and quietly turns things off. Check the transitive
-   core package too — `@tanstack/query-core`, not just
-   `@tanstack/react-query`, which has no hits of its own.
+   A pointer, not a verdict — _read the hits_. A minified UMD bundle or an
+   `isSSR = typeof window === "undefined"` default matches harmlessly. Look
+   for an environment probe whose result gates a feature: that is the
+   silent-failure shape, where the library decides it is doing SSR and
+   quietly turns things off. Check the transitive core too —
+   `@tanstack/query-core`, not just `@tanstack/react-query`, which has no
+   hits of its own.
 
-4. **Does it expect DOM-shaped events?** Since 2.0.0 the answer is usually
-   fine: `<textinput onChange>` hands over a synthetic event with
-   `target.value`, `target.name` and a writable `target.value`, so
-   `event.target.value` reads the way it does in the DOM. What to check
-   instead is the **opposite** direction — a library whose field contract is
-   value-in/value-out (`field.handleChange(value)`) now needs one unwrap per
+4. **Does it expect DOM-shaped events?** Usually fine: `<textinput onChange>`
+   passes a synthetic event with `target.value` (writable) and `target.name`,
+   so `event.target.value` reads as it does in the DOM. Check the
+   **opposite** direction: a library whose field contract is
+   value-in/value-out (`field.handleChange(value)`) needs one unwrap per
    field, and a bare `onChange={field.handleChange}` stores the event object
    with no error. Grep your own code for `onChange={` on a `<textinput>`.
 
-A library that passes all four is almost always a drop-in. A library that
-fails 2 or 3 usually has a headless core published separately — that is the
-pattern behind half the adapters on this page.
+A library that passes all four is almost always a drop-in. One that fails 2
+or 3 usually has a headless core published separately — the pattern behind
+half the adapters on this page.
 
 ## What works
 
-Fifty-three packages and two Node built-ins, across 12 categories. **Out of
-the box** means install and use; **adapter** means a small amount of glue,
-written out in full on the category page.
+Fifty-five packages and two Node built-ins, across 12 categories. **Out of
+the box** means install and use; **adapter** means a little glue, written
+out in full on the category page.
 
 ### State management
 
@@ -92,11 +87,13 @@ written out in full on the category page.
 
 ### Forms and validation
 
-| Package                | Integration                                    |                                             |
-| ---------------------- | ---------------------------------------------- | ------------------------------------------- |
-| `@tanstack/react-form` | out of the box                                 | [forms](ecosystem/forms.md#tanstack-form)   |
-| `zod`                  | out of the box                                 | [forms](ecosystem/forms.md#zod)             |
-| `react-hook-form`      | adapter — use `<Controller>`, not `register()` | [forms](ecosystem/forms.md#react-hook-form) |
+| Package                | Integration                                                |                                             |
+| ---------------------- | ---------------------------------------------------------- | ------------------------------------------- |
+| `@tanstack/react-form` | out of the box                                             | [forms](ecosystem/forms.md#tanstack-form)   |
+| `zod`                  | out of the box                                             | [forms](ecosystem/forms.md#zod)             |
+| `react-hook-form`      | out of the box — `register()` or `<Controller>`            | [forms](ecosystem/forms.md#react-hook-form) |
+| `formik`               | out of the box — no `<Form>`; `<Field>` with a render prop | [forms](ecosystem/forms.md#formik)          |
+| `downshift`            | out of the box — `getInputProps()` on a `<textinput>`      | [forms](ecosystem/forms.md)                 |
 
 ### Icons
 
@@ -188,21 +185,18 @@ written out in full on the category page.
 
 ## What does not work
 
-Everything below was reproduced against react-x11 1.2.0. The error text is
-verbatim — if you got here by searching for one of these strings, this is
-the right page.
-
-Failures come in four flavours, and they cost very different amounts of
-time:
+Everything below was reproduced against react-x11 1.2.0, and the error text
+is verbatim — if you searched for one of these strings, this is the right
+page. Failures come in four flavours, by cost:
 
 - **Install and import time** — loud, immediate, cheap.
-- **Render time** — loud, immediate, and the message usually names the
+- **Render time** — loud, immediate; the message usually names the
   offending element.
 - **First interaction** — the tree mounts clean and breaks on the first
-  keystroke. Expensive, because the stack trace points at the library, not
-  at the renderer.
-- **Silent** — no error, ever. The most expensive class by a wide margin;
-  read that table even if nothing is broken yet.
+  keystroke, with a stack trace that points at the library, not the
+  renderer.
+- **Silent** — no error, ever. By far the most expensive; read that table
+  even if nothing is broken yet.
 
 ### Install and import time
 
@@ -213,13 +207,12 @@ time:
 | `@tanstack/react-virtual`                 | `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'react-dom' imported from node_modules/@tanstack/react-virtual/dist/esm/index.js`                  | `@tanstack/virtual-core` — [layout](ecosystem/layout.md#tanstack-virtual)                                    |
 | `styled-components`                       | `TypeError: styled.div is not a function`                                                                                                             | `createStyles`/`ThemeProvider` + a palette package — [theming](ecosystem/theming.md)                         |
 | `react-scan`                              | `Error [ERR_PACKAGE_PATH_NOT_EXPORTED]: Package subpath './auto' is not defined by "exports" in node_modules/react-scan/package.json imported from …` | React's own `<Profiler>`, or why-did-you-render — [dev tooling](ecosystem/dev-tooling.md#why-did-you-render) |
-| `@testing-library/react` (no `react-dom`) | `Error: Cannot find module 'react-dom/test-utils'`                                                                                                    | `node:test` or `vitest` — [testing](ecosystem/testing.md)                                                    |
+| `@testing-library/react` (no `react-dom`) | `Error: Cannot find module 'react-dom/test-utils'`                                                                                                    | `react-x11/test` on `node:test` or `vitest` — [testing](testing.md)                                          |
 | `jest` (no ESM config)                    | `Jest encountered an unexpected token` … `SyntaxError: Cannot use import statement outside a module`                                                  | `node:test`/`vitest`, or Jest in ESM mode — [testing](ecosystem/testing.md#jest)                             |
 | `jest` (transformed to CJS)               | `SyntaxError: Cannot use 'import.meta' outside a module`                                                                                              | as above                                                                                                     |
 
-`styled-components` deserves a note because the error is actively
-misleading. It fires at module-evaluation time, mentions neither react-x11
-nor the DOM, and sends people hunting for a version mismatch:
+The `styled-components` error is misleading: it fires at module evaluation,
+mentions neither react-x11 nor the DOM, and looks like a version mismatch.
 
 ```js
 import styled from 'styled-components';
@@ -228,13 +221,12 @@ const Panel = styled.div`
 `; // throws right here
 ```
 
-Under plain Node ESM — which is how react-x11 apps run, with no bundler —
-the default import resolves to the CJS module namespace, so `styled` is an
-object with `ServerStyleSheet` and friends on it, and no `.div`. Working
-around the interop with `const styled = sc.default ?? sc` only moves you to
-`react-x11: unknown element type <div>`. See the
-[silent failures](#silent-failures) table for what happens if you then try
-`styled('box')`.
+Under plain Node ESM (how react-x11 apps run, with no bundler) the default
+import resolves to the CJS module namespace — an object with
+`ServerStyleSheet` and friends, and no `.div`. Fixing the interop with
+`const styled = sc.default ?? sc` only moves you to
+`react-x11: unknown element type <div>`; `styled('box')` is in
+[silent failures](#silent-failures).
 
 The two Jest entries are the same dead end from two directions. Full text:
 
@@ -247,49 +239,45 @@ Jest encountered an unexpected token
     SyntaxError: Cannot use 'import.meta' outside a module
 ```
 
-`react-x11/src/Reconciler.js` and `src/DevToolsIntegration.js` both call
-`createRequire(import.meta.url)`, which cannot be down-compiled to CJS. Jest
-_can_ run react-x11 tests, but only in real ESM mode — see
-[testing](ecosystem/testing.md#jest). `node:test` and `vitest` need no
-transform at all.
+react-x11 calls `createRequire(import.meta.url)`, which cannot be
+down-compiled to CJS, so Jest runs react-x11 tests only in real ESM mode —
+see [testing](ecosystem/testing.md#jest).
 
 ### Render time
 
 The renderer's own errors are prefixed `react-x11:` and name the element it
-could not create. This is the most common failure by far, and the tag it
-names tells you which library layer broke.
+could not create. By far the most common failure; the tag tells you which
+library layer broke.
 
-| Package                              | Error                                                                                                                                                                               | Use instead                                                                                    |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `framer-motion`                      | `react-x11: uncaught error Error: react-x11: unknown element type <div>. Supported: <window>, <popup>, <box>, <text>, <image>, <canvas>, <textinput>, <textarea>, <svg>, <glarea>.` | popmotion, `@tweenjs/tween.js`, d3-ease + d3-interpolate — [animation](ecosystem/animation.md) |
-| `framer-motion` (value layer)        | `ReferenceError: HTMLElement is not defined`                                                                                                                                        | popmotion — [animation](ecosystem/animation.md#popmotion)                                      |
-| `recharts`                           | `react-x11: uncaught error Error: react-x11: unknown element type <div>. …`                                                                                                         | d3-scale + d3-shape into the `<svg>` host — [below](#charting)                                 |
-| `formik` (`<Form>` with a `<Field>`) | `react-x11: uncaught error Error: react-x11: unknown element type <input>. …`                                                                                                       | `@tanstack/react-form` — [forms](ecosystem/forms.md#tanstack-form)                             |
-| `formik` (`<Form>` alone)            | `react-x11: uncaught error Error: react-x11: unknown element type <form>. …`                                                                                                        | as above                                                                                       |
-| `@headlessui/react` (`Switch`)       | `react-x11: uncaught error Error: react-x11: unknown element type <button>. …`                                                                                                      | react-x11's built-in widgets — [components](components.md)                                     |
-| `@headlessui/react` (`Dialog`)       | `react-x11: uncaught error Error: react-x11: unknown element type <span>. …`                                                                                                        | react-x11's built-in `Dialog`                                                                  |
-| `@radix-ui/react-dialog`             | `react-x11: uncaught error Error: react-x11: unknown element type <button>. …`                                                                                                      | react-x11's built-in `Dialog`                                                                  |
-| `react-select`                       | `react-x11: uncaught error Error: react-x11: unknown element type <style>. …`                                                                                                       | react-x11's built-in `Select`                                                                  |
-| `@emotion/styled`                    | `react-x11: uncaught error Error: react-x11: unknown element type <style>. …`                                                                                                       | `createStyles` + `ThemeProvider` — [styling](styling.md)                                       |
-| `react-dropzone`                     | `react-x11: uncaught error Error: react-x11: unknown element type <input>. …`                                                                                                       | built-in `useDropTarget` / `<box dropAccept onDrop>` — [drag and drop](drag-and-drop.md)       |
-| `react-router-dom` (`BrowserRouter`) | `react-x11: uncaught error ReferenceError: document is not defined` at `getUrlBasedHistory`                                                                                         | `MemoryRouter` — [routing](ecosystem/routing.md#react-router)                                  |
-| `react-router-dom` (`<Link>`)        | `react-x11: uncaught error Error: react-x11: unknown element type <a>. …`                                                                                                           | `useNavigate()` on a `<box onClick>`                                                           |
-| `lucide-react`                       | `react-x11: uncaught error Error: react-x11: <svg width=…> is a style property — pass it in style: <svg style={{ width: … }} />`                                                    | `@iconify-json/lucide`, or `lucide` — [icons](ecosystem/icons.md)                              |
-| `@tabler/icons-react`                | `react-x11: uncaught error Error: react-x11: <svg width=…> is a style property — pass it in style: <svg style={{ width: … }} />`                                                    | `@iconify-json/tabler`, or `@tabler/icons` — [icons](ecosystem/icons.md#tabler-icons)          |
-| `@phosphor-icons/react`              | `react-x11: uncaught error Error: react-x11: <svg width=…> is a style property — pass it in style: <svg style={{ width: … }} />`                                                    | `@iconify-json/ph`, or `@phosphor-icons/core` — [icons](ecosystem/icons.md#phosphor-icons)     |
-| `@testing-library/react`             | `ReferenceError: document is not defined` at `render (node_modules/@testing-library/react/dist/pure.js:256:5)`                                                                      | `node:test`/`vitest` against the node tree — [testing](ecosystem/testing.md)                   |
-| `@testing-library/dom` (`within`)    | `TypeError: Expected container to be an Element, a Document or a DocumentFragment but got WindowNode.`                                                                              | walk `node.children`/`node.props` — [testing](ecosystem/testing.md)                            |
-| `@testing-library/dom` (`screen`)    | `TypeError: For queries bound to document.body a global document has to be available... Learn more: https://testing-library.com/s/screen-global-error`                              | nothing — there is no accessibility tree behind react-x11 today                                |
-| `@testing-library/user-event`        | `TypeError: Cannot read properties of undefined (reading 'Symbol(Node prepared with document state workarounds)')`                                                                  | emit raw ntk events on the window — [testing](ecosystem/testing.md#driving-events)             |
-| `jest-image-snapshot`                | `TypeError: The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object. Received an instance of Object`                      | `getImageData` + `pngjs` + `pixelmatch` — [testing](ecosystem/testing.md#pixelmatch)           |
-| `react-x11` test selectors           | `Error: Test selector API is not supported by this renderer.`                                                                                                                       | nothing — `supportsTestSelectors` is `false`                                                   |
+| Package                              | Error                                                                                                                                                                               | Use instead                                                                                           |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `framer-motion`                      | `react-x11: uncaught error Error: react-x11: unknown element type <div>. Supported: <window>, <popup>, <box>, <text>, <image>, <canvas>, <textinput>, <textarea>, <svg>, <glarea>.` | popmotion, `@tweenjs/tween.js`, d3-ease + d3-interpolate — [animation](ecosystem/animation.md)        |
+| `framer-motion` (value layer)        | `ReferenceError: HTMLElement is not defined`                                                                                                                                        | popmotion — [animation](ecosystem/animation.md#popmotion)                                             |
+| `recharts`                           | `react-x11: uncaught error Error: react-x11: unknown element type <div>. …`                                                                                                         | d3-scale + d3-shape into the `<svg>` host — [below](#charting)                                        |
+| `formik` (`<Form>` with a `<Field>`) | `react-x11: uncaught error Error: react-x11: unknown element type <input>. …`                                                                                                       | a `<Field>` render prop onto a `<textinput>` — [forms](ecosystem/forms.md#formik)                     |
+| `formik` (`<Form>` alone)            | `react-x11: uncaught error Error: react-x11: unknown element type <form>. …`                                                                                                        | no `<Form>`; call `submitForm()` from a `Button`                                                      |
+| `@headlessui/react` (`Switch`)       | `react-x11: uncaught error Error: react-x11: unknown element type <button>. …`                                                                                                      | react-x11's built-in widgets — [components](components.md)                                            |
+| `@headlessui/react` (`Dialog`)       | `react-x11: uncaught error Error: react-x11: unknown element type <span>. …`                                                                                                        | react-x11's built-in `Dialog`                                                                         |
+| `@radix-ui/react-dialog`             | `react-x11: uncaught error Error: react-x11: unknown element type <button>. …`                                                                                                      | react-x11's built-in `Dialog`                                                                         |
+| `react-select`                       | `react-x11: uncaught error Error: react-x11: unknown element type <style>. …`                                                                                                       | react-x11's built-in `Select`                                                                         |
+| `@emotion/styled`                    | `react-x11: uncaught error Error: react-x11: unknown element type <style>. …`                                                                                                       | `createStyles` + `ThemeProvider` — [styling](styling.md)                                              |
+| `react-dropzone`                     | `react-x11: uncaught error Error: react-x11: unknown element type <input>. …`                                                                                                       | built-in `useDropTarget` / `<box dropAccept onDrop>` — [drag and drop](drag-and-drop.md)              |
+| `react-router-dom` (`BrowserRouter`) | `react-x11: uncaught error ReferenceError: document is not defined` at `getUrlBasedHistory`                                                                                         | `MemoryRouter` — [routing](ecosystem/routing.md#react-router)                                         |
+| `react-router-dom` (`<Link>`)        | `react-x11: uncaught error Error: react-x11: unknown element type <a>. …`                                                                                                           | `useNavigate()` on a `<box onClick>`                                                                  |
+| `lucide-react`                       | `react-x11: uncaught error Error: react-x11: <svg width=…> is a style property — pass it in style: <svg style={{ width: … }} />`                                                    | `@iconify-json/lucide`, or `lucide` — [icons](ecosystem/icons.md)                                     |
+| `@tabler/icons-react`                | `react-x11: uncaught error Error: react-x11: <svg width=…> is a style property — pass it in style: <svg style={{ width: … }} />`                                                    | `@iconify-json/tabler`, or `@tabler/icons` — [icons](ecosystem/icons.md#tabler-icons)                 |
+| `@phosphor-icons/react`              | `react-x11: uncaught error Error: react-x11: <svg width=…> is a style property — pass it in style: <svg style={{ width: … }} />`                                                    | `@iconify-json/ph`, or `@phosphor-icons/core` — [icons](ecosystem/icons.md#phosphor-icons)            |
+| `@testing-library/react`             | `ReferenceError: document is not defined` at `render (node_modules/@testing-library/react/dist/pure.js:256:5)`                                                                      | `renderX11` from `react-x11/test` — [testing](testing.md)                                             |
+| `@testing-library/dom` (`within`)    | `TypeError: Expected container to be an Element, a Document or a DocumentFragment but got WindowNode.`                                                                              | `within` from `react-x11/test` — [testing](testing.md)                                                |
+| `@testing-library/dom` (`screen`)    | `TypeError: For queries bound to document.body a global document has to be available... Learn more: https://testing-library.com/s/screen-global-error`                              | `screen` from `react-x11/test` — [testing](testing.md)                                                |
+| `@testing-library/user-event`        | `TypeError: Cannot read properties of undefined (reading 'Symbol(Node prepared with document state workarounds)')`                                                                  | `userEvent` from `react-x11/test`, or raw ntk events — [testing](ecosystem/testing.md#driving-events) |
+| `jest-image-snapshot`                | `TypeError: The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object. Received an instance of Object`                      | `getImageData` + `pngjs` + `pixelmatch` — [testing](ecosystem/testing.md#pixelmatch)                  |
+| `react-x11` test selectors           | `Error: Test selector API is not supported by this renderer.`                                                                                                                       | nothing — `supportsTestSelectors` is `false`                                                          |
 
-Four of those need the detail, because the obvious workaround does not
-work.
+Four of those need detail, because the obvious workaround fails.
 
-**framer-motion cannot be rescued by dropping to its value layer.** The
-`motion.div` failure is the expected one; the interesting one is what
-happens when you reach past it:
+**framer-motion cannot be rescued by dropping to its value layer.** Reaching
+past `motion.div` fails too:
 
 ```js
 import { animate, motionValue } from 'framer-motion';
@@ -299,17 +287,16 @@ animate(mv, 100, { duration: 0.1 });
 // ReferenceError: HTMLElement is not defined
 ```
 
-`motion-dom` feature-detects the Web Animations API by testing
+`motion-dom` feature-detects the Web Animations API with
 `subject instanceof HTMLElement`, so `animate()` on a plain `motionValue`
-still throws once keyframes resolve — asynchronously, from
-`motion-dom/src/animation/waapi/supports/waapi.ts`. Use popmotion's
-`animate()` instead: same author lineage, no DOM assumption.
+still throws, asynchronously, once keyframes resolve (from
+`motion-dom/src/animation/waapi/supports/waapi.ts`). Use popmotion's
+`animate()` instead.
 
 **The Radix escape hatch is worse than the error.**
 `<Dialog.Portal><Dialog.Content /></Dialog.Portal>` produces no error and no
-output at all — Radix's `Portal` is SSR-guarded, finds no `document`, and
-renders nothing, so the dialog silently never appears. Every Radix primitive
-has that shape. (`@radix-ui/colors`, by contrast, is pure data and is
+output: `Portal` is SSR-guarded, finds no `document`, and renders nothing.
+Every Radix primitive has that shape. (`@radix-ui/colors` is pure data and
 [recommended](ecosystem/theming.md#radix-colors).)
 
 **react-dropzone fails twice.** Deleting the `<input>` does not rescue it:
@@ -317,19 +304,17 @@ with only `<box {...getRootProps()} />` you get past the reconciler and then
 hit `react-x11: uncaught error ReferenceError: window is not defined`,
 thrown from react-dropzone's own mount effect.
 
-**The three `*-react` icon packages produce a byte-identical error**, and it
-is not "unknown element type" — react-x11 has a real `<svg>` host, so the
-icon gets further than every other DOM library here and then dies on the
-flat `width`/`height` props those wrappers set unconditionally. There is no
-prop you can pass to avoid it. `@heroicons/react` is the
-[exception](ecosystem/icons.md#heroicons-react): it sizes with a class name
-rather than flat attributes, so it renders.
+**The three `*-react` icon packages produce a byte-identical error**, not
+"unknown element type": react-x11 has a real `<svg>` host, so the icon gets
+further and dies on the flat `width`/`height` props those wrappers always
+set. No prop avoids it. `@heroicons/react` is the
+[exception](ecosystem/icons.md#heroicons-react): it sizes with a class name,
+so it renders.
 
-Two more index notes for searchers:
+Index notes for searchers:
 
-- `react-select` reports `<style>`, not `<div>`. It is built on Emotion, and
-  the first host it emits is Emotion's injected style tag — so this is the
-  CSS-in-JS failure rather than the component failure.
+- `react-select` reports `<style>`, not `<div>`: it is built on Emotion, and
+  the first host it emits is Emotion's injected style tag.
 - `formik` reports `<input>` when your `<Form>` has a `<Field>` in it and
   `<form>` when it does not, because the reconciler completes children
   first.
@@ -339,9 +324,8 @@ Two more index notes for searchers:
 
 #### Charting, without recharts {#charting}
 
-There is no charting entry in the compatibility table, but the substitute
-for `recharts` is small: compute with `d3-scale` + `d3-shape` and emit the
-path into react-x11's own `<svg>` host.
+The substitute for `recharts` is small: compute with `d3-scale` +
+`d3-shape` and emit the path into react-x11's own `<svg>` host.
 
 ```jsx
 import { scaleLinear } from 'd3-scale';
@@ -370,30 +354,24 @@ better one for dense plots.
 
 ### First interaction
 
-These mount without a single error message. The first sign of trouble is a
-keystroke.
+These mount without an error; the first sign of trouble is a keystroke.
 
-**Two entries left this table in 2.0.0.** `downshift` (a TypeError on the
-first keystroke) and `formik`'s `getFieldProps` spread (silent, no error,
-the field simply never updated) both had one cause: `<textinput>` called
-`onChange(newString)` rather than `onChange(event)`. It now passes a
-synthetic event, and both work — see
-[forms](ecosystem/forms.md). They are recorded here because the symptoms are
-what a 1.x user searches for.
-
-Nothing currently fails on first interaction. Two shapes to know about
-anyway, because they are the ones this class of bug takes here:
+Nothing currently fails here. `downshift` (a TypeError on the first
+keystroke) and `formik`'s `getFieldProps` spread (the field silently never
+updated) did on 1.x, when `<textinput>` called `onChange(newString)`; it now
+passes a synthetic event and both work ([forms](ecosystem/forms.md)). The
+two shapes this class of bug takes:
 
 - A handler that reads `event.nativeEvent.<something>` **unguarded** works
   for a keystroke and throws for a paste or an undo, where there is no X
   event to report. downshift reads
-  `event.nativeEvent.preventDownshiftDefault` this way; it is safe only
-  because it also checks `hasOwnProperty('nativeEvent')` first and the
-  property is always present.
+  `event.nativeEvent.preventDownshiftDefault` this way, and is safe only
+  because it checks `hasOwnProperty('nativeEvent')` first and the property
+  is always present.
 - A library that writes through a ref — `ref.value = ''` — needs the node to
-  have a value **setter**. `<textinput>` does; most nodes do not, and the
-  failure is a TypeError thrown from inside the commit phase, which takes the
-  render down rather than one handler.
+  have a value **setter**. `<textinput>` has one; most nodes do not, and the
+  TypeError is thrown inside the commit phase, taking the render down rather
+  than one handler.
 
 ### Silent failures
 
@@ -408,34 +386,23 @@ No error is ever printed. Read this table before you spend an afternoon.
 | `styled-components` (`styled('box')`)                  | renders with no error and hands the box a single `className` prop, which react-x11 ignores — the CSS goes nowhere                                             | `createStyles` + `ThemeProvider`                                                                                                  |
 | `tailwindcss/colors` (raw values)                      | v4 ships `oklch()` strings; ntk's parser returns null and paints nothing                                                                                      | convert with `culori` — [theming](ecosystem/theming.md#tailwind-colors)                                                           |
 
-The swr one is the most expensive, so here it is in full. `useSWR` fetches
-on mount, caches and dedupes correctly. What never happens is focus
-revalidation, because swr computes its environment once at import:
+The swr one is the most expensive. `useSWR` fetches, caches and dedupes,
+but swr decides once at import that a process with no global `window` is a
+server and registers no focus or reconnect listeners — not even a custom
+`initFocus` passed through `<SWRConfig value={{ provider, initFocus }}>`,
+the documented React Native escape hatch. Details and the workaround:
+[data fetching](ecosystem/data-fetching.md#swr).
 
-```js
-// swr/dist/_internal/config-context-*.mjs
-const IS_SERVER = !isWindowDefined || isLegacyDeno;
-```
-
-In Node there is no global `window`, so `initCache`'s `if (!IS_SERVER)`
-branch never runs and neither `initFocus` nor `initReconnect` is ever
-called — swr registers zero listeners. The documented React Native escape
-hatch does not help either: a custom `initFocus` passed through
-`<SWRConfig value={{ provider, initFocus }}>` is never called, because the
-guard sits above it. The workaround, and its one gotcha, are on the
-[data fetching](ecosystem/data-fetching.md#swr) page.
-
-The `@tanstack/react-virtual` entry is subtle in a different way. `react-dom`
-is a _required_ peer, so a default `npm i @tanstack/react-virtual` installs
-it and the import-time error above never appears. `react-dom@19`'s
-`flushSync()` called outside any react-dom root runs the callback and does
-not throw — so nothing warns you that the synchronous flush the virtualizer
-depends on is happening in the wrong renderer.
+`@tanstack/react-virtual` is subtle differently. `react-dom` is a _required_
+peer, so a default `npm i @tanstack/react-virtual` installs it and the
+import-time error never appears; `react-dom@19`'s `flushSync()` outside any
+react-dom root runs the callback without throwing, so nothing warns you that
+the virtualizer's synchronous flush happens in the wrong renderer.
 
 ## Adding a library that is not listed
 
 Run the [30-second test](#the-30-second-test) first; it settles most cases
-without an install. If it passes, the fastest real check is a render:
+without an install. If it passes, render it:
 
 ```jsx
 // probe.jsx — needs a display: run under $DISPLAY, or `xvfb-run -a`
@@ -451,23 +418,22 @@ import { TheThing } from 'the-package';
 );
 ```
 
-Four outcomes, and each one tells you where to look:
+Four outcomes:
 
 - **`react-x11: unknown element type <…>`** — the library renders DOM hosts.
   Look for a headless core published as a separate package; that is what
   rescued TanStack Virtual, Floating UI and react-spring.
-- **`react-x11: <… width=…> is a style property`** — it got as far as a real
-  react-x11 host and then passed a flat style prop. Usually fixable by
-  wrapping the component rather than replacing it.
+- **`react-x11: <… width=…> is a style property`** — it reached a real
+  react-x11 host and passed a flat style prop. Usually fixable by wrapping
+  the component rather than replacing it.
 - **`ReferenceError: document is not defined`** (or `window`, or
-  `HTMLElement`) — a DOM global at module or mount time. Check whether the
-  library has a documented environment-override seam, the way
-  `@tanstack/react-query`'s `environmentManager` does.
-- **It renders.** Then type into it, click it, and resize the window. The
+  `HTMLElement`) — a DOM global at module or mount time. Look for a
+  documented environment-override seam, like `@tanstack/react-query`'s
+  `environmentManager`.
+- **It renders.** Then type into it, click it, and resize the window; the
   event-shape and silent classes only show up here.
 
-If you establish a result — either direction — open an issue on
+If you establish a result either way, open an issue on
 [the react-x11 repository](https://github.com/sidorares/react-x11/issues)
 with the package name, its exact version, the code you ran, and the verbatim
-output. Negative results are as useful as positive ones on this page; most
-of what is above started as somebody's wasted afternoon.
+output. Negative results are as useful as positive ones.

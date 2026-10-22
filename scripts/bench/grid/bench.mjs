@@ -3,7 +3,7 @@
 // WindowNode._layoutStep's, per frame, in the in-process server with real
 // text shaping (KaTeX Main); "layouts" is every yoga calculateLayout the
 // frame made, the window's own passes and each child tree's.
-// docs/architecture/grid-layout.md §3.
+// design/architecture/grid-layout.md §3.
 //   npm run bench:grid
 //
 // Two resizes, because the difference between them is the thing to know. A

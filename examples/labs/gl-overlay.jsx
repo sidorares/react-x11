@@ -11,7 +11,7 @@
 // lays out in the surface's box and draws above it (src/gloverlay.js).
 // Nothing in the suite can witness that composite — the in-process server
 // draws no GL at all, and window capture does not see a GL surface on either
-// backend (docs/glx.md) — so this is a lab: run it, and look.
+// backend (docs/gl.md) — so this is a lab: run it, and look.
 //
 // ## What to look at
 //

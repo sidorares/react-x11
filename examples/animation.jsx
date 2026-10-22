@@ -36,7 +36,7 @@
 // nothing, and a card answering a click is not that.
 //
 // docs/styling.md ("Transitions", "Loops") is the reference, and
-// docs/architecture/animation.md is what comes next: easing on a
+// design/architecture/animation.md is what comes next: easing on a
 // transition, timelines that end, opacity, transforms.
 import React, { useEffect, useRef, useState } from 'react';
 import {

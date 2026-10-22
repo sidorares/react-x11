@@ -1,6 +1,7 @@
 // react-x11/refresh — the runtime half of state-preserving hot reload
 // (Fast Refresh). The loader half is ./loader.js; `react-x11/refresh/register`
-// wires both up for `node --import`. See docs/ecosystem/dev-tooling.md.
+// wires both up for `node --import`. See docs/ecosystem/dev-tooling.md, and
+// design/ecosystem/dev-tooling.md §"How it reloads" for the loader's rules.
 //
 // Import order is what this module exists to own:
 //

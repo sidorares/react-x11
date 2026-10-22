@@ -1,9 +1,7 @@
 # Packaging and distribution
 
 Five ways to ship a react-x11 app, cheapest first. Every recipe here was
-run — except the two that need a signing identity, which say so — and
-where something does not work, the reason is measured rather than
-guessed.
+run, except the signing steps that need a real identity, which say so.
 
 | tier                            | works                      | cost                            |
 | ------------------------------- | -------------------------- | ------------------------------- |
@@ -16,14 +14,13 @@ guessed.
 ## Tier 1 — `npm install`
 
 The default, and fine for a server-side app, a CI tool, or anything already
-deployed with a package manager. Nothing to say beyond: the package is ESM
-(`"type": "module"`), it needs Node ≥ 20.19 (`engines` in its
-`package.json`), and it has **no required native dependencies** — ntk,
-node-x11 and yoga-layout are pure JavaScript and WASM, so the X11 backend
-needs no node-gyp and no prebuild matrix, and `npm install` on a fresh box
-just works. The native bridges the other backends drive — `@windowkit/appkit`
-for Cocoa, `@windowkit/win32` for win32, `x11-dri` for Wayland's GPU path —
-are `optionalDependencies` that install from a bundled prebuild where one
+deployed with a package manager. The package is ESM (`"type": "module"`),
+needs Node ≥ 20.19 (`engines` in its `package.json`), and has **no required
+native dependencies** — ntk, node-x11 and yoga-layout are pure JavaScript
+and WASM, so the X11 backend needs no node-gyp and no prebuild matrix. The
+native bridges the other backends drive — `@windowkit/appkit` for Cocoa,
+`@windowkit/win32` for win32, `x11-dri` for Wayland's GPU path — are
+`optionalDependencies` that install from a bundled prebuild where one
 matches the platform, so an install that cannot build one still succeeds.
 
 ## Tier 2 — one `.mjs` file
@@ -40,11 +37,10 @@ Three things about that command are load-bearing.
 **`--format=esm` is the easy path, not the only one.** It tolerates top-level
 await anywhere in the graph; `cjs` does not, and refuses to build with
 `Top-level await is currently not supported with the "cjs" output format`.
-Nothing in this stack forces the issue — ntk has had no top-level await
-since 5, and the layout engine, which was the other source of one, is loaded
-rather than imported here (below). See
-[tier 3](#tier-3--node-single-executable), which needs `cjs`; the choice is
-only about what your own code does at module scope.
+react-x11's own graph has none (the layout engine is loaded during
+`createRoot()`, not imported), so the choice is only about what your own
+code does at module scope. [Tier 3](#tier-3--node-single-executable) needs
+`cjs`.
 
 **The `--banner:js` is not optional.** node-x11 is CommonJS and uses dynamic
 `require`, which esbuild cannot resolve statically. Without the banner the
@@ -54,42 +50,27 @@ bundle builds cleanly and then dies at startup:
 Error: Dynamic require of "events" is not supported
 ```
 
-The banner defines the `require` that shim calls. This is an upstream gap —
-node-x11 wants an ESM entry point, or `node:`-prefixed requires — and until
-it closes, the banner is the fix.
+The banner defines the `require` that esbuild's shim calls; it is needed
+until node-x11 ships ESM sources ([node-x11#246][x11-246]).
 
 **The banner's import must be aliased.** The obvious form, `import
 {createRequire} from 'node:module'`, collides with react-x11's own import of
 the same name and the bundle fails to parse with `Identifier 'createRequire'
-has already been declared`. Hence `as __cjsRequire` above. That one costs an
-afternoon if you meet it without warning.
+has already been declared`. Hence `as __cjsRequire` above.
 
-Two things that are _not_ problems, and are worth knowing because they
-usually are:
+**yoga-layout is bundler-safe**: its WASM is base64-inlined into the
+JavaScript, so nothing is emitted beside the bundle and nothing needs a
+loader rule or a copy step.
 
-- **yoga-layout is bundler-safe.** Its WASM is base64-inlined into the
-  JavaScript, so nothing is emitted beside the bundle and nothing needs a
-  loader rule or a copy step. Verified: no `.wasm` file appears, and the
-  bundle renders.
-- **`keysym` is gone.** It used to read a JSON file off disk at module load
-  and broke every bundle; ntk 4.3.0 no longer depends on it. If you are
-  reading an older account of this, that half is fixed.
+react-x11's [DevTools](devtools.md) and
+[click-to-component](click-to-component.md) integrations are dynamically
+imported behind environment variables, so a bundler pulls in `ws` and
+`node:child_process` for them; to leave them out, stub them with a resolver
+plugin the way `website/scripts/build-demo-bundles.mjs` does.
 
-Verified end to end: bundling an app that imports `react-x11`, `react` and
-node-x11's in-process X server produces a 7 MB `app.mjs` that mounts a tree,
-paints, and reads its own pixels back.
-
-If you use react-x11's [DevTools](devtools.md) or
-[click-to-component](click-to-component.md) integrations, note that they are
-dynamically imported behind environment variables. A bundler will pull in
-`ws` and `node:child_process` for them; if you do not want that, stub them
-out with a resolver plugin the way
-`website/scripts/build-demo-bundles.mjs` does.
-
-On macOS the bundle moves onto a worker as it starts, the way the source
-does, and still needs nothing beside it: the worker's entry is the bundle
-itself. Verified with a one-window app under Node and Bun; what it costs,
-and how to skip it, is [below](#on-macos-the-app-moves-onto-a-worker).
+On macOS the bundle moves onto a worker as it starts, as the source does,
+and still needs nothing beside it: the worker's entry is the bundle itself
+([below](#on-macos-the-app-moves-onto-a-worker)).
 
 ## Tier 3 — Node single executable
 
@@ -103,83 +84,51 @@ node --build-sea=sea.json          # { "main": "app.cjs", "output": "myapp" }
 { "main": "app.cjs", "output": "myapp", "disableExperimentalSEAWarning": true }
 ```
 
-This did not work until recently, and the reason is worth keeping: Node's SEA
-evaluates the embedded main as **CommonJS** — there is no `package.json`
-inside the blob for it to consult, and the `.mjs` name has no effect on an
-embedded script — while the stack forced ESM, because esbuild will not emit
-CommonJS for a graph containing top-level await. The await came from the
-layout engine: `yoga-layout`'s default entry is
-`const Yoga = wrapAssembly(await loadYoga())`, and every app inherited it.
-`src/yoga.js` loads the engine through `yoga-layout/load` instead — enums
-synchronously, WebAssembly during `createRoot()` — and react-x11 moved its
-own three `await import()`s for DevTools, click-to-component and tracing out
-of module scope. Nothing in the graph has a top-level await now, and
-`test/yoga.test.js` fails the build if an import puts one back.
-
-Verified: a bundle of react-x11, react, ntk and node-x11's in-process X
-server mounts a 40-row tree and paints it — 157 requests in 7 socket writes —
-from a single 142 MB file, most of which is node itself.
-
-What the CommonJS format costs you, in your own code:
+Node's SEA evaluates the embedded main as **CommonJS** — there is no
+`package.json` inside the blob, and a `.mjs` name has no effect on an
+embedded script — so the bundle is `--format=cjs`. Nothing in react-x11's
+graph has a top-level await, so that builds. What the CommonJS format costs
+you, in your own code:
 
 - **No top-level `await`.** Put startup in an `async function main()`;
   `const root = await createRoot()` at the top level of your entry is enough
-  to fail the build. esbuild names the file and line, so this is a
-  five-second fix rather than a mystery.
+  to fail the build. esbuild names the file and line.
 - **`import.meta.url` is `undefined`.** Anything resolving paths through it
-  needs `process.execPath` or a literal. react-x11 guards its own uses (the
-  version string DevTools shows falls back rather than throwing, and the
-  cocoa backend's addon loader is built from `process.execPath` when there
-  is no module URL — see the cocoa note below); check your app for the same
-  pattern. Two features cannot be guarded, because what they resolve through
-  it has to exist on disk: `<Frame>` forks a child entry, and
-  click-to-component opens your source. Neither works in a SEA, and each
-  fails when first used rather than at startup: a pane hands its `fallback`
-  a `spawn`-phase `ERR_INVALID_URL` (and is an empty box without one), and
-  `createRoot()` with `REACT_X11_CLICK_TO_COMPONENT` set rejects with
-  `ERR_INVALID_ARG_TYPE`. Both measured on the SEA below.
+  needs `process.execPath` or a literal; react-x11 guards its own uses. Two
+  features cannot be guarded, because what they resolve has to exist on
+  disk, and neither works in a SEA. Each fails when first used rather than
+  at startup: `<Frame>` forks a child entry, and a pane hands its `fallback`
+  a `spawn`-phase `ERR_INVALID_URL` (and is an empty box without one);
+  click-to-component opens your source, and `createRoot()` with
+  `REACT_X11_CLICK_TO_COMPONENT` set rejects with `ERR_INVALID_ARG_TYPE`.
 - **Runtime module loading is out.** Inside a SEA, the embedded main's
   `require()` _and_ `import()` resolve **built-in modules only** — a `data:`
   or `file:` URL import fails with `ERR_UNKNOWN_BUILTIN_MODULE`. A bundle has
   nothing left to resolve, so this only bites if you meant to load something
-  later. It also closes the obvious workaround for the old ESM problem: you
-  cannot carry an ESM bundle as a SEA asset and import it. The one door left
-  open is `createRequire(process.execPath)` from `node:module` — a full
-  CommonJS loader rooted at the executable, and how the cocoa addon gets in.
+  later (an ESM bundle carried as a SEA asset cannot be imported either).
+  The one door left open is `createRequire(process.execPath)` from
+  `node:module` — a full CommonJS loader rooted at the executable.
 - **Assets are not files.** `sea.getAsset()` reads what the config's
   `assets` map embedded; fonts are the usual case, and `StaticFontSource`
   takes bytes directly ([ntk's fonts guide][ntk-fonts]).
 
 On macOS the binary must be re-signed before it runs
 (`codesign --remove-signature myapp && codesign --sign - myapp`); on Linux
-nothing extra. Measured on Node 26.
+nothing extra.
 
 **The cocoa backend works in a SEA, with the addon beside the binary.** The
-native bridge is a `.node` file: the blob cannot carry it and the embedded
-main's `require()` cannot load it, so react-x11 loads it through
-`createRequire(process.execPath)` — the loader Node's SEA documentation
-prescribes — which resolves from the executable's own directory. Either
-point `REACT_X11_CALAYERS_PATH` at the addon (the `@windowkit/appkit`
-package directory or its `calayers.node` prebuild, the way
-`examples/form/main.js` names it inside a compiled bundle), or ship
-`node_modules/@windowkit/appkit` next to the executable and let the bare
-name resolve. With neither, the error is the backend's usual one, naming
-both attempts. Verified with a `createRoot({ backend: 'cocoa' })` app built
-by the recipe above: it mounts a window on the Core Animation backend all
-three ways, and the sandboxed store build in
-[tier 5](#developer-id-or-the-app-store) — this recipe inside a bundle —
-ran without the define it used to need. Earlier releases made that loader
-at import time, from
-`import.meta.url`, and every cocoa SEA died with `ERR_INVALID_ARG_VALUE`
-before the backend could say what it was loading; on a release you cannot
-move off, `--define:import.meta.url='"file:///dev/null"'` at bundle time is
-the workaround, and `test/cocoa-native.test.js` keeps the fix.
+native bridge is a `.node` file the blob cannot carry, so react-x11 loads it
+through `createRequire(process.execPath)`, which resolves from the
+executable's own directory. Either point `REACT_X11_CALAYERS_PATH` at the
+addon (the `@windowkit/appkit` package directory or its `calayers.node`
+prebuild, the way `examples/form/main.js` names it inside a compiled
+bundle), or ship `node_modules/@windowkit/appkit` next to the executable and
+let the bare name resolve. With neither, the error names both attempts.
 
-A SEA runs the cocoa backend in pump mode, on the main thread: the move
-onto a worker (below) starts the worker on the entry file, and a SEA's
-entry is inside the binary, where a worker cannot load it from. So a menu,
-a drag or a live resize stops its JS, as every cocoa app's did before
-threaded mode.
+A SEA runs the cocoa backend in pump mode, on the main thread — its entry
+is inside the binary, where a worker cannot load it from — so a menu, a
+drag or a live resize stops its JS
+([below](#on-macos-the-app-moves-onto-a-worker)).
 
 [ntk-fonts]: https://github.com/sidorares/ntk/blob/master/docs/fonts.md
 
@@ -202,15 +151,14 @@ metadata rather than anything about JavaScript.
   the size.
 
 Nothing here is react-x11-specific — any Node desktop app packages the same
-way — which is why this section is short rather than absent.
+way.
 
 ## Tier 5 — a macOS `.app`
 
-The cocoa backend's counterpart to tier 4, and the same shape: a wrapper
-around tier 2 or tier 3 whose content is metadata. It matters more than it
-looks, because several integrations are not features you enable but things
-macOS grants **a bundle** and refuses a loose executable — the notification
-centre first among them ([notifications.md](notifications.md)).
+The cocoa backend's counterpart to tier 4: a wrapper around tier 2 or tier
+3 whose content is metadata. Several integrations are things macOS grants
+**a bundle** and refuses a loose executable — the notification centre first
+among them ([notifications.md](notifications.md)).
 
 ```sh
 APP=Downloads.app
@@ -238,14 +186,12 @@ $APP/Contents/MacOS/Downloads app.mjs   # or app.cjs from tier 3
 
 **The executable must be the real binary, in `Contents/MacOS/`.** A shell
 script that execs node from elsewhere does not work: `NSBundle.mainBundle` is
-resolved from the running executable's own path, so the bundle the system
-sees would be node's location, not yours. Copy the binary in (or ship a tier
-3 SEA, which is one file and wants to live there anyway). Which tier the
-bundle wraps decides where the app's JS runs: a tier 2 bundle beside the
-binary moves onto a worker, a SEA stays on the pump
+resolved from the running executable's own path. Copy the binary in (or ship
+a tier 3 SEA). Which tier the bundle wraps decides where the app's JS runs: a
+tier 2 bundle beside the binary moves onto a worker, a SEA stays on the pump
 ([below](#on-macos-the-app-moves-onto-a-worker)).
 
-What the bundle changes, measured with the same script run both ways:
+What the bundle changes:
 
 |                                           | inside the `.app`       | bare `node`        |
 | ----------------------------------------- | ----------------------- | ------------------ |
@@ -264,39 +210,31 @@ Apple Events ([uri-schemes.md](uri-schemes.md)).
 An **ad-hoc signature (`--sign -`) is enough to be a bundle, and not enough to
 post a notification.** With one, the centre reports `available: true` and
 every authorization request fails with `UNErrorDomain` code 1
-(`notificationsNotAllowed`) — the prompt never appears, the status stays
-`notDetermined`, and `usernotificationsd` logs nothing at all, so the system
-never registered the app as a notification client. Measured here as not the
-cause: registering with `lsregister -f`, launching through `open -a` instead
-of exec'ing the binary, `activationPolicy: 'regular'` with a real window on
-screen, and re-signing with the hardened runtime and node's own entitlements.
-None of them move it.
+(`notificationsNotAllowed`): the prompt never appears and the status stays
+`notDetermined`. Registering with `lsregister -f`, launching through
+`open -a`, `activationPolicy: 'regular'` and the hardened runtime do not
+change that.
 
-The remaining variable is the identity itself — a real Apple Development or
-Developer ID certificate, which a free Apple ID gets you through Xcode:
+The documented requirement is a real Apple Development or Developer ID
+certificate, which a free Apple ID gets you through Xcode (not tested here):
 
 ```sh
 security find-identity -v -p codesigning        # pick one
 codesign --force --sign "Apple Development: you@example.com (TEAMID)" $APP
 ```
 
-That is the documented requirement and the untested one, because the machine
-this page was measured on has no signing identity. If you have a certificate
-and it still refuses, that is worth an issue rather than a workaround.
-
-Until then the ladder does the right thing on its own: `notify()` falls
-through to `osascript`, which delivers real banners attributed to Script
-Editor, and `useNotifier().backend` says `osascript` so an app can tell the
-difference ([notifications.md](notifications.md)). Nothing else about the
-bundle depends on the certificate.
+Without one, `notify()` falls through to `osascript`, which delivers real
+banners attributed to Script Editor, and `useNotifier().backend` says
+`osascript` so an app can tell the difference
+([notifications.md](notifications.md)). Nothing else about the bundle
+depends on the certificate.
 
 ### Developer ID, or the App Store
 
-Past the ad-hoc signature there are two ways out of the building, and they
-want different runtimes. Measured 2026-09-08 on macOS 15.2 with bun 1.4.0
-and node 26. The machine has no signing identity, so the line through this
-section is the ad-hoc one: everything on the near side of it was run, and
-everything past it is Apple's documentation, marked as such.
+Past the ad-hoc signature there are two ways to distribute, and they want
+different runtimes. The sandboxed, ad-hoc-signed half below was run (macOS
+15.2, bun 1.4.0, node 26); the steps that need a real identity follow
+Apple's documentation and were not run.
 
 |                  | Developer ID — a download                          | Mac App Store                                        |
 | ---------------- | -------------------------------------------------- | ---------------------------------------------------- |
@@ -307,52 +245,23 @@ everything past it is Apple's documentation, marked as such.
 | identity         | Developer ID Application                           | Apple Distribution, plus an installer identity       |
 | then             | `notarytool`, `stapler`                            | `productbuild`, Transporter                          |
 
-**The sandbox is where bun stops.** Apple's App Sandbox page: "To
-distribute a macOS app through the Mac App Store, you must enable the App
-Sandbox capability" — one entitlement, `com.apple.security.app-sandbox`.
-The form example's bundle, as `make-app.sh` builds it with
-`bun build --compile` and re-signed with only that entitlement, crashes at
-launch every time:
-
-- **the bare binary**, outside any bundle: `SIGTRAP` in
-  `_libsecinit_appsandbox`, the libSystem initializer that applies the
-  sandbox — before a line of JavaScript runs;
-- **inside the bundle**: `SIGABRT` in HIServices' `_RegisterApplication`,
-  under `-[NSApplication init]`, after the kernel logs
-  `Sandbox: Guestbook deny(1) mach-lookup com.apple.coreservices.launchservicesd`.
-
-Measured not to be the cause: how it is launched (exec'd from a shell, in
-the foreground under a watchdog, or by `open`), the plist (the example's
-and a minimal one), and where the bundle sits. Upstream:
-[oven-sh/bun#15661][bun-15661], "Cannot run Bun within macOS sandbox", open
-since December 2024 — its "status code 5" is this SIGTRAP.
-
-The same example, sandboxed with the same entitlement and the same ad-hoc
-signature, runs as node: as an esbuild `.mjs` (tier 2) under a copied
-`node` binary, and as a `node --build-sea` executable (tier 3). Both stayed
-up with the window on screen and logged no `Sandbox: … deny` line at all;
-the SEA, launched by `open`, registers with Launch Services as itself and
-gets its container:
-
-```
-$ open SeaGuestbook.app
-"LSDisplayName"="SeaGuestbook"
-"CFBundleIdentifier"="com.example.seaguestbook"
-container: ~/Library/Containers/com.example.seaguestbook
-```
-
-The control: a five-line Swift AppKit app (`NSApplication.shared`, print
-the container id), ad-hoc-signed with the same entitlement, runs and
-reports its container. So an ad-hoc signature plus the entitlement is a
-valid local sandbox test, and no certificate is needed for this part.
+**Bun does not start under the App Sandbox**, which the Mac App Store
+requires (one entitlement, `com.apple.security.app-sandbox`). A
+`bun build --compile` binary signed with it crashes at launch: `SIGTRAP` in
+`_libsecinit_appsandbox` before any JavaScript runs, or, inside a bundle,
+`SIGABRT` in `_RegisterApplication` after a
+`Sandbox: … deny(1) mach-lookup com.apple.coreservices.launchservicesd`
+([oven-sh/bun#15661][bun-15661]). The same app as node — a tier 2 `.mjs`
+under a copied `node`, or a tier 3 SEA — runs sandboxed. An ad-hoc
+signature plus the entitlement is a valid local sandbox test; no
+certificate is needed for it.
 
 **The SEA is the store shape.** Launch Services starts a bundle's
 executable with no arguments, so a copied `node` has nothing to run; the
-SEA carries its main. (The sandbox also moves the working directory into
-the container — `ProbeNode probe.mjs` with a relative path failed with
-`MODULE_NOT_FOUND` at `~/Library/Containers/…/Data/probe.mjs`, an absolute
-one ran — and a SEA has no path to get wrong.) Its build is tier 3's, with
-one esbuild define that the form example needs today:
+SEA carries its main. The sandbox also moves the working directory into the
+container (`~/Library/Containers/<bundle id>/Data`), so a relative script
+path fails with `MODULE_NOT_FOUND`; a SEA has no path to get wrong. Its
+build is tier 3's, with one esbuild define that the form example needs:
 
 ```sh
 esbuild sea-main.js --bundle --platform=node --format=cjs --jsx=automatic --outfile=app.cjs \
@@ -360,46 +269,34 @@ esbuild sea-main.js --bundle --platform=node --format=cjs --jsx=automatic --outf
 node --build-sea sea.json   # { "main": "app.cjs", "output": "Guestbook", "disableExperimentalSEAWarning": true }
 ```
 
-- **`REACT_X11_NO_AUTORUN`.** `index.jsx` mounts itself under that guard
-  with a top-level `await createRoot()`, which `cjs` cannot express;
-  without the define esbuild stops at
-  `Top-level await is currently not supported with the "cjs" output format`.
-  Defined, the guard is a constant and the branch is dropped at build
-  time; the entry mounts `App` itself, in an async function:
+`index.jsx` mounts itself under a `REACT_X11_NO_AUTORUN` guard with a
+top-level `await createRoot()`, which `cjs` cannot express; defined, the
+guard is a constant, the branch is dropped at build time, and the entry
+mounts `App` itself, in an async function:
 
-  ```js
-  // sea-main.js — main.js's job, as CommonJS
-  const path = require('node:path');
-  const contents = path.resolve(path.dirname(process.execPath), '..');
-  process.env.REACT_X11_CALAYERS_PATH ??= path.join(
-    contents,
-    'Resources',
-    'calayers.node',
-  );
-  process.env.REACT_X11_BACKEND ??= 'cocoa';
-  (async () => {
-    const [{ createRoot }, { default: App }, React] = await Promise.all([
-      import('react-x11'),
-      import('./index.jsx'),
-      import('react'),
-    ]);
-    const root = await createRoot();
-    root.render(React.createElement(App));
-  })().catch((e) => {
-    console.error(e);
-    process.exit(1);
-  });
-  ```
-
-- **`import.meta.url` needs no define any more.** This recipe used to
-  carry a second one, `--define:import.meta.url='"file:///dev/null"'`,
-  because the cocoa backend's addon loader was made from `import.meta.url`
-  at import and a SEA has none. The loader is now made from
-  `process.execPath` when the URL is missing
-  ([tier 3](#tier-3--node-single-executable)), and the addon is found
-  through `REACT_X11_CALAYERS_PATH` as before. On a react-x11 whose
-  `src/cocoa/native.js` still calls `createRequire(import.meta.url)` at
-  module scope, put the define back.
+```js
+// sea-main.js — main.js's job, as CommonJS
+const path = require('node:path');
+const contents = path.resolve(path.dirname(process.execPath), '..');
+process.env.REACT_X11_CALAYERS_PATH ??= path.join(
+  contents,
+  'Resources',
+  'calayers.node',
+);
+process.env.REACT_X11_BACKEND ??= 'cocoa';
+(async () => {
+  const [{ createRoot }, { default: App }, React] = await Promise.all([
+    import('react-x11'),
+    import('./index.jsx'),
+    import('react'),
+  ]);
+  const root = await createRoot();
+  root.render(React.createElement(App));
+})().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
+```
 
 The bundle is then tier 5's — the plist, the SEA at
 `Contents/MacOS/Guestbook`, `calayers.node` in `Contents/Resources` — and
@@ -411,18 +308,14 @@ codesign --force --sign - --entitlements sandbox.plist Guestbook.app
 open Guestbook.app
 ```
 
-where `sandbox.plist` holds the one key. That is what ran.
+where `sandbox.plist` holds the one key.
 
-**Sign inside-out, and never `--deep`.** Apple DTS, in "Signing a Mac
-Product For Distribution" and "Creating distribution-signed code for Mac"
-([forums 128166][dts-128166], [701514][dts-701514]): "Do not use the
-`--deep` argument … it will cause problems when signing a complex
-program". Sign each code item separately, dependencies first — the addon
-before the app, because the app's signature seals the addon's — and put
-entitlements on the main executable only: "Do not apply entitlements to
-library code. It doesn't do anything useful and can prevent your code from
-running." `--deep` applies one set of options to every item, which is the
-wrong thing the moment the app has entitlements and the addon must not.
+**Sign inside-out, and never `--deep`** (Apple DTS, [forums
+128166][dts-128166], [701514][dts-701514]). Sign each code item separately,
+dependencies first — the addon before the app, because the app's signature
+seals the addon's — and put entitlements on the main executable only.
+`--deep` applies one set of options to every item, which is wrong the moment
+the app has entitlements and the addon must not.
 
 **Developer ID — not run.** For a download outside the store, Gatekeeper
 wants a Developer ID signature with the hardened runtime, then
@@ -444,21 +337,15 @@ xcrun stapler staple Guestbook.app
 `com.apple.security.cs.allow-jit`, `allow-unsigned-executable-memory`,
 `disable-executable-page-protection`, `allow-dyld-environment-variables`
 and `disable-library-validation`. Node's file has a sixth,
-`com.apple.security.get-task-allow` — a debugging entitlement, and the
-`node` you copy from a release carries it (`codesign -d --entitlements -`
-on node 26 lists all six). Never ship it; a re-sign replaces node's
-entitlements wholesale, so it only ever appears if your plist names it.
+`com.apple.security.get-task-allow` — a debugging entitlement, which the
+`node` you copy from a release carries. Never ship it; a re-sign replaces
+node's entitlements wholesale, so it only appears if your plist names it.
 
-What the hardened runtime needs was measured with an ad-hoc signature and
-`--options runtime`, which is the real thing: a copied `node` signed with
-no entitlements aborts at startup —
-`Fatal process out of memory: Failed to reserve virtual memory for CodeRange`,
-V8 unable to map executable memory — and runs with `allow-jit` alone; a
-`bun build --compile` binary ran with none, with `allow-jit` alone, and
-with all five (whether its JIT was on was not measured). So `allow-jit` is
-the load-bearing one for node, and the other four are what upstream
-ships, not what this page found necessary. The Developer ID identity,
-`notarytool` and `stapler` were not run: the machine has none.
+Under the hardened runtime a copied `node` signed with no entitlements
+aborts at startup with
+`Fatal process out of memory: Failed to reserve virtual memory for CodeRange`;
+`allow-jit` alone is enough for it to run. A `bun build --compile` binary
+ran with none. The other four are what upstream ships.
 
 **Mac App Store — not run.** Sign the same bundle, inside-out, with the
 store identity, and package it as an installer:
@@ -475,13 +362,12 @@ xcrun altool --upload-app -f Guestbook.pkg -t macos --apiKey KEY --apiIssuer ISS
 `store.plist` is `com.apple.security.app-sandbox` plus what the app
 actually needs — `network.client`, `files.user-selected.read-write` — and
 none of the hardened-runtime keys: the store does not require the hardened
-runtime, and Apple's "Porting just-in-time compilers to Apple silicon" is
-explicit that `allow-jit` "is required only when an app adopts the
-Hardened Runtime capability". `Contents/embedded.provisionprofile` is
-needed only for restricted entitlements (iCloud, push, app groups) or
-TestFlight. The ad-hoc half of this — the sandboxed SEA bundle, launched
-by `open`, registered, contained, zero denials — is what was measured; the
-identity, `productbuild --sign` and the upload are Apple's documentation.
+runtime, and `allow-jit` is needed only under it.
+`Contents/embedded.provisionprofile` is needed only for restricted
+entitlements (iCloud, push, app groups) or TestFlight.
+
+Design notes — the sandbox crash investigation, what was measured and how:
+[design/packaging.md](../design/packaging.md#developer-id-or-the-app-store).
 
 [bun-15661]: https://github.com/oven-sh/bun/issues/15661
 [dts-128166]: https://developer.apple.com/forums/thread/128166
@@ -492,32 +378,21 @@ identity, `productbuild --sign` and the upload are Apple's documentation.
 ## On macOS: the app moves onto a worker
 
 On macOS the first import of react-x11 moves the app onto a
-`worker_threads` Worker. AppKit keeps the process main thread — it is the
-only thread AppKit lets own a window — and an app whose JS ran there would
-stop through every menu, drag, live resize and modal panel
+`worker_threads` Worker. AppKit keeps the process main thread — the only
+thread it lets own a window — and an app whose JS ran there would stop
+through every menu, drag, live resize and modal panel
 ([macos.md](macos.md#js-on-a-worker-a-ui-thread-of-the-bridges-own)). The
 worker's entry is your entry itself, run from the top: when react-x11 is
 imported the entry has not run a line yet, because its imports finish
 before its body does. The main thread then waits, and launches AppKit only
 when the app's first cocoa `createRoot` asks for it.
 
-What it costs, measured on an M1 Pro with Node 26 and Bun 1.4 — spawn to
-the first painted window of a one-window app, the median of seven runs:
-
-|                       | pump (`REACT_X11_THREADED=0`) | the move (the default) | `--import react-x11/cocoa-main` |
-| --------------------- | ----------------------------: | ---------------------: | ------------------------------: |
-| Node, the source      |                        471 ms |                 544 ms |                          462 ms |
-| Node, a tier 2 bundle |                        427 ms |                 463 ms |                               — |
-| Bun, the source       |                        408 ms |                 446 ms |                          385 ms |
-| Bun, a tier 2 bundle  |                        401 ms |                 426 ms |                               — |
-| memory, Node / Bun    |                  170 / 150 MB |           219 / 182 MB |                    186 / 159 MB |
-
-The move's 25–73 ms and 30–50 MB are the main thread loading the entry's
-imports once, for nothing, before the worker loads them again; a bundle is
-at the low end because one file loads faster than a tree of them. An app
-that imports react-x11 and never makes a cocoa root — an X11 app on
-XQuartz, a script — never launches AppKit, and pays 95–131 ms more to exit
-(Node 251 → 382 ms, Bun 196 → 291 ms).
+The move costs 25–73 ms of startup and 30–50 MB: the main thread loads the
+entry's imports once before the worker loads them again (a tier 2 bundle is
+at the low end). An app that imports react-x11 and never makes a cocoa root
+— an X11 app on XQuartz, a script — never launches AppKit, and takes
+95–131 ms longer to exit. Measurements:
+[design/packaging.md](../design/packaging.md#on-macos-the-app-moves-onto-a-worker).
 
 To skip the cost, or the move:
 
@@ -554,20 +429,18 @@ Node 20 and 22, under an ES module loader. By Node version, measured on
 | under `--import react-x11/cocoa-main`                  | moves       | moves             |
 | importing react-x11 with an `import()`                 | stays       | stays             |
 
-An app under a loader stays on Node 20 and 22 because tsx, the loader an
-app is likeliest to run under, keeps its hooks to the main thread there,
-and a worker without them stops on the first `.jsx` or `.ts` file it loads
-(measured, tsx 4.23). No loader can be asked before the move, so any
-`--import` or `--loader`, on the command line or in `NODE_OPTIONS`,
-counts. The launcher moves such an app all the same, for a loader that
-does follow it onto a worker; tsx 4.23 does from Node 22.22.3, by its own
-version check. On Node 24 and later tsx follows from tsx 4.21.1 and Node
-24.11.1, and an older one there stops the app as it starts, on
-`ERR_UNKNOWN_FILE_EXTENSION` (measured, tsx 4.20.6): update tsx, or set
+An app under a loader stays on the main thread on Node 20 and 22: tsx, the
+likeliest loader, keeps its hooks to the main thread there, and a worker
+without them stops on the first `.jsx` or `.ts` file it loads. Any
+`--import` or `--loader`, on the command line or in `NODE_OPTIONS`, counts.
+The launcher moves such an app all the same, for a loader that does follow
+it onto a worker (tsx 4.23 does from Node 22.22.3). On Node 24 and later
+tsx follows from tsx 4.21.1 and Node 24.11.1; an older tsx there stops the
+app as it starts with `ERR_UNKNOWN_FILE_EXTENSION` — update tsx, or set
 `REACT_X11_THREADED=0`. Bun moves an ES module entry and a CommonJS one,
 `bun app.mjs` and `bun app.cjs`, and keeps the main thread for an entry
-that imports react-x11 with an `import()`, measured on Bun 1.4; it tells a
-late import its own way ([macos.md](macos.md#the-renderers-half)).
+that imports react-x11 with an `import()`; it tells a late import its own
+way ([macos.md](macos.md#what-changes-for-an-app)).
 
 ## Checklist
 
@@ -590,22 +463,6 @@ late import its own way ([macos.md](macos.md#the-renderers-half)).
   never `--deep`.
 - Test on a display you did not develop on. Fonts are the usual surprise:
   family resolution goes through `fc-match`, so `sans-serif` is a different
-  face on the target ([remote.md](remote.md#the-other-x-servers), issue #86).
-
-## Upstream
-
-Two things would delete the rest of the friction here:
-
-- **node-x11: ESM sources** ([node-x11#246][x11-246]). That removes tier 2's
-  banner, which is now the only real trap on the page. Note the tempting
-  cheaper version does not work: `node:`-prefixed requires change nothing,
-  because esbuild wraps a CommonJS module either way and its `require` shim
-  throws in ESM output regardless of the specifier — measured, not assumed.
-- **bun: App Sandbox** ([oven-sh/bun#15661][bun-15661]). Until a
-  `bun build --compile` binary can start sandboxed, a Mac App Store build is
-  node's SEA and bun is a Developer ID runtime only.
-
-ESM support for a SEA's embedded main would be welcome in Node, but it is no
-longer load-bearing: tier 3 works as CommonJS.
+  face on the target ([remote.md](remote.md#the-other-x-servers)).
 
 [x11-246]: https://github.com/sidorares/node-x11/issues/246
