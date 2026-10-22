@@ -19,6 +19,11 @@ const fontDir = join(
   'fonts',
 );
 
+// Every root here is `createRoot({ app, desktop: false })`: these tests read
+// pixels, and a root that follows the desktop starts from the appearance the
+// last real app on this machine saved (~/.cache/react-x11/appearance.json).
+// After any app had run on a dark desktop, the textinput below drew its text
+// in the dark palette's ink, near-white on its white box, and failed.
 async function createHeadlessApp() {
   const server = xserver.createServer({ width: 640, height: 480 });
   const [serverEnd, clientEnd] = xserver.createStreamPair();
@@ -86,7 +91,7 @@ async function waitForPixel(ctx, w, h, x, y, want, what) {
 
 test('renders a window tree into an in-process X server', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const instance = await render(
       React.createElement(
@@ -119,7 +124,7 @@ test('renders a window tree into an in-process X server', async () => {
 
 test('child windows stack bottom-to-top in JSX order on the server', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const refs = { a: React.createRef(), b: React.createRef() };
     // Two child windows on the same spot. The check is QueryTree, not
@@ -174,7 +179,7 @@ test('child windows stack bottom-to-top in JSX order on the server', async () =>
 
 test('paints a flex box tree and reflows on update', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const ui = (leftColor) =>
       React.createElement(
@@ -210,7 +215,7 @@ test('paints a flex box tree and reflows on update', async () => {
 
 test('a scroll box scrolls its content (pixel-verified)', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const ref = React.createRef();
     const wnd = await render(
@@ -244,7 +249,7 @@ test('a scroll box scrolls its content (pixel-verified)', async () => {
 
 test('popup is override-redirect on the server and paints', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const ref = React.createRef();
     await render(
@@ -292,7 +297,7 @@ test('popup is override-redirect on the server and paints', async () => {
 
 test('a popup anchors to the window even once a WM has reframed it', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const ref = React.createRef();
     const wnd = await render(
@@ -346,7 +351,7 @@ test('a popup anchors to the window even once a WM has reframed it', async () =>
 
 test('textinput renders its value through the ntk text stack', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const wnd = await render(
       React.createElement(
@@ -386,7 +391,7 @@ test('textinput renders its value through the ntk text stack', async () => {
 
 test('an unfocused field shows the start of its value, not the caret', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     // The caret starts at the *end* of the value, and the paint used to chase
     // it whether or not the field had ever been focused — so a field holding
@@ -448,7 +453,7 @@ test('an unfocused field shows the start of its value, not the caret', async () 
 
 test('textinput caret advances past trailing spaces', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const ref = React.createRef();
     await render(
@@ -494,7 +499,7 @@ test('textinput caret advances past trailing spaces', async () => {
 
 test('renders <text> through the ntk text stack', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const wnd = await render(
       React.createElement(
@@ -559,7 +564,7 @@ const isDark = ([r, g, b]) => r < 128 && g < 128 && b < 128;
 
 test('centered text is vertically balanced (half-leading)', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const wnd = await render(
       React.createElement(
@@ -626,7 +631,7 @@ test('centered text is vertically balanced (half-leading)', async () => {
 
 test('vector content scrolled out of a scroll box leaves no ink behind', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     // `<svg>` draws glyph runs and vector shapes of its own, which used to
     // bypass the 2d clip and paint over whatever was above the scroll box
@@ -705,7 +710,7 @@ test('vector content scrolled out of a scroll box leaves no ink behind', async (
 
 test('<svg> scales its viewBox into the content box', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const wnd = await render(
       React.createElement(
@@ -730,7 +735,7 @@ test('<svg> scales its viewBox into the content box', async () => {
 
 test('<svg> JSX children render and update declaratively', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const ui = (fill) =>
       React.createElement(
@@ -773,7 +778,7 @@ test('<svg> JSX children render and update declaratively', async () => {
 
 test('<textarea> edits multi-line text with line-aware caret movement', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const ref = React.createRef();
     const wnd = await render(
@@ -847,7 +852,7 @@ test('<textarea> edits multi-line text with line-aware caret movement', async ()
 
 test('window hints reach the X server as real properties', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     // the render callback resolves to the live ntk window (getPublicInstance)
     const wnd = await render(
@@ -908,7 +913,7 @@ test('window hints reach the X server as real properties', async () => {
 
 test('overflow: hidden still clips a child that really does overflow', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     // A clip that clips nothing is skipped, because each one costs a
     // server-side mask rebuild and a table sets `overflow: hidden` on every
@@ -982,7 +987,7 @@ test('overflow: hidden still clips a child that really does overflow', async () 
 // the baseline — the two edges the trim is defined against.
 test('textBoxTrim: cap-alphabetic centres a label on its capitals', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   const W = 200;
   const H = 120;
   const PAD = 12;
@@ -1094,7 +1099,7 @@ test('textBoxTrim: cap-alphabetic centres a label on its capitals', async () => 
 // `<text>` because "the widgets set it" is the claim.
 test('a button holds its label evenly on the capitals', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   const W = 300;
   const H = 160;
 
@@ -1156,7 +1161,7 @@ test('a button holds its label evenly on the capitals', async () => {
 // is what happened the moment the labels were trimmed and this did not follow.
 test('a field, a dropdown and a button are the same height', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   const { Button, Select } = await import('../src/index.js');
   const field = {
     paddingTop: '$paddingY',
@@ -1222,7 +1227,7 @@ test('a field, a dropdown and a button are the same height', async () => {
 // app has no fonts, so nothing there ever wraps.
 test('a table cell keeps its text on one line, inside its row', async () => {
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   const { Table } = await import('../src/index.js');
 
   try {
@@ -1294,7 +1299,7 @@ test('a window with no size fits its text, and wraps to fit the screen', async (
   // real glyph metrics, and the height-for-width pass that a wrapping
   // paragraph is the whole reason for.
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const label = 'Fit me';
     const wnd = await render(
@@ -1352,7 +1357,7 @@ test('a content floor is measured through real glyphs and read back', async () =
   // The two claims about `minWidth="auto"` that need a font to make, read
   // back off the server as the window manager would see them.
   const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
+  const x11Root = await createRoot({ app, desktop: false });
   try {
     const wnd = await render(
       React.createElement(
