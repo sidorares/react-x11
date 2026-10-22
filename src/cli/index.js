@@ -48,7 +48,13 @@ async function main([command, ...rest]) {
     // A terminal's own width, within reason; 80 for a pipe or a file.
     const columns = process.stdout.isTTY ? process.stdout.columns : 80;
     const width = Math.min(100, Math.max(60, columns || 80));
-    process.stdout.write(`${USAGE}\n${formatEnvironment(width)}`);
+    // Colour where the terminal has it — hasColors() reads NO_COLOR and
+    // FORCE_COLOR — and into a pipe only when FORCE_COLOR asks for it.
+    const force = process.env.FORCE_COLOR;
+    const color = process.stdout.isTTY
+      ? process.stdout.hasColors()
+      : force !== undefined && force !== '0' && force !== 'false';
+    process.stdout.write(`${USAGE}\n${formatEnvironment(width, { color })}`);
     return 0;
   }
   if (command === '-v' || command === '--version') {

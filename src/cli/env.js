@@ -434,33 +434,49 @@ export const ENVIRONMENT = [
 ];
 
 /**
- * `text` broken into lines of at most `width` columns, each `indent`ed. A
- * `{ … }` stays whole, so `createRoot({ scale })` is never cut after its
- * brace.
+ * `text` broken into lines of at most `width` columns, each `indent`ed and
+ * passed through `style`. A `{ … }` stays whole, so `createRoot({ scale })`
+ * is never cut after its brace.
  */
-function wrap(text, width, indent) {
+function wrap(text, width, indent, style = (s) => s) {
   const lines = [];
   let line = '';
   for (const word of text.match(/(?:\{[^}]*\}|\S)+/g) ?? []) {
     if (line && indent.length + line.length + 1 + word.length > width) {
-      lines.push(indent + line);
+      lines.push(indent + style(line));
       line = word;
     } else {
       line = line ? `${line} ${word}` : word;
     }
   }
-  if (line) lines.push(indent + line);
+  if (line) lines.push(indent + style(line));
   return lines.join('\n');
 }
 
-/** The list as `react-x11 help` prints it, wrapped to `width` columns. */
-export function formatEnvironment(width = 80) {
+// SGR pairs, each closing only what it opened. Applied after the wrapping,
+// which counts the columns of the plain text.
+const STYLES = {
+  title: ['\x1b[1m', '\x1b[22m'],
+  name: ['\x1b[1;36m', '\x1b[39;22m'],
+  dim: ['\x1b[2m', '\x1b[22m'],
+};
+
+/**
+ * The list as `react-x11 help` prints it, wrapped to `width` columns. With
+ * `color`, group titles are bold, names bold cyan, and value forms and
+ * intros dim; the text is otherwise the same.
+ */
+export function formatEnvironment(width = 80, { color = false } = {}) {
+  const paint = (style) => (text) =>
+    color ? STYLES[style][0] + text + STYLES[style][1] : text;
   const out = ['Environment variables:'];
   for (const group of ENVIRONMENT) {
-    out.push('', group.title);
-    if (group.intro) out.push(wrap(group.intro, width, '  '));
+    out.push('', paint('title')(group.title));
+    if (group.intro) out.push(wrap(group.intro, width, '  ', paint('dim')));
     for (const { name, value, text } of group.vars) {
-      out.push(`  ${value ? `${name}=${value}` : name}`);
+      out.push(
+        `  ${paint('name')(name)}${value ? paint('dim')(`=${value}`) : ''}`,
+      );
       out.push(wrap(text, width, '      '));
     }
   }

@@ -51,19 +51,51 @@ test('the list wraps to the width it is given', () => {
   }
 });
 
-test('react-x11 help prints the usage, then every variable', () => {
-  const { status, stdout } = spawnSync(process.execPath, [bin, 'help'], {
+// eslint-disable-next-line no-control-regex
+const SGR = /\x1b\[[\d;]*m/g;
+
+test('colour adds escapes and nothing else', () => {
+  const plain = formatEnvironment(80);
+  const coloured = formatEnvironment(80, { color: true });
+  assert.doesNotMatch(plain, SGR);
+  assert.equal(coloured.replace(SGR, ''), plain);
+  assert.ok(coloured.includes('\n\x1b[1mBackend and display\x1b[22m\n'));
+  assert.ok(
+    coloured.includes(
+      '  \x1b[1;36mREACT_X11_BACKEND\x1b[39;22m' +
+        '\x1b[2m=x11|cocoa|wayland|win32|auto\x1b[22m\n',
+    ),
+  );
+  // a name with no value form is the name alone
+  assert.ok(
+    coloured.includes('  \x1b[1;36mREACT_X11_DEVTOOLS_SESSION\x1b[39;22m\n'),
+  );
+});
+
+/** The bin, into a pipe, with the colour variables the test is given. */
+function cli(args, env = {}) {
+  const base = { ...process.env };
+  delete base.FORCE_COLOR;
+  delete base.NO_COLOR;
+  return spawnSync(process.execPath, [bin, ...args], {
     encoding: 'utf8',
+    env: { ...base, ...env },
   });
+}
+
+test('react-x11 help prints the usage, then every variable', () => {
+  const { status, stdout } = cli(['help']);
   assert.equal(status, 0);
   assert.match(stdout, /^Usage: react-x11 dev <file>/);
   assert.match(stdout, /\nEnvironment variables:\n/);
   for (const name of listed) assert.ok(stdout.includes(`  ${name}`), name);
+  // a pipe gets no colour unless FORCE_COLOR asks for it
+  assert.doesNotMatch(stdout, SGR);
+  assert.match(cli(['help'], { FORCE_COLOR: '1' }).stdout, SGR);
+  assert.doesNotMatch(cli(['help'], { FORCE_COLOR: '0' }).stdout, SGR);
 
   // --help stays the short form.
-  const short = spawnSync(process.execPath, [bin, '--help'], {
-    encoding: 'utf8',
-  });
+  const short = cli(['--help']);
   assert.equal(short.status, 0);
   assert.doesNotMatch(short.stdout, /Environment variables/);
 });
