@@ -1,0 +1,1 @@
+Build an address book: groups of contacts, the contacts in the selected group, and the details of one contact, which I can edit.

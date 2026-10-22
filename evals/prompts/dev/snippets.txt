@@ -1,0 +1,1 @@
+Build a code snippet manager: snippets grouped by language, a syntax-highlighted editor for the selected one, and copy to clipboard.

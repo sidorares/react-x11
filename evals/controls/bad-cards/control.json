@@ -1,0 +1,5 @@
+{
+  "expect": "bad",
+  "flaw": "card soup: every file a rounded, shadowed card on a grey page",
+  "catches": ["noWebLook"]
+}

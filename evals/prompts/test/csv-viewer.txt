@@ -1,0 +1,1 @@
+Build a CSV viewer that opens a CSV file and shows it in a sortable, filterable table, with a sample file bundled so it has something to show at first.
