@@ -1628,7 +1628,10 @@ function startDecoder(file, frames) {
   default, `'bt601'`, `'bt2020'`) and `range` (`'video'` default, `'full'`)
   say what YCbCr numbers mean.
 - **`preferredFormats`** is the display's order, cheapest first:
-  `NV12, I420, BGRA` on macOS, `BGRA` where a 2D context draws the frame.
+  `NV12, I420, BGRA` where something native takes YCbCr as it is — a layer
+  on macOS, a shader on Wayland, an Xv port on X11 — and `BGRA` where the
+  frame is converted in JavaScript. On X11 it is `BGRA`, not kept, for the
+  few round trips until the port answers after the first sink is made.
   Every format works everywhere.
 - **The newest frame is the frame**: a push replaces the last, shown or not;
   nothing queues, and the decoder's clock is the pacing. A push hands its
@@ -1650,9 +1653,22 @@ millisecond and **no window frame**. Otherwise — a tooltip over it, a
 dialog's dim, a rounded card — it is **drawn**: a push claims the picture,
 and the next frame composites it in paint order, in the same colours.
 
-On **X11, Wayland and Windows** it is always drawn, converted to RGBA in
-JavaScript unless BGRA (hence their preference); X11 uploads through shared
-memory where available. No colour management is applied there.
+On **X11, Wayland and Windows** it is always drawn, and what differs is how
+the frame reaches the element's surface:
+
+- **Wayland**: planes as textures, the matrix in a shader — about 0.2ms of
+  CPU for a 1080p NV12 frame, against 7.6ms converted in JavaScript.
+- **X11 with an Xv image adaptor** (glamor, under Xorg or Xwayland): the
+  frame goes to the server as decoded, through shared memory, and its GPU
+  converts it into a hidden window copied into the surface — 1.5ms a 1080p
+  NV12 frame against 15ms. Full range, BT.2020, the first frame of a size
+  and a window off screen go the JavaScript way.
+- **X11 without one, and Windows**: converted to RGBA in JavaScript unless
+  BGRA (hence their preference); X11 uploads through shared memory where
+  available.
+
+No colour management is applied on any of them. `examples/video.jsx` plays
+a file through whichever path the display has.
 
 ### `src` — the platform's player
 

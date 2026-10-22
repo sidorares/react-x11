@@ -30,6 +30,7 @@ import { releaseDevice } from './device.js';
 import { WaylandSeat } from './seat.js';
 import { WaylandBackendWindow } from './backendwindow.js';
 import { WaylandSurface } from './surface.js';
+import { releaseVideoFrame, writeVideoFrame } from './video.js';
 import { InputRouter } from './input.js';
 import { WaylandTouch } from './touch.js';
 import { WaylandTablet } from './tablet.js';
@@ -438,6 +439,32 @@ export class WaylandApp extends EventEmitter {
 
   createSurface(options) {
     return new WaylandSurface(this, options);
+  }
+
+  /**
+   * The formats a `VideoFrames` sink is cheapest in here
+   * (`preferredFormats`, src/videoframes.js): all three, YCbCr first. Every
+   * one goes up as textures as it is and is converted by a shader
+   * (src/wayland/video.js), and NV12 or I420 is less than half of BGRA's
+   * bytes on the way.
+   */
+  videoFormats() {
+    return ['NV12', 'I420', 'BGRA'];
+  }
+
+  /**
+   * A `<video>`'s frame into `surface`, its drawn presentation, on the GPU:
+   * planes as textures, the matrix in a fragment shader. False where the
+   * frame cannot be — a size past the GPU's textures — and the node
+   * converts it in JavaScript instead (src/nodes/video.js).
+   */
+  writeVideoFrame(surface, sink, frame) {
+    return writeVideoFrame(this, surface, sink, frame);
+  }
+
+  /** The node let `surface` go: its plane textures go too. */
+  releaseVideoFrame(surface) {
+    releaseVideoFrame(this, surface);
   }
 
   /**

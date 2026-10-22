@@ -90,14 +90,17 @@ that have not been built, and say so at the top.
 - [architecture/video.md](architecture/video.md) — the design record for
   video, reviewed against the four backends: why no X11 extension decodes
   anything and the one that did is dead, what a decoded frame costs through
-  core `PutImage` and what Xv would change, the VideoToolbox and Core
+  core `PutImage` and what Xv changes — built, into a redirected window
+  since no adaptor draws into a pixmap — the Wayland sink as a shader, with
+  every Linux path measured, the VideoToolbox and Core
   Animation ladder on macOS measured end to end, the YUV surface that is
   blank through `render(in:)` and drawn on screen (probed, and it reverses
   the first version's Cocoa design), what a frame sink costs through a
   plain layer, the Media Foundation plan for Windows with the probes it
   owes, a `<video>` element with two sources — `frames` everywhere, `src`
   where the platform has a player — on the sprite seam, and how `<Html>`
-  and `<MediaPlayer>` consume it. Not built.
+  and `<MediaPlayer>` consume it. Built but for Windows and `<MediaPlayer>`'s
+  frames backend.
 - [architecture/animation.md](architecture/animation.md) — what the style
   vocabulary cannot say today (a fade, a move that does not reflow, a
   timeline that ends), who should interpolate it, and what offloading a

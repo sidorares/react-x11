@@ -18,9 +18,10 @@
 // - **drawn** — everywhere else, and in every frame the presenter declines
 //   the part (something is painted over it, it fades, a rounded card does
 //   not hold it): the newest frame is copied into a surface of the node's
-//   own at paint, natively where the backend can (`app.writeVideoFrame`) and
-//   through `frameToRGBA` where it cannot, and composited at the picture's
-//   rect like an `<image>` whose pixels changed. A push claims the picture.
+//   own at paint, natively where the backend can (`writeVideoFrame`,
+//   src/videobackend.js) and through `frameToRGBA` where it cannot, and
+//   composited at the picture's rect like an `<image>` whose pixels
+//   changed. A push claims the picture.
 //
 // `src` needs a platform player, which this backend has when
 // `useSupports('mediaPlayback')` says so — the app's `createPlayer`, on macOS
@@ -41,6 +42,7 @@ import {
 } from '../imagesource.js';
 import { canPlayMedia, NoMediaPlaybackError } from '../mediaplayback.js';
 import { Surface } from '../offscreen.js';
+import { videoBackendOf } from '../videobackend.js';
 import { frameToRGBA, isVideoFrames } from '../videoframes.js';
 import { fitRect, objectFitOf } from './fit.js';
 import { intrinsicSize } from './layout.js';
@@ -592,10 +594,18 @@ export class VideoNode extends Node {
   }
 
   _upload(surface, sink, frame) {
-    // natively where the backend converts in its own code (the Cocoa
-    // bridge's writeVideoSurface: a copy for BGRA, VideoToolbox for YCbCr,
-    // colour-matched to what a layer shows)
-    if (this.app?.writeVideoFrame?.(surface, sink, frame)) return;
+    // natively where the backend converts in its own code: the Cocoa
+    // bridge's writeVideoSurface (a copy for BGRA, VideoToolbox for YCbCr,
+    // colour-matched to what a layer shows), the Wayland context's shader,
+    // an Xv port on X11 (src/videobackend.js)
+    if (
+      videoBackendOf(this.app)?.writeVideoFrame?.(surface, sink, frame, this)
+    ) {
+      // a frame converted in JavaScript earlier — the first, on X11, before
+      // the window was mapped — left a buffer the native path does not need
+      this._rgba = null;
+      return;
+    }
     const w = sink.width;
     const h = sink.height;
     if (this._rgba?.width !== w || this._rgba?.height !== h) {
@@ -632,6 +642,7 @@ export class VideoNode extends Node {
     this._surface = null;
     this._rgba = null;
     this._drawn = -1;
+    if (surface) videoBackendOf(this.app)?.releaseVideoFrame?.(surface);
     try {
       surface?.destroy();
     } catch {

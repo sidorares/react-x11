@@ -4,7 +4,9 @@ _Design record, 2026-09-08, **reviewed 2026-10-02** against master at 65e323a
 (react-x11 2.30.0, ntk ^8.17.8, `@windowkit/appkit` ^0.19.0,
 `@windowkit/win32` ^0.0.6, `@windowkit/wayland` ^3.1.1, node-x11 4.2.3 in
 the lockfile). §0.2 is what has been built since — track 1 of §12 and the
-Cocoa half of track 2. §0.1 is what
+Cocoa half of track 2 — and §0.3 the Linux rungs, built 2026-10-22: the
+Wayland sink as a shader and X11's Xv, which answered §2.1's open question
+by measurement. §0.1 is what
 moved in the month between the two dates and what it changed here; §6 is
 the element, §7 the seam it rides, §8 the two consumers it is for, §12 what
 can be built now and in what order, and §13 the spikes every number came
@@ -77,6 +79,14 @@ constraint it runs into on X11 is the one
   (4.2.3), untouched by anything here; XQuartz still answers "no adaptors
   present", so every Xv path still needs the drawn fallback by
   construction.
+- **On Linux both rungs are built (§0.3), and Xv does not draw into a
+  pixmap.** Xwayland's glamor adaptor answers `BadWindow` for one, so the
+  backing-pixmap target §2.1 hoped for does not exist; a manually
+  redirected child window placed outside its parent does, shows nowhere,
+  and is copied into the element's surface in one RENDER request. A 1080p
+  NV12 frame: 15ms through the JavaScript conversion, 1.5ms through Xv; on
+  Wayland's GLES context 0.2ms of CPU through a shader, where JavaScript
+  took 7.6.
 
 ### 0.1 Review, 2026-10-02: what moved
 
@@ -137,7 +147,67 @@ bridge without video surfaces. And **`<video src>` on macOS** (§12 track 3):
 `AVPlayerLayer` lifted into the part, its frame copied into the element's
 surface while it plays and something is over it. HTML's props, events and
 imperative half; `useSupports('mediaPlayback')` true where the bridge plays.
-Not built yet: the Windows and Wayland rungs.
+Not built then: the Windows and Wayland rungs, and X11's Xv — the last two
+are §0.3.
+
+### 0.3 Built, 2026-10-22: the Linux rungs
+
+Measured on Xwayland (GNOME, Mesa 26.2, the "glamor textured video"
+adaptor: YV12, I420, NV12, UYVY, AR24 and RG16 at depth 24, `XV_COLORSPACE`
+settable) and on the same GPU's render node through x11-dri, by
+`scripts/spikes/video/linuxpaths.mjs` (§13). A frame from a sink into the
+element's surface, synchronised — a round trip on X11, `glFinish` on GLES:
+
+| path, 1920x1080 (1280x720)   | NV12 median       | NV12 CPU a frame | BGRA median    | BGRA CPU a frame |
+| ---------------------------- | ----------------- | ---------------- | -------------- | ---------------- |
+| X11, `frameToRGBA` + SHM put | 15.0ms (8.4ms)    | 19.9ms (9.9ms)   | 10.1ms (4.7ms) | 11.9ms (6.5ms)   |
+| X11, Xv (§2.6)               | **1.5ms** (0.7ms) | **0.5ms** (0.3)  | 1.9ms (0.7ms)  | 1.6ms (0.6ms)    |
+| GLES, `frameToRGBA` + put    | 10.5ms (5.5ms)    | 7.6ms (3.4ms)    | 5.8ms (3.6ms)  | 3.3ms (1.7ms)    |
+| GLES, shader (§5)            | **3.0ms** (2.3ms) | **0.2ms** (0.2)  | 3.0ms (2.3ms)  | 0.3ms (0.2ms)    |
+
+I420 is within a tenth of NV12 on every row. The GLES rows' median is
+mostly the wait for the GPU, which a frame of the window's would overlap;
+the CPU column is what the process pays.
+
+- **Wayland** (§5): `src/wayland/video.js` — Y as an R8 texture, NV12's
+  chroma one RG8, I420's two R8, BGRA one RGBA8 read back to front; a
+  fragment shader with the sink's matrix and range, the numbers
+  `frameToRGBA`'s tables are made of, so the two paths draw the same
+  picture (chroma apart: bilinear on the GPU, nearest in JavaScript). A
+  decoder's padded rows go up through `UNPACK_ROW_LENGTH`, set back to 0
+  after. The writer shares the 2D contexts' device the way `device.js`
+  says a foreign draw must: the owner flushed first, the shader's vertex
+  state in a vertex array of its own, the device released after.
+  `WaylandApp` answers `videoFormats()` with all three, YCbCr first, and
+  `writeVideoFrame` / `releaseVideoFrame` with the module's.
+- **X11, ntk** (`ntk/xv`, upstream): `openVideoPort(app)` — the first image
+  adaptor at depth 24, the first port no other client holds, grabbed;
+  `null` where there is none, which is every Mac and every CI server. A
+  port's formats by name, its layouts asked once per size, frames through a
+  shared-memory segment that is already attached (ShmUploader's discipline)
+  and down the socket while the first one warms, `XV_COLORSPACE` set before
+  the first frame — a port's attributes outlive the client that set them,
+  and a run that left it at BT.709 turned the next run's BT.601 red orange
+  — and `VideoTarget`, §2.6's redirected window. `app.xv()` beside
+  `app.composite()`; `app.close()` closes the ports.
+- **X11, react-x11**: `src/xvideo.js`, one writer per connection, asked for
+  nothing until a sink or a `<video>` is made; `src/videobackend.js`, the
+  seam `VideoFrames` and the node ask through — the app itself where it has
+  the verbs (Cocoa, Wayland), the Xv writer on an ntk app. `preferredFormats`
+  answers `BGRA` and keeps nothing while the port is being asked for.
+- **What declines to the JavaScript path**, on purpose: a full-range frame
+  (every adaptor reads video range), BT.2020, BT.709 on a port with no
+  `XV_COLORSPACE`, the first frame of a size, and any frame while the window
+  is not mapped — its redirected child has no pixmap then (§2.6). An ntk
+  without `ntk/xv` declines everything, so react-x11 needs no new floor.
+- **Tests**: `ntk/test/xv.test.js` (layouts, port choice, transport, the
+  colour-space rule) and `xv-live.test.js` (pixels through a real adaptor,
+  skipped without one); `test/xvideo.test.js` for the writer's decisions,
+  `test/video-xv-live.test.js` against a real adaptor (the port's picture
+  against `frameToRGBA`'s, a box drawn over the video covering it);
+  `test/wayland/video-gpu.test.js` against a render node. And
+  `examples/video.jsx`: ffmpeg decoding a file or its test pattern into a
+  sink in the display's first format, a caption drawn over it.
 
 ## 1. The asymmetry, stated once
 
@@ -211,11 +281,12 @@ And the caveats, which are why it is not simply the answer:
   drawable it names. Named at our window it is overwritten by the next
   present of ntk's backing pixmap, and named at a child window of its own
   it stacks above everything drawn, which is the z-order flaw `<glarea>`
-  and `<MediaPlayer>` both live with. The honest target is the **backing
-  pixmap itself**, at the fitted rect, as a step of the paint pass — then
-  the frame composites in paint order and the present carries it. Whether
-  ntk will name that pixmap to a caller is a small seam to ask for, and
-  the question the Xv rung starts with.
+  and `<MediaPlayer>` both live with. The honest target was to be the
+  **backing pixmap itself**, at the fitted rect, as a step of the paint
+  pass — and **measured, it cannot be**: Xwayland's glamor adaptor answers
+  `PutImage` into a depth-24 pixmap with `BadWindow` and into a depth-32
+  one with `BadMatch`. Textured adaptors take windows. §2.6 is the window
+  that behaves like a pixmap.
 
 ### 2.2 The decode extensions, and what replaced them
 
@@ -316,9 +387,8 @@ assume:
   `SHMSEG` and no payload. So for HD it is not an optimisation over
   `PutImage`; it is the path.
 
-What is still missing is ours: ntk has no Xv wrapper (its only `xv`
-substrings are `Xvfb` and `glxVisual`), and nothing in `src/` requires the
-extension. The rung is gated on nobody but us (§12).
+What was still missing was ours, and is built (§0.3, §2.6): `ntk/xv`
+wraps the requests, and `src/xvideo.js` puts a sink's frames through it.
 
 ### 2.5 Measured: what the naive path costs
 
@@ -354,6 +424,43 @@ XQuartz — derived, not measured, and owed a measurement by the bench
 scenario in §12. That is the honest X11
 budget until the Xv rung, and a document that said otherwise would be
 read by someone building a 4K player on a `PutImage`.
+
+### 2.6 The Xv rung, as built
+
+A pixmap is refused (§2.1), and a window shows itself and takes the
+pointer. Composite has the window that does neither: a child of the
+`<video>`'s own window, **manually redirected** — so the server keeps its
+contents in a pixmap of its own and composites them nowhere — and **placed
+outside its parent**, up and to the left, where the pointer can never be.
+Measured on Xwayland: a frame put into one at (10,10), at (-5000,-5000) and
+at a size larger than its parent lands whole in its pixmap every time, and
+the parent's pixels under it are untouched. That is `VideoTarget` in
+`ntk/xv`.
+
+A frame's way, then: the planes copied into a shared-memory segment at the
+port's layout (1.5 bytes a pixel for NV12 and I420, the latter as YV12 with
+its chroma swapped where the port has only that, BGRA as AR24), one
+`ShmPutImage` into the target at the frame's own size, and one RENDER
+`Composite` from the target's picture into the element's surface — the
+same surface the JavaScript path writes, so everything after is the drawn
+path unchanged: composited in paint order, under the window's popups,
+inside its scroll panes, cut by its clips, and painted again from without a
+frame. All three requests are void and in line with the paint around them.
+
+Two conditions are the target's own. **Its pixels exist only while its
+parent is viewable**: a redirected window that is not viewable has no
+pixmap, and a copy out of it would read whatever the server has there. So
+`VideoTarget.viewable` follows the parent ntk `Window`'s map state and
+`put` declines while it is false — the first paint, which runs before the
+window's `MapNotify`, and a minimized window — and the frame goes the
+JavaScript way. And **it goes with its window**: an ntk parent destroyed
+takes the child, its picture and the port's hold on it, so the target
+forgets all three and sends nothing.
+
+The port's colour is the other condition. Every adaptor measured reads
+video range; glamor's reads BT.601 at `XV_COLORSPACE` 0 and BT.709 at 1, and
+an adaptor without the attribute reads BT.601 alone. A frame the port cannot
+read as the sink means it is not sent.
 
 ## 3. Cocoa
 
@@ -692,7 +799,10 @@ than bolted on, and with no conversion in JavaScript for any format. The
 sink's drawn presentation on Wayland takes NV12, I420 and BGRA alike and
 prefers whichever the decoder emits. Nothing lifts: there is no layer to
 lift onto and no compositor-side scaler asked for, and `wp_viewporter` is
-used for the window's fractional scale only.
+used for the window's fractional scale only. Built as
+`src/wayland/video.js` (§0.3): the shader draws into the element's surface,
+a render target, and the window's context composites that like any
+`drawImage`.
 
 `src` has no answer on Wayland for the same reason it has none on X11 — no
 display-server player exists; GStreamer and PipeWire are libraries, and
@@ -803,12 +913,12 @@ Three rules, each of which is a cost somewhere:
   that can choose reads `preferredFormats`; one that cannot still works,
   with the conversion charged where it happens:
 
-  | backend | lifted                                                         | drawn                                                                                                           | `preferredFormats`     |
-  | ------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------- |
-  | Cocoa   | NV12 as is; I420 interleaved on the write (bridge); BGRA as is | BGRA; NV12/I420 converted in the bridge by VideoToolbox, colour-matched to sRGB, about 1ms at 1080p             | `NV12`, `I420`, `BGRA` |
-  | X11     | —                                                              | BGRA into an ntk `Surface` (SHM where the server has it); NV12/I420 converted in JS, which is not free at 1080p | `BGRA`                 |
-  | win32   | later: an NV12 swapchain on a visual (§4.2)                    | BGRA into a texture; NV12/I420 through the video processor, or in JS until then                                 | `BGRA`, then `NV12`    |
-  | Wayland | —                                                              | NV12, I420 and BGRA as textures; YUV sampled in the shader, no conversion anywhere                              | `NV12`, `I420`, `BGRA` |
+  | backend | lifted                                                         | drawn                                                                                                                                                                                                                                                                               | `preferredFormats`                                 |
+  | ------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+  | Cocoa   | NV12 as is; I420 interleaved on the write (bridge); BGRA as is | BGRA; NV12/I420 converted in the bridge by VideoToolbox, colour-matched to sRGB, about 1ms at 1080p                                                                                                                                                                                 | `NV12`, `I420`, `BGRA`                             |
+  | X11     | —                                                              | through an Xv port where there is an image adaptor: NV12, I420 (or YV12) and BGRA (AR24) converted by the server's GPU into a redirected target, copied into an ntk `Surface` (§2.6); without one, BGRA into the `Surface` (SHM where the server has it), NV12/I420 converted in JS | `NV12`, `I420`, `BGRA` with a port; `BGRA` without |
+  | win32   | later: an NV12 swapchain on a visual (§4.2)                    | BGRA into a texture; NV12/I420 through the video processor, or in JS until then                                                                                                                                                                                                     | `BGRA`, then `NV12`                                |
+  | Wayland | —                                                              | NV12, I420 and BGRA as textures; YUV sampled in the shader, no conversion anywhere (`src/wayland/video.js`)                                                                                                                                                                         | `NV12`, `I420`, `BGRA`                             |
 
 - **`push` is not a frame.** On a lifted sink it writes a surface from the
   ring and repoints the layer in a transaction of its own, and react-x11's
@@ -972,14 +1082,14 @@ piece of work, after this, on the same element.
 | piece                             | where                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | the element                       | `src/nodes/video.js` beside `image.js`, the kind in `src/nodes/kinds.js` and `src/Reconciler.js`, `VideoProps` in `src/types/elements.d.ts`, a line in `test/types/api.tsx`; `objectFit` in `src/styles.js` for `<video>` and `<image>` both                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| the sink                          | `src/videoframes.js` — pure: formats, the ring, the conversion policy, `preferredFormats` — with a presentation per backend behind it: ntk `Surface` on X11, `src/cocoa/video.js`, `src/win32/video.js`, `src/wayland/video.js`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| the sink                          | `src/videoframes.js` — formats, the ring, the conversion policy, `preferredFormats` — with a presentation per backend behind it, asked through `src/videobackend.js`: an ntk `Surface` on X11 written through `src/xvideo.js` where there is a port, `src/cocoa/video.js`, `src/win32/video.js`, `src/wayland/video.js`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | the sprite kind                   | the `contents` field in `src/nodes/sprites.js`'s contract and `src/node.d.ts`; `src/cocoa/sprites.js` skips the raster for it; `src/cocoa/promotion.js` unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | the capability                    | `mediaPlayback` in `src/appcontext.js`'s `FEATURES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | the player, Cocoa                 | `src/cocoa/player.js` over the verbs below, in the shape of `src/cocoa/glarea.js`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | the player, win32                 | `src/win32/player.js` over `IMFMediaEngine`, after §4.3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | bridge verbs, `@windowkit/appkit` | release A, the sink: `createVideoSurface({ width, height, format, colorSpace, range })` → `{ handle, iosurfaceId }` with the colour attachments set; `writeVideoSurface(handle, planes)`, which interleaves I420 into NV12; an optional `videoSurfacePlanes(handle)` answering `Buffer`s over the locked planes so a pipe read lands in the surface with no copy at all. Reuse, unchanged: `setLayerContentsIOSurface`, `surfaceIsInUse`, `surface-released`, `releaseSurface`. Release B, the player: `createPlayer({ url })`, `playerSet(id, { rate, volume, muted, loop })`, `playerSeek(id, seconds)`, `playerLayer(id)` answering a layer handle `addSublayer` takes, `playerCopyFrame(id)` answering a BGRA surface for the drawn presentation, `releasePlayer(id)`; events `player-metadata`, `player-time`, `player-rate`, `player-ended`, `player-error`. Release C, capture, later |
 | bridge verbs, `@windowkit/win32`  | after §4.3: `mediaCreate`, `mediaSet`, `mediaSeek`, `mediaFrame` (frame-server), `mediaRelease` and the engine's events; later `mediaAttach` onto a visual, over the pane host's `CreateSurfaceFromHandle`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Xv                                | a thin wrapper in ntk over node-x11's requests, port and format negotiation, `ShmPutImage` as the HD path, a clean decline where `QueryAdaptors` answers none                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Xv                                | built: `ntk/xv` — `openVideoPort`, port and format negotiation, `ShmPutImage` as the HD path, a clean `null` where `QueryAdaptors` answers none, and `VideoTarget` (§2.6) — and `src/xvideo.js` over it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | docs                              | a `<video>` section in [elements.md](../../docs/elements.md); the ladder in [macos.md](../../docs/macos.md) and [windows.md](../../docs/windows.md); the `contents` part in [extending.md](../../docs/extending.md); this file is the record they point at                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | tests                             | `test/video.test.js` — pixels, fit, the poster, the refusal — on the mock and the in-process X server; `test/cocoa-video.test.js` over `test/helpers/cocoa-bridge.js` for which verbs a lift and a decline send; a real-bridge check through `snapshotWindow`; a sink scenario in `scripts/bench/protocol.js` and a rule in `presenters-gate.json` that a lifted sink paints no window frame per pushed frame                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | spikes                            | `scripts/spikes/video/` — `yuvscan.swift` and `sinkcost.swift`, this PR                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -1025,7 +1135,7 @@ piece of work, after this, on the same element.
 | the frame clock                | a lifted sink's `push` is not a react-x11 frame and is not priced (§6.3); a drawn sink's is, exactly like any other claim; a player's layer costs the frame nothing                                                                                 |
 | the hole                       | the element's, through `spritesLifted`, as for every sprite; the bars are painted always, the picture only when drawn                                                                                                                               |
 | rounded video corners          | legal, and the drawn presentation; say so beside the prop rather than mask a layer that cannot be                                                                                                                                                   |
-| X11 v1                         | BGRA frames into an ntk `Surface` with SHM; Xv second, into the backing pixmap if ntk will name it; DRI3 import as the real answer                                                                                                                  |
+| X11 v1                         | BGRA frames into an ntk `Surface` with SHM; then Xv — built, into a redirected target rather than the backing pixmap, which no adaptor takes (§2.6); DRI3 import as the real answer                                                                 |
 | Xv fallback                    | mandatory: `QueryAdaptors` answering none is every Mac, and the drawn path is the decline                                                                                                                                                           |
 | win32 v1                       | `IMFMediaEngine` in frame-server mode, drawn in paint order; the swapchain visual waits for the Windows half of promotion                                                                                                                           |
 | tests                          | the fake bridge for what reaches the natives; `snapshotWindow` for pixels on Cocoa, never `render(in:)`; on X11 that the element paints the same with and without SHM; on every backend that a declined video and a lifted one show the same pixels |
@@ -1069,11 +1179,13 @@ waits for a Windows machine; the fifth is the ecosystem's.
    VLC and grows a `frames` backend — `ffmpeg` first, since it is pure JS
    and silent is still a video, libmpv when someone wants audio on macOS.
 
-After those, in order of value: the Xv rung on X11 (into the backing
-pixmap, if ntk will name it), the camera source, DRI3 import on X11 and
-a dma-buf subsurface on Wayland for the zero-copy decoders, and a
-compressed-stream source over `AVSampleBufferDisplayLayer` when a consumer
-appears.
+After those, in order of value: the Xv rung on X11 — built (§0.3, §2.6),
+into a redirected target since no adaptor takes the backing pixmap — the
+camera source, DRI3 import on X11 and a dma-buf subsurface on Wayland for
+the zero-copy decoders, and a compressed-stream source over
+`AVSampleBufferDisplayLayer` when a consumer appears. The Wayland half of
+track 1's drawn path is built too, as a shader rather than the JavaScript
+conversion (§5).
 
 ## 13. The spikes
 
@@ -1105,6 +1217,15 @@ frame, for NV12 and BGRA in turn, twice each. The `memcpy` stands in for
 the read from a decoder; a verb that answers `Buffer`s over the locked
 planes removes even that.
 
+**`scripts/spikes/video/linuxpaths.mjs`** (2026-10-22) answers §0.3's
+table: a frame from a sink into the element's surface through each Linux
+path — `frameToRGBA` and the SHM put, the Xv port and its target, the
+JavaScript conversion into a GL render target, and the shader — with a
+round trip or a `glFinish` after each, a hundred frames after ten of
+warm-up, median, p95 and the process's CPU a frame. The X11 rows need
+`$DISPLAY`, the Xv ones an image adaptor on it; the GLES rows a render node
+and no compositor. `node --import tsx scripts/spikes/video/linuxpaths.mjs`.
+
 The **2026-09-08 spikes** behind §2.5, §3.1–3.3 and §3.5 are described
 there and were not committed; their shapes: encode synthetic frames with a
 `VTCompressionSession` to get a real stream with parameter sets, decode
@@ -1129,11 +1250,14 @@ for a frame sink on macOS is two verbs and a field on a sprite; what is
 left for a URL is the player verbs, which are the first AVFoundation the
 bridge will link for anything but a permission prompt.
 
-The X11 half is exactly as large as it was, and this record's main
-service there is still to say so before someone spends a week on it: the
-transport that exists in the protocol is capped near 30fps at 1080p, the
-one that would fix it is now installed and still absent on every Mac, and
-the one that is right is the largest piece of work here. A sink the
+The X11 half is smaller than this record said, for a reason it could not
+have known: the target it designed Xv around does not exist, and the window
+that replaces it costs one RENDER copy. Where a server has an image adaptor
+— Xorg's and Xwayland's glamor, which is most Linux desktops — a 1080p frame
+is 1.5ms through Xv against 15 through the JavaScript conversion; where it
+has none, the JavaScript path is the path, as it is on every Mac. The
+transport that is right, DRI3 import, is still the largest piece of work
+here. A sink the
 application feeds, drawn through the surface every retained-surface
 element already draws through, is honest, is small, and is the version of
 this that ships on four backends at once.
@@ -1141,7 +1265,7 @@ this that ships on four backends at once.
 Windows has every piece a player needs except a decision about stacking,
 which is promotion's to make there as it was on macOS, and a drawn
 presentation that needs no such decision. Wayland is a rasterizer, so its
-sink is a shader.
+sink is a shader — and now one is.
 
 The thing not to build is still the API that hides the difference — and
 the thing not to build twice is the element: a video inside a document is
