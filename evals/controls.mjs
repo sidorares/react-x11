@@ -29,6 +29,7 @@ import {
   writeJSON,
 } from './lib/common.mjs';
 import { gradeApp } from './grade.mjs';
+import { judgePair } from './lib/judgepair.mjs';
 
 export const CONTROL_PROMPT = {
   id: 'control-files',
@@ -191,7 +192,6 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   let problems = graded.problems;
   let verdicts = [];
   if (args.judge && !problems.length) {
-    const { judgePair } = await import('./judge.mjs');
     const judged = await judgeControls({
       grades: graded.grades,
       judgePair,
