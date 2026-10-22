@@ -29,17 +29,18 @@ on every rung, so the whole error path is one `if`. The same contract as the
 
 ## The ladder
 
-|     |                        |                                                                                                                                                                                                                                                                                                                 |
-| --- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **the system sampler** | `NSColorSampler` on the [cocoa backend](macos.md), where the app the tree renders through carries `colorSampler` (`@windowkit/appkit` >= 0.9). macOS draws the loupe out of process, so the app needs no Screen Recording grant of its own and the user gets the magnifier every other Mac colour picker shows. |
-| 2   | **the portal**         | `org.freedesktop.portal.Screenshot.PickColor` over D-Bus. The desktop draws its own magnifier and hands the colour back. GNOME and KDE ship it; it is also the only route that exists on Wayland.                                                                                                               |
-| 3   | **X11**                | The classic route: grab the pointer with a crosshair, wait for the click, read the 1×1 under it, decode by the server's own pixel layout. Works under a bare WM, over ssh, on XQuartz — everywhere there is a display and nothing else.                                                                         |
+|     |                        |                                                                                                                                                                                                                                                                                                                                                            |
+| --- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **the system sampler** | `NSColorSampler` on the [cocoa backend](macos.md), where the app the tree renders through carries `colorSampler` (`@windowkit/appkit` >= 0.9). macOS draws the loupe out of process, so the app needs no Screen Recording grant of its own and the user gets the magnifier every other Mac colour picker shows.                                            |
+| 2   | **the portal**         | `org.freedesktop.portal.Screenshot.PickColor` over D-Bus. The desktop draws its own magnifier and hands the colour back. GNOME and KDE ship it; it is also GNOME's only route on Wayland.                                                                                                                                                                  |
+| 3   | **the Wayland picker** | On the [Wayland backend](wayland-backend.md), where the compositor offers screen capture and layer-shell but no portal (wlroots: sway, labwc, …): the output is frozen into a capture, shown as an overlay, and the click is taken on that (`src/wayland/screencopy.js`). Below the portal because the portal is the desktop's own, user-consented picker. |
+| 4   | **X11**                | The classic route: grab the pointer with a crosshair, wait for the click, read the 1×1 under it, decode by the server's own pixel layout. Works under a bare WM, over ssh, on XQuartz — everywhere there is a display and nothing else.                                                                                                                    |
 
 `screenColorBackend()` reports which rung this machine lands on without
 grabbing anything; `useEyedropper().supported` is the same answer as render
 state.
 
-The first two rungs are the same shape — ask the system, it draws the
+The first three rungs are the same shape — ask the system, it draws the
 picker, it hands back an sRGB triple — which is why the sampler goes on top
 of the portal and not under the crosshair: where the OS will do this for us,
 it does it better.
@@ -196,15 +197,16 @@ lifecycle belongs to core rather than to apps:
 
 ## Running it anywhere
 
-| where                                                | rung                                                                                                               |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| macOS, the cocoa backend, `@windowkit/appkit` >= 0.9 | cocoa — `NSColorSampler` ([macos.md](macos.md))                                                                    |
-| macOS, the cocoa backend, an older bridge            | none — `supported` is false, `pickScreenColor()` rejects typed                                                     |
-| GNOME / KDE, or any portal with Screenshot ≥ 2       | portal                                                                                                             |
-| XFCE (portal present, no Screenshot interface)       | X11                                                                                                                |
-| ssh, `startx`, XQuartz, a container with a display   | X11                                                                                                                |
-| Node 20, where npm skips `dbus-native`               | X11                                                                                                                |
-| Wayland, some day                                    | portal only — there is no root window to read, which is a further reason the ladder lives here and not in each app |
+| where                                                | rung                                                                                         |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| macOS, the cocoa backend, `@windowkit/appkit` >= 0.9 | cocoa — `NSColorSampler` ([macos.md](macos.md))                                              |
+| macOS, the cocoa backend, an older bridge            | none — `supported` is false, `pickScreenColor()` rejects typed                               |
+| GNOME / KDE, or any portal with Screenshot ≥ 2       | portal                                                                                       |
+| XFCE (portal present, no Screenshot interface)       | X11                                                                                          |
+| ssh, `startx`, XQuartz, a container with a display   | X11                                                                                          |
+| Node 20, where npm skips `dbus-native`               | X11                                                                                          |
+| the Wayland backend, a portal with Screenshot ≥ 2    | portal                                                                                       |
+| the Wayland backend on wlroots (sway, labwc, …)      | wayland — the backend's own picker; there is no root window to read, so no X11 rung under it |
 
 ## Building a colour picker on it
 

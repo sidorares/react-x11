@@ -131,7 +131,7 @@ REACT_X11_DEVTOOLS=1 REACT_X11_DEVTOOLS_PORT=8098 npm run examples:dashboard
 ## How it works (and its sharp edges)
 
 `src/DevToolsIntegration.js`. When `REACT_X11_DEVTOOLS` is set, the hook is
-installed from `render()`/`createRoot()` rather than at import time — a
+installed from `createRoot()` rather than at import time — a
 top-level await there would make every bundle of react-x11 ESM-only, which
 rules out a single executable ([packaging.md](packaging.md)). The ordering
 guarantee is the same: a commit can only follow a root, and there is no way
@@ -154,7 +154,7 @@ installs none where it finds one, and the stub cannot connect.
 
 Notes for maintainers:
 
-- **`injectIntoDevTools()` takes no arguments** in react-reconciler 0.33.
+- **`injectIntoDevTools()` takes no arguments** in react-reconciler 0.34.
   What it reports comes from the host config — `rendererPackageName`,
   `rendererVersion`, `extraDevToolsConfig` — and an argument passed here is
   ignored without a word, which is how react-x11 shipped for a while with

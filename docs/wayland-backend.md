@@ -509,40 +509,41 @@ arrive as fds, and Node's sockets abort on them
 
 - **Multisampling.** Stencil-then-cover (gradients, shapes past the CPU
   budget) and stencil clips are aliased at the edge. MSAA is the fix, and it
-  is not the few lines it looks like: GLES 3.0 cannot `blitFramebuffer`
-  _into_ a multisampled framebuffer, so the scroll blits and the partial
-  repaints the backing target exists for would have to be re-expressed as
-  textured draws, and every read of the target (a present, `getImageData`,
-  a `drawImage` of a surface) as a resolve first. virgl here reports
-  `MAX_SAMPLES` of 1, so none of it could be validated; it waits for a
-  machine that can run it.
+  is not the few lines it looks like: GLES 3.0 cannot `blitFramebuffer` _into_
+  a multisampled framebuffer, so the scroll blits and the partial repaints the
+  backing target exists for would have to be re-expressed as textured draws,
+  and every read of the target (a present, `getImageData`, a `drawImage` of a
+  surface) as a resolve first. virgl here reports `MAX_SAMPLES` of 1, so none
+  of it could be validated; it waits for a machine that can run it.
 - **`<Frame>` panes.** The out-of-process pane path (`createPaneHost`) is
-  macOS-only today — the pane presents an IOSurface id. Linux wants the same
-  over a memfd or dma-buf fd on the pane channel; until then `<Frame>` here
-  degrades the way it does without embedding.
+  macOS's and Windows' today — the pane presents an IOSurface id there and a
+  composition surface handle on Windows. Linux wants the same over a memfd or
+  dma-buf fd on the pane channel; until then `<Frame>` here degrades the way
+  it does without embedding.
 - **Drag-and-drop.** Wired (`src/wayland/dnd.js`): the drop side answers
   another application's drag over `wl_data_device` enter/motion/leave/drop,
-  and the source side offers a payload and hands the gesture to
-  `start_drag`, with an in-app drop keeping `e.items` by reference. What is
-  left is the drag _icon_: `start_drag` is given a bare (invisible) surface,
-  and rendering the tree's `<popup dragPreview>` into an icon surface the
-  frame loop paints is a follow-up.
-- **Input methods, the rest of it.** The preedit's cursor is drawn (a
-  heavier underline under the segment being converted) but nothing is done
-  with a hidden cursor beyond putting the caret at the end, and the only
-  content hints sent are `multiline` and `sensitive_data` — no
+  and the source side offers a payload and hands the gesture to `start_drag`,
+  with an in-app drop keeping `e.items` by reference. What is left is the drag
+  _icon_: `start_drag` is given a bare (invisible) surface, and rendering the
+  tree's `<popup dragPreview>` into an icon surface the frame loop paints is a
+  follow-up.
+- **Input methods, the rest of it.** The preedit's cursor is drawn (a heavier
+  underline under the segment being converted) but nothing is done with a
+  hidden cursor beyond putting the caret at the end, and the only content
+  hints sent are `multiline` and `sensitive_data` — no
   `spellcheck`/`auto_capitalization`, which the tree has no notion of.
 - **Tablet pads.** The buttons, rings and strips on the tablet itself
   (`zwp_tablet_pad_v2`) are accepted and ignored: the tree has no vocabulary
   for them.
-- **`useScreens().source` reads `'test'`**, as it does on macOS: both
-  backends publish through `setScreensForTests`, the one seam `screens.js`
-  has, and it stamps the source. A `source` argument on it is the fix.
+- **`useScreens().source` reads `'test'`**, as it does on macOS and Windows:
+  all three backends publish through `setScreensForTests`, the one seam
+  `screens.js` has, and it stamps the source. A `source` argument on it is the
+  fix.
 - **`fillText` only sees the first font family** of a `font` shorthand and
   strokes text as a fill.
-- **`ext-image-copy-capture`** is implemented to the protocol text but has
-  not run against a compositor: sway 1.10 advertises only wlr-screencopy,
-  and GNOME neither. wlroots 0.19 (sway 1.11) is where to try it.
+- **`ext-image-copy-capture`** is implemented to the protocol text but has not
+  run against a compositor: sway 1.10 advertises only wlr-screencopy, and
+  GNOME neither. wlroots 0.19 (sway 1.11) is where to try it.
 
 ## Things that are gone, not missing
 

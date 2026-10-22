@@ -14,7 +14,9 @@ import { Frame } from 'react-x11';
 `<Frame>` mounts a module of your application in a **process of its own** and
 embeds its output here, laid out like any other child. It is this package's
 iframe: the same composition of a display boundary and a process boundary,
-behind one element, and it works on every backend.
+behind one element, and it works on X11, Cocoa and win32. The
+[Wayland backend](wayland-backend.md) has neither of the mechanisms below, so
+a `<Frame>` there fails at once: `fallback` renders and no pane is started.
 
 How the display boundary is drawn differs, and it is worth knowing which one
 you are on when reading a trace:

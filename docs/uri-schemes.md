@@ -373,4 +373,8 @@ here; it is the shape of the problem.
   implementation or a token store.
 - **`http`/`https` handling.** Being the default browser is not this.
 - **Wayland's `xdg-activation` token.** `platform_data.activation-token` is
-  read and exposed on `ctx`, and ignored. There is no Wayland here.
+  read and exposed on `ctx`, and ignored. On the
+  [Wayland backend](wayland-backend.md) `activateWindow()` does go through
+  xdg-activation, but with a token it requests itself against the seat's
+  last input serial (`src/wayland/app.js`, `activate`) — the launcher's token
+  is not handed to the compositor.

@@ -161,8 +161,8 @@ reason the variable's value is never logged.
 
 The one thing an app says to the desktop that the user reads without opening
 it is the mark on its icon — an unread count on the Dock tile, a dot on the
-taskbar entry. Three things live here, and they are on both backends only
-where both have a mechanism:
+taskbar entry. What lives here is on a backend only where that backend has a
+mechanism for it:
 
 |                       | Linux (`launcherentry`)                                                                            | macOS (`cocoa`)                                      | Windows (`taskbar`)                                                                                                                                                                                  |
 | --------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -227,8 +227,9 @@ existing request, and on the cocoa backend it is
 activates the app, and stops when the prop drops the state or the window
 goes away. AppKit ignores the request while the app is already active, which
 is the same outcome a window manager gives a focused window's urgency hint.
-The other `states` names are inert on that backend until the bridge grows
-zoom, miniaturize and fullscreen.
+`fullscreen`, `maximized` and `hidden` are AppKit's full-screen Space, zoom
+and miniaturize there (@windowkit/appkit 0.30.0), and the other `states`
+names are inert on that backend.
 
 ### The Dock menu
 
@@ -619,16 +620,18 @@ Inside a sandbox that name is not there. Flatpak's answer is
 per-application master secret down a pipe; libsecret switches to it
 automatically and encrypts a local store with it.
 
-### 4. Reading the field — AT-SPI, which we do not implement
+### 4. Reading the field — AT-SPI, which does not mark it yet
 
 The accessibility bus is the only channel through which an outside program
 can see a field's _contents and role_ rather than guess at a window title:
 AT-SPI2 gives a password entry the role `password text`, which is how a
 screen reader knows to announce "bullet" instead of the character. Some
-automation leans on the same tree. react-x11 has no accessibility tree yet
-(NEXT_STEPS §11.3) — `role` is a prop the testing queries read and nothing
-else — so this seam is closed here for now, and worth reopening as one piece
-with the rest of AT-SPI rather than as a password-shaped hole in it.
+automation leans on the same tree. react-x11 does publish one
+([accessibility.md](accessibility.md)), but `PasswordInput` is a plain
+`role="textbox"` in it and nothing maps a node to `password text`
+(`src/a11y.js` declares the role and no node takes it), so this seam is still
+closed — worth opening as a role in the shared model rather than as a
+password-shaped hole beside it.
 
 ### What a field can still do wrong
 

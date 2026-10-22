@@ -225,7 +225,7 @@ application" would come apart.
 ## Installing, and Node 20
 
 ```json
-"optionalDependencies": { "dbus-native": "^0.15.1" }
+"optionalDependencies": { "dbus-native": "^0.16.0" }
 ```
 
 `dbus-native` declares `engines: ">=22.12.0"` where react-x11 declares

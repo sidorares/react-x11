@@ -71,6 +71,13 @@ your own — is one nobody can paste from:
   X's answers for a selection nobody owns;
 - `clear()` leaves the pasteboard alone, and `watch()` never fires.
 
+The **win32** backend answers every selection but `CLIPBOARD` the same way,
+since Windows has no equivalent either (and writes only text there so far).
+The **Wayland** backend is the other X-like one: it has `PRIMARY` too, over
+the primary-selection protocol where the compositor offers it
+(`src/wayland/clipboard.js`), so "X11-only" here means "not on macOS or
+Windows".
+
 That is what keeps selecting from being copying. A drag across a
 `selectable` surface, a select-all, shift+arrows in a field: each takes
 `PRIMARY` on X11, and on macOS none of them replaces what the user copied

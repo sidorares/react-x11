@@ -53,19 +53,23 @@ function Counter() {
   );
 }
 
-const root = await createRoot(); // connects via $DISPLAY
+const root = await createRoot(); // Cocoa on macOS, win32 on Windows, else $DISPLAY
 root.render(<Counter />);
 ```
 
-That program runs unchanged on both of react-x11's backends. On Linux — or
+That program runs unchanged on each of react-x11's backends. On Linux — or
 on a display forwarded over ssh, or `Xvfb` in CI — it is a real X11 client.
 On macOS it is a real Mac app: an `NSWindow`, Core Animation compositing, no
-X server anywhere. `createRoot()` picks, and
+X server anywhere. On Windows it is HWNDs drawn with Direct2D
+([win32](/docs/reference/windows)), and a Linux desktop can opt into a native
+[Wayland](/docs/reference/wayland-backend) client. `createRoot()` picks, and
 [`backend`](/docs/reference) pins it. You can also
 [run it right now in this browser](/playground) — the playground boots a
 pure-JavaScript X server on the page and connects to it.
 
-## Two backends, one tree
+## Four backends, one tree
+
+The two most complete:
 
 |                  | **X11**                                                                                                 | **Cocoa**                                                      |
 | ---------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
@@ -75,15 +79,17 @@ pure-JavaScript X server on the page and connects to it.
 | text             | [fontkit](https://github.com/foliojs/fontkit) shaping, server-side glyph sets                           | CoreText                                                       |
 | what only it has | `<foreign>` embedding, the window-manager example, `react-x11/test`, remote display                     | the system menu bar, native control bezels, native panels, TCC |
 
-Layout is [yoga-layout](https://www.yogalayout.dev/) (WASM) on both, and so
+Layout is [yoga-layout](https://www.yogalayout.dev/) (WASM) on all four, and so
 are the reconciler, the styles, the events, the components and the hooks.
 `npm install` never compiles anything: the X11 stack is JavaScript all the
-way down, and the two native addons in the tree — the Cocoa bridge and
-`x11-dri` for direct GL — are optional dependencies that ship prebuilt.
+way down, and the native addons in the tree — the Cocoa and win32 bridges
+and `x11-dri` for direct GL — are optional dependencies that ship prebuilt.
 
 The [macOS backend](/docs/reference/macos) is the design record for the
 second one, and [remote display](/docs/reference/remote) is the case the
-first one is categorically better at.
+first one is categorically better at. [win32](/docs/reference/windows) is the
+default on Windows and still young; [Wayland](/docs/reference/wayland-backend)
+is opt-in only, since X11 is what a remote display needs.
 
 ## On X11, the wire carries drawing, not pixels
 

@@ -34,7 +34,6 @@ API's existence. "Works" means a test asserts it or it was driven and seen.
 | notifications            | `notify`, `useNotifier`                                       | a tray balloon, which the shell shows as a toast                                               |
 | idle time                | `useIdle`                                                     | `GetLastInputInfo`, polled on the same adaptive wait the X rung uses                           |
 | keeping the screen awake | `keepAwake`, `useKeepAwake`                                   | `SetThreadExecutionState`, counted                                                             |
-| sampling a screen colour | `useEyedropper`                                               | the screen read through GDI, with a drawn loupe                                                |
 | reading a window back    | `window.snapshot()`                                           | `PrintWindow` with `PW_CLIENTONLY                                                              | PW_RENDERFULLCONTENT` |
 | locale                   | `systemLocale`, `useLocale`                                   | ICU's own resolution, which reads the OS on Windows — no backend code                          |
 | drag and drop            | `useDropTarget`, `useDragSource`                              | `IDropTarget` and `DoDragDrop` over OLE, both directions                                       |
@@ -111,6 +110,13 @@ hand its arguments to the first and exit — a named mutex and a `WM_COPYDATA`,
 or `ISingleInstanceApp`. [uri-schemes.md](uri-schemes.md) documents what the
 other platforms do.
 
+### Eyedropper — the pixel is read, the ladder has no rung
+
+The bridge reads a screen pixel through GDI (`app.screenColorAt`,
+`app.pointerPosition`), but `src/screencolor.js` has no rung that calls it,
+so `useEyedropper()` reports `supported: false` here until one draws the
+loupe over it.
+
 ### Calendar — blocked, not missing
 
 `useDesktopCalendarEvents` wants the Windows appointments API, which requires
@@ -153,7 +159,8 @@ effect is reproduced from two signals instead, and `<Select>`, `<Menu>` and any
   itself and opening one raises no blur.
 
 Both end in the same made-up outside press the Wayland backend sends for
-`xdg_popup.popup_done`, so all three backends answer a dismissal through one
+`xdg_popup.popup_done`, and the Cocoa backend's grab rule redirects a press to
+the holder the same way, so all four backends answer a dismissal through one
 path (`_dismissOutside` in src/events.js).
 
 **The gap**: a press on the _non-client_ area of one of our own windows — a

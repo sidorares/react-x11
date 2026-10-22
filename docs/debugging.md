@@ -236,12 +236,14 @@ from a bounded repaint — culled by a reach nobody updated — this is the
 first thing to try, and a fix that lands here is a change nobody announced
 through `invalidate`. Read once at startup; answers only to `1`.
 
-## `REACT_X11_NO_STROKE_CHUNKING=1` (macOS)
+## `REACT_X11_NO_STROKE_CHUNKING=1` (macOS, Windows)
 
-Makes the Cocoa 2d context hand every stroke to CoreGraphics in one
-`CGContextStrokePath`, instead of splitting a path with many subpaths into
-several — [docs/macos.md](macos.md#stroking-a-path-with-many-subpaths) for
-what the split buys (a 4,000-subpath stroke goes from 986ms to 113ms) and
+Makes the 2d context the Cocoa and win32 backends share
+(`src/backend/context2d.js`) hand every stroke to the platform in one call —
+one `CGContextStrokePath` on CoreGraphics — instead of splitting a path with
+many subpaths into several —
+[docs/macos.md](macos.md#stroking-a-path-with-many-subpaths) for what the
+split buys (a 4,000-subpath stroke goes from 986ms to 113ms) and
 the one thing it costs (the antialiased fringe where two subpaths' strokes
 overlap is half-covered twice rather than covered once, and reads a little
 lighter). Set this to compare the two on the same build, or as first aid if
@@ -452,7 +454,7 @@ same screenshots far more than this route did.
 Every internal `invalidate()` call now names why it ran, from a small
 closed set (`INVALIDATE_REASONS` in `src/nodes/damage.js`, which says what
 each one means): `props`, `position`, `style-state`, `shadow`, `outline`,
-`theme`, `direction`, `scale`, `units`, `animation`, `scroll`, `text`,
+`theme`, `ink`, `direction`, `scale`, `units`, `animation`, `scroll`, `text`,
 `selection`, `content`, `measure`, `child-list`, `focus`, `caret`, `resize`,
 `mount`, `expose`, `highlight`, `trace-updates`, `capabilities`, `layout`. The
 frame's collected reasons are what `REACT_X11_TRACE=requests` frame lines,
