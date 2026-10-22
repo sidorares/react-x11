@@ -984,7 +984,9 @@ function useMenuAccelerators(
  *
  * The wrapper is focusable and takes focus when the menu opens, because the
  * popup is override-redirect and never gets focus itself — the same trick
- * `Select` uses to keep arrow keys working while its menu is open.
+ * `Select` uses to keep arrow keys working while its menu is open. It is not
+ * a Tab stop: it has no role or name, so Tab landing on it would announce
+ * nothing, and the controls inside are stops of their own.
  */
 export function ContextMenu({
   items = [],
@@ -1087,7 +1089,10 @@ export function ContextMenu({
     'box',
     {
       ref,
-      focusable: true,
+      // focusable by a press and by `focus()` above, but out of the Tab
+      // cycle: a stop here is a nameless "filler" around content whose own
+      // controls are already reachable
+      tabIndex: -1,
       onMouseDown: (ev) => {
         if (ev.button !== 3 && rect) close();
       },
