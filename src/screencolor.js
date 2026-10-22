@@ -65,12 +65,11 @@ import {
   PortalCancelledError,
   RESPONSE_OK,
   hasService,
-  parentWindowHandle,
+  portalParentFor,
   portalRequest,
   portalVersion,
 } from './portal.js';
 import { liveApps } from './trace-registry.js';
-import { windowIdOf } from './windowid.js';
 
 export const SCREENSHOT_IFACE = 'org.freedesktop.portal.Screenshot';
 /** `PickColor` arrived in version 2 of the Screenshot interface. */
@@ -220,14 +219,10 @@ async function portalPick(opts, ref) {
     // options)` — no title — which is the whole reason portalRequest takes a
     // signature now.
     signature: 'sa{sv}',
-    // The handle names an X window. A Wayland toplevel has none to name —
-    // an xdg-foreign export would be the equivalent — so there the dialog
-    // floats, which the portal allows.
-    args: [
-      appFor(opts)?.backend === 'wayland'
-        ? ''
-        : parentWindowHandle(windowIdOf(opts.parentWindow)),
-    ],
+    // An X window's handle on X11, an xdg-foreign export on Wayland, and
+    // nothing — a floating dialog, which the portal allows — where neither
+    // can be had.
+    args: [await portalParentFor(opts.parentWindow, appFor(opts))],
     options: {},
     signal: opts.signal,
   });

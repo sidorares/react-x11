@@ -46,14 +46,14 @@ import {
   RESPONSE_CANCELLED,
   RESPONSE_OK,
   hasService,
-  parentWindowHandle,
   pathBytes,
+  portalParentFor,
   portalRequest,
   variant,
 } from './portal.js';
 import { sessionBus } from './bus.js';
 import { liveApps } from './trace-registry.js';
-import { windowIdOf, windowOf } from './windowid.js';
+import { windowOf } from './windowid.js';
 
 const FILE_CHOOSER = 'org.freedesktop.portal.FileChooser';
 
@@ -149,7 +149,7 @@ async function portalDialog(kind, opts, ref) {
   const { response, results } = await portalRequest(ref, {
     iface: FILE_CHOOSER,
     member,
-    parentWindow: parentWindowHandle(windowIdOf(opts.parentWindow)),
+    parentWindow: await portalParentFor(opts.parentWindow),
     title: opts.title ?? defaultTitle(kind),
     options: await portalOptions(opts, {
       save: kind === 'save',

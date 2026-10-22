@@ -29,6 +29,7 @@
 // re-solve.
 
 import { loadTransport, sessionBus } from './bus.js';
+import { windowIdOf, windowOf } from './windowid.js';
 
 export const PORTAL_NAME = 'org.freedesktop.portal.Desktop';
 export const PORTAL_PATH = '/org/freedesktop/portal/desktop';
@@ -437,6 +438,36 @@ export async function portalRequest(
  */
 export function parentWindowHandle(xid) {
   return typeof xid === 'number' && xid > 0 ? `x11:${xid.toString(16)}` : '';
+}
+
+/**
+ * The `parent_window` handle for whatever names a window — a ref, a node, a
+ * backend window, an XID — on whichever backend it belongs to.
+ *
+ * - **X11**: `x11:<xid>`, as `parentWindowHandle` spells it.
+ * - **Wayland**: `wayland:<handle>`, from an xdg-foreign export of the
+ *   toplevel (src/wayland/app.js, `exportHandle`) — what the portal needs to
+ *   make the dialog modal to the window and stack it there. `''` where the
+ *   compositor has no xdg-foreign, or the window is a popup; never an `x11:`
+ *   handle, because a Wayland window's id names no X window, and on a desktop
+ *   running Xwayland it could name somebody else's.
+ *
+ * `app` is the fallback for a target that resolves to no window object — a
+ * bare number on Wayland is that app's id for one of its own windows.
+ *
+ * @param {any} target
+ * @param {any} [app]
+ * @returns {Promise<string>}
+ */
+export async function portalParentFor(target, app = null) {
+  let win = windowOf(target);
+  const owner = win?.app ?? app;
+  if (owner?.backend !== 'wayland') {
+    return parentWindowHandle(windowIdOf(target));
+  }
+  if (!win && typeof target === 'number') win = owner.windowById?.(target);
+  const handle = win ? await owner.exportHandle?.(win) : null;
+  return handle ? `wayland:${handle}` : '';
 }
 
 /**
