@@ -331,6 +331,14 @@ export class XkbKeymap {
     }
   }
 
+  /**
+   * A modifier by name, as the real mask the compositor reports it under —
+   * `'NumLock'` is whichever ModN this keymap binds it to, `'Lock'` is Lock.
+   */
+  maskOf(name) {
+    return this._modMask(name);
+  }
+
   /** A modifier name (real or virtual) as a real mask. */
   _modMask(name) {
     if (name in REAL_MODS) return REAL_MODS[name];
@@ -459,6 +467,135 @@ export class XkbKeymap {
   static stateOf(mods, group) {
     return (mods & 0xff) | ((group & 3) << GROUP_SHIFT);
   }
+}
+
+/**
+ * Files the rules add to `xkb_symbols` that are not a layout: the model's
+ * extras (`inet(evdev)`) and every option's (`group(alt_shift_toggle)`,
+ * `compose(rctrl)`). Only consulted where a keymap has one group and so no
+ * group suffix to anchor on.
+ */
+const NOT_LAYOUTS = new Set([
+  'altwin',
+  'capslock',
+  'compose',
+  'ctrl',
+  'eurosign',
+  'fkeys',
+  'grab',
+  'group',
+  'hyper',
+  'inet',
+  'keypad',
+  'kpdl',
+  'level2',
+  'level3',
+  'level5',
+  'nbsp',
+  'parens',
+  'rupeesign',
+  'scrolllock',
+  'shift',
+  'srvr_ctrl',
+  'srvrkeys',
+  'terminate',
+  'typo',
+]);
+
+/** `macintosh_vndr/us(alt)` → `us`: the file, without directory or variant. */
+const fileOf = (token) => token.replace(/\(.*$/, '').replace(/^.*\//, '');
+
+/**
+ * The layout codes a keymap was compiled from — `['us', 'ru']`, what X11
+ * reads out of `_XKB_RULES_NAMES` and what a Wayland client has nothing
+ * like. Pure, and exported for the test.
+ *
+ * The one place a compositor's keymap still says is the **name** of its
+ * `xkb_symbols` section. libxkbcommon names it after the include string the
+ * rules built — `pc+us+ru:2+inet(evdev)+group(alt_shift_toggle)` — with both
+ * `+` and `:` written as `_`:
+ *
+ *     xkb_symbols "pc_us_ru_2_inet(evdev)_group(alt_shift_toggle)" {
+ *       name[1]="English (US)";
+ *       name[2]="Russian";
+ *
+ * The rules put the model's file first, then the layouts in order — each one
+ * after the first followed by its group number — then the model's extras and
+ * the options. So group N is the file right before the bare `N`, group 1 is
+ * the file right before group 2, and with a single group it is the file
+ * before the first extra. `name[N]` is how many groups there are, and an
+ * answer that cannot account for every one of them is no answer: the list
+ * comes back empty, which is what "not known" means in src/keyboardstate.js.
+ *
+ * The `name[N]` strings are not the answer themselves: they are
+ * descriptions, `"Russian"`, where an indicator wants `ru` — the same reason
+ * the X11 path reads the rules rather than XKB's group names.
+ */
+export function layoutsFromKeymap(text) {
+  if (typeof text !== 'string') return [];
+  const at = text.search(/xkb_symbols\s+"/);
+  if (at < 0) return [];
+  const section = text.slice(at);
+  const name = /^xkb_symbols\s+"([^"]*)"/.exec(section)?.[1];
+  let groups = 0;
+  for (const m of section.matchAll(/\bname\[(?:group)?(\d+)\]\s*=/gi)) {
+    groups = Math.max(groups, Number(m[1]));
+  }
+  if (!name || !groups || groups > 4) return [];
+
+  const tokens = splitIncludes(name);
+  const layouts = [];
+  if (groups === 1) {
+    let i = tokens.findIndex((t, n) => n > 0 && NOT_LAYOUTS.has(fileOf(t)));
+    if (i < 0) i = tokens.length;
+    if (i < 2) return [];
+    layouts.push(tokens[i - 1]);
+  } else {
+    let prev = -1;
+    for (let g = 2; g <= groups; g++) {
+      const i = tokens.indexOf(String(g), prev + 1);
+      if (i < 2) return [];
+      if (g === 2) layouts.push(tokens[i - 2]);
+      layouts.push(tokens[i - 1]);
+      prev = i;
+    }
+  }
+  const codes = layouts.map(fileOf);
+  if (codes.some((c) => !/^[a-z][a-z0-9-]*$/i.test(c) || NOT_LAYOUTS.has(c))) {
+    return [];
+  }
+  // `empty` is what a keymap with no layout to name is built from; reporting
+  // it would put "EMPTY" in an indicator (the X11 path drops it too)
+  return codes.every((c) => c === 'empty') ? [] : codes;
+}
+
+/**
+ * `pc_us(dvorak)_ru(phonetic_winkeys)_2` → `['pc', 'us(dvorak)',
+ * 'ru(phonetic_winkeys)', '2']`. Split where a `_`, `+` or `:` stands outside
+ * parentheses — the raw include string spells them that way, and a
+ * variant's own underscores are inside them. Two file names have an
+ * underscore of their own, the `*_vndr/` directories and `srvr_ctrl`, and are
+ * kept whole.
+ */
+function splitIncludes(name) {
+  const guarded = name
+    .replace(/([a-z0-9]+)_vndr\//gi, '$1\u0001vndr/')
+    .replace(/srvr_ctrl/g, 'srvr\u0001ctrl');
+  const out = [];
+  let depth = 0;
+  let cur = '';
+  for (const ch of guarded) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    if (depth === 0 && (ch === '_' || ch === '+' || ch === ':')) {
+      if (cur) out.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur) out.push(cur);
+  return out.map((t) => t.replaceAll('\u0001', '_'));
 }
 
 /**

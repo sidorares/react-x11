@@ -18,6 +18,7 @@
 //
 // The degradation paths get the real thing, because a server with none of the
 // extensions is exactly what this one is.
+import { EventEmitter } from 'node:events';
 import { test, describe, afterEach } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
@@ -39,10 +40,12 @@ import {
 import { idleSnapshot, setIdleForTests } from '../src/idle.js';
 import { useIdle } from '../src/idlehooks.js';
 import {
+  endKeyboardState,
   keyboardStateSnapshot,
   layoutsFromRules,
   locksFromMods,
   setKeyboardStateForTests,
+  watchKeyboardState,
 } from '../src/keyboardstate.js';
 import { useKeyboardState } from '../src/keyboardstatehooks.js';
 import {
@@ -734,6 +737,45 @@ describe('useKeyboardState', () => {
     assert.equal(state.capsLock, false);
     // the field that tells "off" apart from "could not be asked"
     assert.deepEqual(state.layouts, []);
+  });
+
+  // The Wayland backend's seam: no XKB extension, and the seat answering
+  // instead (src/wayland/seat.js, `keyboardState`).
+  test('a backend that answers for itself is read and followed', () => {
+    const seat = new EventEmitter();
+    let now = {
+      capsLock: false,
+      numLock: true,
+      group: 0,
+      layouts: ['us', 'ru'],
+    };
+    const app = {
+      keyboardState: () => now,
+      watchKeyboardState(fn) {
+        seat.on('modifiers', fn);
+        return () => seat.off('modifiers', fn);
+      },
+    };
+    let changes = 0;
+    watchKeyboardState(app, () => changes++);
+    assert.equal(keyboardStateSnapshot(app).layout, 'us');
+    assert.equal(keyboardStateSnapshot(app).numLock, true);
+
+    now = { ...now, capsLock: true, group: 1 };
+    seat.emit('modifiers');
+    assert.equal(keyboardStateSnapshot(app).capsLock, true);
+    assert.equal(keyboardStateSnapshot(app).layout, 'ru');
+    // the first read landed before this subscriber did, which the hook's
+    // store covers by reading the snapshot after it subscribes
+    assert.equal(changes, 1);
+
+    // a modifiers event that changes none of this (a held Shift) notifies
+    // nobody
+    seat.emit('modifiers');
+    assert.equal(changes, 1);
+
+    endKeyboardState(app);
+    assert.equal(seat.listenerCount('modifiers'), 0, 'unsubscribed');
   });
 });
 
