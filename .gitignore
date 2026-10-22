@@ -9,6 +9,8 @@ node_modules
 test/fixtures/refresh-run-*/
 # and the apps the `react-x11 dev` sessions write and edit
 test/fixtures/dev-run-*/
+# and the apps `react-x11 create` writes
+test/fixtures/create-run-*/
 
 # framed screenshots are machine-specific (they capture the local WM's
 # decorations), so they are generated on demand rather than committed

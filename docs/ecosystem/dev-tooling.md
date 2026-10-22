@@ -78,6 +78,11 @@ survive.
 npx react-x11 dev app.jsx
 ```
 
+A new app comes set up for it: `npm create react-x11@latest my-app` (or
+`npx react-x11 create my-app`) writes `src/App.jsx`, an entry for a plain
+run, and a `dev` script, with the toolchain below already in its
+devDependencies.
+
 ### `react-x11 dev` {#react-x11-dev}
 
 The package's `bin`, and the route with nothing to set up. What it does,

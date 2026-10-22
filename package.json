@@ -7,7 +7,8 @@
     "react-x11": "./src/cli/index.js"
   },
   "files": [
-    "src"
+    "src",
+    "!src/cli/create-react-x11"
   ],
   "scripts": {
     "test": "node --import tsx --test --test-timeout=60000",
@@ -228,6 +229,10 @@
     "./frame/child": {
       "types": "./src/frame/child.d.ts",
       "default": "./src/frame/child.js"
+    },
+    "./create": {
+      "types": "./src/cli/create.d.ts",
+      "default": "./src/cli/create.js"
     }
   },
   "types": "./src/index.d.ts"

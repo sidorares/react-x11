@@ -8,6 +8,18 @@ slug: /getting-started
 
 ## Install
 
+The quickest start is a new app, ready to run with hot reload:
+
+```bash
+npm create react-x11@latest my-app
+cd my-app
+npm run dev
+```
+
+`npx react-x11 create my-app` is the same command; `pnpm create`, `yarn
+create` and `bun create` work too and install with themselves. Or add it to
+a project you have:
+
 ```bash
 npm install react-x11 react
 ```

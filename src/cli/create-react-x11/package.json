@@ -1,0 +1,30 @@
+{
+  "name": "create-react-x11",
+  "version": "0.0.0",
+  "description": "Create a react-x11 app: npm create react-x11 <dir>",
+  "type": "module",
+  "bin": {
+    "create-react-x11": "./index.js"
+  },
+  "files": [
+    "index.js"
+  ],
+  "dependencies": {
+    "react-x11": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sidorares/react-x11.git",
+    "directory": "src/cli/create-react-x11"
+  },
+  "keywords": [
+    "react",
+    "react-x11",
+    "create"
+  ],
+  "author": "Andrey Sidorov <andrey.sidorov@gmail.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.19"
+  }
+}

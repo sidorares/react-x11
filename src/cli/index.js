@@ -1,17 +1,24 @@
 #!/usr/bin/env node
-// react-x11's command line, the `bin` of the package. One command so far:
+// react-x11's command line, the `bin` of the package:
 //
 //   react-x11 dev <file> [args…]   hot reload with nothing to set up (./dev.js)
+//   react-x11 create <dir>         a new app (./create.js; also what
+//                                  `npm create react-x11` runs)
 //
 // Arguments before the file belong to the command, and everything after it
 // to the app, which sees them in process.argv as `node <file> …args` would
 // have handed them over.
 import { readFileSync } from 'node:fs';
+import { runCreate } from './create.js';
 import { DevError, runDev } from './dev.js';
 
 const USAGE = `Usage: react-x11 dev <file> [args…]
+       react-x11 create <dir> [--no-install]
 
 Commands:
+  create <dir>   Write a new app into <dir> and install its dependencies;
+                 --no-install writes the files only. \`npm create react-x11
+                 <dir>\` does the same.
   dev <file>     Run <file> with hot reload: saving it, or a .jsx module it
                  imports, updates the running app in place. Its default
                  export is mounted, inside a window of its own when it
@@ -46,6 +53,7 @@ async function main([command, ...rest]) {
     process.stderr.write(USAGE);
     return 2;
   }
+  if (command === 'create') return runCreate(rest);
   if (command !== 'dev') {
     process.stderr.write(`react-x11: no command "${command}".\n\n${USAGE}`);
     return 2;
