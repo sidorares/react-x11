@@ -986,8 +986,8 @@ queries (`c`,`a` finds _Carrot_), a repeated letter cycles, disabled entries
 and separators never match.
 
 Focus stays in the _owner_ window, as with `Select`; `ContextMenu`'s wrapper
-is focusable and takes focus when its menu opens. Losing the window closes
-an open menu.
+is focusable and takes focus when its menu opens, but is not a Tab stop
+(`tabIndex={-1}`). Losing the window closes an open menu.
 
 ### Safe-polygon hover
 

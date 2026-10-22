@@ -739,7 +739,9 @@ levels for free.
 Both keep focus on a node in the _owner_ window — the popup is
 override-redirect and never takes focus — which is the same arrangement
 `Select` uses. `ContextMenu`'s wrapper is focusable for that reason and
-takes focus when the menu opens.
+takes focus when the menu opens. It is `tabIndex={-1}` rather than
+`focusable`: it has no role or name, so as a Tab stop it would be announced
+as an unnamed filler around controls that are already stops of their own.
 
 Switching between `MenuBar` menus reuses the same X window and moves it
 rather than destroying and recreating one, so there is no flicker.
