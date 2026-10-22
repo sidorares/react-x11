@@ -72,6 +72,7 @@
     "labs:direct-gl": "tsx examples/labs/direct-gl.jsx",
     "labs:gl-overlay": "tsx examples/labs/gl-overlay.jsx",
     "examples:viewer3d": "tsx examples/viewer3d.jsx",
+    "examples:video": "tsx examples/video.jsx",
     "examples:transparent": "tsx examples/transparent.jsx",
     "examples:windows": "tsx examples/windows.jsx",
     "examples:wm": "tsx examples/wm.jsx",
@@ -110,7 +111,7 @@
     "ical.js": "^2.2.1",
     "image-in-browser": "^3.6.0",
     "linebreak": "^1.1.0",
-    "ntk": "^8.23.2",
+    "ntk": "^8.24.0",
     "react-reconciler": "^0.34.0",
     "yoga-layout": "^3.2.1"
   },

@@ -69,8 +69,11 @@ export class VideoFrames {
   readonly colorSpace: VideoColorSpace;
   readonly range: VideoRange;
   /** This display's formats, cheapest first: what a decoder that can choose
-   * should emit (`ffmpeg -pix_fmt nv12`). NV12 leads where a frame goes on
-   * a layer as it is — macOS — and BGRA wherever a 2D context draws it. */
+   * should emit (`ffmpeg -pix_fmt nv12`). NV12 leads wherever something
+   * native takes it as it is — a layer on macOS, a shader on Wayland, an Xv
+   * port on X11 — and BGRA where a frame is converted in JavaScript. On X11
+   * it is BGRA, and not kept, until the port has answered, a few round
+   * trips after the first sink is made. */
   readonly preferredFormats: readonly VideoFormat[];
   /** Frames pushed so far. */
   readonly version: number;

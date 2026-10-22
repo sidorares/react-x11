@@ -33,12 +33,16 @@
 //   a decoder that can choose (`ffmpeg -pix_fmt`); one that cannot still
 //   works, with the conversion charged where it happens.
 //
-// Pure: no node, no backend. The app is asked for its formats
-// (`app.videoFormats()`, the Cocoa app's answer from the bridge) and nothing
-// else.
+// No node and no backend: the one question asked of the display is its
+// formats, through `videoBackendOf` (src/videobackend.js) — the Cocoa app's
+// answer from the bridge, the Wayland app's own, and on X11 the Xv writer's,
+// which a sink starts asking for when it is made.
+
+import { videoBackendOf } from './videobackend.js';
 
 export const VIDEO_FORMATS = Object.freeze(['NV12', 'I420', 'BGRA']);
 const COLOR_SPACES = ['bt709', 'bt601', 'bt2020'];
+const BGRA_ONLY = Object.freeze(['BGRA']);
 const RANGES = ['video', 'full'];
 // The largest side a frame may have: a surface's limit on every backend, and
 // a number past which a size is a bug rather than a video.
@@ -209,22 +213,30 @@ export class VideoFrames {
     this._frame = null;
     this._listeners = new Set();
     this._preferred = null;
+    // On X11 the formats are a port's, and asking for one is round trips:
+    // started here, so they are known by the time a decoder that waits for
+    // anything at all — a probe of the file, a spawn — reads them.
+    videoBackendOf(app)?.prepare?.(this);
   }
 
   /**
    * This display's formats, cheapest first: what a decoder that can choose
-   * should emit. NV12 first where a frame can go on a layer as it is
-   * (Cocoa); BGRA first wherever a 2D context draws it.
+   * should emit. YCbCr first wherever something native takes it as it is —
+   * a layer on Cocoa, a shader on Wayland, an Xv port on X11 — and BGRA
+   * first where a frame is converted in JavaScript on its way to a 2D
+   * context. On X11 the answer is BGRA until the port has answered, a few
+   * round trips after the first sink is made, and is not kept until then.
    */
   get preferredFormats() {
-    if (this._preferred === null) {
-      const asked = this.app?.videoFormats?.();
-      this._preferred = Object.freeze(
-        Array.isArray(asked) && asked.length !== 0
-          ? asked.filter((f) => VIDEO_FORMATS.includes(f))
-          : ['BGRA'],
-      );
-    }
+    if (this._preferred !== null) return this._preferred;
+    const asked = videoBackendOf(this.app)?.videoFormats?.();
+    // null: still being asked — answer for now, and ask again next time
+    if (asked === null) return BGRA_ONLY;
+    this._preferred = Object.freeze(
+      Array.isArray(asked) && asked.length !== 0
+        ? asked.filter((f) => VIDEO_FORMATS.includes(f))
+        : ['BGRA'],
+    );
     return this._preferred;
   }
 
@@ -281,8 +293,9 @@ export const isVideoFrames = (v) => v instanceof VideoFrames;
 
 // --- converting a frame where nothing native will ----------------------------
 //
-// The drawn path on a backend with no native write (X11, win32, Wayland, a
-// Cocoa bridge older than its video surfaces): the frame converted here to
+// The drawn path where nothing native writes the frame (win32, an X server
+// with no Xv adaptor, a Cocoa bridge older than its video surfaces, and on
+// any backend a frame the native writer declines): the frame converted here to
 // the straight RGBA `putImageData` takes. Not free — two million pixels a
 // frame at 1080p — which is why `preferredFormats` says BGRA first there.
 // The matrix and the range are the frame's; no transfer function is
