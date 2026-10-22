@@ -11,6 +11,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -18,6 +19,7 @@ import {
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { PNG } from 'pngjs';
 import React from 'react';
 import {
   CreateError,
@@ -71,6 +73,9 @@ test('writes an app named after its directory, on react-x11’s own versions', (
     'src/main.jsx',
     'README.md',
     '.gitignore',
+    'AGENTS.md',
+    'CLAUDE.md',
+    'DESIGN.md',
   ]) {
     assert.ok(existsSync(join(dir, file)), file);
   }
@@ -89,6 +94,112 @@ test('the app it writes mounts, and its button counts', async () => {
   getByText('Hello from react-x11');
   fireEvent.click(getByText('Clicked 0 times'));
   await waitFor(() => getByText('Clicked 1 times'));
+});
+
+test('AGENTS.md and DESIGN.md are filled in for this version', () => {
+  const files = appFiles({ name: 'x', manager: 'bun' });
+  const agents = files['AGENTS.md'];
+  assert.match(agents, /^<!-- BEGIN:react-x11-agent-rules -->\n/);
+  assert.match(agents, /\n<!-- END:react-x11-agent-rules -->\n/);
+  assert.ok(agents.includes(`react-x11\n${own.version}.`), 'names the version');
+  assert.ok(agents.includes(`/tree/v${own.version}/examples`), 'pins examples');
+  assert.match(agents, /`bun start` runs the app once/);
+  assert.match(files['DESIGN.md'], /^# Design\n/);
+  assert.strictEqual(files['CLAUDE.md'], '@AGENTS.md\n');
+  for (const [file, text] of Object.entries(files)) {
+    assert.doesNotMatch(text, /\{\{\w+\}\}/, `${file} has a hole left in it`);
+  }
+  // the starter follows the rules it ships with: no colour but a token
+  assert.doesNotMatch(files['src/App.jsx'], /#[0-9a-f]{3,8}\b/i);
+});
+
+test('--no-agents-md leaves the agent files out, and keeps DESIGN.md', () => {
+  const made = cli([
+    join(repo, 'src/cli/index.js'),
+    'create',
+    'no-agents',
+    '--no-install',
+    '--no-agents-md',
+  ]);
+  assert.strictEqual(made.status, 0, made.stderr);
+  const dir = join(scratch, 'no-agents');
+  assert.ok(!existsSync(join(dir, 'AGENTS.md')));
+  assert.ok(!existsSync(join(dir, 'CLAUDE.md')));
+  assert.ok(existsSync(join(dir, 'DESIGN.md')));
+  assert.doesNotMatch(readFileSync(join(dir, 'README.md'), 'utf8'), /AGENTS/);
+});
+
+test('every page and file AGENTS.md points at ships in the package', () => {
+  const agents = appFiles({ name: 'x' })['AGENTS.md'];
+  const table = agents.slice(
+    agents.indexOf('**Docs**'),
+    agents.indexOf('**Types**'),
+  );
+  const pages = [...table.matchAll(/`([\w/*-]+\.md)`/g)].map((m) => m[1]);
+  assert.ok(pages.length > 10, `only ${pages.length} pages found`);
+  for (const page of pages) {
+    const [dir, file] = page.includes('/') ? page.split('/') : ['', page];
+    const present =
+      file === '*.md'
+        ? readdirSync(join(repo, 'docs', dir)).some((f) => f.endsWith('.md'))
+        : existsSync(join(repo, 'docs', dir, file));
+    assert.ok(present, `docs/${page} is named in AGENTS.md but missing`);
+  }
+  // `files` is what puts them under node_modules: the top level and one down
+  assert.ok(own.files.includes('docs/*.md'));
+  assert.ok(own.files.includes('docs/*/*.md'));
+  for (const types of ['src/index.d.ts', 'src/types/elements.d.ts']) {
+    assert.ok(existsSync(join(repo, types)), types);
+  }
+  const examples = [...agents.matchAll(/`(\w+\.jsx)`/g)].map((m) => m[1]);
+  assert.ok(examples.length > 5);
+  for (const example of examples) {
+    assert.ok(existsSync(join(repo, 'examples', example)), example);
+  }
+});
+
+test('the screenshot test AGENTS.md hands out runs, in both schemes', () => {
+  const dir = createApp(join(scratch, 'pictures'), {
+    ...quiet,
+    install: false,
+  });
+  // the block as an agent would copy it out of the numbered list
+  const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8');
+  const block = /\n {3}```jsx\n([\s\S]*?)\n {3}```\n/.exec(agents)[1];
+  const source = block.replace(/^ {3}/gm, '');
+  mkdirSync(join(dir, 'test'));
+  writeFileSync(join(dir, 'test/App.test.jsx'), source);
+  // installed the way npm would: react-x11 in the app's own node_modules
+  mkdirSync(join(dir, 'node_modules'));
+  symlinkSync(repo, join(dir, 'node_modules/react-x11'), 'junction');
+
+  const ran = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', '--test', 'test/App.test.jsx'],
+    {
+      cwd: dir,
+      encoding: 'utf8',
+      // a run of its own, not a child reporting to this one
+      env: { ...process.env, NODE_TEST_CONTEXT: undefined },
+    },
+  );
+  assert.strictEqual(ran.status, 0, ran.stdout + ran.stderr);
+  // the picture is the window, edge to edge: the size it came out, and a
+  // background of the scheme asked for all the way to the bottom corner
+  const corners = {};
+  for (const scheme of ['light', 'dark']) {
+    const png = PNG.sync.read(readFileSync(join(dir, `shots/${scheme}.png`)));
+    assert.ok(
+      png.width > 200 && png.height > 100,
+      `${png.width}x${png.height}`,
+    );
+    const at = (png.width * png.height - 1) * 4;
+    corners[scheme] = png.data[at] + png.data[at + 1] + png.data[at + 2];
+  }
+  assert.ok(
+    corners.light > corners.dark + 300,
+    `light ${corners.light}, dark ${corners.dark}`,
+  );
 });
 
 test('installs with the package manager that launched it', () => {

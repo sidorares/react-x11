@@ -17,8 +17,10 @@ npm run dev
 ```
 
 `npx react-x11 create my-app` is the same command; `pnpm create`, `yarn
-create` and `bun create` work too and install with themselves. Or add it to
-a project you have:
+create` and `bun create` work too and install with themselves. The app comes
+with an `AGENTS.md` for coding agents and a `DESIGN.md` design brief, so
+"build me…" in Claude Code, Codex or Cursor starts from react-x11's rules
+rather than the DOM's. Or add it to a project you have:
 
 ```bash
 npm install react-x11 react
