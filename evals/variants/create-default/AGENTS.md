@@ -3,7 +3,7 @@
 # This is react-x11, not react-dom
 
 This app is React drawing native desktop windows with react-x11
-2.51.1. There is no DOM, no browser and no CSS. What you know about
+2.52.0. There is no DOM, no browser and no CSS. What you know about
 React carries over: components, hooks, state, context, Suspense, error
 boundaries. What you know about the DOM does not. Before writing UI, read the
 docs installed with the package. They match the version this app runs and
@@ -38,8 +38,8 @@ The same pages are online at
 and widget with its props. Grep them for any prop you are not sure of.
 
 **Examples** are not in the package. These are pinned to this version:
-`https://github.com/sidorares/react-x11/tree/v2.51.1/examples`, raw files
-at `https://raw.githubusercontent.com/sidorares/react-x11/v2.51.1/examples/<file>`.
+`https://github.com/sidorares/react-x11/tree/v2.52.0/examples`, raw files
+at `https://raw.githubusercontent.com/sidorares/react-x11/v2.52.0/examples/<file>`.
 `finder.jsx` and `settings.jsx` (sidebar and content), `tasks.jsx` (list and
 input), `widgets.jsx` (every control), `dashboard.jsx`, `menu.jsx`,
 `theming.jsx`. Read the closest one or two before writing a screen.
@@ -187,7 +187,7 @@ look and how to get each piece out of react-x11.
 
 <!-- END:react-x11-agent-rules -->
 
-The block above comes from react-x11 2.51.1. Keep notes about this app
+The block above comes from react-x11 2.52.0. Keep notes about this app
 below it, so the block can be replaced with a newer version's.
 
 ## This app

@@ -4,7 +4,7 @@ How this app should look and behave. People and coding agents both read it
 before changing the UI.
 
 The first section is this app's brief: fill it in. The rest is the house
-style react-x11 2.51.1 starts every app with: the conventions of the
+style react-x11 2.52.0 starts every app with: the conventions of the
 desktops the app runs on, and how to get each one out of react-x11. Change
 any of it that this app does differently. Then the agent follows your rules
 and not the defaults.
