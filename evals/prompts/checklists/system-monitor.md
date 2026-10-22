@@ -1,0 +1,4 @@
+- A chart of CPU and memory over time, labelled with units.
+- A table of processes with name, PID, CPU and memory, sortable by column.
+- Numbers right-aligned in tabular figures.
+- The data looks like real processes (plausible names, not "Process 1").

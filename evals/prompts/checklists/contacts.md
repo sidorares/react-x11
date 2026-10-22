@@ -1,0 +1,4 @@
+- Groups, contacts of the selected group, and the selected contact's details.
+- Contacts have realistic names, emails and phone numbers.
+- The details show labelled fields aligned in a column.
+- An edit action is visible.

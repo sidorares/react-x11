@@ -1,0 +1,4 @@
+- A table showing the bundled sample CSV on first launch, with column headers.
+- Sortable columns and a filter or search field.
+- An Open action (menu or toolbar) for choosing a file.
+- Numeric columns right-aligned; the row count or file name is shown.

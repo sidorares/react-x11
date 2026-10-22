@@ -1,0 +1,4 @@
+- Fields for the bill amount, tip percentage and number of people, with labels aligned.
+- The tip, the total and the amount per person are shown, computed correctly from the inputs.
+- Money uses tabular figures and a currency symbol.
+- A compact utility window, not a big empty one.

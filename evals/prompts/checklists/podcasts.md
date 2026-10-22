@@ -1,0 +1,4 @@
+- Subscriptions, episodes of the selected show, and the selected episode's notes.
+- Episodes show a title, a date and a duration.
+- A player bar with play/pause, a position and the current episode.
+- Show and episode names look real, not placeholders.

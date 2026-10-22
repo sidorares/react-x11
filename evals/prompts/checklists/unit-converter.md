@@ -1,0 +1,4 @@
+- The categories (length, weight, temperature, volume) are all reachable, one selected.
+- A value field and a unit picker on each side, with a result shown.
+- The result is a real conversion of the shown value (e.g. 10 km = 6.21 mi), not a placeholder.
+- A compact window sized for a utility, not a mostly empty large window.
