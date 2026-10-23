@@ -178,6 +178,12 @@ export class TextAreaNode extends TextInputNode {
     super._applyHistory(value, caret, anchor);
   }
 
+  /** Nor does it once the caret is put somewhere from outside. */
+  setSelectionRange(start, end, direction) {
+    this._goalX = null;
+    super.setSelectionRange(start, end, direction);
+  }
+
   /** Wrapped, styled layout of the value (or placeholder), cached per
    * (text, style, width). Used for painting and all caret geometry, so
    * caret math always agrees with what is on screen. */
