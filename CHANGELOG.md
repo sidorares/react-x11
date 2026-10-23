@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.54.0](https://github.com/sidorares/react-x11/compare/v2.53.0...v2.54.0) (2026-10-23)
+
+
+### Features
+
+* **image:** decodeImageBytes takes { offThread }, and under Node decodes on a worker thread for a caller that waits anyway ([#1004](https://github.com/sidorares/react-x11/issues/1004)) ([1a7b43e](https://github.com/sidorares/react-x11/commit/1a7b43e82ba2dd416edc0befc7705944a466fb62))
+
 ## [2.53.0](https://github.com/sidorares/react-x11/compare/v2.52.0...v2.53.0) (2026-10-22)
 
 
