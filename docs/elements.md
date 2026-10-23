@@ -1360,7 +1360,56 @@ Wayland the field is also declared `sensitive_data` to the input method,
 with no surrounding text offered ([events.md](events.md#input-methods)).
 
 **Ref**: the node, plus `value`, `undo()` / `redo()` and `canUndo` /
-`canRedo` — enough for a toolbar button beside the field.
+`canRedo` — enough for a toolbar button beside the field — and the
+selection, below.
+
+### The selection, from outside
+
+The ref has a DOM input's selection API, with the DOM's names and the DOM's
+units, so a copy-link box, a search field that selects on focus or an input
+mask is written as it would be against a DOM input:
+
+```jsx
+const link = useRef(null);
+<textinput
+  ref={link}
+  defaultValue={url}
+  onFocus={() => link.current.select()}
+/>;
+// an emoji picker: an insert at the caret, and the caret after it
+const field = message.current;
+const { value, selectionStart: a, selectionEnd: b } = field;
+field.value = value.slice(0, a) + emoji + value.slice(b);
+field.setSelectionRange(a + emoji.length, a + emoji.length);
+```
+
+| on the node                                 |                                                                           |
+| ------------------------------------------- | ------------------------------------------------------------------------- |
+| `selectionStart`, `selectionEnd`            | where the selection starts and ends — the caret's offset where nothing is |
+| `selectionDirection`                        | `'forward'`, `'backward'` or `'none'`: which end the caret is at          |
+| `setSelectionRange(start, end, direction?)` | select `[start, end)`; equal offsets put a bare caret                     |
+| `select()`                                  | select the whole value                                                    |
+
+- **Offsets are UTF-16 code units**, as the DOM's are and as a JavaScript
+  string is indexed — `value.slice(selectionStart, selectionEnd)` is what is
+  selected — though `maxLength` and the caret inside the field count code
+  points. One that falls inside a surrogate pair is the character's start.
+- **Clamped as the DOM clamps them**: each end to the value, a start past
+  the end moved back to it. Setting `selectionStart` past the end takes the
+  end with it, and `selectionEnd` before the start takes the start back.
+- **The caret is at the end**, or at the start for `'backward'`, so
+  Shift+arrow goes on from there. A direction set reads back as it was set,
+  `'none'` over a range included, until the user moves an end; after that
+  it is where the caret is, and `'none'` for a bare one.
+- **It is the field's selection**: drawn while the field has the focus — an
+  unfocused field draws none, as a browser's does — and then the one lit
+  range on screen; Backspace deletes it, typing replaces it, and the next
+  edit is a new undo step. What the user selects is what the getters read.
+- **It does not take PRIMARY.** On X11 PRIMARY is what the user last
+  selected, for a middle click elsewhere; a field a script selects on focus
+  would otherwise replace it every time it was tabbed into.
+
+`<textarea>` has the same, across its lines.
 
 ### Undo
 

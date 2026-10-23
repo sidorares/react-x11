@@ -175,6 +175,7 @@ import type {
   Style,
   StyleProp,
   TextInputNode,
+  TextSelectionDirection,
   WheelEvent,
   WidgetChangeEvent,
 } from '../../src/index.js';
@@ -613,6 +614,25 @@ function Elements() {
         label="Undo"
         disabled={!inputRef.current?.canUndo}
         onPress={() => void inputRef.current?.undo()}
+      />
+      <Button
+        label="Copy link"
+        onPress={() => {
+          const field = inputRef.current;
+          if (!field) return;
+          // the DOM's selection API, in UTF-16 code units into `value`
+          field.select();
+          field.setSelectionRange(0, field.value.length, 'backward');
+          field.setSelectionRange(2, 2);
+          field.selectionStart = 1;
+          field.selectionEnd = field.selectionStart + 1;
+          field.selectionDirection = 'forward';
+          const direction: TextSelectionDirection = field.selectionDirection;
+          void field.value.slice(field.selectionStart, field.selectionEnd);
+          void direction;
+          // @ts-expect-error — a direction is one of the DOM's three words
+          field.setSelectionRange(0, 1, 'left');
+        }}
       />
       <textinput
         contextMenu={false}

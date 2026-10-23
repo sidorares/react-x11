@@ -200,7 +200,42 @@ export interface TextInputNode extends DrawnNode {
   redo(): boolean;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
+  /**
+   * Where the selection starts, as a DOM input's `selectionStart` says it:
+   * an offset into `value` in **UTF-16 code units**, so `value.slice(
+   * selectionStart, selectionEnd)` is the selected text. The caret's, where
+   * nothing is selected. Setting it moves the end with it where it passes
+   * the end.
+   */
+  selectionStart: number;
+  /** Where the selection ends, in UTF-16 code units. Setting it before the
+   * start moves the start back to it. */
+  selectionEnd: number;
+  /**
+   * Which end the caret is at: `'backward'` at the start, `'forward'` at the
+   * end, `'none'` for a bare caret — or as `setSelectionRange` set it, until
+   * the user moves either end.
+   */
+  selectionDirection: TextSelectionDirection;
+  /**
+   * Select `[start, end)`, in UTF-16 code units, as a DOM input's
+   * `setSelectionRange` does: clamped to the value, a start past the end
+   * moved back to it, the caret at the end or, for `'backward'`, at the
+   * start. Equal offsets put a bare caret there. Drawn while the field has
+   * the focus, and edited as the user's own selection is; it does not take
+   * PRIMARY, which is the user's last selection.
+   */
+  setSelectionRange(
+    start: number,
+    end: number,
+    direction?: TextSelectionDirection,
+  ): void;
+  /** Select the whole value, as a DOM input's `select()` does. */
+  select(): void;
 }
+
+/** A field's `selectionDirection`, as the DOM names it. */
+export type TextSelectionDirection = 'forward' | 'backward' | 'none';
 
 /**
  * ntk's `Window`, as handed back by a `<window>` or `<popup>` ref. This

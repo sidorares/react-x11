@@ -1,7 +1,8 @@
 // <textinput>: a single-line editable field — value, caret and selection,
 // the keys, the mouse, the clipboard, the edit menu and painting. Undo/redo
-// is in edithistory.js, IME composition in preedit.js and the Mac's editing
-// keys in textkeys.js, installed below.
+// is in edithistory.js, IME composition in preedit.js, the Mac's editing
+// keys in textkeys.js and the selection as the DOM reads and sets it in
+// fieldselection.js, installed below.
 
 import { localTextStyleChanged } from '../styles.js';
 import { Yoga } from '../yoga.js';
@@ -30,6 +31,7 @@ import { takeVisibleSelection } from '../textselection.js';
 import { TextInputHistory } from './edithistory.js';
 import { openEditMenu, editMenuOpen } from './editmenupopup.js';
 import { installMethods } from './install.js';
+import { TextInputSelection } from './fieldselection.js';
 import { Node } from './node.js';
 import { TextInputPreedit } from './preedit.js';
 import { rangeBands } from './text.js';
@@ -964,6 +966,10 @@ export class TextInputNode extends Node {
   defaultFocus() {
     this._focused = true;
     this._caretOn = true;
+    // A selection the field kept while it had no focus — one set from
+    // outside (`setSelectionRange`) — is drawn from now on, and is the one
+    // lit range on screen, as one the user drags here is.
+    if (this._caret !== this._anchor) takeVisibleSelection(this);
     // The desktop's cadence, read at focus rather than at import: XSETTINGS
     // is started but not awaited by createRoot, so this is the first moment
     // it is reliably in — and a field focused before that gets the default
@@ -1165,10 +1171,12 @@ export class TextInputNode extends Node {
   }
 }
 
-// Undo/redo and IME composition live in their own files (see install.js).
+// Undo/redo, IME composition, the Mac's keys and the selection API live in
+// their own files (see install.js).
 installMethods(
   TextInputNode,
   TextInputHistory,
   TextInputPreedit,
   TextInputKeys,
+  TextInputSelection,
 );
