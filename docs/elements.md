@@ -1465,7 +1465,12 @@ const logo = <image src={decodeImage(bytes)} />;
 `decodeImageBytes` from `react-x11/ntk` is the same ladder for an element
 that draws its own images (a document's `<img>`, a CSS background): an
 `Image`, or a promise of one where decoding is async; it throws or rejects,
-naming what to convert to, where `<image>` would show nothing.
+naming what to convert to, where `<image>` would show nothing. One that
+waits for a promise anyway passes `{ offThread: true }`, and under Node the
+same JavaScript decoders run on a worker thread for bytes of 8 KB or more —
+a PNG and a JPEG then land a moment later too, as under Bun, and the
+JavaScript thread decodes none of a page's photographs. `<image>` does not
+ask, so the bytes it is handed keep their first frame.
 
 Between the runtimes:
 

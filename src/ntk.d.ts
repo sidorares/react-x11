@@ -115,7 +115,19 @@ export interface DecodedImage {
  */
 export function decodeImageBytes(
   bytes: Uint8Array,
+  options?: DecodeImageOptions,
 ): DecodedImage | Promise<DecodedImage>;
+
+/** How `decodeImageBytes` decodes. */
+export interface DecodeImageOptions {
+  /**
+   * Decode on a worker thread where the runtime decodes in JavaScript (Node),
+   * for bytes long enough to pay for the trip: the answer is then a promise
+   * for a PNG and a JPEG too. Under Bun every decode is off the thread
+   * already.
+   */
+  offThread?: boolean;
+}
 
 /** `code` values on a failed GL setup — see `<glarea onError>`. */
 export const GLXError: {

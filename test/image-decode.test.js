@@ -211,6 +211,81 @@ test(
   },
 );
 
+// --- off the JavaScript thread ------------------------------------------------
+
+/** A picture of noise `width` by `height`: bytes no encoder makes small. */
+function noise(width, height) {
+  const data = new Uint8Array(width * height * 4);
+  for (let i = 0; i < data.length; i++) data[i] = (i * 2654435761) >>> 24;
+  return { width, height, data };
+}
+
+test(
+  'a decode asked to run off the thread makes on a worker the pixels the JavaScript rung makes',
+  { skip: realBun },
+  async () => {
+    const picture = noise(300, 200);
+    for (const bytes of [encodePng(picture), losslessWebP(picture)]) {
+      const kept = Buffer.from(bytes);
+      const pending = decodeImageBytes(bytes, { offThread: true });
+      assert.equal(typeof pending.then, 'function', 'a promise, a PNG too');
+      const image = await pending;
+      assert.deepStrictEqual([image.width, image.height], [300, 200]);
+      assert.ok(
+        Buffer.from(image.data).equals(Buffer.from(picture.data)),
+        'every pixel',
+      );
+      // what it was handed was a copy: the caller's bytes are still theirs
+      assert.ok(Buffer.from(bytes).equals(kept), 'the bytes are untouched');
+    }
+  },
+);
+
+test(
+  'off the thread, bytes too short to pay for the trip decode where they are',
+  { skip: realBun },
+  () => {
+    const image = decodeImageBytes(encodePng(TWO_BY_TWO), { offThread: true });
+    assert.equal(typeof image.then, 'undefined', 'an Image, not a promise');
+    assert.deepStrictEqual(at(image, 0, 1), BLUE);
+  },
+);
+
+test(
+  'a decode that fails off the thread rejects with what the JavaScript rung says',
+  { skip: realBun },
+  async () => {
+    const bad = Buffer.concat([
+      Buffer.from('RIFF\0\0\0\0WEBPVP8 '),
+      Buffer.alloc(9000, 7),
+    ]);
+    await assert.rejects(
+      decodeImageBytes(bad, { offThread: true }),
+      /WebP bytes did not decode.*damaged or cut short/s,
+    );
+  },
+);
+
+test(
+  'a decode worker holds the process open only while it has a decode to answer',
+  { skip: realBun },
+  () => {
+    // a worker left referenced would keep this process running for good
+    const script =
+      "import { decodeImageBytes } from './src/imagedecode.js';" +
+      "import { encodePng } from './test/fixtures/images.js';" +
+      'const data = new Uint8Array(300 * 200 * 4).map((_, i) => (i * 2654435761) >>> 24);' +
+      'const image = await decodeImageBytes(encodePng({ width: 300, height: 200, data }), { offThread: true });' +
+      'console.log(image.width);';
+    const out = execFileSync(
+      process.execPath,
+      ['--input-type=module', '-e', script],
+      { cwd: new URL('..', import.meta.url), timeout: 20000, encoding: 'utf8' },
+    );
+    assert.equal(out.trim(), '300');
+  },
+);
+
 // --- the runtime's rung: Bun.Image ----------------------------------------
 
 test(

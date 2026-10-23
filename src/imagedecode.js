@@ -13,7 +13,11 @@
 //   2. JavaScript. ntk's PNG and JPEG decoders (pngjs, jpeg-js), which are
 //      synchronous, and WebP through image-in-browser's decoder — imported
 //      the first time a WebP arrives, because evaluating it takes ~140ms
-//      that an app showing no WebP should never pay at startup.
+//      that an app showing no WebP should never pay at startup. A caller
+//      that takes a promise anyway asks for `offThread`, and the same
+//      decoders run on a worker thread (`imagedecode-worker.js`) for bytes
+//      large enough to pay for the trip: a document's images, which held
+//      the JavaScript thread for half of the Guardian's load.
 //
 // Two things here are easy to undo:
 //
@@ -115,17 +119,41 @@ const hex = (bytes) =>
  * elsewhere). Throws — or rejects — on bytes that are not an image this
  * runtime can decode, with what to do about it.
  *
+ * `options.offThread` asks for the decode to run on a worker thread where
+ * the runtime decodes in JavaScript, which it does for bytes long enough
+ * (`OFF_THREAD_BYTES`): a PNG or a JPEG then lands as a promise too. A
+ * caller that waits for a promise anyway — a document's images — asks for
+ * it; `<image>` does not, so a PNG it is handed still shows in the first
+ * frame.
+ *
  * The bytes are read, never written, and under Bun they are read on another
  * thread after this returns: the caller must not change them meanwhile,
  * which `<image>`'s contract (a source is immutable content) already says.
  */
-export function decodeImageBytes(bytes) {
+export function decodeImageBytes(bytes, options) {
   if (bytes.length === 0) {
     throw new Error('react-x11: an empty buffer is not an image.');
   }
   const decoder = runtimeDecoder();
   if (decoder) return decodeWithRuntime(decoder, bytes);
   const format = imageFormat(bytes);
+  if (
+    options?.offThread &&
+    bytes.length >= OFF_THREAD_BYTES &&
+    (format === 'png' || format === 'jpeg' || format === 'webp')
+  ) {
+    const pool = decodePool();
+    if (pool) return pool.decode(bytes, format);
+  }
+  return decodeHere(bytes, format);
+}
+
+/**
+ * The JavaScript rung, on whichever thread runs it: what `decodeImageBytes`
+ * does where the runtime has no decoder of its own, and what its worker
+ * does with the bytes it is handed.
+ */
+export function decodeHere(bytes, format = imageFormat(bytes)) {
   if (format === 'png' || format === 'jpeg') return decodeImage(bytes);
   if (format === 'webp') return decodeWebP(bytes);
   if (format) {
@@ -140,6 +168,116 @@ export function decodeImageBytes(bytes) {
     'react-x11: these bytes are not an image format react-x11 recognizes ' +
       `(PNG, JPEG or WebP; more under Bun) — they begin ${hex(bytes)}.`,
   );
+}
+
+/**
+ * How long encoded bytes are before a decode asked to run off the
+ * JavaScript thread is handed to a worker: under it, the message costs
+ * about what the decode does.
+ */
+const OFF_THREAD_BYTES = 8 * 1024;
+
+/** The most decode workers a process starts. */
+const MAX_WORKERS = 2;
+
+/** The pool `offThread` decodes on: undefined until asked, null where the
+ *  runtime has no worker threads. */
+let pool;
+
+function decodePool() {
+  if (pool !== undefined) return pool;
+  const threads = globalThis.process?.getBuiltinModule?.('node:worker_threads');
+  pool = threads?.Worker ? new DecodePool(threads.Worker) : null;
+  return pool;
+}
+
+/**
+ * Workers that decode with the JavaScript rung (`decodeHere`), started as
+ * decodes arrive, up to `MAX_WORKERS`. A worker holds the process open only
+ * while it has a decode to answer. One that cannot start, or dies, has its
+ * decodes made here, and none starts after it: a bundle that left the
+ * worker's file behind decodes as it always did.
+ */
+class DecodePool {
+  constructor(Worker) {
+    this._Worker = Worker;
+    this._workers = [];
+    this._jobs = new Map();
+    this._next = 1;
+    this._broken = false;
+  }
+
+  decode(bytes, format) {
+    const worker = this._worker();
+    if (!worker) return decodeHere(bytes, format);
+    const id = this._next++;
+    // a copy, handed over: the caller's bytes stay where they are, and a
+    // Buffer's `slice` is a view of them
+    const copy = new Uint8Array(bytes);
+    try {
+      worker.thread.postMessage({ id, bytes: copy }, [copy.buffer]);
+    } catch {
+      return decodeHere(bytes, format);
+    }
+    if (worker.pending++ === 0) worker.thread.ref();
+    return new Promise((resolve, reject) => {
+      this._jobs.set(id, { resolve, reject, worker, bytes, format });
+    });
+  }
+
+  /** The least busy worker, or a new one while every one is busy. */
+  _worker() {
+    if (this._broken) return null;
+    let best = null;
+    for (const w of this._workers) {
+      if (!best || w.pending < best.pending) best = w;
+    }
+    if (best && (best.pending === 0 || this._workers.length >= MAX_WORKERS)) {
+      return best;
+    }
+    let thread;
+    try {
+      thread = new this._Worker(
+        new URL('./imagedecode-worker.js', import.meta.url),
+      );
+    } catch {
+      this._broken = true;
+      return best;
+    }
+    const w = { thread, pending: 0 };
+    thread.unref();
+    thread.on('message', (message) => this._answer(w, message));
+    thread.on('error', () => this._lost(w));
+    thread.on('exit', () => this._lost(w));
+    this._workers.push(w);
+    return w;
+  }
+
+  _answer(w, { id, width, height, data, error }) {
+    const job = this._jobs.get(id);
+    if (!job) return;
+    this._jobs.delete(id);
+    if (--w.pending === 0) w.thread.unref();
+    if (error !== undefined) job.reject(new Error(error));
+    else job.resolve(new Image({ width, height, data: new Uint8Array(data) }));
+  }
+
+  _lost(w) {
+    this._broken = true;
+    this._workers = this._workers.filter((other) => other !== w);
+    for (const [id, job] of this._jobs) {
+      if (job.worker !== w) continue;
+      this._jobs.delete(id);
+      try {
+        Promise.resolve(decodeHere(job.bytes, job.format)).then(
+          job.resolve,
+          job.reject,
+        );
+      } catch (err) {
+        job.reject(err);
+      }
+    }
+  }
 }
 
 /** Read a file path or file URL and decode it. */
