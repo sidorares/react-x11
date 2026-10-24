@@ -512,6 +512,7 @@ import { Select } from 'react-x11';
 | `labelStyle`            | the caption's style, over `text`          |
 | `chevronStyle`          | the chevron's style, over `textMuted`     |
 | `native`, `nativeMenu`  | the platform's bezel, and its menu        |
+| `open`, `onOpenChange`  | whether the menu is down                  |
 
 `style` restyles the trigger and the two slots what is inside it, keeping the
 menu, keyboard, type-ahead and focus ring. A borderless select in a line of
@@ -548,6 +549,23 @@ does), at the caption's size and family when the system has it; `false`
 keeps the drawn menu. Elsewhere, or on an older bridge, the menu is drawn. A
 platform menu dismisses itself (Escape, a click outside, the app losing
 focus), and the select hears a pick or nothing.
+
+**Whether the menu is down** is told through `onOpenChange(open)`, each time
+it drops or goes, the drawn menu or the platform's, whatever moved it. With
+`open` the owner holds it, as `value` holds the option: the menu drops when
+`open` goes `true` and goes when it goes `false`, and a press, a key, a pick
+or a click outside asks `onOpenChange` instead. A menu that cannot drop, or
+that goes by itself — the platform's dismissing itself, the trigger
+scrolling out of view — is told as `false`, so an owner that keeps what it
+is told keeps what is on screen; a change the owner made is not told back.
+That is a browser's `select.showPicker()` and `:open`, which `<Html>` in
+`@react-x11/components` answers with it:
+
+```jsx
+const [open, setOpen] = useState(false);
+<Button label="Choose" onPress={() => setOpen(true)} />
+<Select value={v} options={opts} onChange={pick} open={open} onOpenChange={setOpen} />
+```
 
 **Behaviour.** The menu opens on the **press**, as in every desktop toolkit;
 a press while it is up closes it. Space and Enter toggle it; Escape, focus

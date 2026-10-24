@@ -545,6 +545,23 @@ export interface SelectProps<T = unknown>
    * Ignored where the backend has no such menu.
    */
   nativeMenu?: boolean;
+  /**
+   * Whether the menu is down, held by the owner as `value` holds the
+   * option: it drops when this goes `true` and comes up when it goes
+   * `false`, and what the user does to open or close it — a press, a key,
+   * a pick, a click outside — asks {@link SelectProps.onOpenChange} instead
+   * of doing it. Left out, the select keeps its own.
+   */
+  open?: boolean;
+  /**
+   * Told each time the menu goes down or comes up, the drawn one or the
+   * platform's, and with `open` asked when the user would move it. A menu
+   * that cannot drop — its trigger in no window — or that goes by itself,
+   * the platform's dismissing itself or the trigger scrolling out of view,
+   * is told as `false`. A change the owner made through `open` is not told
+   * back.
+   */
+  onOpenChange?: (open: boolean) => void;
 }
 export function Select<T = unknown>(props: SelectProps<T>): ReactNode;
 

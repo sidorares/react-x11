@@ -329,6 +329,16 @@ function Option({
  * what a browser does with a `<select>` a page styled, and `false` keeps the
  * drawn one. A drawn trigger's menu is set at the caption's size, in the
  * family its style names when the system has it.
+ *
+ * `onOpenChange(open)` is told each time the menu goes down or comes up,
+ * the drawn one or the platform's, whatever moved it — the user, a pick,
+ * the trigger scrolling out of view, the platform's menu dismissing itself.
+ * `open` puts the menu in its owner's hands, as `value` puts the option:
+ * the menu drops when it goes `true` and comes up when it goes `false`, and
+ * what the user does to open or close it asks `onOpenChange` instead of
+ * doing it. A menu that cannot drop — a trigger not in a window — or that
+ * goes by itself is told as `false`, so an owner that keeps what it is told
+ * keeps what is on screen. Left out, the select keeps its own.
  */
 export function Select({
   value,
@@ -338,6 +348,8 @@ export function Select({
   placeholder = 'Select…',
   native,
   nativeMenu,
+  open: openProp,
+  onOpenChange,
   style,
   labelStyle,
   chevronStyle,
@@ -444,7 +456,8 @@ export function Select({
   const openPlatformMenu = () => {
     const node = triggerRef.current;
     const wnd = node?.root?.window;
-    if (!node || !wnd || platformRef.current) return;
+    if (platformRef.current) return true;
+    if (!node || !wnd) return false;
     const chosen = normalized.findIndex((o) => o.value === value);
     const family = menuFamily(flattenStyle(labelStyle).fontFamily);
     setPlatformOpen(true);
@@ -471,22 +484,64 @@ export function Select({
         if (option && option.value !== value) emit(option.value);
       },
     );
+    return true;
   };
+  /** Drop the menu, whichever it is; whether it is down. */
   const openMenu = () => {
-    if (platformMenu) {
-      openPlatformMenu();
-      return;
-    }
+    if (platformMenu) return openPlatformMenu();
     const node = triggerRef.current;
-    if (!node) return;
+    if (!node) return false;
     const rect = measureAnchor(menuAnchorOptions());
-    if (!rect) return;
+    if (!rect) return false;
     setAnchor(rect);
     const selected = normalized.findIndex((o) => o.value === value);
     setActiveIndex(selected >= 0 ? selected : 0);
     setOpen(true);
+    return true;
   };
-  const toggle = () => (expanded ? close() : openMenu());
+
+  // Whether the menu is down is the select's own, or with `open` its
+  // owner's. `told` is what the owner knows: what it last said through
+  // `open`, or what it was last told through `onOpenChange` — so each
+  // change is told once, and one the owner made itself is not told back.
+  const controlled = openProp !== undefined;
+  const told = useRef(false);
+  const said = useRef(false);
+  const openChange = useRef(onOpenChange);
+  openChange.current = onOpenChange;
+  const tell = (next) => {
+    if (told.current === next) return;
+    told.current = next;
+    openChange.current?.(next);
+  };
+  /** What the user, or the menu's own dismissal, asks for: done, or with
+   *  `open` asked of the owner. */
+  const ask = (next) => {
+    if (!controlled) {
+      if (next) openMenu();
+      else close();
+      return;
+    }
+    tell(next);
+  };
+  // The menu follows what the owner says as it changes, and what it comes
+  // to is told: down, up, or up again by itself. One effect does both: in
+  // two, the pass in which `open` changed told the owner back the state
+  // from before the change, which the menu had not followed yet.
+  useEffect(() => {
+    if (controlled && openProp !== said.current) {
+      said.current = openProp;
+      told.current = openProp;
+      if (openProp && !expanded) {
+        if (!openMenu()) tell(false);
+      } else if (!openProp && expanded) close();
+      return;
+    }
+    tell(expanded);
+  }, [controlled, openProp, expanded]);
+
+  const toggle = () => ask(!expanded);
+  const dismiss = () => ask(false);
   // a menu still down when the select goes is taken with it
   useEffect(() => () => platformRef.current?.(), []);
 
@@ -498,15 +553,15 @@ export function Select({
   // following it there — a popup is a real window, not something clipped
   // by the trigger's ancestors, so it would otherwise hang over content it
   // no longer points at.
-  useAnchorTracking(triggerRef, open, menuAnchorOptions, setAnchor, close);
+  useAnchorTracking(triggerRef, open, menuAnchorOptions, setAnchor, dismiss);
   // and shut it when the whole window loses focus: the trigger keeps the
   // focus it has, so its own `onBlur` never fires for this
-  useDismissOnWindowBlur(triggerRef, open, close);
+  useDismissOnWindowBlur(triggerRef, open, dismiss);
 
   const emit = (next) => onChange?.(changeEvent('select-one', name, next));
 
   const pick = (option) => {
-    close();
+    dismiss();
     if (option.value !== value) emit(option.value);
   };
 
@@ -520,12 +575,12 @@ export function Select({
     const count = normalized.length;
     switch (ev.keysym) {
       case XK_ESCAPE:
-        if (open) close();
+        if (open) dismiss();
         return;
       case XK_DOWN:
       case XK_UP:
         if (open) move(ev.keysym === XK_DOWN ? 1 : -1);
-        else openMenu();
+        else ask(true);
         return;
       case XK_HOME:
       case XK_END:
@@ -589,7 +644,7 @@ export function Select({
       onFocus: () => setFocused(true),
       onBlur: () => {
         setFocused(false);
-        close();
+        dismiss();
       },
       onKeyDown,
       ...boxProps,
@@ -721,7 +776,7 @@ export function Select({
           // control, not the bare `<popup>` default of `popup_menu`
           windowType: 'dropdown_menu',
           grab: true,
-          onDismiss: close,
+          onDismiss: dismiss,
           // ARGB where the display has it, so the corners the sheet gives up
           // are the desktop rather than a colour — as the menus are. The
           // window paints nothing itself when it can be seen through: the
