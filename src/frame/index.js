@@ -696,11 +696,19 @@ function PaneHostView({
     const node = containerRef.current;
     if (!s || !node) return;
     const sc = node.scale ?? 1;
+    // Where the pointer is on the screen, which is what `rootx`/`rooty` are
+    // on every backend, and what a `<ContextMenu>` in the pane opens its
+    // popup at (`openAt`, components/Menu.js). The window's origin plus the
+    // window point: the same sum the pane is told its own corner by
+    // (`syncSize` below), so the pane's `x` plus its corner is this. Sent
+    // the window point, a pane's menu opened up and to the left of the
+    // pointer by as far as the window was from the screen's corner.
+    const origin = node.root?.window?._screenOrigin ?? { x: 0, y: 0 };
     const payload = {
       x: Math.max(0, Math.round(ev.x * sc - node.abs.x)),
       y: Math.max(0, Math.round(ev.y * sc - node.abs.y)),
-      rootx: Math.round(ev.x * sc),
-      rooty: Math.round(ev.y * sc),
+      rootx: Math.round(origin.x + ev.x * sc),
+      rooty: Math.round(origin.y + ev.y * sc),
       // The modifier mask, which a synthetic event carries on its native
       // event alone. Read off the synthetic one, every key and press
       // reached the pane with none: Shift+Tab went forwards there, and a

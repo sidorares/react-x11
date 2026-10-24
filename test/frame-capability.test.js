@@ -237,6 +237,63 @@ describe('<Frame>: input forwarded to a composited pane', () => {
     ]);
     await root.unmount();
   });
+
+  // `rootx`/`rooty` are the pointer on the screen, and a `<ContextMenu>` in
+  // the pane opens its popup there. Sent the point in the host's window,
+  // a right-click on a page opened its menu up and to the left of the
+  // pointer, by as far as the window was from the screen's corner.
+  it('a press reaches the pane at its place in the pane and on the screen', async () => {
+    const app = createMockApp();
+    app.createPaneHost = () => ({ setRect() {}, present() {}, destroy() {} });
+    const sent = [];
+    const transport = () => ({
+      send: (msg) => sent.push(msg),
+      onMessage: (cb) => {
+        setImmediate(() => cb({ type: 'ready', windowId: 1 }));
+        return () => {};
+      },
+      onExit: () => () => {},
+      pid: -1,
+    });
+    const root = await createRoot({ app });
+    root.render(
+      h(
+        'window',
+        { width: 200, height: 120 },
+        h('box', { style: { height: 40, flexShrink: 0 } }),
+        h(Frame, { src: PANE, transport, style: { flexGrow: 1 } }),
+      ),
+    );
+    await settle();
+    const wnd = app.windows[0];
+    // where the window manager put it
+    wnd._screenOrigin = { x: 300, y: 200 };
+    flushFrames(wnd);
+    wnd.emit('mousedown', {
+      x: 50,
+      y: 70,
+      rootx: 350,
+      rooty: 270,
+      keycode: 3,
+      buttons: 0,
+      time: 1,
+    });
+    const press = sent.find(
+      (m) => m.type === 'pane-event' && m.name === 'mousedown',
+    );
+    assert.ok(press, 'the press was not sent on');
+    const { x, y, rootx, rooty } = press.ev;
+    assert.deepEqual(
+      { x, y, rootx, rooty },
+      {
+        x: 50,
+        y: 30,
+        rootx: 350,
+        rooty: 270,
+      },
+    );
+    await root.unmount();
+  });
 });
 
 describe('<Frame>: the cursor of a composited pane', () => {
