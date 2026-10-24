@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.55.0](https://github.com/sidorares/react-x11/compare/v2.54.0...v2.55.0) (2026-10-24)
+
+
+### Features
+
+* **select:** whether the menu is down is told through onOpenChange, and held by an owner through open ([#1010](https://github.com/sidorares/react-x11/issues/1010)) ([6817199](https://github.com/sidorares/react-x11/commit/681719925353d2f600f9e6789b940eac352d0a66))
+* **textinput:** a field's selection is read and set from outside, through the DOM's selectionStart, selectionEnd, selectionDirection, setSelectionRange() and select() ([#1006](https://github.com/sidorares/react-x11/issues/1006)) ([cfcfa07](https://github.com/sidorares/react-x11/commit/cfcfa07aaaf67a7bc01dc6237441892fea97eed6))
+
+
+### Bug Fixes
+
+* **cocoa:** a &lt;glarea&gt; frame draws only into a buffer the render server has let go of, so a GL scene settling after a zoom is not shown as its clear colour for a frame ([#1008](https://github.com/sidorares/react-x11/issues/1008)) ([5ad767f](https://github.com/sidorares/react-x11/commit/5ad767f5cbf17b86e7de3d0aa5341ab0d080806c))
+* **frame:** a right-click menu in a pane opens at the pointer, and the edit menu no longer scrolls a document to its top ([#1009](https://github.com/sidorares/react-x11/issues/1009)) ([6c297fb](https://github.com/sidorares/react-x11/commit/6c297fb3a5fddd745a439817feb16a78196e8479))
+
 ## [2.54.0](https://github.com/sidorares/react-x11/compare/v2.53.0...v2.54.0) (2026-10-23)
 
 
