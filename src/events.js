@@ -2040,6 +2040,13 @@ export class EventManager {
    * Asks `isScroller()` rather than whether the method exists: every `<box>`
    * carries `scrollIntoView` now, and one that is not a scroll container
    * would end the walk without revealing anything.
+   *
+   * And it ends at the node's window. A `<popup>` hangs off a node of its
+   * owner's tree, but it is a window of its own on the screen: no pane in
+   * the owner scrolls it, and the pane above it measured the popup's
+   * content as if it were laid out at the popup's parent — so the edit
+   * menu, focusing its rows, scrolled a document in a pane to its top on
+   * every right-click.
    */
   _scrollIntoView(node) {
     for (let n = node.parent; n; n = n.parent) {
@@ -2047,6 +2054,7 @@ export class EventManager {
         n.scrollIntoView(node);
         return;
       }
+      if (n.isWindow) return;
     }
   }
 
