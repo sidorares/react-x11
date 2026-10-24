@@ -15,7 +15,12 @@ import { test } from 'node:test';
 
 import React from 'react';
 
-import { createRoot } from '../src/index.js';
+import {
+  closeEditMenu,
+  createRoot,
+  editMenuOpen,
+  openEditMenu,
+} from '../src/index.js';
 import { createMockApp, flushFrames, pressButton } from './helpers/mock-app.js';
 
 const h = React.createElement;
@@ -106,5 +111,71 @@ test('scrollIntoView leaves a node that covers the viewport, and brings a taller
   await tick();
   flushFrames(wnd);
   assert.equal(pane.scrollY, 0);
+  await root.unmount();
+});
+
+// A `<popup>` hangs off a node of its owner's tree and is a window of its
+// own on the screen, so what it focuses is no pane's to bring into view.
+// The pane above it measured the popup's content as if it were laid out at
+// the popup's parent: the edit menu taking the keyboard scrolled a
+// document in a pane to its top on every right-click.
+test("the edit menu taking the keyboard leaves the owner's pane where it was", async () => {
+  const { root, wnd, pane, doc } = await mount();
+  pane.scrollTo(500);
+  await tick();
+  flushFrames(wnd);
+
+  openEditMenu(doc, { x: 50, y: 50 }, { copy() {}, selectAll() {} });
+  await tick();
+  flushFrames(wnd);
+  assert.equal(editMenuOpen(doc), true, 'no menu opened');
+  assert.equal(pane.scrollY, 500, 'the menu scrolled the pane');
+
+  closeEditMenu(doc);
+  await tick();
+  flushFrames(wnd);
+  assert.equal(pane.scrollY, 500, 'closing it scrolled the pane');
+  await root.unmount();
+});
+
+test("a node a popup focuses is not scrolled into view by the owner's pane", async () => {
+  const app = createMockApp();
+  const root = await createRoot({ app });
+  let inner = null;
+  root.render(
+    h(
+      'window',
+      { width: 100, height: 100 },
+      h(
+        'box',
+        { style: { overflow: 'scroll', flexGrow: 1 } },
+        h(
+          'box',
+          { style: { height: 1000 } },
+          h(
+            'popup',
+            { x: 0, y: 0, width: 50, height: 20 },
+            h('box', {
+              ref: (n) => (inner = n),
+              style: { height: 20 },
+              focusable: true,
+            }),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tick();
+  const wnd = app.windows[0];
+  flushFrames(wnd);
+  const pane = wnd._reactX11Node.children[0];
+  pane.scrollTo(500);
+  await tick();
+  flushFrames(wnd);
+
+  wnd._reactX11Node.events.focus(inner);
+  await tick();
+  flushFrames(wnd);
+  assert.equal(pane.scrollY, 500, 'the focus scrolled the pane');
   await root.unmount();
 });
