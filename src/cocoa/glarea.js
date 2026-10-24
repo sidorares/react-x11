@@ -6,7 +6,8 @@
 // X server exported, frames render into IOSurface-backed framebuffers
 // (x11-dri `createTarget`) and present by handing the IOSurface's process-
 // global id to the area's own sublayer (`setLayerContentsIOSurface`). Two
-// targets alternate, like any swapchain; the WindowServer composites.
+// targets alternate, like any swapchain — three while a worker's flip has
+// yet to let go of the buffer it replaced; the WindowServer composites.
 //
 // What GlAreaNode needs from us is the child-"window" contract it already
 // speaks (src/glnodes.js): `createWindow({ parent, … })` answering an
@@ -32,6 +33,30 @@ import { withoutActions } from './quiet.js';
 
 const RUNGS = ['auto', 'gl'];
 const KNOWN_RUNGS = ['auto', 'gl', 'gles', 'webgpu'];
+
+/** Buffers a surface's chain may hold: the window presenter's
+ *  `MAX_BUFFERS`. A scene drawn at the display's rate takes all four, since
+ *  each buffer it retires is held for `HOLD_PERIODS` and a frame that
+ *  presents late in its period retires its buffer late too; with three it
+ *  waited for one, and a 120Hz scene ran at 80. */
+const MAX_BUFFERS = 4;
+/** How many display periods a buffer is taken to stay on glass after the
+ *  flip that replaced it: the render server latches a flip at a vsync a
+ *  period or two after the commit, and composites from the old buffer until
+ *  then. Two buffers alternating at the display's rate drew into the one it
+ *  was still reading — `IOSurfaceIsInUse` true at nine frames in ten — and
+ *  now and then it composited that buffer half drawn: the scene's clear
+ *  colour, over the whole surface, for a frame. A period was not enough
+ *  either (one frame in seven). The window presenter asks
+ *  `surfaceIsInUse`; these buffers are x11-dri's, which nothing asks yet. */
+const HOLD_PERIODS = 1.5;
+/** How long a worker's flip may take to report its release before the
+ *  buffer it retired is drawn into anyway — the window presenter's
+ *  `FENCE_TIMEOUT_MS`. */
+const RELEASE_TIMEOUT_MS = 100;
+/** A chain past two buffers gives the rest back after this long without a
+ *  frame — the window presenter's `TRIM_AFTER_MS`. */
+const TRIM_AFTER_MS = 1000;
 
 let driPromise = null;
 function loadDri() {
@@ -292,6 +317,11 @@ export class CocoaGLArea {
 function createGLAreaContext(runtime, area, config) {
   const native = area._native;
   const ctx = Object.create(runtime.gl);
+  // The chain: every buffer this surface draws in, `{ target, released,
+  // offGlassAt, unwatch }`. `front` is the one the last swap put on glass,
+  // and `back` the one the frame being drawn goes into, from `makeCurrent`
+  // to `SwapBuffers`.
+  let buffers = [];
   let front = null;
   let back = null;
   let width = 0;
@@ -301,18 +331,87 @@ function createGLAreaContext(runtime, area, config) {
   // millisecond before its own timer still reads the true state.
   let gateOpenAt = -Infinity;
   let gateTimer = null;
+  let releaseTimer = null;
+  let trimTimer = null;
+  let swappedAt = -Infinity;
   let destroyed = false;
+  // The frame clock's time, which `canRender` is asked on and a hold is
+  // counted on: the window's clock hands out the slot a frame was due at,
+  // and a test drives it by hand. `skew` is how far it was from
+  // `performance.now()` when it was last asked.
+  let skew = 0;
+  const clock = () => performance.now() + skew;
 
+  const size = () => [
+    Math.max(1, area.rect?.width ?? 1),
+    Math.max(1, area.rect?.height ?? 1),
+  ];
+
+  const drop = (buffer) => {
+    buffer.unwatch?.();
+    buffer.target.destroy();
+  };
+
+  // A new size is a new chain, made a buffer at a time as frames take them.
+  // Nothing of the old one is drawn into again, so nothing waits for it.
   const ensureTargets = () => {
-    const w = Math.max(1, area.rect?.width ?? 1);
-    const h = Math.max(1, area.rect?.height ?? 1);
-    if (front && width === w && height === h) return;
-    front?.destroy();
-    back?.destroy();
-    front = runtime.ctx.createTarget(w, h);
-    back = runtime.ctx.createTarget(w, h);
+    const [w, h] = size();
+    if (width === w && height === h) return;
+    for (const buffer of buffers) drop(buffer);
+    buffers = [];
+    front = back = null;
     width = w;
     height = h;
+  };
+
+  /**
+   * Of the buffers off glass, the one a frame may draw in now: one the
+   * flip that retired it has let go of, and of those the one off glass
+   * longest, which the WindowServer has had longest to stop reading.
+   * `'new'` while the chain has room for another. Past that, one whose
+   * release is overdue. Else null: the frame waits for a release.
+   */
+  const freeBuffer = (now) => {
+    const hold = runtime.frameInterval * HOLD_PERIODS;
+    let free = null;
+    let overdue = null;
+    for (const buffer of buffers) {
+      if (buffer === front) continue;
+      if (buffer.released && now - buffer.offGlassAt >= hold) {
+        if (!free || buffer.offGlassAt < free.offGlassAt) free = buffer;
+      } else if (now - buffer.offGlassAt >= RELEASE_TIMEOUT_MS) {
+        if (!overdue || buffer.offGlassAt < overdue.offGlassAt) {
+          overdue = buffer;
+        }
+      }
+    }
+    if (free) return free;
+    if (buffers.length < MAX_BUFFERS) return 'new';
+    return overdue;
+  };
+
+  const takeBack = () => {
+    const found = freeBuffer(clock());
+    if (found && found !== 'new') return found;
+    if (found === 'new') {
+      const buffer = {
+        target: runtime.ctx.createTarget(width, height),
+        released: true,
+        offGlassAt: -Infinity,
+        unwatch: null,
+      };
+      buffers.push(buffer);
+      return buffer;
+    }
+    // Asked to draw with nothing free — by a caller that did not ask
+    // `canRender` first: the buffer off glass longest, which is the one a
+    // chain of two always drew into.
+    let oldest = null;
+    for (const buffer of buffers) {
+      if (buffer === front) continue;
+      if (!oldest || buffer.offGlassAt < oldest.offGlassAt) oldest = buffer;
+    }
+    return oldest;
   };
 
   ctx.backend = 'direct';
@@ -336,12 +435,30 @@ function createGLAreaContext(runtime, area, config) {
   // are on one grid: the clock cannot take a frame the gate would refuse,
   // because both are the same instant, and the gate still never lets two
   // frames into one period.
-  ctx.canRender = (now = performance.now()) => !destroyed && now >= gateOpenAt;
+  //
+  // And a period is not long enough to stay off the buffer the last flip
+  // retired: the render server latches a flip a period or two after it is
+  // committed, and reads the buffer it replaces until then — on a worker,
+  // where the flip waits for the UI thread, until later still. A frame
+  // drawn into it was now and then composited half drawn: the scene's
+  // clear colour over the whole surface, for a frame, as a map settled
+  // after a zoom. So a frame takes a buffer that has been off glass for
+  // `HOLD_PERIODS` and, on a worker, released (`freeBuffer`), and the gate
+  // is shut while there is none and no room in the chain for another.
+  ctx.canRender = (now = performance.now()) => {
+    skew = now - performance.now();
+    if (destroyed || now < gateOpenAt) return false;
+    const [w, h] = size();
+    if (back || width !== w || height !== h || freeBuffer(now)) return true;
+    armRelease();
+    return false;
+  };
 
   ctx.makeCurrent = () => {
     if (destroyed) return;
     ensureTargets();
-    runtime.ctx.bindTarget(back);
+    back ??= takeBack();
+    runtime.ctx.bindTarget(back.target);
   };
 
   // WebGL's "null means the default framebuffer" — and this surface's
@@ -349,7 +466,82 @@ function createGLAreaContext(runtime, area, config) {
   // a swapchain like this is nothing at all. A scene that renders through
   // its own FBO and unbinds at the end (the SSAA pattern) lands back here.
   ctx.bindFramebuffer = (target, fb) => {
-    runtime.gl.bindFramebuffer(target, fb == null ? (back?.fbo ?? 0) : fb);
+    runtime.gl.bindFramebuffer(
+      target,
+      fb == null ? (back?.target.fbo ?? 0) : fb,
+    );
+  };
+
+  /**
+   * The buffer a worker's flip just took off glass is held until the bridge
+   * says the flip applied (`surface-released`, windowkit/appkit#52) — the
+   * window presenter's fence, for this surface's own buffers. The flip
+   * happened then, so `HOLD_PERIODS` counts from then; a frame refused
+   * meanwhile is asked for again once that is over.
+   */
+  const awaitRelease = (buffer) => {
+    buffer.unwatch?.();
+    buffer.released = false;
+    buffer.unwatch = area.app.watchSurfaceRelease(
+      buffer.target.iosurfaceId,
+      () => {
+        buffer.unwatch = null;
+        buffer.released = true;
+        buffer.offGlassAt = clock();
+        if (!destroyed) armRelease();
+      },
+    );
+  };
+
+  // A frame refused for want of a buffer is asked for again when the first
+  // one frees: its hold over, or its release overdue — a release that
+  // never comes stops holding the frames after `RELEASE_TIMEOUT_MS`.
+  let releaseDue = Infinity;
+  const armRelease = () => {
+    if (destroyed) return;
+    const hold = runtime.frameInterval * HOLD_PERIODS;
+    let due = Infinity;
+    for (const buffer of buffers) {
+      if (buffer === front) continue;
+      const wait = buffer.released ? hold : RELEASE_TIMEOUT_MS;
+      due = Math.min(due, buffer.offGlassAt + wait);
+    }
+    if (due === Infinity || (releaseTimer && releaseDue <= due)) return;
+    if (releaseTimer) clearTimeout(releaseTimer);
+    releaseDue = due;
+    releaseTimer = setTimeout(
+      () => {
+        releaseTimer = null;
+        if (!destroyed) ctx.onFrameAvailable?.();
+      },
+      Math.max(1, Math.ceil(due - clock())),
+    );
+    releaseTimer.unref?.();
+  };
+
+  // A chain that grew past two gives the rest back once the surface has
+  // gone `TRIM_AFTER_MS` without a frame: the buffers past two are what a
+  // scene drawn at the display's rate needs, and a still one keeps what it
+  // always had, the buffer on glass and one to draw the next frame in.
+  const armTrim = () => {
+    if (trimTimer || destroyed) return;
+    trimTimer = setTimeout(() => {
+      trimTimer = null;
+      if (destroyed || buffers.length <= 2) return;
+      if (clock() - swappedAt < TRIM_AFTER_MS) {
+        armTrim();
+        return;
+      }
+      const spare = buffers
+        .filter((b) => b !== front && b !== back && b.released)
+        .sort((a, b) => a.offGlassAt - b.offGlassAt)
+        .slice(0, buffers.length - 2);
+      for (const buffer of spare) drop(buffer);
+      buffers = buffers.filter((b) => !spare.includes(b));
+      // one still held keeps its place until its release comes
+      if (buffers.length > 2) armTrim();
+    }, TRIM_AFTER_MS);
+    trimTimer.unref?.();
   };
 
   // A frame refused by the gate has nothing else to wake it, so the gate
@@ -375,26 +567,36 @@ function createGLAreaContext(runtime, area, config) {
   ctx.SwapBuffers = () => {
     if (destroyed || !back) return;
     runtime.gl.flush();
-    native.setLayerContentsIOSurface(area.layer, back.iosurfaceId);
-    const shown = back;
-    back = front;
-    front = shown;
+    native.setLayerContentsIOSurface(area.layer, back.target.iosurfaceId);
+    const retired = front;
+    front = back;
+    back = null;
+    swappedAt = clock();
+    if (retired && retired !== front) {
+      retired.offGlassAt = swappedAt;
+      // A pump-mode flip is applied in the call; a worker's when the UI
+      // thread gets to it, and until then `retired` is still on glass.
+      if (area.app._threaded) awaitRelease(retired);
+    }
     // one display period from the frame's slot, not from this moment
     gateOpenAt = area.nextFrameAt(runtime.frameInterval);
     armGate();
+    if (buffers.length > 2) armTrim();
   };
 
   ctx._resized = () => {
     // targets are rebuilt lazily on the next makeCurrent, so a resize
-    // storm costs two allocations per drawn frame, not per notify
+    // storm costs one allocation per drawn frame, not per notify
   };
 
   ctx._destroy = () => {
     if (destroyed) return;
     destroyed = true;
     if (gateTimer) clearTimeout(gateTimer);
-    front?.destroy();
-    back?.destroy();
+    if (releaseTimer) clearTimeout(releaseTimer);
+    if (trimTimer) clearTimeout(trimTimer);
+    for (const buffer of buffers) drop(buffer);
+    buffers = [];
     front = back = null;
   };
 

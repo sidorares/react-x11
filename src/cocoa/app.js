@@ -1704,11 +1704,32 @@ export class CocoaApp {
    * again once the WindowServer lets go of it too
    * (`CocoaWindow._surfaceReleased`); the tick at the end of this batch
    * runs the frame it was holding.
+   *
+   * A buffer that is no window's is a `<glarea>`'s, which waits on it the
+   * same way (`watchSurfaceRelease`).
    */
   _routeSurfaceReleased(ev) {
     for (const wnd of this._windows.values()) {
       if (wnd._surfaceReleased(ev.id)) return;
     }
+    const watcher = this._surfaceWatchers?.get(ev.id);
+    if (!watcher) return;
+    this._surfaceWatchers.delete(ev.id);
+    watcher();
+  }
+
+  /**
+   * Call `fn` once `surface-released` names IOSurface `id`: a buffer a
+   * worker's flip took off a layer that no window owns. The returned
+   * function stops watching.
+   */
+  watchSurfaceRelease(id, fn) {
+    (this._surfaceWatchers ??= new Map()).set(id, fn);
+    return () => {
+      if (this._surfaceWatchers?.get(id) === fn) {
+        this._surfaceWatchers.delete(id);
+      }
+    };
   }
 
   _routeAccessibility(ev) {

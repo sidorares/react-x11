@@ -12,6 +12,7 @@ import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 
+import { CocoaGLArea } from '../src/cocoa/glarea.js';
 import { createRoot } from '../src/index.js';
 import { fakeCocoaApp, pointerOver, tick } from './helpers/cocoa-bridge.js';
 
@@ -747,6 +748,153 @@ test("a frameLoop 'always' scene draws every display period, not every other one
     Math.abs(median - HZ120) < 0.01,
     `median gap ${median.toFixed(2)}ms is one period, not two`,
   );
+});
+
+test('a frame never draws into a buffer the render server may still be reading', async () => {
+  // Two buffers alternating at the display's rate drew each frame into the
+  // one the last flip had just taken off glass, which the render server
+  // reads until it latches the flip, a period or two later: IOSurfaceIsInUse
+  // said so at nine frames in ten on a 120Hz panel, and now and then it
+  // composited that buffer half drawn — the scene's clear colour over the
+  // whole surface for a frame, as a map settled after a zoom.
+  let drawn = 0;
+  const { native, wnd, node, frame, runtime } = await mountGLArea({
+    period: HZ120,
+    area: {
+      frameLoop: 'always',
+      onDraw: () => {
+        drawn += 1;
+      },
+    },
+  });
+  const bound = [];
+  const bindTarget = runtime.ctx.bindTarget;
+  runtime.ctx.bindTarget = (target) => {
+    bound.push(target.iosurfaceId);
+    bindTarget(target);
+  };
+  const before = drawn;
+  const start = wnd._rafLast;
+  for (let i = 1; i <= 60; i++) frame(start + i * HZ120);
+  assert.equal(drawn - before, 60, 'a frame at every refresh, still');
+
+  const layer = node.window.layer;
+  const flips = native
+    .of('setLayerContentsIOSurface')
+    .filter(([l]) => l === layer)
+    .map(([, id]) => id);
+  // the loop's frames are the last flips
+  const first = flips.length - bound.length;
+  for (let k = 0; k < bound.length; k++) {
+    const f = first + k;
+    assert.equal(flips[f], bound[k], 'a frame presents what it drew');
+    assert.notEqual(bound[k], flips[f - 1], 'not the buffer on glass');
+    assert.notEqual(
+      bound[k],
+      flips[f - 2],
+      'nor the one the last flip took off glass, a period ago',
+    );
+  }
+  assert.ok(new Set(bound).size <= 4, 'in a chain of four at most');
+});
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * A surface drawn by hand on the frame clock, with no window: `draw(t)` is
+ * a frame due at `t`, answered as GlAreaNode answers one — refused, or a
+ * target bound and presented. `bound` and `shown` are the IOSurfaces each
+ * frame went to, `alive()` how many targets the chain holds. `threaded`
+ * puts the surface on a worker's flips, which the UI thread applies later.
+ */
+function handDrawnSurface({ threaded = false } = {}) {
+  const { native, app } = fakeCocoaApp();
+  const runtime = fakeGLRuntime();
+  runtime.frameInterval = HZ120;
+  app._cocoaGL = runtime;
+  app._threaded = threaded;
+  let alive = 0;
+  const createTarget = runtime.ctx.createTarget;
+  runtime.ctx.createTarget = (w, h) => {
+    const target = createTarget(w, h);
+    alive += 1;
+    return { ...target, destroy: () => (alive -= 1) };
+  };
+  const bound = [];
+  runtime.ctx.bindTarget = (target) => bound.push(target.iosurfaceId);
+  let now = 0;
+  const area = new CocoaGLArea(app, {
+    parent: {
+      _layer: native.createLayer(),
+      scale: 2,
+      nextFrameAt: (interval) => now + interval,
+    },
+    width: 200,
+    height: 100,
+  });
+  const gl = area.getContext('opengl', {});
+  const shown = [];
+  const draw = (t) => {
+    now = t;
+    if (!gl.canRender(t)) return false;
+    gl.makeCurrent();
+    gl.SwapBuffers();
+    shown.push(area.layer.ioSurface);
+    return true;
+  };
+  roots.push({ unmount: async () => area.destroy() });
+  return { app, gl, draw, bound, shown, alive: () => alive };
+}
+
+test('on a worker, a buffer is drawn into again only once its flip has let go of it', async () => {
+  // There a flip is a command the UI thread applies when it gets to it, and
+  // the buffer it replaces is on glass until `surface-released` names it.
+  const P = HZ120;
+  const s = handDrawnSurface({ threaded: true });
+  for (let i = 0; i < 4; i++) assert.ok(s.draw(i * P), `frame ${i} drawn`);
+  assert.equal(new Set(s.bound).size, 4, 'a buffer of its own for each');
+  assert.equal(
+    s.draw(4 * P),
+    false,
+    'every buffer off glass held, and no room for a fifth: refused',
+  );
+
+  let asked = 0;
+  s.gl.onFrameAvailable = () => {
+    asked += 1;
+  };
+  const [oldest] = s.shown;
+  s.app._route({ type: 'surface-released', id: oldest });
+  assert.equal(
+    s.draw(4 * P),
+    false,
+    'released this moment: the render server has its period and a half yet',
+  );
+  await sleep(40);
+  assert.ok(asked > 0, 'and the frame is asked for again once that is over');
+  assert.ok(s.draw(4 * P + 1.5 * P + 1), 'drawn then');
+  assert.equal(s.bound.at(-1), oldest, 'into the buffer that was let go of');
+});
+
+test('on a worker, a release that never comes stops holding the frames after a moment', () => {
+  const P = HZ120;
+  const s = handDrawnSurface({ threaded: true });
+  for (let i = 0; i < 4; i++) s.draw(i * P);
+  assert.equal(s.draw(4 * P), false, 'held');
+  // the first buffer went off glass with the second frame's flip
+  assert.ok(s.draw(P + 101), 'drawn a tenth of a second on regardless');
+  assert.equal(s.bound.at(-1), s.shown[0], 'into the one held longest');
+});
+
+test('a chain grown past two buffers goes back to two once the surface is still', async () => {
+  // a frame every 9ms: past the 120Hz gate, inside the hold
+  const s = handDrawnSurface();
+  for (let i = 0; i < 8; i++) assert.ok(s.draw(i * 9), `frame ${i} drawn`);
+  assert.equal(s.alive(), 3, 'three at the display rate in pump mode');
+  await sleep(1100);
+  assert.equal(s.alive(), 2, 'the one on glass, and one to draw the next in');
+  assert.ok(s.draw(1200), 'and the next frame needs no other');
+  assert.equal(s.alive(), 2);
 });
 
 /**
