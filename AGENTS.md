@@ -99,9 +99,14 @@ no override-redirect staging (issue #4).
   anyone's — its damage list, its event manager, its focus — but painted on
   _panes_ stacked over the surface, from the owning window's frame and with
   its damage (`_syncOverlays`/`_paintOverlays` in nodes/window/flush.js). A
-  pane is one transparent layer on Cocoa (`app.createOverlayPane`,
-  `src/cocoa/overlay.js`), which Core Animation composites with the frame,
-  and one opaque child window per region the children reach on X11: no
+  pane is a transparent layer on Cocoa (`app.createOverlayPane`,
+  `src/cocoa/overlay.js`), one a child and holding that child alone
+  (`app.overlaysPerChild`, stacked by `stackAt`), which Core Animation
+  composites with the frame and the panes under it — a layer's contents are
+  a colour-matched copy of its bitmap, so one over the whole surface pushed
+  the surface's pixels at every step a minimap moved; a backend that
+  composites and says nothing of stacking keeps that one pane — and one
+  opaque child window per region the children reach on X11: no
   SHAPE, which the in-process server lacks, and no pixmap the size of the
   surface to show a legend in its corner. Three traps. A pane selects no
   input, because the pointer reaches the tree by propagation the way it does

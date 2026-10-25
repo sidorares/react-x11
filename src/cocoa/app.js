@@ -509,6 +509,17 @@ export class CocoaApp {
   }
 
   /**
+   * That a `<glarea>`'s children each take a pane of their own here, as on
+   * X11, rather than one pane over the whole surface: Core Animation stacks
+   * the layers (`CocoaOverlayPane.stackAt`), and each is only as big as its
+   * child, so a minimap's viewport moving pushes the minimap's pixels and
+   * not the surface's (src/gloverlay.js).
+   */
+  get overlaysPerChild() {
+    return true;
+  }
+
+  /**
    * The Frame host seam (src/frame/index.js): a pane's composited region
    * in this window. Its presence is what routes <Frame> to the shared-
    * memory pane path instead of the X foreign-window embed. `send` is the

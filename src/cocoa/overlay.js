@@ -19,6 +19,10 @@ import { BackendContext2D } from '../backend/context2d.js';
 import { withoutActions } from './quiet.js';
 
 export const OVERLAY_Z = 1e7 + 1;
+/** How far above the last each pane of a surface is stacked (`stackAt`): a
+ *  thousand of them stay under the next whole number, so above every GL
+ *  layer and every surface's panes above every GL frame, as before. */
+const OVERLAY_STEP = 1 / 1024;
 
 export class CocoaOverlayPane {
   constructor(app, options) {
@@ -43,6 +47,8 @@ export class CocoaOverlayPane {
     // show, only whatever the render server makes of that.
     this._presented = false;
     this._hidden = false;
+    // where it is among its surface's panes, a child each (`stackAt`)
+    this._z = OVERLAY_Z;
     this.setState({
       x: options.x ?? 0,
       y: options.y ?? 0,
@@ -66,9 +72,18 @@ export class CocoaOverlayPane {
     const s = this.scale;
     this._setLayerProps({
       frame: [rect.x / s, rect.y / s, rect.width / s, rect.height / s],
-      zPosition: OVERLAY_Z,
+      zPosition: this._z,
       hidden: this._hidden || !this._presented,
     });
+  }
+
+  /** Stacked `index` panes up from the bottom of its surface's — one a
+   * child, in the children's order (src/gloverlay.js, `restack`). */
+  stackAt(index) {
+    const z = OVERLAY_Z + Math.min(index, 1023) * OVERLAY_STEP;
+    if (z === this._z) return;
+    this._z = z;
+    this._setLayerProps({ zPosition: z });
   }
 
   map() {

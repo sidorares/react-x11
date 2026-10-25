@@ -221,8 +221,10 @@ test('the pointer over the surface is dispatched at the <glarea>, and bubbles', 
 });
 
 test('the children are drawn on a transparent layer above the surface', async () => {
-  // One pane over the whole surface, because Core Animation composites it:
-  // a translucent child blends with the GL frame, which X11 cannot do.
+  // A pane a child, because Core Animation composites them: a translucent
+  // child blends with the GL frame, which X11 cannot do — and the pane is
+  // only as big as the child, since its bitmap is copied to the layer at
+  // every present.
   const { native, wnd, node, frame } = await mountGLArea({
     children: legend(),
   });
@@ -232,15 +234,16 @@ test('the children are drawn on a transparent layer above the surface', async ()
   assert.ok(overlay, 'a layer over the GL layer');
   assert.ok(overlay !== gl, 'not the GL layer itself');
   assert.equal(gl.props.zPosition, 1e7);
-  // exactly over the surface, in points, and on show once painted
-  assert.deepEqual(overlay.props.frame, gl.props.frame);
+  // exactly over the legend, in points — the surface is inset ten in the
+  // window, and the legend five in the surface — and on show once painted
+  assert.deepEqual(overlay.props.frame, [15, 15, 20, 10]);
   assert.equal(overlay.props.hidden, false);
   assert.ok(overlay.contents, 'the painted bitmap was pushed to it');
-  // the bitmap is the surface's size in device pixels — at scale 2
+  // the bitmap is the legend's size in device pixels — at scale 2
   const [pane] = node._overlay.panes;
   assert.deepEqual(
     [pane.wnd._surfaceSize.width, pane.wnd._surfaceSize.height],
-    [360, 200],
+    [40, 20],
   );
   // transparent: each pass is cleared, never filled with a ground colour
   const surface = pane.wnd._surface;
@@ -373,7 +376,16 @@ test('a GL frame goes out after the overlay painted in the same tick (#641)', as
         h(
           'glarea',
           { key: 'gl', style: { flexGrow: 1 } },
-          legend({ style: { position: 'absolute', left: 5, top: 5, width } }),
+          legend({
+            style: {
+              position: 'absolute',
+              left: 5,
+              top: 5,
+              width,
+              height: 10,
+              backgroundColor: 'rgba(255, 0, 0, 0.5)',
+            },
+          }),
         ),
       ),
     );
@@ -436,7 +448,16 @@ test('a GL frame and the overlay painted before it go out in one commit', async 
         h(
           'glarea',
           { key: 'gl', style: { flexGrow: 1 } },
-          legend({ style: { position: 'absolute', left: 5, top: 5, width } }),
+          legend({
+            style: {
+              position: 'absolute',
+              left: 5,
+              top: 5,
+              width,
+              height: 10,
+              backgroundColor: 'rgba(255, 0, 0, 0.5)',
+            },
+          }),
         ),
       ),
     );
@@ -1032,26 +1053,38 @@ const tiled = (left, top) =>
     ),
   );
 
-test('a small child moving on the surface: its old place is repainted, and nothing under the copy', async () => {
-  const { native, root, node, frame } = await mountGLArea({
+test('a small child moving on the surface moves its layer, and nothing is painted', async () => {
+  const { native, root, wnd, node, frame } = await mountGLArea({
     children: tile(40, 30),
   });
   frame();
   const passes = panePasses(node);
-  // seven points right: fourteen device pixels. The tile sits at (100, 80)
-  // in the window, 80x60, and its reach is a pixel of slop around that
+  const [pane] = node._overlay.panes;
+  const layer = pane.wnd.layer;
+  // the tile's pane is the tile's: (100, 80) in the window, 80x60 at scale 2
+  assert.deepEqual(pane.rect, { x: 100, y: 80, width: 80, height: 60 });
+  native.calls.length = 0;
+  // seven points right: fourteen device pixels
   root.render(tiled(47, 30));
   await tick();
   frame();
-  assert.equal(native.of('scrollSurface').length, 1, 'moved on the pane');
-  // the copy lands exactly where the tile went: the strip it left is all
-  assert.deepEqual(rectSet(passes), ['99,79 14x62']);
+  // the layer went with the tile, holding what it showed: no copy, no pass,
+  // no bitmap pushed — and nothing of the window's either
+  assert.deepEqual(pane.rect, { x: 114, y: 80, width: 80, height: 60 });
+  assert.deepEqual(layer.props.frame, [57, 40, 40, 30]);
+  assert.equal(native.of('scrollSurface').length, 0);
+  assert.deepEqual(rectSet(passes), []);
+  assert.equal(
+    native.calls.filter((c) => c.name === 'surfaceToLayer').length,
+    0,
+  );
+  assert.deepEqual(wnd._reactX11Node._lastDamageRects, []);
 });
 
-test('a child moving into view past a clipped corner: what it brings in is repainted too', async () => {
-  // Half off the surface's top-left corner, moving right and down: the copy
-  // carries what was on show, and the tile's new reach runs past it along
-  // both clipped edges — the strips the move uncovered are not all of it.
+test('a child moving into view past a clipped corner: its pane grows with it, painted whole', async () => {
+  // Half off the surface's top-left corner, moving right and down: the
+  // pane is what the surface shows of the tile, which is more of it now —
+  // a bitmap of another size, painted whole.
   const { native, root, node, frame } = await mountGLArea({
     children: tile(-20, -15),
   });
@@ -1060,8 +1093,62 @@ test('a child moving into view past a clipped corner: what it brings in is repai
   root.render(tiled(-15, -11));
   await tick();
   frame();
-  assert.equal(native.of('scrollSurface').length, 1, 'moved on the pane');
-  assert.deepEqual(rectSet(passes), ['20,20 51x8', '20,28 10x31']);
+  assert.equal(native.of('scrollSurface').length, 0);
+  assert.deepEqual(rectSet(passes), ['20,20 50x38']);
+});
+
+test('each child of the surface has a layer of its own, stacked in their order', async () => {
+  const twoTiles = (first, second) =>
+    h(
+      'window',
+      { width: 200, height: 120 },
+      h(
+        'box',
+        { style: { flexGrow: 1, padding: 10 } },
+        h(
+          'glarea',
+          { key: 'gl', style: { flexGrow: 1 } },
+          [first, second].map((left) =>
+            h('box', {
+              key: `at${left}`,
+              style: {
+                position: 'absolute',
+                left,
+                top: 10,
+                width: 30,
+                height: 20,
+                backgroundColor: '#e03131',
+              },
+            }),
+          ),
+        ),
+      ),
+    );
+  const { root, wnd, node, frame } = await mountGLArea({
+    children: tile(0, 0),
+  });
+  root.render(twoTiles(10, 100));
+  await tick();
+  frame();
+  const layers = () =>
+    wnd._layer.sublayers
+      .filter((l) => l.props.zPosition > 1e7)
+      .sort((a, b) => a.props.zPosition - b.props.zPosition)
+      .map((l) => l.props.frame);
+  // each as big as its tile, the second over the first
+  assert.deepEqual(layers(), [
+    [20, 20, 30, 20],
+    [110, 20, 30, 20],
+  ]);
+  assert.equal(node._overlay.panes.length, 2);
+  // the children reordered: the layers are too
+  root.render(twoTiles(100, 10));
+  await tick();
+  frame();
+  assert.deepEqual(layers(), [
+    [110, 20, 30, 20],
+    [20, 20, 30, 20],
+  ]);
 });
 
 test('the layer follows its subtree off the screen and back', async () => {

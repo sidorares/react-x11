@@ -1948,9 +1948,10 @@ frame.
 </glarea>
 ```
 
-- **Cocoa**: one transparent layer over the whole surface, composited by
+- **Cocoa**: one transparent layer per child, as big as the child,
+  stacked above the surface in the children's order and composited by
   Core Animation — a translucent fill, antialiased edge or shadow blends
-  with the GL frame.
+  with the GL frame and with the children under it.
 - **X11**: one child window per child, stacked above the surface in the
   children's order and cut (SHAPE) to where the child painted half its
   alpha or more; the GL frame shows everywhere else. A translucent pixel
@@ -1959,10 +1960,11 @@ frame.
   (`react-x11/test`'s server) a pane is the child's whole rectangle,
   `clearColor` where unpainted.
 
-A child that only moves (its `left` or `top`) has its pixels copied, not
-repainted — only uncovered strips are drawn, and panes it passes over are
-untouched — so content panned over a scene is cheap; scroll panes among the
-children scroll the same way.
+A child that only moves (its `left` or `top`) is not repainted — on Cocoa
+its layer moves, and on X11 its pixels are copied and only uncovered strips
+are drawn; panes it passes over are untouched either way — so content
+panned over a scene is cheap; scroll panes among the children scroll the
+same way.
 [`REACT_X11_NO_SCROLL_BLIT=1`](debugging.md#react_x11_no_scroll_blit1)
 turns the copies off.
 
