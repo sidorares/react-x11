@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.55.1](https://github.com/sidorares/react-x11/compare/v2.55.0...v2.55.1) (2026-10-25)
+
+
+### Performance Improvements
+
+* **cocoa:** a pane per child of a &lt;glarea&gt;, as on X11 ([#1011](https://github.com/sidorares/react-x11/issues/1011)) ([e9d55fd](https://github.com/sidorares/react-x11/commit/e9d55fda5c9e88d5b4f1e0a992d0a185b11cb0e4))
+
 ## [2.55.0](https://github.com/sidorares/react-x11/compare/v2.54.0...v2.55.0) (2026-10-24)
 
 
