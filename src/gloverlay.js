@@ -17,10 +17,18 @@
 // translucent child over a GL surface?
 //
 // - **The Cocoa backend: yes.** Core Animation composites every layer, so
-//   one pane holds everything — a transparent bitmap layer over the whole
-//   surface, above the GL layer — and a translucent background, an
-//   antialiased edge or a shadow blends with the GL frame under it.
-//   `app.createOverlayPane` is how a backend says it composites.
+//   a pane is a transparent bitmap layer above the GL layer, and a
+//   translucent background, an antialiased edge or a shadow blends with the
+//   GL frame under it. `app.createOverlayPane` is how a backend says it
+//   composites. Where it can stack its panes as well
+//   (`app.overlaysPerChild`), a pane is one per child, as on X11, holding
+//   that child alone — the layers under it show through — and as big as
+//   what the child reaches: a layer's contents are a copy of its bitmap,
+//   colour-matched to the display as it is pushed, and one the size of the
+//   surface pushed again at every step a minimap's viewport moved was a
+//   quarter of a core on a Mac. A child that only moved moves its layer,
+//   and nothing is painted. Otherwise one pane holds every child, over the
+//   whole surface.
 // - **X11: no.** A child window is opaque without a compositor, and a
 //   compositor would not change that: it redirects top-level windows, not
 //   the children inside one. So a pane is a plain child window just big
@@ -746,8 +754,9 @@ function askShape(app) {
  */
 class Pane {
   /**
-   * @param node the child an X11 pane is kept by and holds, up to — null for
-   *   a composited pane, which holds every child
+   * @param node the child a pane is kept by and holds — up to it on X11,
+   *   alone where it is composited — and null for a composited pane over
+   *   the whole surface, which holds every child
    * @param overlay the panes it is one of, which `canBlit` asks about
    */
   constructor(wnd, rect, transparent, node = null, overlay = null) {
@@ -842,7 +851,8 @@ class Pane {
     };
     if (!this.wnd.scrollRegion(local, dx, dy)) return false;
     this.blitted = true;
-    const panes = this.node ? this.overlay?.panes : null;
+    // composited, a pane over it holds none of it
+    const panes = this.node && !this.transparent ? this.overlay?.panes : null;
     if (panes) {
       for (let i = panes.indexOf(this) + 1; i < panes.length; i++) {
         panes[i].owe(rect);
@@ -867,8 +877,11 @@ export class GlOverlay {
   constructor(area) {
     this.area = area;
     this.app = area.app;
-    // one pane over the whole surface, where the backend composites it
+    // panes the backend composites, transparent, rather than child windows
     this.composited = typeof this.app?.createOverlayPane === 'function';
+    // a pane a child: X11's, and a compositor's that stacks its panes; one
+    // pane over the whole surface elsewhere
+    this.perChild = !this.composited || this.app?.overlaysPerChild === true;
     // bottom to top: the children's order on X11, one pane each
     this.panes = [];
     // X11: each child's pane, kept by the child for as long as it has one
@@ -908,7 +921,7 @@ export class GlOverlay {
     const visible = shown(area) && abs.width > 0 && abs.height > 0;
     // the surface's own rect, rounded the way its window's is
     const surface = visible ? area._geometry() : null;
-    if (!this.composited) return this._syncChildren(surface);
+    if (this.perChild) return this._syncChildren(surface);
     const rects = surface && area.paintOrder().length ? [surface] : [];
     let changed = false;
     while (this.panes.length > rects.length) {
@@ -929,13 +942,14 @@ export class GlOverlay {
   }
 
   /**
-   * `sync` on X11: a pane per child, kept by the child. A child that is new
-   * gets one, a child that went takes its with it, and one whose reach moved
-   * has its pane placed there — and painted whole, unless the move was the
-   * child's own and nothing else, which the window's move carries
-   * (`_settleMove` repaints what it does not). A change of order restacks
-   * them, and repaints whichever overlap another: what a pane holds is what
-   * is under its child.
+   * `sync` on X11, and where panes composite a child each: a pane per
+   * child, kept by the child. A child that is new gets one, a child that
+   * went takes its with it, and one whose reach moved has its pane placed
+   * there — and painted whole, unless the move was the child's own and
+   * nothing else, which the window's move carries (`_settleMove` repaints
+   * what it does not). A change of order restacks them, and on X11 repaints
+   * whichever overlap another: what an X11 pane holds is what is under its
+   * child.
    */
   _syncChildren(surface) {
     const regions = surface ? childRegions(this.area, surface) : [];
@@ -981,9 +995,10 @@ export class GlOverlay {
     this.panes = next;
     if (reordered) {
       this.restack();
-      if (!made) {
+      if (!made && !this.composited) {
         // what each pane holds is its child and what is under it: a new
-        // order is new contents wherever two of them meet
+        // order is new contents wherever two of them meet — on X11, where a
+        // pane is opaque; a composited one holds its child alone
         for (const pane of next) {
           if (
             next.some(
@@ -1041,7 +1056,11 @@ export class GlOverlay {
    * Cocoa backend the layer's zPosition is the whole of it.
    */
   restack() {
-    if (this.composited) return;
+    if (this.composited) {
+      // a composited pane a child is stacked by the backend, in order
+      this.panes.forEach((pane, i) => pane.wnd.stackAt?.(i));
+      return;
+    }
     const X = this.app?.X;
     if (typeof X?.ConfigureWindow !== 'function') return;
     let below = this.area.window?.id ?? null;
@@ -1085,7 +1104,7 @@ export class GlOverlay {
     if (!root || root.destroyed || root._paneDamage === FULL_DAMAGE) {
       return true;
     }
-    if (!this.composited) {
+    if (this.perChild) {
       // Each child's move is its own pane's to settle: carried by the
       // window's move where its pane went with it, moved on the pane where
       // the pane stayed — cut to the surface, say, which a box bigger than
@@ -1135,6 +1154,9 @@ export class GlOverlay {
    * - The panes under it hold nothing of it, and are owed nothing.
    */
   _settleCarried({ node, reach, dx, dy }, reaches) {
+    // a composited pane holds its child alone, and the layer's move carried
+    // all of it: nothing is owed anywhere
+    if (this.composited) return;
     const panes = this.panes;
     const at = panes.indexOf(this.byNode.get(node));
     const own = panes[at];
@@ -1231,10 +1253,15 @@ export class GlOverlay {
     for (const piece of outside(was, dest)) add(piece);
     if (now) for (const piece of outside(now, dest)) add(piece);
     // the children whose pixels the pane holds: every other one on a pane
-    // over the whole surface, and on X11 the ones under this child — the
-    // panes over it are owed the copy by `Pane.blit`
+    // over the whole surface, on X11 the ones under this child — the panes
+    // over it are owed the copy by `Pane.blit` — and none on a composited
+    // pane a child
     const order = area.paintOrder();
-    const upTo = own ? order.indexOf(node) : order.length;
+    const upTo = !own
+      ? order.length
+      : this.composited
+        ? 0
+        : order.indexOf(node);
     for (let i = 0; i < upTo; i++) {
       const other = order[i];
       if (other === node) continue;
@@ -1324,8 +1351,13 @@ export class GlOverlay {
         }
         root._paintDamage = pass;
         // an X11 pane holds its child and what is under it, and never
-        // what is over it — the pane over it holds that (see the header)
-        area._paintChildren(ctx, pane.node);
+        // what is over it — the pane over it holds that (see the header);
+        // a composited pane a child holds its child alone
+        area._paintChildren(
+          ctx,
+          pane.node,
+          pane.transparent && pane.node !== null,
+        );
       } finally {
         root._paintDamage = null;
         ctx.restore();
