@@ -757,6 +757,8 @@ export class CocoaFontManager {
     this._fonts = new Map(); // family|weight|italic|size -> handle
     // handle -> features key -> the handle with those features set
     this._featured = new WeakMap();
+    // handle -> variations key -> the handle at those axis values
+    this._varied = new WeakMap();
     this._faces = new Map(); // family|weight|italic -> face wrapper
     this._registered = new Map(); // lowercase family -> [{cg, weight, italic}]
     this._byKey = new Map(); // ntk Font key -> { cg } | { ps }
@@ -997,15 +999,38 @@ export class CocoaFontManager {
     return false;
   }
 
+  /**
+   * `handle` at the values `variations` gives a variable face's axes —
+   * `fontApplyVariations`, tag → value. Kept per handle, as `_withFeatures`
+   * keeps a featured one: a paragraph set in a variable web font asked the
+   * bridge for a fresh CTFont for every span of every layout, and a font
+   * CoreText has never seen is one it shapes with none of its caches warm.
+   * The featured font made from it was fresh each time for the same reason,
+   * since `_withFeatures` keeps its fonts by the handle it is given. A
+   * document in a variable face spent seconds in CoreText setting its text:
+   * bun.com's blog, in Archivo and Martian Mono, laid out in 2.3 s, and in
+   * 0.2 s with the handles kept. A kept handle lives as long as the one it was
+   * made from, which `_fonts`, `_sized` and a face's sizes hold: the map is
+   * weak on it, and the bridge's external releases the CTFont when it goes.
+   */
   _withVariations(handle, variations) {
     if (
-      variations &&
-      typeof variations === 'object' &&
-      Object.keys(variations).length > 0
+      !handle ||
+      !variations ||
+      typeof variations !== 'object' ||
+      Object.keys(variations).length === 0
     ) {
-      return this._native.fontApplyVariations(handle, variations);
+      return handle;
     }
-    return handle;
+    let perHandle = this._varied.get(handle);
+    if (!perHandle) this._varied.set(handle, (perHandle = new Map()));
+    const key = JSON.stringify(variations);
+    let varied = perHandle.get(key);
+    if (!varied) {
+      varied = this._native.fontApplyVariations(handle, variations);
+      perHandle.set(key, varied);
+    }
+    return varied;
   }
 
   /**
