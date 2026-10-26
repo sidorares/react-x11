@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.55.2](https://github.com/sidorares/react-x11/compare/v2.55.1...v2.55.2) (2026-10-26)
+
+
+### Performance Improvements
+
+* **cocoa:** a variable face's font at its axis values is made once, and kept per handle as a featured one is ([#1015](https://github.com/sidorares/react-x11/issues/1015)) ([807b0ac](https://github.com/sidorares/react-x11/commit/807b0ac417c47e722b93a1eabb774d9460bf19a6))
+
 ## [2.55.1](https://github.com/sidorares/react-x11/compare/v2.55.0...v2.55.1) (2026-10-25)
 
 
