@@ -176,6 +176,24 @@ export interface VideoNode extends DrawnNode {
   readonly paused: boolean;
 }
 
+/**
+ * An `<audio>`, as its `ref` sees it: HTMLMediaElement's imperative half,
+ * as a `<video src>`'s is.
+ */
+export interface AudioElementNode {
+  readonly kind: 'audio';
+  /** Play — from the start if the item has ended. */
+  play(): void;
+  pause(): void;
+  /** To `seconds` in, exactly. */
+  seek(seconds: number): void;
+  /** Seconds in, or 0. */
+  readonly currentTime: number;
+  /** Seconds; `Infinity` for a live stream, NaN before it is known. */
+  readonly duration: number;
+  readonly paused: boolean;
+}
+
 export interface TextInputNode extends DrawnNode {
   /**
    * The control's current text. Inside an `onChange` handler this is the

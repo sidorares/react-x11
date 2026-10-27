@@ -235,10 +235,11 @@ export function useClipboard(): Clipboard;
  *
  * `'mediaPlayback'` is whether this display plays a file or URL itself — a
  * platform player, AVFoundation on macOS over a bridge with its player verbs
- * — which `<video src>` needs. False on X11 and Wayland for good; ask it
- * before rendering a `<video src>`, which refuses with one `onError` and
- * shows its poster where it is false. `<video frames>` needs no capability.
- * A property of the backend, and it never changes.
+ * — which `<video src>` and `<audio src>` need. False on X11 and Wayland for
+ * good; ask it before rendering either, which refuses with one `onError`
+ * where it is false — a `<video>` showing its poster, an `<audio>` heard by
+ * nobody. `<video frames>` needs no capability. A property of the backend,
+ * and it never changes.
  */
 export type SupportsFeature =
   | 'transparency'

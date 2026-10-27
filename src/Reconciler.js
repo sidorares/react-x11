@@ -34,6 +34,7 @@ import {
 import { TextNode, TextChunkNode, setTextStripBelow } from './nodes/text.js';
 import { ImageNode } from './nodes/image.js';
 import { VideoNode } from './nodes/video.js';
+import { AudioElementNode } from './nodes/audio.js';
 import { CanvasNode } from './nodes/canvas.js';
 import { TextInputNode } from './nodes/textinput.js';
 import { TextAreaNode } from './nodes/textarea.js';
@@ -105,6 +106,7 @@ export const HOST_TYPES = [
   'text',
   'image',
   'video',
+  'audio',
   'canvas',
   'textinput',
   'textarea',
@@ -324,6 +326,9 @@ const HostConfig = {
       case 'video':
         node = new VideoNode(props, rootContainer);
         break;
+      case 'audio':
+        node = new AudioElementNode(props, rootContainer);
+        break;
       case 'canvas':
         node = new CanvasNode(props, rootContainer);
         break;
@@ -404,8 +409,12 @@ const HostConfig = {
     // which is after this ran — and commitMount is the first moment React
     // holds that node's own fiber (nodes/cascade.js `_tokenProblem`). Gated on the
     // flag so the default mount pays nothing for a debugging mode.
+    //
+    // An `<audio>` opens its player there: it is never laid out, which is
+    // when every other node opens what it shows (nodes/audio.js).
     return (
       type === 'popup' ||
+      type === 'audio' ||
       Boolean(props.autoFocus) ||
       Boolean(props.trapFocus) ||
       hasDropProps(props) ||
@@ -423,6 +432,9 @@ const HostConfig = {
     if (tokenError) throw tokenError;
     if (type === 'popup') {
       instance.realize(null);
+    }
+    if (type === 'audio') {
+      instance._ensure();
     }
     if (props.trapFocus) {
       instance._syncFocusScope?.();

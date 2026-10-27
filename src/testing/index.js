@@ -61,6 +61,7 @@ export {
   pressButton,
   spinWheel,
 } from './mock-app.js';
+export { fakeMediaPlayers } from './media.js';
 export * from '../keysyms.js';
 
 /**

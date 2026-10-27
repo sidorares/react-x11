@@ -350,6 +350,41 @@ test('a pane’s <video src> is played by the host: mediaPlayback is true, and s
   assert.strictEqual(m.paneNative.of('createPlayer').length, 0);
 });
 
+test('a pane’s <audio src> is played by the host, which copies no frames for it', async () => {
+  const m = await mount({ autoPlay: true, element: 'audio' });
+  await until(m.apps, () => m.hostNative.live.size === 1, 'the host’s player');
+  assert.deepStrictEqual(m.heard.supports, [true]);
+  const [id, record] = m.player();
+  assert.strictEqual(record.url, CLIP);
+  assert.strictEqual(record.options.autoPlay, true);
+  // what the host made for the pane itself, before any frame of a player's
+  const made = m.hostNative.of('createSurfaceIOSurface').length;
+  // a video file is a source an `<audio>` may play, heard and not seen:
+  // the item has a size, and frames, and none of them is copied
+  m.emit({
+    type: 'player-metadata',
+    id,
+    width: 64,
+    height: 36,
+    duration: 9.72,
+  });
+  m.hostNative.playerFrame(id, 64, 36);
+  m.emit({ type: 'player-state', id, playing: true });
+  m.emit({ type: 'player-time', id, currentTime: 0.5 });
+  await until(m.apps, () => m.heard.times.includes(0.5), 'the time');
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepStrictEqual(m.heard.meta, [
+    { width: undefined, height: undefined, duration: 9.72 },
+  ]);
+  assert.strictEqual(m.heard.plays, 1);
+  assert.strictEqual(m.hostNative.of('playerCopyFrame').length, 0);
+  assert.strictEqual(
+    m.hostNative.of('createSurfaceIOSurface').length,
+    made,
+    'no ring',
+  );
+});
+
 test('the host’s events are the pane’s media events', async () => {
   const m = await mount({ autoPlay: true });
   await until(m.apps, () => m.hostNative.live.size === 1, 'the host’s player');

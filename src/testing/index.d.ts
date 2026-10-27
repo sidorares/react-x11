@@ -641,3 +641,44 @@ export function spinWheel(
     buttons?: number;
   },
 ): void;
+
+/** A player `fakeMediaPlayers` made: what it was told, and what a test can
+ * make it say. Its state is the state a real player's events give it. */
+export interface FakeMediaPlayer {
+  readonly src: string;
+  /** What `createPlayer` was handed: `autoPlay`, `loop`, `muted`,
+   * `volume`, `playbackRate`, and `element` — `'video'` or `'audio'`. */
+  readonly options: Record<string, unknown>;
+  /** Each `set` and `seek`, in order: `['set', settings]`,
+   * `['seek', seconds]`. A ref's `play()` is `['set', { paused: false }]`. */
+  readonly calls: ReadonlyArray<
+    ['set', Record<string, unknown>] | ['seek', number]
+  >;
+  readonly released: boolean;
+  readonly playing: boolean;
+  readonly currentTime: number;
+  readonly duration: number;
+  /** The item is ready: its length, and for a video its size. */
+  ready(info?: { duration?: number; width?: number; height?: number }): void;
+  /** It starts, or with `false` stops, playing. */
+  state(playing?: boolean): void;
+  /** It has got to `currentTime` seconds. */
+  time(currentTime: number): void;
+  /** It reached the end of an item that does not loop. */
+  end(): void;
+  /** The item failed, with the bridge's message. */
+  fail(message?: string): void;
+}
+
+/**
+ * Give `app` a platform player that plays nothing, so `<video src>` and
+ * `<audio src>` open one and `useSupports('mediaPlayback')` is true. Call it
+ * before the first render — on `createMockApp()`'s app, handed to
+ * `renderX11` as `app`.
+ */
+export function fakeMediaPlayers(app: NtkApp): {
+  /** Every player made, in order. */
+  readonly players: readonly FakeMediaPlayer[];
+  /** The newest, or null. */
+  readonly last: FakeMediaPlayer | null;
+};
