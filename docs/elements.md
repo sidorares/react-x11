@@ -1456,6 +1456,13 @@ the ends of a paragraph ([events.md](events.md#primary-modifier)). A field
 whose text fits passes the wheel out to the pane or window behind it, as a
 `<box overflow="scroll">` does.
 
+Its lines are spaced by its `lineHeight`, as a `<text>`'s are: the font's
+natural line box times the multiple the style comes to, `rows` of them its
+preferred height, with the leading split above and below and the caret as
+tall as the glyphs. A field laid over text of a page's own — a code
+editor's, over the highlighted copy it types into — has its caret and
+selection on that text's lines where the two share a line height.
+
 | prop            |                                                                |
 | --------------- | -------------------------------------------------------------- |
 | `rows`          | preferred height in text lines (default 3)                     |

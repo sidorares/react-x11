@@ -18,6 +18,7 @@ import {
   scrollbarHit,
   paintScrollbarThumb,
 } from './scrollbars.js';
+import { lineHeightOf } from '../styles.js';
 import { installMethods } from './install.js';
 import { rangeBands } from './text.js';
 import { CARET_WIDTH, CARET_RESERVE, TextInputNode } from './textinput.js';
@@ -162,6 +163,22 @@ export class TextAreaNode extends TextInputNode {
     this._goalX = null;
   }
 
+  /** One line of the value: the font's natural line box, times the
+   * `lineHeight` the style gives, as a `<text>` spaces its lines. A field's
+   * lines are a page's line boxes wherever a page lays one over text of its
+   * own — a code editor's `<textarea>` over the `<pre>` it highlights, whose
+   * caret otherwise drifted a fraction of a line further down at each line
+   * of a `line-height: 1.4375rem` page. */
+  _lineHeight() {
+    const fonts = this.app?.fonts;
+    const lineHeight = lineHeightOf(this.style.lineHeight);
+    if (fonts) {
+      return fonts.layout('Mg', this.resolvedTextStyle(), { lineHeight })
+        .height;
+    }
+    return this.resolvedTextStyle().size * 1.4 * (lineHeight ?? 1);
+  }
+
   /** Wider than a single-line field, and `rows` lines tall — a height that
    * comes from a prop rather than from the style, which is what makes
    * `invalidateMeasure` necessary below. */
@@ -223,10 +240,12 @@ export class TextAreaNode extends TextInputNode {
       width === undefined || direction !== 'rtl'
         ? width
         : Math.max(0, width - CARET_RESERVE * this.scale);
-    const key = `${width}|${color}|${shown}|${s.family}|${s.size}|${s.weight}|${s.style}|${direction}|${align}|${s.letterSpacing}|${JSON.stringify(s.features ?? null)}`;
+    // its lines spaced as a `<text>`'s are (`_lineHeight`)
+    const lineHeight = lineHeightOf(this.style.lineHeight);
+    const key = `${width}|${color}|${shown}|${s.family}|${s.size}|${s.weight}|${s.style}|${direction}|${align}|${lineHeight}|${s.letterSpacing}|${JSON.stringify(s.features ?? null)}`;
     if (this._valueLayoutKey !== key) {
       this._valueLayoutKey = key;
-      const options = { maxWidth: container, align, direction };
+      const options = { maxWidth: container, align, direction, lineHeight };
       const layout = fonts.layout([{ text: shown, ...s, color }], s, options);
       this._valueLayoutCache = isEmpty
         ? layout
