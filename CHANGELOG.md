@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.56.0](https://github.com/sidorares/react-x11/compare/v2.55.2...v2.56.0) (2026-10-27)
+
+
+### Features
+
+* &lt;audio src&gt;, the platform's player without a picture ([#1019](https://github.com/sidorares/react-x11/issues/1019)) ([0f6fd9e](https://github.com/sidorares/react-x11/commit/0f6fd9e0d5b6604c0b1ee544c9a0df0288bb92ca))
+* **textinput:** mask draws a field's text as one character for each of its own, as a browser's password field does ([#1017](https://github.com/sidorares/react-x11/issues/1017)) ([c5ba7a0](https://github.com/sidorares/react-x11/commit/c5ba7a02fa74fae6261711feceaf022872b3f372))
+
 ## [2.55.2](https://github.com/sidorares/react-x11/compare/v2.55.1...v2.55.2) (2026-10-26)
 
 
