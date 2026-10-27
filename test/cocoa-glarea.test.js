@@ -907,14 +907,26 @@ test('on a worker, a release that never comes stops holding the frames after a m
   assert.equal(s.bound.at(-1), s.shown[0], 'into the one held longest');
 });
 
-test('a chain grown past two buffers goes back to two once the surface is still', async () => {
-  // a frame every 9ms: past the 120Hz gate, inside the hold
+test('a chain grown past two buffers goes back to two once the surface is still', async (t) => {
+  // On a clock the test holds, the surface's and its timers': the trim is a
+  // second without a frame, counted from the last one. Slept through on the
+  // wall clock instead, it passed only where the frames took less time than
+  // the timer was late, since the timer armed at the first of them waited
+  // a whole second more — and failed on a slower runner.
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 });
+  t.mock.method(performance, 'now', () => Date.now());
   const s = handDrawnSurface();
-  for (let i = 0; i < 8; i++) assert.ok(s.draw(i * 9), `frame ${i} drawn`);
+  // a frame every 9ms: past the 120Hz gate, inside the hold
+  for (let i = 0; i < 8; i++) {
+    if (i > 0) t.mock.timers.tick(9);
+    assert.ok(s.draw(Date.now()), `frame ${i} drawn`);
+  }
   assert.equal(s.alive(), 3, 'three at the display rate in pump mode');
-  await sleep(1100);
+  t.mock.timers.tick(999);
+  assert.equal(s.alive(), 3, 'a millisecond short of a second since the last');
+  t.mock.timers.tick(1);
   assert.equal(s.alive(), 2, 'the one on glass, and one to draw the next in');
-  assert.ok(s.draw(1200), 'and the next frame needs no other');
+  assert.ok(s.draw(Date.now()), 'and the next frame needs no other');
   assert.equal(s.alive(), 2);
 });
 

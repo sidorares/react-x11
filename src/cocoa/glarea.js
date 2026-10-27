@@ -523,24 +523,32 @@ function createGLAreaContext(runtime, area, config) {
   // gone `TRIM_AFTER_MS` without a frame: the buffers past two are what a
   // scene drawn at the display's rate needs, and a still one keeps what it
   // always had, the buffer on glass and one to draw the next frame in.
-  const armTrim = () => {
+  // The timer is armed at the first frame past two, so where frames came
+  // after it, it waits out what is left of the time from the last of them,
+  // not the whole of it again: that made a still surface keep its chain
+  // anywhere up to twice as long.
+  const armTrim = (wait = TRIM_AFTER_MS) => {
     if (trimTimer || destroyed) return;
-    trimTimer = setTimeout(() => {
-      trimTimer = null;
-      if (destroyed || buffers.length <= 2) return;
-      if (clock() - swappedAt < TRIM_AFTER_MS) {
-        armTrim();
-        return;
-      }
-      const spare = buffers
-        .filter((b) => b !== front && b !== back && b.released)
-        .sort((a, b) => a.offGlassAt - b.offGlassAt)
-        .slice(0, buffers.length - 2);
-      for (const buffer of spare) drop(buffer);
-      buffers = buffers.filter((b) => !spare.includes(b));
-      // one still held keeps its place until its release comes
-      if (buffers.length > 2) armTrim();
-    }, TRIM_AFTER_MS);
+    trimTimer = setTimeout(
+      () => {
+        trimTimer = null;
+        if (destroyed || buffers.length <= 2) return;
+        const still = clock() - swappedAt;
+        if (still < TRIM_AFTER_MS) {
+          armTrim(TRIM_AFTER_MS - still);
+          return;
+        }
+        const spare = buffers
+          .filter((b) => b !== front && b !== back && b.released)
+          .sort((a, b) => a.offGlassAt - b.offGlassAt)
+          .slice(0, buffers.length - 2);
+        for (const buffer of spare) drop(buffer);
+        buffers = buffers.filter((b) => !spare.includes(b));
+        // one still held keeps its place until its release comes
+        if (buffers.length > 2) armTrim();
+      },
+      Math.max(1, Math.ceil(wait)),
+    );
     trimTimer.unref?.();
   };
 
