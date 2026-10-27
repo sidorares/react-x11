@@ -1359,6 +1359,21 @@ the secret is revealed ([components.md](components.md#passwordinput)). On
 Wayland the field is also declared `sensitive_data` to the input method,
 with no surrounding text offered ([events.md](events.md#input-methods)).
 
+### `mask`
+
+`<textinput mask="•">` draws its text as that character, once for each of
+its own — a browser's password field. Only the drawing changes: `value`,
+`onChange`, editing, the caret, the selection and undo are the field's as
+ever, and the secret itself is never laid out. An assistive technology
+reads the mask, the word keys and a double click take the field as one
+word (where the words end is part of what is hidden), an input method is
+told the text is hidden, and the placeholder is shown as written. It is
+separate from `sensitive`, and a password field wants both: one keeps the
+text off the screen, the other off the clipboard. `<PasswordInput>`'s
+scribble is the other answer to the same question, for an app rather than
+a page ([components.md](components.md#passwordinput)). `<textarea>` takes
+no mask.
+
 **Ref**: the node, plus `value`, `undo()` / `redo()` and `canUndo` /
 `canRedo` — enough for a toolbar button beside the field — and the
 selection, below.

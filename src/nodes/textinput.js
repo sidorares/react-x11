@@ -606,8 +606,9 @@ export class TextInputNode extends Node {
       const ch = String.fromCodePoint(ev.codepoint);
       this._insert(ch, 'type');
       // undo a word at a time: the space that ends a word joins the run it
-      // ends, and the next word starts a fresh one
-      if (/\s/.test(ch)) this._breakUndoRun();
+      // ends, and the next word starts a fresh one — but not where the
+      // field is masked, where an undo would show where the spaces are
+      if (/\s/.test(ch) && this._maskChar() === null) this._breakUndoRun();
       return true;
     }
     return false;
@@ -627,14 +628,28 @@ export class TextInputNode extends Node {
     );
   }
 
-  /** Word range around a code-point index (whitespace-delimited). */
+  /** Word range around a code-point index (whitespace-delimited). A masked
+   * field is one word, as a browser's password field is: where its words
+   * end is part of what the mask hides. */
   _wordRangeAt(index) {
+    if (this._maskChar() !== null) return [0, this._chars().length];
     return wordRangeAt(this._chars(), index);
   }
 
-  /** Caret index one word away, the way Ctrl+arrow moves in a text editor. */
+  /** Caret index one word away, the way Ctrl+arrow moves in a text editor —
+   * and in a masked field to its start or its end. */
   _wordBoundary(from, dir) {
+    if (this._maskChar() !== null) return dir < 0 ? 0 : this._chars().length;
     return wordBoundary(this._chars(), from, dir);
+  }
+
+  /** The one character a `mask`ed field draws for each of its own, or null.
+   * One code point, whatever the prop holds, so that the displayed string
+   * counts as the value does. */
+  _maskChar() {
+    const mask = this.props.mask;
+    if (typeof mask !== 'string' || mask === '') return null;
+    return String.fromCodePoint(mask.codePointAt(0));
   }
 
   // --- geometry (the accessors every text-bearing element answers) --------
@@ -1036,7 +1051,10 @@ export class TextInputNode extends Node {
     // node-local half of the text vocabulary.
     if (localTextStyleChanged(this.style, beforeStyle)) {
       this.invalidateMeasure('props');
-    } else if (newProps.value !== before.value) {
+    } else if (
+      newProps.value !== before.value ||
+      newProps.mask !== before.mask
+    ) {
       // painting clips to the content box and the measure function reads
       // only font metrics, so a value change is confined to the field —
       // the same claim applyProps makes for any paint-only prop

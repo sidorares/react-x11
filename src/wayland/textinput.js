@@ -293,6 +293,9 @@ export class WaylandTextInput {
     // (docs/elements.md); an input method's word history is another place
     // it must not reach, and the same field says so with one prop.
     if (props.sensitive) hint |= CONTENT_HINT.SENSITIVE_DATA;
+    // and a field that draws its text masked asks the input method to show
+    // none of it either, in a candidate window or a preedit of its own
+    if (node._maskChar?.() != null) hint |= CONTENT_HINT.HIDDEN_TEXT;
     const byMode = PURPOSE_BY_INPUT_MODE[props.inputMode];
     if (byMode !== undefined) purpose = byMode;
     const value = typeof node.value === 'string' ? node.value : '';

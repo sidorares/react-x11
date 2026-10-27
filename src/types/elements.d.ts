@@ -771,9 +771,22 @@ export interface TextInputProps extends DrawnProps<TextInputNode> {
    * not. `PasswordInput` sets this on the input it shows while revealed.
    */
   sensitive?: boolean;
+  /**
+   * The text is drawn as this character, once for each of its own — a
+   * browser's password field is `mask="•"`. Only what is **drawn** changes:
+   * `value`, `onChange`, editing, the caret and the selection are the
+   * field's as ever, and the value is never laid out. What an assistive
+   * technology reads is the mask too, the field is one word to the word
+   * keys and a double click, and the placeholder is shown as it is.
+   *
+   * A field the mask hides is usually `sensitive` as well, which keeps its
+   * text off the clipboard; the two are separate props because they are
+   * separate decisions.
+   */
+  mask?: string;
 }
 
-export interface TextAreaProps extends TextInputProps {
+export interface TextAreaProps extends Omit<TextInputProps, 'mask'> {
   /** Preferred height in text lines (default 3). */
   rows?: number;
 }

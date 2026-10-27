@@ -31,14 +31,21 @@ export class TextInputPreedit {
   }
 
   /** The string the field draws — the value with any composition spliced in
-   * where it will land. */
+   * where it will land, and in a masked field the mask in place of each
+   * code point of that (`mask`). One for one, so every index below means
+   * the same in either, and the secret is never laid out. */
   _displayValue() {
-    if (!this._preedit) return this.value;
+    const mask = this._maskChar();
+    if (!this._preedit) {
+      return mask === null
+        ? this.value
+        : mask.repeat(Array.from(this.value).length);
+    }
     const chars = this._chars();
     const at = this._preeditStart();
-    return (
-      chars.slice(0, at).join('') + this._preedit + chars.slice(at).join('')
-    );
+    const shown =
+      chars.slice(0, at).join('') + this._preedit + chars.slice(at).join('');
+    return mask === null ? shown : mask.repeat(Array.from(shown).length);
   }
 
   /** A value index in the displayed string. The caret is at the composition
