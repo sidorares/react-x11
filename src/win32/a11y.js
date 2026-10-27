@@ -237,7 +237,10 @@ function snapshotOf(node, id, parentId, childIds) {
   const value = a11yValue(node);
   const box = node.abs ?? { x: 0, y: 0, width: 0, height: 0 };
   const editable = hasState(states, ATSPI_STATE.EDITABLE);
-  const text = isNativeTextControl(node) ? (node.value ?? '') : '';
+  // a masked field's text is its mask, as AT-SPI reads it (`textStateOf`)
+  const mask = node._maskChar?.() ?? null;
+  const field = isNativeTextControl(node) ? (node.value ?? '') : '';
+  const text = mask === null ? field : mask.repeat(Array.from(field).length);
 
   return {
     id,

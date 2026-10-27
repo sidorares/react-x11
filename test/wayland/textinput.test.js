@@ -54,7 +54,7 @@ let mockApp;
 let root;
 let wnd;
 let input; // <textinput name="a">
-let secret; // <textinput name="b" sensitive inputMode="email">
+let secret; // <textinput name="b" sensitive mask="•" inputMode="email">
 let area; // <textarea>
 let textInput;
 const changes = [];
@@ -147,6 +147,7 @@ before(async () => {
         name: 'b',
         defaultValue: 'hunter2',
         sensitive: true,
+        mask: '•',
         inputMode: 'email',
         onCompositionStart: record('start'),
         onCompositionUpdate: record('update'),
@@ -384,7 +385,7 @@ test(
       'commit',
     ]);
     assert.deepEqual(argsOf(mark, 'set_content_type'), [
-      CONTENT_HINT.SENSITIVE_DATA,
+      CONTENT_HINT.SENSITIVE_DATA | CONTENT_HINT.HIDDEN_TEXT,
       CONTENT_PURPOSE.EMAIL,
     ]);
     assert.deepEqual(

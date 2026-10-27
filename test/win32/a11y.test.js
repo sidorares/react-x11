@@ -143,6 +143,11 @@ describe('win32 a11y: the translation', () => {
           'aria-valuemax': 11,
         }),
         h('textinput', { value: 'typed', 'aria-label': 'Field' }),
+        h('textinput', {
+          value: 'hunter2',
+          mask: '•',
+          'aria-label': 'Secret',
+        }),
       ),
     );
     try {
@@ -167,6 +172,8 @@ describe('win32 a11y: the translation', () => {
       assert.equal(field.valuePattern, true);
       assert.equal(field.value, 'typed');
       assert.equal(field.readOnly, false);
+      // …and a masked one's is its mask, never the secret
+      assert.equal(byName.get('Secret').value, '•••••••');
       // A label is not an edit field, and must not say it is read-write:
       // a screen reader offers to type into anything that does.
       assert.equal(volume.readOnly, true);

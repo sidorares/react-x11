@@ -102,6 +102,12 @@ export function withFinalLine(layout, text, lineBreak) {
  * ⌘↑/⌘↓ for the ends of the value, ⌥↑/⌥↓ for a paragraph's.
  */
 export class TextAreaNode extends TextInputNode {
+  /** A mask is a one-line field's: in place of a line break it would set
+   * the text out as one line. */
+  _maskChar() {
+    return null;
+  }
+
   /**
    * The bar takes the press before the caret does — otherwise grabbing the
    * thumb would drop the caret into whatever text sits behind it and start
