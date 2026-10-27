@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.56.1](https://github.com/sidorares/react-x11/compare/v2.56.0...v2.56.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* **textarea:** its lines are spaced by its lineHeight, as a text's are ([#1020](https://github.com/sidorares/react-x11/issues/1020)) ([0260a8d](https://github.com/sidorares/react-x11/commit/0260a8d266a6edb4755a8f9d79c9ebc66b20d196))
+
 ## [2.56.0](https://github.com/sidorares/react-x11/compare/v2.55.2...v2.56.0) (2026-10-27)
 
 
