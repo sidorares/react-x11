@@ -75,7 +75,7 @@ export function canShowPanePlayers(native) {
  */
 export class PanePlayer extends PlayerState {
   constructor(app, src, options = {}) {
-    super();
+    super(options.element);
     this.app = app;
     this._native = app._native;
     this.id = `pane-player-${++seq}`;
@@ -96,6 +96,7 @@ export class PanePlayer extends PlayerState {
         volume: typeof options.volume === 'number' ? options.volume : 1,
         playbackRate:
           typeof options.playbackRate === 'number' ? options.playbackRate : 1,
+        element: this.element,
       },
     });
   }
@@ -227,7 +228,9 @@ export class PanePlayer extends PlayerState {
 /**
  * The host's end: a real player for one of the pane's, its events sent down
  * as they come and its frames copied into the shared ring while it plays —
- * or, paused, the one frame a seek or the item's arrival shows.
+ * or, paused, the one frame a seek or the item's arrival shows. An
+ * `<audio>`'s has no picture, so nothing is copied and no ring is made —
+ * a video file it plays for its sound included, whose frames nobody sees.
  */
 export class HostedPlayer {
   constructor(app, send, { player, src, options }) {
@@ -236,6 +239,7 @@ export class HostedPlayer {
     this._send = send;
     this.id = player;
     this.player = app.createPlayer(src, options);
+    this._picture = this.player.element !== 'audio';
     this._ring = [];
     this._ringSize = null;
     this._next = 0;
@@ -267,6 +271,7 @@ export class HostedPlayer {
       ev: { ...ev, id: this.id },
     });
     const player = this.player;
+    if (!this._picture) return;
     // a new size is what the next frame is copied at
     if (ev.type === 'player-metadata') this._ringSize = null;
     // the item's first frame, and the frame a seek lands on while paused,

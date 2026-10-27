@@ -40,7 +40,12 @@ import {
   isPathImageSource,
   toLoadablePath,
 } from '../imagesource.js';
-import { canPlayMedia, NoMediaPlaybackError } from '../mediaplayback.js';
+import {
+  canPlayMedia,
+  changedSettings,
+  NoMediaPlaybackError,
+  playerOptions,
+} from '../mediaplayback.js';
 import { Surface } from '../offscreen.js';
 import { videoBackendOf } from '../videobackend.js';
 import { frameToRGBA, isVideoFrames } from '../videoframes.js';
@@ -57,9 +62,6 @@ const DEFAULT_HEIGHT = 150;
 // frame, since the copy answers null for one that has not changed and the
 // claim follows only a new one.
 const PULL_MS = 16;
-
-// The player's settings among a `<video>`'s props, as the player takes them.
-const PLAYER_PROPS = ['paused', 'muted', 'volume', 'loop', 'playbackRate'];
 
 // Apps already told, by a <video src> with no `onError`, that this backend
 // plays nothing: the answer is the backend's, so the second element to ask
@@ -190,15 +192,7 @@ export class VideoNode extends Node {
   /** `src` on the platform's player, playing from the start if the props
    *  say so: a controlled `paused={false}`, or `autoPlay`. */
   _play(src) {
-    const p = this.props;
-    const player = this.app.createPlayer(src, {
-      autoPlay:
-        p.paused !== undefined ? p.paused === false : Boolean(p.autoPlay),
-      loop: p.loop,
-      muted: p.muted,
-      volume: p.volume,
-      playbackRate: p.playbackRate,
-    });
+    const player = this.app.createPlayer(src, playerOptions(this.props));
     this._player = player;
     this._playerOff = player._subscribe((ev) => this._onPlayer(ev));
   }
@@ -408,16 +402,8 @@ export class VideoNode extends Node {
     super.applyProps(newProps, oldProps);
     if (!changed) {
       // the same player, told what changed of how it plays
-      if (
-        this._player &&
-        PLAYER_PROPS.some((name) => newProps[name] !== before[name])
-      ) {
-        const settings = {};
-        for (const name of PLAYER_PROPS) {
-          if (newProps[name] !== before[name]) settings[name] = newProps[name];
-        }
-        this._player.set(settings);
-      }
+      const settings = this._player && changedSettings(newProps, before);
+      if (settings) this._player.set(settings);
       return;
     }
     const was = this._natural();

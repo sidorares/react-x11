@@ -163,6 +163,7 @@ import {
   windowIdOf,
 } from '../../src/index.js';
 import type {
+  AudioElementNode,
   ChangeEvent,
   DrawnNode,
   Rect,
@@ -1653,6 +1654,34 @@ function _Video() {
       <video frames={frames} style={{ objectFit: 'stretch' }} />
       {/* @ts-expect-error — frames is a sink, not raw bytes */}
       <video frames={new Uint8Array(4)} />
+    </box>
+  );
+}
+
+// <audio>: the platform's player without a picture, and no style to give it
+function _Audio() {
+  const voice = useRef<AudioElementNode>(null);
+  voice.current?.seek(voice.current.duration / 2);
+  return (
+    <box>
+      <audio
+        ref={voice}
+        src="https://example.com/read-aloud.mp3"
+        paused={false}
+        volume={0.8}
+        onLoadedMetadata={({ duration }) => void duration}
+        onTimeUpdate={({ currentTime, node }) =>
+          void [currentTime, node.paused]
+        }
+        onEnded={() => {}}
+        onError={(err) => {
+          if (err instanceof NoMediaPlaybackError) void err.code;
+        }}
+      />
+      {/* @ts-expect-error — it takes no room, and no style */}
+      <audio src="./blip.wav" style={{ width: 10 }} />
+      {/* @ts-expect-error — no poster: there is nothing to see */}
+      <audio src="./blip.wav" poster="./x.png" />
     </box>
   );
 }

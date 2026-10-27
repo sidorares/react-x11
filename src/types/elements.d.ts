@@ -7,6 +7,7 @@
 import type { Ref, RefObject, ReactNode, Key } from 'react';
 import type { Color, Cursor, FontWeight, StyleProp } from './style.js';
 import type {
+  AudioElementNode,
   DrawnNode,
   NtkWindow,
   ScrollableNode,
@@ -977,6 +978,43 @@ export interface VideoProps extends DrawnProps<VideoNode> {
   onError?: (err: Error) => void;
 }
 
+/**
+ * `<audio>`: a path or URL the platform plays, heard and never seen. It
+ * takes no room and draws nothing, so it has no `style`; the transport is
+ * your React. `useSupports('mediaPlayback')` asks whether there is a player.
+ */
+export interface AudioProps {
+  key?: Key;
+  ref?: Ref<AudioElementNode>;
+  /**
+   * A path or URL the platform plays itself. Where there is no player the
+   * element reports one `NoMediaPlaybackError` through `onError`, on a
+   * microtask, and nothing is heard. A new `src` is a new player.
+   */
+  src?: string;
+  /** HTML's names and defaults: nothing plays until asked. */
+  autoPlay?: boolean;
+  loop?: boolean;
+  muted?: boolean;
+  /** 0 to 1. */
+  volume?: number;
+  playbackRate?: number;
+  /** Controlled when present; the element plays or pauses to match. */
+  paused?: boolean;
+  /** The item is ready: how long it is, in seconds — `Infinity` for a live
+   * stream. */
+  onLoadedMetadata?: (ev: { duration: number; node: AudioElementNode }) => void;
+  onPlay?: () => void;
+  onPause?: () => void;
+  onEnded?: () => void;
+  /** A few times a second while playing, as HTML's is, and after a seek. */
+  onTimeUpdate?: (ev: { currentTime: number; node: AudioElementNode }) => void;
+  /** The source failed, or this backend has no player
+   * (`NoMediaPlaybackError`). Without a handler the failure is a console
+   * warning. */
+  onError?: (err: Error) => void;
+}
+
 /** What `onDraw` is told about the node it is painting. */
 export interface DrawInfo {
   /**
@@ -1149,6 +1187,7 @@ export interface ReactX11Elements {
   textarea: TextAreaProps;
   image: ImageProps;
   video: VideoProps;
+  audio: AudioProps;
   canvas: CanvasProps;
   svg: SvgProps;
   glarea: GlAreaProps;

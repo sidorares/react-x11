@@ -1784,6 +1784,54 @@ const playback = useSupports('mediaPlayback');
 }
 ```
 
+## `<audio>` {#audio}
+
+`<video src>` without a picture: a path or URL the platform plays, heard
+and never seen. The same player — AVFoundation on macOS, and a `<Frame>`
+pane's host for a pane — the same props, events and `ref`, and the same
+`useSupports('mediaPlayback')` to ask first.
+
+```jsx
+const voice = useRef(null);
+<audio
+  ref={voice}
+  src="https://example.com/read-aloud.mp3"
+  paused={paused}
+  onLoadedMetadata={({ duration }) => setLength(duration)}
+  onTimeUpdate={({ currentTime }) => setAt(currentTime)}
+  onEnded={next}
+/>;
+<button onPress={() => voice.current.seek(0)} />;
+```
+
+It takes no room and draws nothing, whatever its `style` says — HTML's
+`<audio>` without `controls` is `display: none`, and there are no controls
+here: the transport is your React. The player opens in the commit that
+mounts the element, and a new `src` is a new player; `paused`, `muted`,
+`volume`, `loop` and `playbackRate` go to the one that is playing.
+`onLoadedMetadata` is handed `{ duration, node }`, `Infinity` for a live
+stream. In a pane, the host copies no frames for it, a video file it plays
+for its sound included.
+
+Where there is no player — X11 and Wayland for good, Windows today — it
+reports one `NoMediaPlaybackError` through `onError` on a microtask, and
+nothing is heard. There is no sink for decoded samples yet, as
+`<video frames>` is for pictures.
+
+A test gives an app a player that plays nothing with `fakeMediaPlayers`
+from `react-x11/test`, which makes `useSupports('mediaPlayback')` true and
+records what each `<audio>` and `<video src>` asks of its player:
+
+```js
+const app = createMockApp();
+const players = fakeMediaPlayers(app);
+await renderX11(<Reader />, { app, backend: 'mock' });
+players.last.ready({ duration: 9.72 });
+players.last.state(true); // playing
+players.last.time(2.5);
+players.last.end();
+```
+
 ## `<canvas>`
 
 The escape hatch: a retained node you paint.

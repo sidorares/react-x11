@@ -30,10 +30,12 @@ export function canPlay(native) {
  * (src/cocoa/paneplayer.js). `width`/`height` are the picture's once the
  * item is ready (0 before), `duration` its length in seconds (`Infinity`
  * for a live stream, NaN before it is known). A subclass sends `set` and
- * `seek` on.
+ * `seek` on. `element` is the one that asked, `'video'` or `'audio'`, which
+ * an error is told by.
  */
 export class PlayerState {
-  constructor() {
+  constructor(element = 'video') {
+    this.element = element === 'audio' ? 'audio' : 'video';
     this.width = 0;
     this.height = 0;
     this.duration = NaN;
@@ -71,7 +73,7 @@ export class PlayerState {
         break;
       case 'player-error':
         this.error = new Error(
-          `react-x11: <video src> could not be played: ${ev.message}`,
+          `react-x11: <${this.element} src> could not be played: ${ev.message}`,
         );
         break;
       default:
@@ -100,7 +102,7 @@ export class PlayerState {
 /** One file or URL, played by this process's bridge. */
 export class CocoaPlayer extends PlayerState {
   constructor(app, src, options = {}) {
-    super();
+    super(options.element);
     this.app = app;
     this._native = app._native;
     const made = this._native.createPlayer(String(src), {
