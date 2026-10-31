@@ -1,0 +1,4 @@
+- Several cities (at least four), each with a time and its offset from local time.
+- The times are plausible for different time zones, not all identical.
+- A way to add a city and a way to remove one are visible.
+- Times use tabular figures and line up.

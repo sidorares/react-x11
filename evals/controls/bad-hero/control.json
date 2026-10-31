@@ -1,0 +1,5 @@
+{
+  "expect": "bad",
+  "flaw": "a hero header over a centred landing-page column",
+  "catches": ["noWebLook"]
+}

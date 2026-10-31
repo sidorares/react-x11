@@ -1,0 +1,4 @@
+- A folder list in a sidebar, one folder selected.
+- Bookmarks of that folder with titles and URLs or domains, plus tags.
+- A search field and a way to filter by tag are visible.
+- A way to add a bookmark is visible.

@@ -1,0 +1,5 @@
+- Several lists in a sidebar, with counts; one list selected.
+- Tasks with due dates and a visible priority (not by colour alone).
+- Completing a task is a checkbox or equivalent; completed tasks look different.
+- What is due today is reachable (a Today list or a marker).
+- A way to add a task is visible.

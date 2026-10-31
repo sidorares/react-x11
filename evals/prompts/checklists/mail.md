@@ -1,0 +1,4 @@
+- Three areas: mailboxes, the message list, and the reading pane.
+- The list shows sender, subject, a date and an unread marker; messages look like real mail.
+- A selected message shows its full text in the reading pane.
+- Flag, read/unread and delete actions are reachable (toolbar, menu or row).

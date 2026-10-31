@@ -1,0 +1,1 @@
+Build an email client with mailboxes, a message list and a reading pane, using sample mail. I can mark messages read or unread, flag them and delete them.
