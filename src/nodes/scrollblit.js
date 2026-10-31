@@ -958,12 +958,21 @@ export class WindowScrollBlit {
     for (const repair of repairs) add(repair);
     // Each pinned corner where it is and where the copy put its image — one
     // box, since a step moves it a few pixels, and less the strip, which
-    // repaints anyway.
+    // repaints anyway, and less the repairs before it: rects that overlap
+    // merge into the box around them, and a sticky header whose shadow falls
+    // on a sticky sidebar came to the viewport, so that a scroll of every
+    // documentation site was a repaint of the window.
+    const repaired = [strip];
     for (const pin of corners ?? []) {
       const image = { ...pin, x: pin.x + dx, y: pin.y + dy };
       const repair = intersectRects(unionRect(pin, image), vp);
       if (!repair) continue;
-      for (const piece of outside(repair, strip)) add(piece);
+      let pieces = [repair];
+      for (const done of repaired) {
+        pieces = pieces.flatMap((piece) => outside(piece, done));
+      }
+      for (const piece of pieces) add(piece);
+      repaired.push(repair);
     }
     // Capped in one call where corners were pinned: two at each end of the
     // viewport and the strip at one of them are more pieces than the cap
