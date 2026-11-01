@@ -77,7 +77,7 @@ jobs:
   # say nothing, and the table it prints is for the human reading the log.
   # A push to master runs every scenario, for the trend.
   bench-cocoa:
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
