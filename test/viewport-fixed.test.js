@@ -45,10 +45,27 @@ class FixedDocNode extends Node {
     };
   }
 
+  /** A rail down the viewport's left edge, `rail` pixels wide, that the
+   *  banner lies across: a documentation site's sticky sidebar and header. */
+  _rail() {
+    const banner = this._banner();
+    if (!banner || !this.props.rail) return null;
+    let pane = this.parent;
+    while (pane && !pane.isWindow && !pane.isScroller?.()) pane = pane.parent;
+    const viewport = pane.contentBox();
+    return {
+      x: viewport.x,
+      y: viewport.y,
+      width: this.props.rail,
+      height: viewport.height,
+    };
+  }
+
   viewportFixedRects() {
     if (this.props.silent) return null;
     const banner = this._banner();
-    return banner && [banner];
+    const rail = this._rail();
+    return banner && (rail ? [banner, rail] : [banner]);
   }
 
   paintContent(ctx) {
@@ -59,6 +76,11 @@ class FixedDocNode extends Node {
     }
     const banner = this._banner();
     if (!banner) return;
+    const rail = this._rail();
+    if (rail) {
+      ctx.fillStyle = '#2980b9';
+      ctx.fillRect(rail.x, rail.y, rail.width, rail.height);
+    }
     ctx.fillStyle = '#c0392b';
     ctx.fillRect(banner.x, banner.y, banner.width, banner.height);
   }
@@ -176,6 +198,39 @@ test('an element that says nothing is copied with the content', async () => {
   );
 });
 
+test('a banner and a rail that overlap repair each and leave the scroll a blit', async () => {
+  // merged, the box around the two is the viewport, and every frame of a
+  // scroll of a page with a sticky header and sidebar repainted the window
+  for (const to of [48, 96, 40]) {
+    const { wnd, root, ref } = await mount({ banner: 60, rail: 90 });
+    ref.current.scrollTo(to);
+    await tick();
+    assert.strictEqual(blits(wnd).length, 1, `scrolled to ${to}: a blit`);
+    const rects = root._lastDamageRects;
+    assert.ok(rects, 'the frame stayed bounded');
+    assert.ok(
+      covered(rects, { x: 0, y: 0, width: 400, height: 60 }) &&
+        covered(rects, { x: 0, y: 0, width: 90, height: 400 }),
+      `both are repaired where they are: ${JSON.stringify(rects)}`,
+    );
+    const area = rects.reduce((sum, r) => sum + r.width * r.height, 0);
+    assert.ok(
+      area < 400 * 400 * 0.6,
+      `and not the viewport: ${JSON.stringify(rects)}`,
+    );
+    for (const [i, a] of rects.entries()) {
+      for (const b of rects.slice(i + 1)) {
+        const apart =
+          a.x + a.width <= b.x ||
+          b.x + b.width <= a.x ||
+          a.y + a.height <= b.y ||
+          b.y + b.height <= a.y;
+        assert.ok(apart, `painted once each: ${JSON.stringify(rects)}`);
+      }
+    }
+  }
+});
+
 test('a fixed rect that covers most of the viewport makes the scroll a repaint', async () => {
   // a fixed background, fixed to the whole viewport: nothing the copy moves
   // is right, so it is not made
@@ -235,59 +290,64 @@ const readPixels = (ctx, w, h) =>
     ),
   );
 
-test('a blitted scroll with a fixed banner is byte-identical to its repaint', async (t) => {
-  const app = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
-  try {
-    const ref = React.createRef();
-    const instance = await new Promise((resolve) =>
-      x11Root.render(
-        h(
-          'window',
-          { width: 400, height: 300, style: { backgroundColor: '#f5f6fa' } },
+for (const [what, doc] of [
+  ['a fixed banner', {}],
+  ['a fixed banner and a rail under it', { banner: 60, rail: 90 }],
+]) {
+  test(`a blitted scroll with ${what} is byte-identical to its repaint`, async (t) => {
+    const app = await createHeadlessApp();
+    const x11Root = await createRoot({ app });
+    try {
+      const ref = React.createRef();
+      const instance = await new Promise((resolve) =>
+        x11Root.render(
           h(
-            'box',
-            { ref, style: { overflow: 'scroll', flexGrow: 1 } },
-            h('fixeddoc', { style: { height: 1600, flexShrink: 0 } }),
+            'window',
+            { width: 400, height: 300, style: { backgroundColor: '#f5f6fa' } },
+            h(
+              'box',
+              { ref, style: { overflow: 'scroll', flexGrow: 1 } },
+              h('fixeddoc', { style: { height: 1600, flexShrink: 0 }, ...doc }),
+            ),
           ),
+          resolve,
         ),
-        resolve,
-      ),
-    );
-    if (typeof instance.scrollRegion !== 'function') {
-      t.skip('installed ntk has no Window.scrollRegion yet');
-      return;
-    }
-    const root = instance._reactX11Node;
-    const frame = () => {
-      root._scheduled = false;
-      root.flush();
-    };
-    frame();
-    await settle(app);
-    let blitCalls = 0;
-    const realScrollRegion = instance.scrollRegion.bind(instance);
-    instance.scrollRegion = (...args) => {
-      blitCalls += 1;
-      return realScrollRegion(...args);
-    };
-    for (const to of [48, 96, 60]) {
-      ref.current.scrollTo(to);
+      );
+      if (typeof instance.scrollRegion !== 'function') {
+        t.skip('installed ntk has no Window.scrollRegion yet');
+        return;
+      }
+      const root = instance._reactX11Node;
+      const frame = () => {
+        root._scheduled = false;
+        root.flush();
+      };
       frame();
       await settle(app);
+      let blitCalls = 0;
+      const realScrollRegion = instance.scrollRegion.bind(instance);
+      instance.scrollRegion = (...args) => {
+        blitCalls += 1;
+        return realScrollRegion(...args);
+      };
+      for (const to of [48, 96, 60]) {
+        ref.current.scrollTo(to);
+        frame();
+        await settle(app);
+      }
+      assert.strictEqual(blitCalls, 3, 'every scroll took the fast path');
+      const blitted = await readPixels(root._ctx, 400, 300);
+      root.invalidate(false);
+      frame();
+      await settle(app);
+      const repainted = await readPixels(root._ctx, 400, 300);
+      assert.ok(
+        Buffer.from(blitted.data).equals(Buffer.from(repainted.data)),
+        'blitted pixels differ from a full repaint of the same state',
+      );
+    } finally {
+      await x11Root.unmount();
+      await app.close();
     }
-    assert.strictEqual(blitCalls, 3, 'every scroll took the fast path');
-    const blitted = await readPixels(root._ctx, 400, 300);
-    root.invalidate(false);
-    frame();
-    await settle(app);
-    const repainted = await readPixels(root._ctx, 400, 300);
-    assert.ok(
-      Buffer.from(blitted.data).equals(Buffer.from(repainted.data)),
-      'blitted pixels differ from a full repaint of the same state',
-    );
-  } finally {
-    await x11Root.unmount();
-    await app.close();
-  }
-});
+  });
+}
