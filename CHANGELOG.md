@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.56.2](https://github.com/sidorares/react-x11/compare/v2.56.1...v2.56.2) (2026-11-01)
+
+
+### Performance Improvements
+
+* **scroll:** pinned repairs stay apart, where a sticky header over a sticky sidebar made every scroll a repaint of the window ([#1022](https://github.com/sidorares/react-x11/issues/1022)) ([c6726a4](https://github.com/sidorares/react-x11/commit/c6726a4df170478e397f469fd3b4d03be23ccb5a))
+
 ## [2.56.1](https://github.com/sidorares/react-x11/compare/v2.56.0...v2.56.1) (2026-10-27)
 
 
