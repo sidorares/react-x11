@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.56.3](https://github.com/sidorares/react-x11/compare/v2.56.2...v2.56.3) (2026-11-02)
+
+
+### Bug Fixes
+
+* **events:** a press moves the focus after its handlers and not where one cancelled it, where it moved first and preventDefault kept nothing ([#1029](https://github.com/sidorares/react-x11/issues/1029)) ([7b755e8](https://github.com/sidorares/react-x11/commit/7b755e800da8a6eb70a42e5846492d3175260299)), closes [#1028](https://github.com/sidorares/react-x11/issues/1028)
+
 ## [2.56.2](https://github.com/sidorares/react-x11/compare/v2.56.1...v2.56.2) (2026-11-01)
 
 
