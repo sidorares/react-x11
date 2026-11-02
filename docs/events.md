@@ -18,7 +18,8 @@ synthetic events over the drawn node tree with DOM-like semantics.
    the target.
 3. **Target + bubble phase**: `on<Event>` handlers from the target up.
 4. **Default action**: the element's built-in behaviour (textinput editing,
-   wheel scrolling, then Tab traversal) — skipped if any handler called
+   wheel scrolling, then Tab traversal), and for a press the
+   [focus](#focus) moving first — skipped if any handler called
    `ev.preventDefault()`.
 
 `ev.stopPropagation()` stops the walk. Handlers always read current props.
@@ -231,7 +232,7 @@ default action, so `preventDefault()` in `onKeyDown` keeps the key.
 | `onContextMenu`                                                   | right-click, after `onMouseDown`; default action opens the element's menu                        |
 | `onKeyDown` / `onKeyUp`                                           | to the focused node (or window); defaults: Space/Enter click, [accelerators](#accelerators), Tab |
 | `onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` | text still being typed — [below](#composition)                                                   |
-| `onFocus` / `onBlur`                                              | focus follows mousedown (nearest `focusable` ancestor) and Tab                                   |
+| `onFocus` / `onBlur`                                              | focus follows mousedown's handlers (nearest `focusable` ancestor) and Tab                        |
 | `onDragEnter` / `onDragLeave`                                     | do not propagate; drag-path diffing, like hover                                                  |
 | `onDragOver` / `onDrop`                                           | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)                   |
 | `onDragStart` / `onDrag` / `onDragEnd`                            | on a `draggable` node; the press is a click until it moves 4px                                   |
@@ -591,10 +592,15 @@ whatever else it says; `autoFocus` focuses at mount. Every drawn node's ref
 has `focus()` (which returns the node, for forwarding from an imperative
 handle), `blur()`, `focused`, and `focusWithin` — focus on the node **or
 inside it**; `':focus-within'` draws that
-([styling.md](styling.md#inline-pseudo-states)). Mousedown focuses the
-nearest focusable ancestor of the hit node; keyboard events route up the
-focused node's ancestor chain. Focusing a node in a scroll container scrolls
-it into view, unless a press focused it.
+([styling.md](styling.md#inline-pseudo-states)). A press focuses the
+nearest focusable ancestor of the hit node, as its default action, as in the
+DOM: `onMouseDown` runs with the focus where it was, and `preventDefault()`
+there keeps it there, which a toolbar button wants, to leave the caret in
+the field beside it. A handler that claims a press and wants the focus as
+well takes it itself, or leaves the press uncancelled and vetoes what it does
+not want some other way. Keyboard events route up the focused node's ancestor
+chain. Focusing a node in a scroll container scrolls it into view, unless a
+press focused it.
 
 **A focused node shows a ring** depending on how focus arrived: a press sets
 `:focus`; Tab, `autoFocus`, `node.focus()` or a modal handing focus back
