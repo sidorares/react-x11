@@ -941,7 +941,6 @@ export class EventManager {
       // the caret is about to move, and the accent was aimed at where it was
       this._endComposition(native);
       this._setPressed(this.downPath);
-      this._focusFromPress(target);
       const ev = this.dispatch(
         'MouseDown',
         target,
@@ -960,6 +959,11 @@ export class EventManager {
       // the need for one (issue #251).
       this._downDefaulted = !ev.defaultPrevented;
       if (this._downDefaulted) {
+        // the press's default actions, the focus first: a handler hears the
+        // press with the focus where it was, and one that calls
+        // `preventDefault()` keeps it there, which is how a toolbar's button
+        // leaves the caret in the field beside it
+        this._focusFromPress(target);
         target.defaultMouseDown?.(ev);
       }
       // a left press on (or inside) a `draggable` arms a drag; below the
@@ -1094,9 +1098,11 @@ export class EventManager {
   }
 
   /**
-   * DOM-like: mousedown moves focus to the nearest focusable ancestor of the
-   * hit node. A press outside an open focus scope leaves focus where it is —
-   * a modal keeps focus even when the user pokes at what is behind it.
+   * As in the DOM, a press moves focus to the nearest focusable ancestor of
+   * the hit node as its default action: after the handlers have run, and not
+   * where one called `preventDefault()` (`_onMouseDown`). A press outside an
+   * open focus scope leaves focus where it is — a modal keeps focus even when
+   * the user pokes at what is behind it.
    */
   _focusFromPress(target) {
     const manager = this.focusManager;

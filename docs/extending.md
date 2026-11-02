@@ -398,7 +398,8 @@ editing, a tree with type-ahead — implements **default actions**, the seam
 
 1. the app's `onKeyDown` / `onMouseDown` / … handlers, capture then bubble;
 2. **unless one called `ev.preventDefault()`**, the element's `default*`
-   method.
+   method — for a press, after the focus has moved
+   ([events.md](events.md#focus)).
 
 So an app can veto or precede the behaviour without knowing how the element
 is built — the reason to put it here rather than in a wrapping component.

@@ -350,6 +350,56 @@ test('preventDefault on the press skips the element behaviour', async () => {
   assert.ok(!editor.log.some((entry) => entry.startsWith('drag')));
 });
 
+test('a press moves the focus after its handlers, and just before the element hears it', async () => {
+  const seen = [];
+  const { wnd, editor } = await mount({
+    props: {
+      onMouseDown: () => seen.push(`handler, focused ${editor.focused}`),
+    },
+  });
+  const down = editor.defaultMouseDown;
+  editor.defaultMouseDown = function (ev) {
+    seen.push(`element, focused ${this.focused}`);
+    down.call(this, ev);
+  };
+  wnd.emit('mousedown', { x: 10, y: 10, keycode: 1 });
+  await tick();
+  assert.deepStrictEqual(seen, [
+    'handler, focused false',
+    'element, focused true',
+  ]);
+});
+
+test('preventDefault on the press keeps the focus where it is, as in the DOM', async () => {
+  const { wnd, editor } = await mount({
+    props: { onMouseDown: (ev) => ev.preventDefault() },
+  });
+  editor.focus();
+  await tick();
+  assert.strictEqual(editor.focused, true);
+  const blurred = [];
+  const blur = editor.defaultBlur;
+  editor.defaultBlur = function () {
+    blurred.push('blur');
+    blur?.call(this);
+  };
+  wnd.emit('mousedown', { x: 10, y: 10, keycode: 1 });
+  await tick();
+  assert.strictEqual(editor.focused, true);
+  assert.deepStrictEqual(blurred, []);
+
+  const other = await mount({
+    props: { onMouseDown: (ev) => ev.preventDefault() },
+  });
+  other.wnd.emit('mousedown', { x: 10, y: 10, keycode: 1 });
+  await tick();
+  assert.strictEqual(
+    other.editor.focused,
+    false,
+    'and nothing takes it that did not have it',
+  );
+});
+
 test('the context menu is its own default action', async () => {
   const { wnd, editor } = await mount({
     props: { onContextMenu: (ev) => ev.preventDefault() },
