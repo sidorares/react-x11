@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.56.4](https://github.com/sidorares/react-x11/compare/v2.56.3...v2.56.4) (2026-11-04)
+
+
+### Bug Fixes
+
+* **textarea:** a click on the placeholder puts the caret where typing goes ([#1033](https://github.com/sidorares/react-x11/issues/1033)) ([069106f](https://github.com/sidorares/react-x11/commit/069106ff23d090c3cd0806332ea62aa824119282))
+
 ## [2.56.3](https://github.com/sidorares/react-x11/compare/v2.56.2...v2.56.3) (2026-11-02)
 
 
