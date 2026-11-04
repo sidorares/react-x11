@@ -762,3 +762,24 @@ export class NodeLayout {
     };
   }
 }
+
+/**
+ * A pane owes a pass the walk may not give it: its offsets moved, or a
+ * held `scrollTo`/`scrollIntoView` or an anchor shift waits for one, or
+ * an element in it said its extent changed (`invalidate(true, this,
+ * 'scroll')`), which yoga never sees. The walk reaches it on its own
+ * unless a pane above takes the fast path with its origin held
+ * (`_absolutizeChildren`) — nothing inside that one was laid out and it
+ * did not scroll, so it returns without walking, and a nested pane that
+ * scrolled kept its rows where they were while its thumb moved. So the
+ * path up from the pane is marked, and that return descends along the
+ * marks, to the panes at their ends and nowhere else.
+ *
+ * Marked to the top every time rather than up to the first mark: a full
+ * walk clears the marks of the panes it passes and leaves the boxes'
+ * between them, so a mark found on the way up says nothing of the ones
+ * above it.
+ */
+export function markScrollPath(node) {
+  for (let n = node; n; n = n.parent) n._scrollPathOwed = true;
+}
