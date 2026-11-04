@@ -207,19 +207,39 @@ export class TextAreaNode extends TextInputNode {
     super.setSelectionRange(start, end, direction);
   }
 
-  /** Wrapped, styled layout of the value (or placeholder), cached per
-   * (text, style, width). Used for painting and all caret geometry, so
-   * caret math always agrees with what is on screen. */
+  /** Wrapped, styled layout of the value, cached per (text, style, width).
+   * Used for all caret geometry — click-to-caret, the keys, the accessors —
+   * so caret math always agrees with what is on screen. An empty field's is
+   * the layout of the empty string, never the placeholder's: the hint is
+   * chrome, and a click on it has to put the caret where typing will put
+   * the first character, not at the hint's n-th one (`_shownLayout`). */
   _valueLayout() {
-    const fonts = this.app?.fonts;
-    if (!fonts) return null;
     const text = this._displayValue();
-    const isEmpty = text.length === 0;
-    const shown = isEmpty ? (this.props.placeholder ?? '') : text;
+    const layout = this._wrappedLayout(text, this.resolvedTextStyle().color);
+    if (!layout || text.length === 0) return layout;
+    const fonts = this.app.fonts;
     const s = this.resolvedTextStyle();
-    const color = isEmpty
-      ? (this.props.placeholderColor ?? this.theme.textMuted)
-      : s.color;
+    // the wrapped layout is cached by key, so its identity is the key
+    if (this._valueLayoutBase !== layout) {
+      this._valueLayoutBase = layout;
+      this._valueLayoutCache = withFinalLine(layout, text, () =>
+        fonts.layout([{ text: '\n', ...s }], s, this._wrappedOptions()),
+      );
+    }
+    return this._valueLayoutCache;
+  }
+
+  /** What the field draws: the value, or the placeholder when it is empty. */
+  _shownLayout() {
+    if (this._displayValue().length > 0) return this._valueLayout();
+    return this._wrappedLayout(
+      this.props.placeholder ?? '',
+      this.props.placeholderColor ?? this.theme.textMuted,
+    );
+  }
+
+  /** The layout options every text of the field is wrapped with. */
+  _wrappedOptions() {
     const direction = this.direction;
     const align = this.style.textAlign ?? 'start';
     // A wrapped field *has* a container, so — unlike `<textinput>` — the
@@ -236,24 +256,33 @@ export class TextAreaNode extends TextInputNode {
     // of it, and only a line that fills its width exactly could reach the
     // other end — so nothing is taken off a direction that does not need it.
     const width = this.contentBox().width || undefined;
-    const container =
+    const maxWidth =
       width === undefined || direction !== 'rtl'
         ? width
         : Math.max(0, width - CARET_RESERVE * this.scale);
     // its lines spaced as a `<text>`'s are (`_lineHeight`)
     const lineHeight = lineHeightOf(this.style.lineHeight);
-    const key = `${width}|${color}|${shown}|${s.family}|${s.size}|${s.weight}|${s.style}|${direction}|${align}|${lineHeight}|${s.letterSpacing}|${JSON.stringify(s.features ?? null)}`;
-    if (this._valueLayoutKey !== key) {
-      this._valueLayoutKey = key;
-      const options = { maxWidth: container, align, direction, lineHeight };
-      const layout = fonts.layout([{ text: shown, ...s, color }], s, options);
-      this._valueLayoutCache = isEmpty
-        ? layout
-        : withFinalLine(layout, shown, () =>
-            fonts.layout([{ text: '\n', ...s, color }], s, options),
-          );
+    return { maxWidth, align, direction, lineHeight };
+  }
+
+  /** One wrapped layout of `text` in `color`, cached per (text, style,
+   * width) — two entries, since a field asks for its value's and, while
+   * empty, the placeholder's in the same frame. */
+  _wrappedLayout(text, color) {
+    const fonts = this.app?.fonts;
+    if (!fonts) return null;
+    const s = this.resolvedTextStyle();
+    const options = this._wrappedOptions();
+    const key = `${options.maxWidth}|${color}|${text}|${s.family}|${s.size}|${s.weight}|${s.style}|${options.direction}|${options.align}|${options.lineHeight}|${s.letterSpacing}|${JSON.stringify(s.features ?? null)}`;
+    const cache = (this._wrappedCache ??= new Map());
+    let layout = cache.get(key);
+    if (!layout) {
+      layout = fonts.layout([{ text, ...s, color }], s, options);
+      // the newest two: the value's and the placeholder's
+      if (cache.size >= 2) cache.delete(cache.keys().next().value);
+      cache.set(key, layout);
     }
-    return this._valueLayoutCache;
+    return layout;
   }
 
   applyProps(newProps, oldProps) {
@@ -414,6 +443,9 @@ export class TextAreaNode extends TextInputNode {
   paintContent(ctx) {
     const layout = this._valueLayout();
     if (!layout) return;
+    // the ink: the placeholder while the field is empty, which the marks
+    // over the value — caret, selection, scrollbar — never read
+    const shown = this._shownLayout();
     const content = this.contentBox();
     if (content.width <= 0 || content.height <= 0) return;
     const isEmpty = this._displayValue().length === 0;
@@ -482,7 +514,7 @@ export class TextAreaNode extends TextInputNode {
       if (rects.length) ctx.fillRects(rects);
     }
 
-    layout.draw(ctx, originX, originY);
+    shown.draw(ctx, originX, originY);
     this._paintPreedit(ctx, originX, originY, this.resolvedTextStyle());
 
     if (this._focused && this._caretOn && a === b) {
