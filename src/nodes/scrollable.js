@@ -17,7 +17,12 @@ import {
   XK_SPACE,
 } from '../keysyms.js';
 import { DAMAGE_SLOP, NO_DAMAGE, layoutDiff } from './damage.js';
-import { describeSize, laidBox, offsetInParent } from './layout.js';
+import {
+  describeSize,
+  laidBox,
+  markScrollPath,
+  offsetInParent,
+} from './layout.js';
 import { insetRect, intersectRects, rectsOverlap } from './rects.js';
 import {
   SCROLLBAR_WIDTH,
@@ -154,6 +159,22 @@ const sameThumb = (a, b) =>
     a.width === b.width &&
     a.height === b.height);
 
+/** The descent `markScrollPath` asks for, from a pane that walked nothing. */
+function placeOwedPanes(node) {
+  for (const child of node.children) {
+    if (child.isWindow || !child._scrollPathOwed) continue;
+    // where a full walk would not go either (`absolutize`)
+    if (child.style.display === 'none' || child.hidden) {
+      child._scrollPathOwed = false;
+    } else if (child.isScroller?.()) {
+      child._absolutizeChildren(child.abs.x, child.abs.y);
+    } else {
+      child._scrollPathOwed = false;
+      placeOwedPanes(child);
+    }
+  }
+}
+
 /**
  * Scrolling, as a style rather than as a species of node.
  *
@@ -190,6 +211,9 @@ export const Scrollable = (Base) =>
       // layout pass measures, and re-raised by any change yoga cannot see
       // (`_markScrollMeasureDirty`, issue #405)
       this._scrollMeasureDirty = true;
+      // a pane at or below this box owes a pass the walk might skip
+      // (`markScrollPath`)
+      this._scrollPathOwed = false;
     }
 
     /**
@@ -277,6 +301,9 @@ export const Scrollable = (Base) =>
      * child yoga did not lay out again moves with it (`_followParent`).
      */
     _absolutizeChildren(originX, originY, dx = 0, dy = 0) {
+      // whatever this walk does, it reaches every pane below that owes one
+      const owed = this._scrollPathOwed;
+      this._scrollPathOwed = false;
       if (!this.isScroller()) {
         // a layout host's children go where its algorithm put them
         if (this._host !== null) {
@@ -394,7 +421,13 @@ export const Scrollable = (Base) =>
         // the deviations from this very translation, and a clean pane has
         // none — the walk below lands every node where the diff would have
         // reported silence.
-        if (!shifted) return;
+        if (!shifted) {
+          // …and none at all when the origin held — except down to a pane
+          // inside that scrolled, or owes its pass for another reason
+          // (`markScrollPath`): nothing else would place its rows again
+          if (owed) placeOwedPanes(this);
+          return;
+        }
         const dx = ox - wasOrigin.x;
         const dy = oy - wasOrigin.y;
         for (const child of this.children) {
@@ -619,6 +652,7 @@ export const Scrollable = (Base) =>
       // offsets before it (`_applyAnchorShift`)
       this._scrolledSincePass = true;
       if (moved) this.props.onScroll?.(this._scrollEvent());
+      markScrollPath(this);
       // A scroll reflows this viewport's contents and nothing else, and the
       // viewport clips them, so the damage is this node's own rect. It is a
       // layout change all the same — children's absolute positions move — hence
@@ -732,6 +766,7 @@ export const Scrollable = (Base) =>
       shift.x += dx;
       shift.y += dy;
       this._scrollMeasureDirty = true;
+      markScrollPath(this);
       const root = this.root;
       if (root && !root._inFlush) root.invalidate(true, this, 'scroll');
       return true;
@@ -953,6 +988,7 @@ export const Scrollable = (Base) =>
     scrollIntoView(node) {
       if (!node || !this.isScroller()) return;
       this._scrollIntoViewTarget = node;
+      markScrollPath(this);
       const root = this.root;
       if (!root) return;
       // a pane no pass has placed arms nothing, as for `scrollTo`

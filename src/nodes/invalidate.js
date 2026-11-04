@@ -16,6 +16,7 @@ import {
 import { insetRect, unionRect, rectsBounds, rectsOverlap } from './rects.js';
 import { BLIT_POISONED } from './scrollblit.js';
 import { DEV } from './util.js';
+import { markScrollPath } from './layout.js';
 import { debugPaint } from './window/debugpaint.js';
 
 // Which damage lists a claim belongs in (`WindowInvalidate._paneReach`).
@@ -49,7 +50,12 @@ export class NodeInvalidate {
   invalidate(layoutChanged = false, damage = null, reason = null) {
     // a layout change may grow what an enclosing scroll pane has to scroll,
     // through a route yoga never sees (issue #405)
-    if (layoutChanged) this._markScrollMeasureDirty();
+    if (layoutChanged) {
+      this._markScrollMeasureDirty();
+      // …and when the reason is that, the pane measuring it is owed its
+      // pass however clean the panes above it are
+      if (reason === 'scroll') markScrollPath(this);
+    }
     // a node that says its appearance changed may have changed how far it
     // reaches — a shadow, an outline, a scene element's ink — so its cached
     // paint reach goes with the claim
