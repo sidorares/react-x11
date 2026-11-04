@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.56.5](https://github.com/sidorares/react-x11/compare/v2.56.4...v2.56.5) (2026-11-04)
+
+
+### Bug Fixes
+
+* **scroll:** a scroll pane inside another one moves its rows when it scrolls ([#1035](https://github.com/sidorares/react-x11/issues/1035)) ([bac4db8](https://github.com/sidorares/react-x11/commit/bac4db815aff85d0a14eaea69b58ee78f02d8717))
+
 ## [2.56.4](https://github.com/sidorares/react-x11/compare/v2.56.3...v2.56.4) (2026-11-04)
 
 
