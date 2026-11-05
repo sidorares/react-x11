@@ -101,6 +101,13 @@ that have not been built, and say so at the top.
   where the platform has a player — on the sprite seam, and how `<Html>`
   and `<MediaPlayer>` consume it. Built but for Windows and `<MediaPlayer>`'s
   frames backend.
+- [architecture/media-capture.md](architecture/media-capture.md) — the
+  layer between video's sinks and `<Html>`'s WebRTC facade that nobody
+  owns yet: cameras, microphones, screens, system audio and platform
+  codecs, measured against five applications; why echo cancellation makes
+  capture and playback one module, what Linux capture pure JavaScript can
+  and cannot reach, the web vocabulary core adopts and the object model it
+  leaves to components, and the split between the two. Not built.
 - [architecture/animation.md](architecture/animation.md) — what the style
   vocabulary cannot say today (a fade, a move that does not reflow, a
   timeline that ends), who should interpolate it, and what offloading a
