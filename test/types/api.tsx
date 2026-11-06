@@ -2358,3 +2358,95 @@ import { CreateError, createApp, runCreate } from 'react-x11/create';
   // @ts-expect-error — not a package manager this knows how to run
   createApp('my-app', { manager: 'cargo' });
 }
+
+// ---- media capture: devices, tracks, the screen, audio out ----
+import {
+  captureScreenshot,
+  createAudioFrames,
+  displaySources,
+  enumerateDevices,
+  getDisplayMedia,
+  getUserMedia,
+  MediaStream,
+  MediaStreamTrack,
+  NoAudioOutputError,
+  OverconstrainedError,
+  useDisplayMedia,
+  useMediaDevices,
+  useUserMedia,
+  watchDevices,
+} from 'react-x11';
+import type { MediaDeviceInfo, MediaStatus, Screenshot } from 'react-x11';
+function _Media() {
+  const { cameras, settled } = useMediaDevices();
+  const first: MediaDeviceInfo | undefined = cameras[0];
+  const call = useUserMedia({
+    video: {
+      deviceId: first?.deviceId,
+      width: 1280,
+      frameRate: { ideal: 30, max: 60 },
+    },
+    audio: { echoCancellation: true, sampleRate: 16000, channelCount: 1 },
+  });
+  const status: MediaStatus = call.status;
+  const share = useDisplayMedia({ video: { frameRate: 30 }, audio: 'system' });
+  const caps = useDesktopCapability('screenCapture');
+  const enumerate: boolean | undefined = caps.features.enumerate;
+  const camera = useDesktopCapability('camera');
+  const preview: boolean | undefined = camera.features.nativePreview;
+  // @ts-expect-error — a constraint is a number or a range, not a CSS length
+  useUserMedia({ video: { width: '1280px' } });
+  // @ts-expect-error — not a capability
+  useDesktopCapability('webcam');
+  void [settled, status, enumerate, preview];
+  return (
+    <box>
+      <video srcObject={call.stream} style={{ objectFit: 'cover' }} />
+      <video srcObject={share.stream} />
+      <audio srcObject={call.stream} muted volume={0.5} sinkId="default" />
+      <box onClick={share.start}>
+        <text>Share</text>
+      </box>
+      {/* @ts-expect-error — srcObject is a MediaStream, not a URL */}
+      <video srcObject="camera://0" />
+    </box>
+  );
+}
+void _Media;
+async function _MediaPromises(app: unknown) {
+  const devices: MediaDeviceInfo[] = await enumerateDevices({ app });
+  const off: () => void = watchDevices(() => {}, { app });
+  const stream: MediaStream = await getUserMedia({ video: true }, { app });
+  const [track]: MediaStreamTrack[] = stream.getVideoTracks();
+  track.enabled = false;
+  await track.applyConstraints({ width: { exact: 640 } });
+  const stop: () => void = track.onFrame((frame) => {
+    void [frame.planes, frame.strides, frame.format, frame.time];
+  });
+  const width: number | undefined = track.getSettings().width;
+  const both = new MediaStream([...stream.getTracks(), track.clone()]);
+  const screen = await getDisplayMedia({ source: 'screen:0' }, { app });
+  const sources = await displaySources({
+    app,
+    thumbnail: { width: 160, height: 90 },
+  });
+  const shot: Screenshot = await captureScreenshot({
+    app,
+    source: sources[0]?.id,
+    region: { x: 0, y: 0, width: 100, height: 100 },
+  });
+  const png: Uint8Array = shot.png();
+  const sink = createAudioFrames(app, { sampleRate: 16000, channels: 1 });
+  sink.push([new Float32Array(160)]);
+  const queued: number = sink.queued;
+  try {
+    await getUserMedia({ video: { width: { min: 8000 } } });
+  } catch (err) {
+    if (err instanceof OverconstrainedError) void err.constraint;
+    if (err instanceof NoAudioOutputError) void err.code;
+  }
+  // @ts-expect-error — a track is made by getUserMedia, not constructed
+  new MediaStreamTrack();
+  void [devices, off, stop, width, both, screen, png, queued];
+}
+void _MediaPromises;

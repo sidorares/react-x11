@@ -55,6 +55,11 @@ test('screen capture over X11: no picker, sources listed, screenshots and frames
   assert.equal(cap.backend, 'x11');
   assert.equal(cap.features.picker, false);
   assert.equal(cap.features.enumerate, true);
+  assert.equal(
+    cap.features.screens,
+    true,
+    'not XQuartz: the root is the screen',
+  );
   // no camera on X11: the rung is the screen's alone
   assert.equal((await desktopCapability('camera', { app })).available, false);
   await assert.rejects(getUserMedia({ video: true }, { app }), {
@@ -124,4 +129,62 @@ test('a source that is not there is NotFoundError', async () => {
   await assert.rejects(getDisplayMedia({ source: 'window:12345' }, { app }), {
     name: 'NotFoundError',
   });
+});
+
+test('a window is read from the window itself, its own pixels', async () => {
+  const { app, windowNode } = await renderX11(
+    h('box', { style: { flexGrow: 1, backgroundColor: `rgb(${RED})` } }),
+    { width: 60, height: 40 },
+  );
+  await settle(app);
+  const source = `window:${windowNode.window.id}`;
+  const shot = await captureScreenshot({ app, source });
+  assert.deepEqual([shot.width, shot.height], [60, 40]);
+  assert.deepEqual(rgbAt(shot, 30, 20), [...RED, 255]);
+  const stream = await getDisplayMedia({ source }, { app });
+  const [track] = stream.getVideoTracks();
+  assert.equal(track.getSettings().displaySurface, 'window');
+  const frame = await new Promise((resolve) => {
+    const off = track.onFrame((f) => {
+      off();
+      resolve(f);
+    });
+  });
+  assert.deepEqual([frame.width, frame.height], [60, 40]);
+  const i = 20 * frame.strides[0] + 30 * 4;
+  assert.deepEqual(
+    [frame.planes[0][i + 2], frame.planes[0][i + 1], frame.planes[0][i]],
+    RED,
+  );
+  track.stop();
+});
+
+test('on XQuartz, whose root holds nothing, a screen is refused and says why', async () => {
+  const { app, windowNode } = await renderX11(h('box', null), {
+    width: 60,
+    height: 40,
+  });
+  // the extension every XQuartz server has and no other does
+  const query = app.X.QueryExtension.bind(app.X);
+  app.X.QueryExtension = (name, cb) =>
+    name === 'Apple-WM'
+      ? cb(null, { present: true, majorOpcode: 140 })
+      : query(name, cb);
+  const cap = await desktopCapability('screenCapture', { app });
+  assert.equal(cap.features.screens, false);
+  assert.equal(cap.features.windows, true);
+  await assert.rejects(captureScreenshot({ app }), (err) => {
+    assert.equal(err.name, 'NotSupportedError');
+    assert.match(err.message, /XQuartz/);
+    assert.match(err.message, /Cocoa backend/);
+    return true;
+  });
+  const sources = await displaySources({ app });
+  assert.ok(!sources.some((s) => s.kind === 'screen'), 'no screen is offered');
+  // a window still is
+  const shot = await captureScreenshot({
+    app,
+    source: `window:${windowNode.window.id}`,
+  });
+  assert.equal(shot.width, 60);
 });

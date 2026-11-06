@@ -534,6 +534,7 @@ export function fakeMediaDevices(app, options = {}) {
             screenCapture: Object.freeze({
               picker: true,
               enumerate: true,
+              screens: true,
               windows: true,
               cursor: false,
               systemAudio: false,

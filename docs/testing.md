@@ -487,6 +487,14 @@ A batch records as the fills it stands for: `ctx.fillRects([[x, y, w, h], …])`
 leaves one `fillRect` operation per rectangle, so an assertion on what a
 drawing painted holds whether or not it batched.
 
+## Cameras, microphones and the screen
+
+`fakeMediaDevices(app)` gives an app a camera drawing colour bars, a
+microphone playing a tone, a speaker, a screen, and — where it has none — a
+permission service, so `useUserMedia`, `<video srcObject>` and
+`usePermission('camera')` run against devices that are not there.
+[media.md](media.md#testing) has what a test reads and makes them do.
+
 ## Testing Library itself
 
 It does not work here and no shim will fix it: its queries are built on a

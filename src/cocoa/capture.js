@@ -154,6 +154,7 @@ export class CocoaMediaCapture {
       this.features.screenCapture = Object.freeze({
         picker: false,
         enumerate: has('screenCaptureDisplays'),
+        screens: true,
         windows: false,
         cursor: true,
         systemAudio: false,

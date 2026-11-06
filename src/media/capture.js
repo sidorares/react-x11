@@ -424,6 +424,17 @@ const NONE = null;
  * rung is the app's own and knows what it can do without asking anyone.
  */
 export function captureCapability(app, name) {
+  return capabilityOf(app, name);
+}
+
+/** The same, once every rung that has something left to ask — the X11
+ *  rung, whether the server is XQuartz — has asked it. */
+export async function settledCaptureCapability(app, name) {
+  await Promise.all(captureRungs(app).map((r) => r.ready?.()));
+  return capabilityOf(app, name);
+}
+
+function capabilityOf(app, name) {
   for (const rung of captureRungs(app)) {
     const features = rung.features?.[name];
     if (features) return { backend: rung.backend ?? 'unknown', features };

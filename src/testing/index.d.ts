@@ -682,3 +682,84 @@ export function fakeMediaPlayers(app: NtkApp): {
   /** The newest, or null. */
   readonly last: FakeMediaPlayer | null;
 };
+
+/** A source `fakeMediaDevices` opened: what a test reads of it, and what it
+ * makes it do. */
+export interface FakeMediaSource {
+  readonly kind: 'video' | 'audio';
+  readonly label: string;
+  /** Whether a reader asked for frames; none are made otherwise. */
+  readonly wanted: boolean;
+  readonly stopped: boolean;
+  readonly ended: boolean;
+  /** Frames (or 10 ms chunks) delivered so far. */
+  readonly count: number;
+  /** One frame now, wanted or not. */
+  tick(): void;
+  /** Muted by the system, or given back with `false`. */
+  mute(muted?: boolean): void;
+  /** Gone: every track of it ends. */
+  end(): void;
+}
+
+/** An audio output `fakeMediaDevices` opened: what was pushed, and a clock
+ * the test moves. */
+export interface FakeAudioOutput {
+  readonly sampleRate: number;
+  readonly channels: number;
+  readonly closed: boolean;
+  /** Every push, copied: an array a channel. */
+  readonly pushed: readonly Float32Array[][];
+  /** The device plays `seconds` of what is queued. */
+  advance(seconds: number): void;
+  /** Every sample pushed to `channel`, in order. */
+  samples(channel?: number): Float32Array;
+}
+
+/** What `fakeMediaDevices` gives a test. */
+export interface FakeMediaDevices {
+  readonly sources: readonly FakeMediaSource[];
+  readonly outputs: readonly FakeAudioOutput[];
+  readonly screenshots: ReadonlyArray<{
+    source: string | null;
+    region: unknown;
+  }>;
+  /** Every permission request, by kind. */
+  readonly requests: readonly string[];
+  /** The newest source of a kind, or null. */
+  last(kind?: 'video' | 'audio'): FakeMediaSource | null;
+  /** The sources of `deviceId` still running. */
+  live(deviceId?: string): FakeMediaSource[];
+  /** What the next open rejects with — `{ name: 'NotReadableError' }`. */
+  failNextOpen: (Error & { name: string }) | null;
+  /** What the picker answers: a source id, or null for nothing chosen. */
+  pickerAnswer: string | null;
+  plug(device: {
+    deviceId: string;
+    kind: 'videoinput' | 'audioinput' | 'audiooutput';
+    label?: string;
+  }): void;
+  unplug(deviceId: string): void;
+  setPermission(
+    kind: 'camera' | 'microphone' | 'screen-recording',
+    status: 'granted' | 'denied' | 'restricted' | 'prompt',
+  ): void;
+}
+
+/**
+ * Give `app` cameras, microphones, a speaker and a screen that are not
+ * there — a camera drawing colour bars, a microphone playing a 440 Hz tone
+ * — and, where it has none, a permission service answering from a table.
+ * Call it before the first render that asks for them.
+ */
+export function fakeMediaDevices(
+  app: NtkApp,
+  options?: {
+    cameras?: number;
+    microphones?: number;
+    speaker?: boolean;
+    screen?: boolean;
+    permission?: 'granted' | 'denied' | 'restricted' | 'prompt';
+    promptAnswer?: 'granted' | 'denied' | 'prompt';
+  },
+): FakeMediaDevices;

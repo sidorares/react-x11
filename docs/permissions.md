@@ -33,6 +33,11 @@ and one that only points:
 | 1   | **the platform's authorization** | The [cocoa backend](macos.md): macOS's privacy (TCC) status per kind, and the system's own prompt where a framework offers one — `AVCaptureDevice` for the camera and microphone, `CoreLocation`, and the rest. |
 | 2   | **the Settings pane**            | `open x-apple.systempreferences:…` — any Mac, bridge or not. It cannot read a status or raise a prompt; it puts the user in front of the switch, which is all `openPrivacySettings` promises.                   |
 
+`getUserMedia`, `getDisplayMedia` and `captureScreenshot` ask this ladder
+just before a device opens ([media](media.md#errors)), so an app that only
+wants the camera needs no permission code of its own: a decided "no" is a
+`NotAllowedError`, and an undecided one is the system's prompt.
+
 **On Linux nothing answers yet** (the per-device portals,
 `org.freedesktop.portal.Camera`, `.Location`, …, are not wired up). A status
 query says `'unknown'` and a request rejects with a **typed**

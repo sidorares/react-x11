@@ -16,6 +16,7 @@ import type {
 } from './nodes.js';
 import type { AnchorOptions, ScreenAnchorRect } from './components.js';
 import type { VideoFrames, VideoMetadataEvent } from './video.js';
+import type { MediaStream } from './media.js';
 import type {
   ChangeEvent,
   SelectionChangeEvent,
@@ -948,10 +949,18 @@ export interface VideoProps extends DrawnProps<VideoNode> {
   /**
    * A path or URL the platform plays itself. Where there is no player the
    * element reports one `NoMediaPlaybackError` through `onError`, on a
-   * microtask, and shows its poster. Exclusive with `frames`: passing both
-   * throws.
+   * microtask, and shows its poster. Exclusive with `frames` and
+   * `srcObject`: passing two throws.
    */
   src?: string;
+  /**
+   * A `MediaStream` — `useUserMedia().stream`, `getDisplayMedia()`: its
+   * first live video track, followed as the stream changes. A camera on
+   * macOS is shown on a layer of its own, its frames never crossing into
+   * JavaScript; any other track's frames are read off it. A disabled or
+   * muted track shows nothing — the poster, or the background.
+   */
+  srcObject?: MediaStream | null;
   /** Shown until there is a frame, and whenever there is none — an
    * `<image src>` value. */
   poster?: ImageSource;
@@ -992,6 +1001,16 @@ export interface AudioProps {
    * microtask, and nothing is heard. A new `src` is a new player.
    */
   src?: string;
+  /**
+   * A `MediaStream`: its first live audio track, played through an
+   * `AudioFrames` sink at the rate it arrives in. `muted`, `volume` and
+   * `paused` say what is heard of it. Where nothing can play audio,
+   * `onError` is told once, with a `NoAudioOutputError`.
+   */
+  srcObject?: MediaStream | null;
+  /** The `audiooutput` device a `srcObject` plays on; the default output
+   * when left out. */
+  sinkId?: string;
   /** HTML's names and defaults: nothing plays until asked. */
   autoPlay?: boolean;
   loop?: boolean;

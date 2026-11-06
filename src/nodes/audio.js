@@ -262,6 +262,11 @@ export class AudioElementNode extends Node {
       newProps.src === before.src &&
       newProps.srcObject === before.srcObject
     ) {
+      // another output: the next chunk makes a sink there
+      if (newProps.sinkId !== before.sinkId && this._sink) {
+        this._sink.close();
+        this._sink = null;
+      }
       // the same player, told what changed of how it plays
       const settings = this._player && changedSettings(newProps, before);
       if (settings) this._player.set(settings);

@@ -56,7 +56,10 @@ import {
   NOTIFICATIONS_PATH,
 } from './notifications.js';
 import { WATCHER_NAME } from './statusnotifier.js';
-import { captureCapability } from './media/capture.js';
+import {
+  captureCapability,
+  settledCaptureCapability,
+} from './media/capture.js';
 import { liveApps } from './trace-registry.js';
 
 /** Every capability this module can answer for. */
@@ -414,7 +417,8 @@ async function probeLauncher({ app } = {}) {
  *   - `audioOutput`: `deviceSelection`, `echoReference` (what is played is
  *     the reference an echo-cancelled microphone subtracts);
  *   - `screenCapture`: `picker` (the system's), `enumerate`
- *     (`displaySources()` lists sources), `windows`, `cursor`,
+ *     (`displaySources()` lists sources), `screens` (false on XQuartz,
+ *     whose root holds nothing), `windows`, `cursor`,
  *     `systemAudio`, `excludeWindows` (`<window excludeFromCapture>`),
  *     `screenshot`, `thumbnails`.
  */
@@ -423,10 +427,15 @@ function captureNow(name, target) {
   return found ? frozen(found.backend, { ...found.features }) : NONE;
 }
 
+// The probe waits for what a rung still has to ask — the X11 rung, whether
+// the server is XQuartz, whose root holds no screen — so the hook's answer a
+// tick after its first frame is the settled one.
 const captureProbe =
   (name) =>
-  async ({ app } = {}) =>
-    captureNow(name, app ?? soleApp());
+  async ({ app } = {}) => {
+    const found = await settledCaptureCapability(app ?? soleApp(), name);
+    return found ? frozen(found.backend, { ...found.features }) : NONE;
+  };
 
 // ---------------------------------------------------------------------------
 
