@@ -82,6 +82,28 @@ export {
 } from './videoframes.js';
 export { useVideoFrames } from './videohooks.js';
 export { NoMediaPlaybackError } from './mediaplayback.js';
+// Media capture: devices, tracks, the screen, and audio out
+// (design/architecture/media-capture.md, docs/media.md).
+export {
+  captureScreenshot,
+  displaySources,
+  enumerateDevices,
+  getDisplayMedia,
+  getUserMedia,
+  watchDevices,
+} from './media/capture.js';
+export { MediaStream, MediaStreamTrack } from './media/stream.js';
+export { OverconstrainedError } from './media/errors.js';
+export {
+  AudioFrames,
+  createAudioFrames,
+  NoAudioOutputError,
+} from './media/audioframes.js';
+export {
+  useDisplayMedia,
+  useMediaDevices,
+  useUserMedia,
+} from './media/hooks.js';
 export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';
 export { announce } from './a11y.js';
 // the standard Undo/Cut/Copy/Paste menu, for an element that edits or

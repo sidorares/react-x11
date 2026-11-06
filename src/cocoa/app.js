@@ -43,6 +43,7 @@ import { lastInputReader } from './idle.js';
 import { releaseImageUpload } from '../backend/context2d.js';
 import { PanePlayer, canShowPanePlayers } from './paneplayer.js';
 import { CocoaPlayer, canPlay } from './player.js';
+import { canCapture, CocoaMediaCapture } from './capture.js';
 import { CocoaSurface } from './surface.js';
 import { CocoaSymbols } from './symbols.js';
 import { CocoaWindow, FRAME_SLACK_MS } from './window.js';
@@ -269,6 +270,14 @@ export class CocoaApp {
     this._players = new Map();
     if (canPlay(native) && !pane) {
       this.createPlayer = (src, options) => new CocoaPlayer(this, src, options);
+    }
+    // Cameras, microphones, the audio out and screenshots
+    // (src/cocoa/capture.js), where the bridge has the capture verbs: the
+    // rung src/media/capture.js asks first, and its presence is what
+    // `useDesktopCapability('camera')` and the rest answer. Not in a
+    // `<Frame>` pane, which pumps no bridge events, for the reason above.
+    if (canCapture(native) && !pane) {
+      this.mediaCapture = new CocoaMediaCapture(this);
     }
 
     // 'surface' (the measured default) or 'layers' — the retained CALayer
@@ -1473,6 +1482,19 @@ export class CocoaApp {
       case 'player-ended':
       case 'player-error':
         return this._players.get(ev.id)?._event(ev);
+      case 'capture-devices':
+      case 'camera-started':
+      case 'camera-error':
+      case 'camera-frame':
+      case 'camera-muted':
+      case 'camera-ended':
+      case 'microphone-started':
+      case 'microphone-error':
+      case 'microphone-muted':
+      case 'microphone-ended':
+      case 'audio-input':
+      case 'audio-output-low':
+        return this.mediaCapture?._route(ev);
       default:
         return undefined;
     }

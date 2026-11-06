@@ -67,7 +67,8 @@ function same(a, b) {
  * that order is deliberate. It re-probes whenever a name appears or vanishes
  * on the session bus, so a panel that starts after the app does is picked up.
  *
- * Capability names: `'notifications'`, `'tray'`, `'launcher'`.
+ * Capability names: `'notifications'`, `'tray'`, `'launcher'`, `'camera'`,
+ * `'audioInput'`, `'audioOutput'`, `'screenCapture'`.
  */
 export function useDesktopCapability(name) {
   // The app this component is rendered into, when there is one: a process

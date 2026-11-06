@@ -563,7 +563,7 @@ test('frames and src together, or frames that are not a sink, throw', async () =
   const sink = createVideoFrames(null, { width: 2, height: 2 });
   await assert.rejects(
     renderX11(pane({ frames: sink, src: 'clip.mp4' })),
-    /takes frames or src, not both/,
+    /takes one of frames, src and srcObject, and was given frames and src/,
   );
   await assert.rejects(
     renderX11(pane({ frames: { push() {} } })),

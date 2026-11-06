@@ -171,6 +171,8 @@ export class PlayerLift {
     this.layer = layer;
     this._bounds = null;
     native.addSublayer(layer, player.layer);
+    // a camera's one layer can be in one part at a time (src/cocoa/capture.js)
+    player._lifted?.(true);
   }
 
   /** The part's layer is `bounds` (points) now: the picture fills it. */
@@ -185,5 +187,6 @@ export class PlayerLift {
 
   release() {
     this.native.removeFromSuperlayer(this.player.layer);
+    this.player._lifted?.(false);
   }
 }

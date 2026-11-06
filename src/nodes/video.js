@@ -31,6 +31,15 @@
 // as it plays. Where there is no player the element says so once, through
 // `onError`, and shows its poster — never a black box that looks like a
 // video that has not started (#531's rule for `<foreign>`).
+//
+// `srcObject` is a `MediaStream` (design/architecture/media-capture.md
+// §2.1): its first live video track, followed as the stream changes. A
+// track whose source has a presentation of its own — a camera on macOS,
+// whose frames go from IOSurface to layer without crossing into JavaScript
+// — is shown the way a player is; any other is read off the track
+// (`onFrame`) into a sink of the node's own, remade when the frames change
+// size or format, and shown the way `frames` is. A disabled or muted track
+// shows nothing: the poster, or the background.
 
 import { loadImageFile } from '../imagedecode.js';
 import {
@@ -46,9 +55,14 @@ import {
   NoMediaPlaybackError,
   playerOptions,
 } from '../mediaplayback.js';
+import { MediaStream, firstLiveTrack } from '../media/stream.js';
 import { Surface } from '../offscreen.js';
 import { videoBackendOf } from '../videobackend.js';
-import { frameToRGBA, isVideoFrames } from '../videoframes.js';
+import {
+  createVideoFrames,
+  frameToRGBA,
+  isVideoFrames,
+} from '../videoframes.js';
 import { fitRect, objectFitOf } from './fit.js';
 import { intrinsicSize } from './layout.js';
 import { Node } from './node.js';
@@ -70,10 +84,21 @@ const warnedNoPlayback = new WeakSet();
 
 /** Throws for a combination no `<video>` can be. */
 export function validateVideoProps(props) {
-  if (props.frames != null && props.src != null) {
+  const sources = ['frames', 'src', 'srcObject'].filter(
+    (k) => props[k] != null,
+  );
+  if (sources.length > 1) {
     throw new Error(
-      'react-x11: <video> takes frames or src, not both — frames are ' +
-        'decoded by the application, src by the platform',
+      `react-x11: <video> takes one of frames, src and srcObject, and was ` +
+        `given ${sources.join(' and ')} — frames are decoded by the ` +
+        'application, src by the platform, srcObject is a MediaStream',
+    );
+  }
+  if (props.srcObject != null && !(props.srcObject instanceof MediaStream)) {
+    throw new Error(
+      'react-x11: <video srcObject> must be a MediaStream — from ' +
+        'useUserMedia(), getUserMedia(), getDisplayMedia() or new ' +
+        'MediaStream(tracks)',
     );
   }
   if (props.frames != null && !isVideoFrames(props.frames)) {
@@ -111,6 +136,14 @@ export class VideoNode extends Node {
     this._playerOff = null;
     this._playerFrame = false;
     this._pull = null;
+    /** `srcObject`: the stream, the track shown from it, and — where the
+     *  track has no presentation of its own — the sink its frames go into */
+    this._stream = null;
+    this._streamOff = null;
+    this._track = null;
+    this._trackShared = null;
+    this._trackOff = null;
+    this._ownSink = null;
     // Like `<image>`, nothing is resolved in the constructor: it runs in the
     // render phase, which React may discard, and a subscription made there
     // would never be undone.
@@ -127,7 +160,7 @@ export class VideoNode extends Node {
   }
 
   _attach() {
-    const { frames, src, poster } = this.props;
+    const { frames, src, srcObject, poster } = this.props;
     if (frames != null) {
       this._sink = frames;
       this._unsubscribe = frames._subscribe((frame) => this._onFrame(frame));
@@ -135,11 +168,19 @@ export class VideoNode extends Node {
     } else if (src != null) {
       if (canPlayMedia(this.app)) this._play(src);
       else this._refuse();
+    } else if (srcObject != null) {
+      this._stream = srcObject;
+      this._streamOff = srcObject.onChange(() => this._retrack());
+      this._retrack();
     }
     if (poster != null) this._loadPoster(poster);
   }
 
   _detach() {
+    this._dropTrack();
+    this._streamOff?.();
+    this._streamOff = null;
+    this._stream = null;
     this._unsubscribe?.();
     this._unsubscribe = null;
     this._sink = null;
@@ -156,6 +197,105 @@ export class VideoNode extends Node {
     }
     this._poster = null;
     this._refused = false;
+  }
+
+  // --- srcObject ----------------------------------------------------------------
+
+  /** The track to show: the stream's first live video track, while it is
+   *  enabled and not muted. Asked again whenever the stream changes. */
+  _retrack() {
+    if (this.destroyed || !this._stream) return;
+    const track = firstLiveTrack(this._stream, 'video');
+    const shown = track?.enabled && !track.muted ? track : null;
+    // the same track over the same source: nothing to do. A track that
+    // moved to another source (`applyConstraints`) is shown again, since a
+    // presentation is its source's
+    if (shown === this._track && shown?._shared === this._trackShared) return;
+    const was = this._natural();
+    this._dropTrack();
+    this._track = shown;
+    this._trackShared = shown?._shared ?? null;
+    if (shown) {
+      const presentation = shown._present();
+      if (presentation) {
+        // the source shows itself: a player in all but name
+        this._player = presentation;
+        this._playerOff = presentation._subscribe((ev) => this._onPlayer(ev));
+      } else {
+        this._trackOff = shown.onFrame((frame) => this._trackFrame(frame));
+      }
+    }
+    this.spritesChanged();
+    const now = this._natural();
+    if (was.width !== now.width || was.height !== now.height) {
+      this.invalidateMeasure('content');
+    } else {
+      this.root?.invalidate(false, this, 'content');
+    }
+  }
+
+  /** What showing a track holds, let go. */
+  _dropTrack() {
+    this._trackOff?.();
+    this._trackOff = null;
+    if (this._ownSink) {
+      if (this._sink === this._ownSink) {
+        this._unsubscribe?.();
+        this._unsubscribe = null;
+        this._sink = null;
+      }
+      this._ownSink.close();
+      this._ownSink = null;
+    }
+    if (this._track && this._player) {
+      this._playerOff?.();
+      this._playerOff = null;
+      this._player.release();
+      this._player = null;
+      this._playerFrame = false;
+      this._stopPull();
+    }
+    this._track = null;
+    this._trackShared = null;
+  }
+
+  /** A frame off the track, into the node's own sink — a new sink when the
+   *  frames change size, format or colour, which is a new stream as far as
+   *  the drawing is concerned. */
+  _trackFrame(frame) {
+    if (this.destroyed) return;
+    let sink = this._ownSink;
+    const colorSpace = frame.colorSpace ?? 'bt709';
+    const range = frame.range ?? 'video';
+    if (
+      !sink ||
+      sink.width !== frame.width ||
+      sink.height !== frame.height ||
+      sink.format !== frame.format ||
+      sink.colorSpace !== colorSpace ||
+      sink.range !== range
+    ) {
+      const was = this._natural();
+      this._unsubscribe?.();
+      sink?.close();
+      sink = createVideoFrames(this.app, {
+        width: frame.width,
+        height: frame.height,
+        format: frame.format,
+        colorSpace,
+        range,
+      });
+      this._ownSink = sink;
+      this._sink = sink;
+      this._unsubscribe = sink._subscribe((f) => this._onFrame(f));
+      this._metadata();
+      this.spritesChanged();
+      const now = this._natural();
+      if (was.width !== now.width || was.height !== now.height) {
+        this.invalidateMeasure('content');
+      }
+    }
+    sink.push(frame.planes, { strides: frame.strides, time: frame.time });
   }
 
   /**
@@ -397,6 +537,7 @@ export class VideoNode extends Node {
     const changed =
       newProps.frames !== before.frames ||
       newProps.src !== before.src ||
+      newProps.srcObject !== before.srcObject ||
       newProps.poster !== before.poster;
     if (changed) validateVideoProps(newProps);
     super.applyProps(newProps, oldProps);
@@ -500,6 +641,8 @@ export class VideoNode extends Node {
   }
 
   get paused() {
+    // a stream plays while there is a track to show, as HTML's does
+    if (this._stream) return this._track === null;
     return this._player ? !this._player.playing : true;
   }
 
