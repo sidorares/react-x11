@@ -1,0 +1,4 @@
+- A list of notes with realistic titles, one selected.
+- An editor showing the selected note's markdown source.
+- A rendered preview beside the editor with real formatting (headings, lists, emphasis).
+- A way to create a note is visible.

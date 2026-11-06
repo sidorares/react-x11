@@ -1,0 +1,4 @@
+- Snippets grouped by language in a sidebar or list, one selected.
+- An editor with syntax highlighting for the selected snippet.
+- A copy action is visible.
+- Snippets contain plausible code, not placeholders.

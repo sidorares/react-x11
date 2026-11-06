@@ -1,0 +1,1 @@
+Build a stock watchlist: the stocks I follow with their price and daily change, a price chart for the selected one, and simulated prices that move.

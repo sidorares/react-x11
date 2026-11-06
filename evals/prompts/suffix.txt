@@ -1,0 +1,1 @@
+This folder is a new react-x11 app. Build it here. Work unattended: nobody will answer questions, so make sensible decisions and keep going. Use realistic sample data. Aim to finish within about 12 minutes, and leave it so that `npm start` runs the app.

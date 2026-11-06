@@ -1,0 +1,5 @@
+{
+  "expect": "bad",
+  "flaw": "buttons stretched across their column",
+  "catches": ["noWideButtons"]
+}

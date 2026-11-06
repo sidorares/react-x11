@@ -1,0 +1,4 @@
+- A sidebar or list of categories, one selected.
+- A list of recipes in that category with realistic names (no "Recipe 1").
+- The selected recipe shows ingredients, numbered or ordered steps, and a cooking time.
+- The detail fills the content area, aligned to the leading edge.

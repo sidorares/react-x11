@@ -1,0 +1,22 @@
+{
+  "description": "Exactly the AGENTS.md, CLAUDE.md and DESIGN.md that `react-x11 create` writes.",
+  "files": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "DESIGN.md"
+  ],
+  "source": {
+    "kind": "react-x11 create",
+    "version": "2.52.0",
+    "git": {
+      "sha": "36f28555f9ccb6b8a68a1541fb4d26fe74830dfd",
+      "branch": "feat/evals",
+      "dirty": false
+    },
+    "sha256": {
+      "AGENTS.md": "f81b659bacaa12cb591d663700c04a94aafa407949e257edc1df8552e6569837",
+      "CLAUDE.md": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
+      "DESIGN.md": "5dedd25dc75b16815dc0556286058b30c9e3ceddd15b7e1c3a6eb22422248894"
+    }
+  }
+}

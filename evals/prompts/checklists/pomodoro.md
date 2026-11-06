@@ -1,0 +1,5 @@
+- The timer shows minutes and seconds large enough to read across the room, in tabular figures.
+- Start/pause and reset controls are visible; the phase (focus or break) is labelled.
+- A list of today's tasks with realistic names, one of them selected as the current task.
+- Each task shows how many sessions it has had.
+- A way to add a task is visible (a field or an Add button).

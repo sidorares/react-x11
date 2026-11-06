@@ -1,0 +1,1 @@
+Build a tip calculator that splits a bill: the bill amount, a tip percentage, the number of people, and what each person pays.

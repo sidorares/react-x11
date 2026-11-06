@@ -1,0 +1,4 @@
+- Several habits with realistic names.
+- Each habit shows a week of check-offs (seven marks) and its current streak.
+- The checked and unchecked days are distinguishable without relying on colour alone.
+- A way to add a habit is visible.
