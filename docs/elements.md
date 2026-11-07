@@ -197,6 +197,7 @@ backend; the flex, paint and event root for its subtree.
 | `onCloseRequest(ev)`        | WM close button; replaces the default answer                                                                  |
 | `states`                    | EWMH `_NET_WM_STATE`, controlled                                                                              |
 | `fullscreen`, `alwaysOnTop` | boolean sugar for two of those states                                                                         |
+| `excludeFromCapture`        | kept out of screenshots and recordings; macOS only ([media](media.md#the-screen))                             |
 | `decorations`               | `false` asks the WM for no titlebar or border                                                                 |
 | `transparent`               | 32-bit ARGB visual: rounded, translucent windows                                                              |
 | `transientFor`              | ICCCM `WM_TRANSIENT_FOR`: the window this one belongs to                                                      |

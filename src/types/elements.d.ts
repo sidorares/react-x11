@@ -444,6 +444,14 @@ export interface WindowProps
   /** Sugar for `states={['above']}`; they union. */
   alwaysOnTop?: boolean;
   /**
+   * Keep the window out of every screenshot and screen recording, this
+   * app's own included — a recording indicator, a password overlay. macOS
+   * only (`NSWindow.sharingType`); X11 has no such thing, and
+   * `useDesktopCapability('screenCapture').features.excludeWindows` says
+   * where it holds.
+   */
+  excludeFromCapture?: boolean;
+  /**
    * `false` asks for no titlebar or border, via `_MOTIF_WM_HINTS`. Honoured
    * by Mutter, KWin, Xfwm, Openbox and i3; a WM that ignores the hint
    * simply decorates the window.

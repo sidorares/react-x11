@@ -375,6 +375,10 @@ export class WindowHints {
     if (next.decorations !== prev.decorations) {
       applyDecorations(wnd, next.decorations !== false);
     }
+    // creation carries it as an attribute; this is a change of mind later
+    if (Boolean(next.excludeFromCapture) !== Boolean(prev.excludeFromCapture)) {
+      wnd.setExcludedFromCapture?.(Boolean(next.excludeFromCapture));
+    }
     if (next.transientFor !== prev.transientFor) {
       this._pendingTransientFor = undefined;
       this._applyTransientFor(next.transientFor);

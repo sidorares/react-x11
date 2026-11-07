@@ -165,28 +165,47 @@ export class CocoaMediaCapture {
     }
   }
 
+  /** The bridge lists on a queue of its own and answers through a
+   *  callback, since its first listing loads AVFoundation's camera plug-ins
+   *  (100 ms to over a second); a bridge that answers at once is taken at
+   *  its word. */
   _devices() {
-    return this._native.captureDevices().map((d) => {
-      const kind = KIND[d.kind];
-      const out = {
-        deviceId: String(d.id),
-        groupId: d.groupId ? String(d.groupId) : '',
-        kind,
-        label: d.name ?? '',
-        isDefault: Boolean(d.isDefault),
-        capabilities: {},
-        defaults: {},
-      };
-      if (kind === 'videoinput') {
-        const { caps, defaults } = cameraShape(d);
-        out.capabilities = caps;
-        out.defaults = defaults;
-      } else if (kind === 'audioinput') {
-        out.capabilities = MICROPHONE_CAPABILITIES;
-        out.defaults = MICROPHONE_DEFAULTS;
-      }
-      return out;
-    });
+    return new Promise((resolve) => {
+      const now = this._native.captureDevices((list) => resolve(list));
+      if (Array.isArray(now)) resolve(now);
+    }).then((list) => (list ?? []).map((d) => this._device(d)));
+  }
+
+  /** A device as the bridge lists it, in the capture seam's shape. */
+  _device(d) {
+    const kind = KIND[d.kind];
+    const out = {
+      deviceId: String(d.id),
+      groupId: d.groupId ? String(d.groupId) : '',
+      kind,
+      label: d.name ?? '',
+      isDefault: Boolean(d.isDefault),
+      capabilities: {},
+      defaults: {},
+    };
+    if (kind === 'videoinput') {
+      const { caps, defaults } = cameraShape(d);
+      out.capabilities = caps;
+      out.defaults = defaults;
+    } else if (kind === 'audioinput') {
+      out.capabilities = MICROPHONE_CAPABILITIES;
+      out.defaults = MICROPHONE_DEFAULTS;
+    }
+    return out;
+  }
+
+  /** The displays, in points as the bridge has them: through a callback,
+   *  which is the one form a worker may use. */
+  _displays() {
+    return new Promise((resolve) => {
+      const now = this._native.screenCaptureDisplays((list) => resolve(list));
+      if (Array.isArray(now)) resolve(now);
+    }).then((list) => list ?? []);
   }
 
   _open(deviceId, settings, device) {
@@ -226,33 +245,67 @@ export class CocoaMediaCapture {
     });
   }
 
+  /** The displays as sources, in pixels — a display's own, which is what a
+   *  screenshot of it comes back in — where the bridge has them in points. */
   async _displaySources({ types }) {
     if (!types.includes('screen')) return [];
-    return this._native.screenCaptureDisplays().map((d, i) => ({
-      id: `display:${d.id}`,
-      kind: 'screen',
-      name: d.name ?? `Display ${i + 1}`,
-      primary: i === 0,
-      x: d.x,
-      y: d.y,
-      width: d.width,
-      height: d.height,
-    }));
+    return (await this._displays()).map((d, i) => {
+      const s = d.scale ?? 1;
+      return {
+        id: `display:${d.id}`,
+        kind: 'screen',
+        name: d.name || `Display ${i + 1}`,
+        primary: i === 0,
+        x: Math.round(d.x * s),
+        y: Math.round(d.y * s),
+        width: Math.round(d.width * s),
+        height: Math.round(d.height * s),
+      };
+    });
   }
 
-  _screenshot({ source, region, cursor }) {
+  /** One picture. `region` is in the source's pixels and the bridge's
+   *  `rect` in points, so it is divided by the display's scale — the
+   *  window's, for a window. The bridge answers `{ width, height, scale,
+   *  data }`, or `{ error, name }`. */
+  async _screenshot({ source, region, cursor }) {
     const ask = { cursor: Boolean(cursor) };
+    let scale = this.app.scale ?? 1;
     if (source != null) {
       const [kind, value] = String(source).split(':');
       if (kind === 'display') ask.display = Number(value);
       else if (kind === 'window') ask.window = Number(value);
+      else {
+        throw Object.assign(new Error(`there is no source ${source}`), {
+          name: 'NotFoundError',
+        });
+      }
     }
-    if (region) ask.rect = { ...region };
-    return new Promise((resolve, reject) => {
-      this._native.captureScreenshot(ask, (err, shot) =>
-        err ? reject(err) : resolve(shot),
-      );
-    });
+    if (region) {
+      if (ask.window === undefined) {
+        const displays = await this._displays();
+        const d =
+          ask.display === undefined
+            ? displays[0]
+            : displays.find((one) => one.id === ask.display);
+        scale = d?.scale ?? scale;
+      }
+      ask.rect = {
+        x: region.x / scale,
+        y: region.y / scale,
+        width: region.width / scale,
+        height: region.height / scale,
+      };
+    }
+    const answer = await new Promise((resolve) =>
+      this._native.captureScreenshot(ask, resolve),
+    );
+    if (!answer || answer.error) {
+      throw Object.assign(new Error(answer?.error ?? 'no picture came back'), {
+        name: answer?.name ?? 'NotReadableError',
+      });
+    }
+    return answer;
   }
 
   /** A capture event from the bridge (`CocoaApp._route`). */
@@ -307,6 +360,8 @@ class CocoaSource {
     switch (ev.type) {
       case 'camera-started':
       case 'microphone-started':
+        // what the engine did, where it says: voice processing engaged or not
+        this._started?.(ev);
         this._opening?.resolve();
         this._opening = null;
         return;
@@ -443,6 +498,19 @@ class CocoaMicrophoneSource extends CocoaSource {
       autoGainControl: Boolean(made.autoGainControl),
     };
     if (typeof made.latency === 'number') this._settings.latency = made.latency;
+  }
+
+  /** `microphone-started` says what the engine did: the switches as they
+   *  came out, and the latency it has. */
+  _started(ev) {
+    for (const key of [
+      'echoCancellation',
+      'noiseSuppression',
+      'autoGainControl',
+    ]) {
+      if (typeof ev[key] === 'boolean') this._settings[key] = ev[key];
+    }
+    if (typeof ev.latency === 'number') this._settings.latency = ev.latency;
   }
 
   settings() {

@@ -65,8 +65,11 @@ this API, and it is what lets existing WebRTC SDKs run unmodified.
 | `getDisplayMedia`          | not yet                                    | the root, read per frame  | —                |
 | `displaySources`           | displays                                   | monitors and WM's windows | —                |
 
-**macOS** needs a `@windowkit/appkit` with the capture verbs. With an older
-bridge every row answers unavailable, never a crash.
+**macOS** needs a `@windowkit/appkit` with the capture verbs (its
+`capture.mm`). With an older bridge every row answers unavailable, never a
+crash. The first device listing in a process loads AVFoundation's camera
+plug-ins, 100 ms to over a second; it runs off the UI thread, which is one
+more reason `useMediaDevices` starts empty and unsettled.
 
 **X11** has the screen and nothing else. A camera or microphone on Linux needs
 PipeWire's file descriptors or v4l2's `ioctl`, and Node's sockets cannot reach
@@ -329,9 +332,17 @@ There, `features.screens` is false, a screen source rejects with a
 windows. Windows capture as they do anywhere else. The Mac's screen is the
 Cocoa backend's to capture.
 
-On **macOS**, a screenshot needs the Screen Recording permission. A
+On **macOS**, a screenshot needs the Screen Recording permission. A source
+is a display (`display:<id>`, listed by `displaySources()` in pixels) or a
+window by its number (`window:<number>`, the title bar included). A
 `getDisplayMedia` stream there comes with ScreenCaptureKit's stream verbs,
 in a later release.
+
+**`<window excludeFromCapture>`** keeps a window out of every screenshot and
+recording, this app's own included: a recording indicator, a password
+overlay. It is set before the window is first shown. On macOS 15 an excluded
+window captures as fully clear pixels. Only macOS has this
+(`features.excludeWindows`); X11 has nothing like it.
 
 ## Testing
 

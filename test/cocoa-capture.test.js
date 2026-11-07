@@ -16,8 +16,10 @@ import {
   enumerateDevices,
   getUserMedia,
 } from '../src/index.js';
+import { createRoot } from '../src/index.js';
 import {
   cleanupCocoa,
+  fakeCocoaApp,
   fakeCocoaBridge,
   mountCocoa,
   tick,
@@ -29,38 +31,59 @@ afterEach(async () => {
   await cleanupCocoa();
 });
 
-/** The fake bridge with the capture verbs, recording as the rest do. */
+/** The fake bridge with the capture verbs, recording as the rest do, in
+ *  the shapes @windowkit/appkit's capture.mm answers in. */
 function captureBridge() {
   const native = fakeCocoaBridge();
   let seq = 5000;
   const cameras = new Map();
+  const listed = [
+    {
+      id: 'cam-builtin',
+      kind: 'camera',
+      name: 'FaceTime HD Camera',
+      isDefault: true,
+      position: 'front',
+      formats: [
+        { width: 640, height: 480, minFrameRate: 1, maxFrameRate: 30 },
+        { width: 1280, height: 720, minFrameRate: 1, maxFrameRate: 30 },
+        { width: 1920, height: 1080, minFrameRate: 1, maxFrameRate: 30 },
+      ],
+    },
+    {
+      id: 'mic-builtin',
+      kind: 'microphone',
+      name: 'MacBook Pro Microphone',
+      isDefault: true,
+    },
+    {
+      id: 'spk-builtin',
+      kind: 'speaker',
+      name: 'MacBook Pro Speakers',
+      isDefault: true,
+    },
+  ];
+  const displays = [
+    {
+      id: 1,
+      name: 'Built-in Retina Display',
+      x: 0,
+      y: 0,
+      width: 1512,
+      height: 982,
+      scale: 2,
+    },
+  ];
+  // listed through a callback, a tick later, where one is given — as the
+  // bridge does, its first listing loading AVFoundation's plug-ins
+  const later = (list, cb) => {
+    if (typeof cb !== 'function') return list;
+    setImmediate(() => cb(list));
+    return undefined;
+  };
   Object.assign(native, {
-    captureDevices: () => [
-      {
-        id: 'cam-builtin',
-        kind: 'camera',
-        name: 'FaceTime HD Camera',
-        isDefault: true,
-        position: 'front',
-        formats: [
-          { width: 640, height: 480, minFrameRate: 1, maxFrameRate: 30 },
-          { width: 1280, height: 720, minFrameRate: 1, maxFrameRate: 30 },
-          { width: 1920, height: 1080, minFrameRate: 1, maxFrameRate: 30 },
-        ],
-      },
-      {
-        id: 'mic-builtin',
-        kind: 'microphone',
-        name: 'MacBook Pro Microphone',
-        isDefault: true,
-      },
-      {
-        id: 'spk-builtin',
-        kind: 'speaker',
-        name: 'MacBook Pro Speakers',
-        isDefault: true,
-      },
-    ],
+    captureDevices: (cb) => later(listed, cb),
+    screenCaptureDisplays: (cb) => later(displays, cb),
     openCamera(deviceId, opts) {
       const id = ++seq;
       const layer = { layer: ++seq, props: {}, sublayers: [], parent: null };
@@ -81,44 +104,23 @@ function captureBridge() {
     closeCamera(id) {
       cameras.delete(id);
     },
-    openMicrophone(deviceId, opts) {
-      return {
-        id: ++seq,
-        sampleRate: opts.sampleRate,
-        channels: opts.channels,
-        echoCancellation: opts.echoCancellation,
-        noiseSuppression: true,
-        autoGainControl: true,
-      };
-    },
+    // what was asked; `microphone-started` says what the engine did
+    openMicrophone: (deviceId, opts) => ({ id: ++seq, ...opts }),
     closeMicrophone() {},
-    openAudioOutput: () => ({ id: ++seq, latency: 0.012 }),
+    openAudioOutput: (opts) => ({ id: ++seq, ...opts, latency: 0 }),
     audioOutputWrite: (id, channels) => channels[0].length,
     audioOutputState: () => ({ currentTime: 0.5, queued: 480, latency: 0.012 }),
     closeAudioOutput() {},
-    screenCaptureDisplays: () => [
-      {
-        id: 1,
-        name: 'Built-in Retina Display',
-        x: 0,
-        y: 0,
-        width: 1512,
-        height: 982,
-        scale: 2,
-      },
-    ],
+    // one answer: a picture, or `{ error, name }`
     captureScreenshot(ask, cb) {
       if (ask.display === 99) {
-        cb(
-          Object.assign(new Error('Screen Recording is off'), {
-            name: 'NotAllowedError',
-          }),
-        );
+        cb({ error: 'Screen Recording is off', name: 'NotAllowedError' });
         return;
       }
       const data = new Uint8Array(4 * 4 * 4).fill(200);
-      setImmediate(() => cb(null, { width: 4, height: 4, scale: 2, data }));
+      setImmediate(() => cb({ width: 4, height: 4, scale: 2, data }));
     },
+    setWindowSharing() {},
   });
   native.cameras = cameras;
   return native;
@@ -290,10 +292,19 @@ test('a microphone at the rate asked, an output on the same engine, a screenshot
     autoGainControl: true,
   });
   const micId = [...app.mediaCapture._sources.keys()].at(-1);
-  native.emit({ type: 'microphone-started', id: micId });
+  // voice processing did not engage: the settings say so, as a browser's do
+  native.emit({
+    type: 'microphone-started',
+    id: micId,
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    latency: 0.004,
+  });
   const stream = await pending;
   const [track] = stream.getAudioTracks();
-  assert.equal(track.getSettings().echoCancellation, true);
+  assert.equal(track.getSettings().echoCancellation, false);
+  assert.equal(track.getSettings().latency, 0.004);
   const chunks = [];
   track.onFrame((d) => chunks.push(d));
   native.emit({
@@ -320,6 +331,18 @@ test('a microphone at the rate asked, an output on the same engine, a screenshot
   const shot = await captureScreenshot({ app, source: 'display:1' });
   assert.deepEqual([shot.width, shot.height], [4, 4]);
   assert.equal(native.of('captureScreenshot')[0][0].display, 1);
+  // a region in the display's pixels is the bridge's rect in points
+  await captureScreenshot({
+    app,
+    source: 'display:1',
+    region: { x: 20, y: 10, width: 40, height: 20 },
+  });
+  assert.deepEqual(native.of('captureScreenshot')[1][0].rect, {
+    x: 10,
+    y: 5,
+    width: 20,
+    height: 10,
+  });
   await assert.rejects(captureScreenshot({ app, source: 'display:99' }), {
     name: 'NotAllowedError',
   });
@@ -352,4 +375,33 @@ test('a bridge without the capture verbs answers unavailable', async () => {
   await assert.rejects(getUserMedia({ video: true }, { app }), {
     name: 'NotFoundError',
   });
+});
+
+test('<window excludeFromCapture> keeps the window out of captures, and lets it back', async () => {
+  const native = captureBridge();
+  const { app } = fakeCocoaApp({}, { native });
+  const root = await createRoot({ app });
+  const win = (exclude) =>
+    h('window', { width: 120, height: 80, excludeFromCapture: exclude });
+  root.render(win(true));
+  await tick();
+  const handle = [...app._windows.values()][0]._h;
+  assert.deepEqual(
+    native.of('setWindowSharing'),
+    [[handle, 'none']],
+    'from before it is first shown',
+  );
+  root.render(win(false));
+  await tick();
+  assert.deepEqual(native.of('setWindowSharing').at(-1), [handle, 'readOnly']);
+  root.render(win(false));
+  await tick();
+  assert.equal(
+    native.of('setWindowSharing').length,
+    2,
+    'asked again only when it changes',
+  );
+  const cap = await desktopCapability('screenCapture', { app });
+  assert.equal(cap.features.excludeWindows, true);
+  await root.unmount();
 });

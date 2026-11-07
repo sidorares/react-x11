@@ -4,9 +4,9 @@ _Design record, 2026-11-06, written against master at 220e1c0 (react-x11
 2.56.5) and `@react-x11/components` at 27fcf7e9. It extends [video.md](video.md),
 whose §8.4 ("Camera, later") this is the "later" of, and it takes the
 boundary `@react-x11/components`' `docs/prd-audio.md` already drew through
-sound. §0.1 is what has been built since: step 1 of §6, core's half, with the
-Cocoa rung written against `@windowkit/appkit` verbs that are not released
-yet._
+sound. §0.1 is what has been built since: step 1 of §6, core's half, and
+the `@windowkit/appkit` verbs it runs on, which are on a branch and not
+released yet._
 
 ---
 
@@ -114,11 +114,36 @@ from its rectangle of the root, and refuses screens where the server has
 `GetImage` reads only the target's own raster, so its tests paint the root
 itself.
 
-**Not built in this step:** the bridge verbs themselves (a separate
-`@windowkit/appkit` release, so every Cocoa row is unavailable until it
-ships), `<window excludeFromCapture>`, the global shortcut hook, Linux
-cameras and microphones, `getDisplayMedia` on Cocoa (SCStream), mirroring
-a self-view (there is no `transform` style), and the components half.
+**The bridge** (`@windowkit/appkit`'s `src/capture.mm`, on a branch, not
+released). `captureDevices` (also through a callback, since the first listing
+loads AVFoundation's camera plug-ins: 1.5 s cold, ~110 ms warm, ~1 ms after),
+`capture-devices` only when what a listing shows changed (an engine's own
+`CADefaultDeviceAggregate-<pid>` device is otherwise announced as a new
+device the moment an output starts), `openCamera` with an
+`AVCaptureVideoPreviewLayer` and the session on a queue of its own,
+`cameraFrames`/`cameraCopyFrame`, one `AVAudioEngine` for microphones and
+outputs with voice processing while an echo-cancelled microphone is open, an
+`AVAudioSinkNode` for 10 ms input (a tap's buffers are 100 ms at the least),
+`captureScreenshot` over `SCScreenshotManager`, and `setWindowSharing`. Three
+places it differs from the contract §0.1's Cocoa rung was first written
+against, and the rung follows the bridge: a screenshot answers one value
+(`{ width, height, scale, data }` or `{ error, name }`); an open microphone
+answers what was asked, and `microphone-started` what the engine did; and
+display listing and device listing take a callback, which is the only form a
+worker may use for the first. Measured over the real bridge here (macOS 15.8,
+M1 Pro): this Mac's FaceTime camera lists only `420v` formats, so a frame is
+never converted; a window painted `#e01a33` read back through react-x11's
+`captureScreenshot` as `224, 25, 51`; an excluded window came back with every
+pixel clear; 0.2 s pushed into `createAudioFrames` played out on the device
+clock. The camera and the microphone were not opened: this process has no
+grant, and the tests skip rather than prompt.
+
+**`<window excludeFromCapture>`**: on Cocoa through `setWindowSharing`,
+sent as a command behind the window's making and ahead of its showing.
+
+**Not built in this step:** the global shortcut hook, Linux cameras and
+microphones, `getDisplayMedia` on Cocoa (SCStream), mirroring a self-view
+(there is no `transform` style), and the components half.
 
 ## 1. The apps this is measured against
 
