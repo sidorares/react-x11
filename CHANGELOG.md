@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.57.0](https://github.com/sidorares/react-x11/compare/v2.56.5...v2.57.0) (2026-11-08)
+
+
+### Features
+
+* **media:** cameras, microphones, audio out and screenshots on macOS, over @windowkit/appkit 0.31.0 ([#1040](https://github.com/sidorares/react-x11/issues/1040)) ([c56f9b1](https://github.com/sidorares/react-x11/commit/c56f9b14d973534619b7c07b20655d946cad6317))
+* **media:** cameras, microphones, the screen and audio out — core's half of media capture ([#1038](https://github.com/sidorares/react-x11/issues/1038)) ([7edc79a](https://github.com/sidorares/react-x11/commit/7edc79ad61ea590a3714a45247e73ad3c601115e))
+* **media:** other applications' sound — system-audio devices over CoreAudio's process taps on macOS, a permission of their own, and getDisplayMedia's audio paired with them ([#1042](https://github.com/sidorares/react-x11/issues/1042)) ([e129004](https://github.com/sidorares/react-x11/commit/e1290042f42b37a2955bd70cb5c9aae7fde3b848))
+
+
+### Bug Fixes
+
+* **media:** screenCapture says whether getDisplayMedia can stream, and a lab tries every capture capability ([#1041](https://github.com/sidorares/react-x11/issues/1041)) ([d1d587d](https://github.com/sidorares/react-x11/commit/d1d587dca65a2b1e56a3f0230865ce12f46f55e0))
+
 ## [2.56.5](https://github.com/sidorares/react-x11/compare/v2.56.4...v2.56.5) (2026-11-04)
 
 
