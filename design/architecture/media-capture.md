@@ -1,10 +1,12 @@
 # Media capture and real-time communication: cameras, microphones, screens, codecs and peers
 
 _Design record, 2026-11-06, written against master at 220e1c0 (react-x11
-2.56.5) and `@react-x11/components` at 27fcf7e9. **A proposal: nothing here
-is built.** It extends [video.md](video.md), whose §8.4 ("Camera, later")
-this is the "later" of, and it takes the boundary
-`@react-x11/components`' `docs/prd-audio.md` already drew through sound._
+2.56.5) and `@react-x11/components` at 27fcf7e9. It extends [video.md](video.md),
+whose §8.4 ("Camera, later") this is the "later" of, and it takes the
+boundary `@react-x11/components`' `docs/prd-audio.md` already drew through
+sound. §0.1 is what has been built since: step 1 of §6, core's half, and
+the `@windowkit/appkit` verbs it runs on, which are on a branch and not
+released yet._
 
 ---
 
@@ -42,6 +44,106 @@ this is the "later" of, and it takes the boundary
   And on Linux only X11 screen capture is reachable from pure JavaScript:
   PipeWire hands buffers over as file descriptors Node's `net` cannot
   receive, and v4l2 needs `ioctl` (§4).
+
+### 0.1 Built, 2026-11-06: step 1, core's half
+
+The reference is [docs/media.md](../../docs/media.md). In `src/media/`:
+
+- **Tracks and streams** (`stream.js`). `MediaStream` and
+  `MediaStreamTrack` over a **shared source**. Sources are pooled by backend,
+  then by `kind|deviceId|settings`, and a source stops when its last track
+  does, so two hooks asking for one camera at one size are one session. That
+  is §7's second open question answered: the count owns the device, not the
+  hook and not the component. `applyConstraints` moves a track to the pooled
+  source at the new settings. A device with no other track is let go first,
+  because a camera that runs one session at a time would refuse the second
+  open. Frames come off a track by callback (`onFrame`), and a source is
+  told whether anybody reads frames at all (`wantFrames`). `onChange`
+  replaces EventTarget, and `stop()` fires it too, so an element showing
+  the track lets go of it.
+- **Constraints** (`constraints.js`). SelectSettings simplified to what a
+  desktop device describes: a range per number, a list per choice, the
+  default device first among equals. `advanced` is not read.
+- **The ladder** (`capture.js`). A rung is an object with some of `devices`,
+  `watch`, `open`, `displaySources`, `openDisplay`, `captureScreenshot` and
+  `openAudioOutput`, and each operation takes the first rung with its verb.
+  `app.mediaCapture` comes first, which is the Cocoa rung or the test fakes.
+  The X11 rung comes second, for the screen only. Permission is the existing
+  ladder's, asked just before a device opens. A refusal with the status
+  still `notDetermined` gets its own `NotAllowedError` message, the video.md
+  §3.5 trap.
+- **Hooks** (`hooks.js`). `useMediaDevices`; `useUserMedia`, which starts on
+  mount; `useDisplayMedia`, which waits for `start()` because a picker
+  nobody asked for is the wrong default. One status addition to §2.2's list:
+  `'ended'`, for every track ending other than by the hook's own `stop()`
+  (a camera unplugged).
+- **`createAudioFrames`** (`audioframes.js`). The prd-audio sink: planar
+  floats, queued, nothing dropped, `currentTime`, `latency` and `queued`.
+  There is no `useAudioFrames`, because the sink owns a native output and
+  making one in render is a side effect React may discard.
+- **Elements.** `<video srcObject>`: a track whose source has a
+  presentation of its own (a macOS camera) is shown the way a player is.
+  Any other track's frames go into a sink of the node's own, remade when
+  the size or format changes. `<audio srcObject>` plays through
+  `createAudioFrames` at the rate the track arrives in, with `sinkId` for
+  the device.
+- **X11** (`x11capture.js`). Screens are monitor rectangles of the root, and
+  windows come from `_NET_CLIENT_LIST`, read from the window itself.
+  `GetImage` decodes by the server's own layout, and frames are BGRA while
+  wanted. There is no XDamage, MIT-SHM or cursor yet.
+- **Cocoa** (`src/cocoa/capture.js`). The rung over the verbs §6 asks
+  `@windowkit/appkit` for. Each part exists only where its verb does. A
+  camera's `layer` is lifted through the sprite seam as a player's is
+  (`CameraPresentation`, a `PlayerState`), and the session's one layer goes
+  to the first part that lifts it.
+- **`react-x11/test`**. `fakeMediaDevices(app)`: components'
+  `fake-media.ts` generator (bars, a tone), plus a speaker on a manual clock,
+  a screen and a window, hot-plug, a picker answer, and a permission table
+  the existing `usePermission` reads.
+
+**One measured finding, which answers part of §7's third question.** On
+XQuartz the root window holds nothing of what is on the screen. In
+rootless mode each X window is a Mac window. A window painted `#ff00ff`
+read back as `ff00ff` through `GetImage` on the window, and as `000000`
+through `GetImage` on the root at the same place (XQuartz 2.8, quartz-wm,
+2026-11-06). So the X11 rung reads a window from the window itself, not
+from its rectangle of the root, and refuses screens where the server has
+`Apple-WM`, saying why (`features.screens: false`). On XQuartz a
+160×120 window streamed at a 33.8 ms median frame gap at
+`frameRate: 30`. The in-process X server cannot stand in for this: its
+`GetImage` reads only the target's own raster, so its tests paint the root
+itself.
+
+**The bridge** (`@windowkit/appkit`'s `src/capture.mm`, on a branch, not
+released). `captureDevices` (also through a callback, since the first listing
+loads AVFoundation's camera plug-ins: 1.5 s cold, ~110 ms warm, ~1 ms after),
+`capture-devices` only when what a listing shows changed (an engine's own
+`CADefaultDeviceAggregate-<pid>` device is otherwise announced as a new
+device the moment an output starts), `openCamera` with an
+`AVCaptureVideoPreviewLayer` and the session on a queue of its own,
+`cameraFrames`/`cameraCopyFrame`, one `AVAudioEngine` for microphones and
+outputs with voice processing while an echo-cancelled microphone is open, an
+`AVAudioSinkNode` for 10 ms input (a tap's buffers are 100 ms at the least),
+`captureScreenshot` over `SCScreenshotManager`, and `setWindowSharing`. Three
+places it differs from the contract §0.1's Cocoa rung was first written
+against, and the rung follows the bridge: a screenshot answers one value
+(`{ width, height, scale, data }` or `{ error, name }`); an open microphone
+answers what was asked, and `microphone-started` what the engine did; and
+display listing and device listing take a callback, which is the only form a
+worker may use for the first. Measured over the real bridge here (macOS 15.8,
+M1 Pro): this Mac's FaceTime camera lists only `420v` formats, so a frame is
+never converted; a window painted `#e01a33` read back through react-x11's
+`captureScreenshot` as `224, 25, 51`; an excluded window came back with every
+pixel clear; 0.2 s pushed into `createAudioFrames` played out on the device
+clock. The camera and the microphone were not opened: this process has no
+grant, and the tests skip rather than prompt.
+
+**`<window excludeFromCapture>`**: on Cocoa through `setWindowSharing`,
+sent as a command behind the window's making and ahead of its showing.
+
+**Not built in this step:** the global shortcut hook, Linux cameras and
+microphones, `getDisplayMedia` on Cocoa (SCStream), mirroring a self-view
+(there is no `transform` style), and the components half.
 
 ## 1. The apps this is measured against
 
@@ -298,13 +400,13 @@ step 1, with its own tests in `react-x11/test` against the fake devices.
   simpler and cheaper; the stream is what WebCodecs pipelines are written
   against. The proposal is the callback in core and the stream in the
   facade; revisit if core's own encoders want backpressure.
-- **Does `useUserMedia` own the device lifetime, or the component?** One
-  camera opened by two components should be one session. A ref-counted
-  source per device and settings, shared across hooks, is the likely
-  answer.
-- **Screen capture on XQuartz.** `GetImage` on the root sees the X screen
-  only, not the Mac's; the Cocoa backend's ScreenCaptureKit rung is the one
-  that answers there, and an X11 app on a Mac should be told which it got.
+- **Does `useUserMedia` own the device lifetime, or the component?**
+  Answered in §0.1: neither. A ref-counted source per device and settings
+  is shared across hooks.
+- **Screen capture on XQuartz.** Measured in §0.1: the root holds nothing
+  at all, not even the X screen. Windows are read from themselves, screens
+  are refused with the reason, and the Cocoa rung is the one that answers
+  for the Mac's screen.
 - **Codecs on Linux.** VA-API is a C library borrowing a `Display*`
   (video.md §2.2); whether a prebuilt bridge for it is worth the closure, or
   ffmpeg spawned with `-c:v h264_vaapi` is the rung, is to measure.

@@ -60,11 +60,16 @@
 // element's to draw where it does not, or where its parent is not lifted.
 
 import { RASTER_PAD, RasterState } from './presenter.js';
-import { CocoaPlayer, PlayerLift } from './player.js';
+import { PlayerLift, PlayerState } from './player.js';
 import { VideoLift, canLiftVideo } from './video.js';
 import { intersectRects, rectContains, rectsOverlap } from '../nodes/rects.js';
 import { DEV } from '../nodes/util.js';
 import { isVideoFrames } from '../videoframes.js';
+
+/** A source with a layer of its own the bridge plays into — a player, a
+ *  camera — which a part shows by placing that layer, not by writing it. */
+const showsItself = (contents) =>
+  contents instanceof PlayerState && contents.layer != null;
 
 // Past this many device pixels on a side a part is drawn by its element: a
 // layer's contents are a bitmap, and a page-sized one is a page-sized
@@ -791,9 +796,13 @@ export class SpriteLayers {
   }
 
   /** Can this bridge show `contents` on a layer by itself? A player always
-   *  can: it was made by this bridge, with the layer it plays into. */
+   *  can: it was made by this bridge, with the layer it plays into. So can
+   *  a camera's presentation (src/cocoa/capture.js), while no other part
+   *  holds the one layer its session shows into. */
   _canShow(contents) {
-    if (contents instanceof CocoaPlayer) return !contents.released;
+    if (showsItself(contents)) {
+      return !contents.released && contents.liftable !== false;
+    }
     return isVideoFrames(contents) && this.videos;
   }
 
@@ -863,7 +872,7 @@ export class SpriteLayers {
       lift:
         contents === null
           ? null
-          : contents instanceof CocoaPlayer
+          : showsItself(contents)
             ? new PlayerLift(this.native, contents, layer)
             : new VideoLift(this.native, contents, layer),
     };

@@ -197,6 +197,7 @@ backend; the flex, paint and event root for its subtree.
 | `onCloseRequest(ev)`        | WM close button; replaces the default answer                                                                  |
 | `states`                    | EWMH `_NET_WM_STATE`, controlled                                                                              |
 | `fullscreen`, `alwaysOnTop` | boolean sugar for two of those states                                                                         |
+| `excludeFromCapture`        | kept out of screenshots and recordings; macOS only ([media](media.md#the-screen))                             |
 | `decorations`               | `false` asks the WM for no titlebar or border                                                                 |
 | `transparent`               | 32-bit ARGB visual: rounded, translucent windows                                                              |
 | `transientFor`              | ICCCM `WM_TRANSIENT_FOR`: the window this one belongs to                                                      |
@@ -1648,6 +1649,7 @@ useEffect(() => startDecoder(file, frames), [frames, file]);
 | ----------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `frames`                                              | a `VideoFrames` sink you push decoded frames into — every backend                             |
 | `src`                                                 | a path or URL the platform plays, where `useSupports('mediaPlayback')` (below)                |
+| `srcObject`                                           | a `MediaStream` — a camera, a screen ([media](media.md)); its first live video track          |
 | `poster`                                              | an `<image src>` value, shown while there is no frame                                         |
 | `autoPlay`, `loop`, `muted`, `volume`, `playbackRate` | HTML's names and defaults — nothing plays until asked; for `src`                              |
 | `paused`                                              | controlled when present; for `src`                                                            |
@@ -1655,7 +1657,7 @@ useEffect(() => startDecoder(file, frames), [frames, file]);
 | `onPlay`, `onPause`, `onEnded`, `onTimeUpdate`        | for `src`                                                                                     |
 | `onError`                                             | the source failed, or `src` has no player; unhandled, one console warning                     |
 
-`frames` and `src` are exclusive; passing both throws. It is a drawn node like
+`frames`, `src` and `srcObject` are exclusive; passing two throws. It is a drawn node like
 `<image>`, so a video in a form sits under its popups and inside its scroll
 panes, which a child window or `<glarea>` cannot. **Size** is HTML's: the
 stream's size in logical pixels (1280x720 is 1280 wide at any scale), else
@@ -1822,8 +1824,12 @@ for its sound included.
 
 Where there is no player — X11 and Wayland for good, Windows today — it
 reports one `NoMediaPlaybackError` through `onError` on a microtask, and
-nothing is heard. There is no sink for decoded samples yet, as
-`<video frames>` is for pictures.
+nothing is heard.
+
+`srcObject` plays a `MediaStream`'s first live audio track — a microphone, a
+peer's audio — through a `createAudioFrames` sink, the push sink for decoded
+samples; `sinkId` names the output device ([media](media.md)). `src` and
+`srcObject` are exclusive.
 
 A test gives an app a player that plays nothing with `fakeMediaPlayers`
 from `react-x11/test`, which makes `useSupports('mediaPlayback')` true and

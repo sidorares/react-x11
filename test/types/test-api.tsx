@@ -23,6 +23,7 @@ import {
   withFrameClock,
   setAppearance,
   createMockApp,
+  fakeMediaDevices,
   windowNodesOf,
   textOf,
   roleOf,
@@ -184,3 +185,19 @@ const _badSource = setAppearance({ source: 'portal' });
 const _badContrast = renderX11(<box />, { appearance: { contrast: 'more' } });
 
 export default suite;
+
+// fakeMediaDevices: a camera, a microphone, a speaker and a screen that are
+// not there, and what a test reads and makes them do
+{
+  const app = createMockApp();
+  const fake = fakeMediaDevices(app, { cameras: 2, permission: 'prompt' });
+  fake.last('video')?.tick();
+  fake.unplug('fake-camera');
+  fake.setPermission('camera', 'denied');
+  fake.pickerAnswer = null;
+  const heard: Float32Array | undefined = fake.outputs[0]?.samples();
+  fake.outputs[0]?.advance(0.02);
+  // @ts-expect-error — not a permission a device is gated on
+  fake.setPermission('calendars', 'denied');
+  void heard;
+}

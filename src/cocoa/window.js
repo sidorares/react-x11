@@ -212,6 +212,9 @@ export class CocoaWindow {
     // window when its command runs: the number is null until then, and
     // `window-created` brings it (`_created`).
     this.windowNumber = this._native.windowNumber(this._h);
+    // out of every capture from before it is first shown: a command queued
+    // behind the making, ahead of the show
+    if (attributes.excludeFromCapture) this.setExcludedFromCapture(true);
     // What the app's window map and the events name this window by: the
     // handle on a worker, where every window event carries it, and the
     // number in pump mode, where the events carry only that.
@@ -461,6 +464,14 @@ export class CocoaWindow {
     if (typeof hints.maxHeight === 'number')
       box.maxHeight = hints.maxHeight / s;
     if (Object.keys(box).length) this._native.setWindowMinMax(this._h, box);
+  }
+
+  /** Kept out of every screenshot and recording, this app's own included
+   *  (`<window excludeFromCapture>`): `NSWindow.sharingType`, through a
+   *  bridge with `setWindowSharing`; nothing on an older one, which
+   *  `useDesktopCapability('screenCapture').features.excludeWindows` says. */
+  setExcludedFromCapture(on) {
+    this._native.setWindowSharing?.(this._h, on ? 'none' : 'readOnly');
   }
 
   setClass() {}

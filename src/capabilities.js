@@ -56,10 +56,22 @@ import {
   NOTIFICATIONS_PATH,
 } from './notifications.js';
 import { WATCHER_NAME } from './statusnotifier.js';
+import {
+  captureCapability,
+  settledCaptureCapability,
+} from './media/capture.js';
 import { liveApps } from './trace-registry.js';
 
 /** Every capability this module can answer for. */
-export const CAPABILITIES = ['notifications', 'tray', 'launcher'];
+export const CAPABILITIES = [
+  'notifications',
+  'tray',
+  'launcher',
+  'camera',
+  'audioInput',
+  'audioOutput',
+  'screenCapture',
+];
 
 /** The shape a probe resolves to when there is no mechanism at all. */
 const NONE = Object.freeze({ available: false, backend: null, features: {} });
@@ -385,11 +397,56 @@ async function probeLauncher({ app } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// media capture: camera, audioInput, audioOutput, screenCapture
+// ---------------------------------------------------------------------------
+
+/**
+ * What the capture rungs on an app can do (src/media/capture.js). Every rung
+ * is the app's own — the Cocoa bridge's verbs, X11's `GetImage`, a test's
+ * fakes — so the answer needs no round trip and is settled on the first
+ * frame. `available` is whether there is a mechanism; whether a camera is
+ * plugged in right now is the device list's to say (`useMediaDevices`).
+ *
+ * The features, by capability:
+ *
+ *   - `camera`: `hotplug`, `labelsBeforePermission`, `nativePreview` (frames
+ *     go from the camera to a layer without crossing into JavaScript);
+ *   - `audioInput`: `echoCancellation`, `noiseSuppression`,
+ *     `autoGainControl`, `resample` (any `sampleRate`/`channelCount` asked is
+ *     delivered as asked), `hotplug`;
+ *   - `audioOutput`: `deviceSelection`, `echoReference` (what is played is
+ *     the reference an echo-cancelled microphone subtracts);
+ *   - `screenCapture`: `picker` (the system's), `enumerate`
+ *     (`displaySources()` lists sources), `screens` (false on XQuartz,
+ *     whose root holds nothing), `windows`, `cursor`,
+ *     `systemAudio`, `excludeWindows` (`<window excludeFromCapture>`),
+ *     `screenshot`, `thumbnails`.
+ */
+function captureNow(name, target) {
+  const found = captureCapability(target, name);
+  return found ? frozen(found.backend, { ...found.features }) : NONE;
+}
+
+// The probe waits for what a rung still has to ask — the X11 rung, whether
+// the server is XQuartz, whose root holds no screen — so the hook's answer a
+// tick after its first frame is the settled one.
+const captureProbe =
+  (name) =>
+  async ({ app } = {}) => {
+    const found = await settledCaptureCapability(app ?? soleApp(), name);
+    return found ? frozen(found.backend, { ...found.features }) : NONE;
+  };
+
+// ---------------------------------------------------------------------------
 
 const PROBES = {
   notifications: probeNotifications,
   tray: probeTray,
   launcher: probeLauncher,
+  camera: captureProbe('camera'),
+  audioInput: captureProbe('audioInput'),
+  audioOutput: captureProbe('audioOutput'),
+  screenCapture: captureProbe('screenCapture'),
 };
 
 /**
@@ -443,5 +500,13 @@ export function capabilityNow(name, { app } = {}) {
   const target = app ?? soleApp();
   if (name === 'tray') return trayNow(target);
   if (name === 'launcher') return launcherNow(target);
+  if (
+    name === 'camera' ||
+    name === 'audioInput' ||
+    name === 'audioOutput' ||
+    name === 'screenCapture'
+  ) {
+    return captureNow(name, target);
+  }
   return null;
 }

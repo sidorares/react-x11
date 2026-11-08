@@ -194,6 +194,7 @@ const ORDER = [
   'uri-schemes.md',
   'filedialog.md',
   'eyedropper.md',
+  'media.md',
   'permissions.md',
   'notifications.md',
   'desktop-calendar.md',

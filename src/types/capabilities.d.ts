@@ -16,10 +16,21 @@ export type DesktopBackend =
   /** The notify icon itself, as a tray. */
   | 'shellnotifyicon'
   /** `ITaskbarList3` and the jump list, as a launcher. */
-  | 'taskbar';
+  | 'taskbar'
+  /** `GetImage` on the root window, as screen capture. */
+  | 'x11'
+  /** `fakeMediaDevices` from `react-x11/test`. */
+  | 'fake';
 
 /** The capabilities {@link desktopCapability} can be asked about. */
-export type DesktopCapabilityName = 'notifications' | 'tray' | 'launcher';
+export type DesktopCapabilityName =
+  | 'notifications'
+  | 'tray'
+  | 'launcher'
+  | 'camera'
+  | 'audioInput'
+  | 'audioOutput'
+  | 'screenCapture';
 
 /**
  * What a notification can carry here.
@@ -99,6 +110,52 @@ export interface LauncherFeatures {
   recentDocuments: boolean;
 }
 
+/** A camera's, where one can be opened (docs/media.md). */
+export interface CameraFeatures {
+  /** `useMediaDevices` follows cameras plugged in and out. */
+  hotplug: boolean;
+  /** Names are listed before any permission. */
+  labelsBeforePermission: boolean;
+  /** `<video srcObject>` shows the camera on a layer of its own, its frames
+   * never crossing into JavaScript. */
+  nativePreview: boolean;
+}
+
+export interface AudioInputFeatures {
+  hotplug: boolean;
+  echoCancellation: boolean;
+  noiseSuppression: boolean;
+  autoGainControl: boolean;
+  /** Any `sampleRate` and `channelCount` asked is delivered as asked. */
+  resample: boolean;
+}
+
+export interface AudioOutputFeatures {
+  /** A sink can name an `audiooutput` device. */
+  deviceSelection: boolean;
+  /** What is played is the reference an echo-cancelled microphone
+   * subtracts. */
+  echoReference: boolean;
+}
+
+export interface ScreenCaptureFeatures {
+  /** The system's own picker answers a `getDisplayMedia` with no source. */
+  picker: boolean;
+  /** `displaySources()` lists what there is. */
+  enumerate: boolean;
+  /** Whole screens can be captured. False on XQuartz, whose root window
+   * holds nothing of what is on the screen. */
+  screens: boolean;
+  windows: boolean;
+  cursor: boolean;
+  systemAudio: boolean;
+  /** `<window excludeFromCapture>` keeps a window out of captures. */
+  excludeWindows: boolean;
+  /** `captureScreenshot()` reads the screen. */
+  screenshot: boolean;
+  thumbnails: boolean;
+}
+
 export interface DesktopCapabilityResult<F = Record<string, boolean>> {
   /** Whether there is any mechanism at all. Branch on `features` for detail. */
   available: boolean;
@@ -122,7 +179,15 @@ export type DesktopCapabilityFor<N extends DesktopCapabilityName> =
     ? DesktopCapabilityResult<NotificationFeatures>
     : N extends 'tray'
       ? DesktopCapabilityResult<TrayFeatures>
-      : DesktopCapabilityResult<LauncherFeatures>;
+      : N extends 'camera'
+        ? DesktopCapabilityResult<CameraFeatures>
+        : N extends 'audioInput'
+          ? DesktopCapabilityResult<AudioInputFeatures>
+          : N extends 'audioOutput'
+            ? DesktopCapabilityResult<AudioOutputFeatures>
+            : N extends 'screenCapture'
+              ? DesktopCapabilityResult<ScreenCaptureFeatures>
+              : DesktopCapabilityResult<LauncherFeatures>;
 
 export declare const CAPABILITIES: readonly DesktopCapabilityName[];
 
