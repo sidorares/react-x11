@@ -67,10 +67,10 @@ this API, and it is what lets existing WebRTC SDKs run unmodified.
 | `displaySources`           | displays                                   | monitors and WM's windows | —                |
 | other applications' sound  | CoreAudio process taps (macOS 14.2)        | —                         | —                |
 
-**macOS** needs `@windowkit/appkit` 0.31 or later, which is what react-x11
-installs, and other applications' sound needs 0.32 and macOS 14.2. With an
-older bridge, every row it cannot do answers unavailable rather than
-crashing. The first device listing in a process loads AVFoundation's camera
+**macOS** needs `@windowkit/appkit` 0.32 or later, which is what react-x11
+installs, and other applications' sound needs macOS 14.2 as well. An older
+bridge answers unavailable for every row it cannot do, rather than crashing:
+0.31 has everything but other applications' sound. The first device listing in a process loads AVFoundation's camera
 plug-ins, 100 ms to over a second; it runs off the UI thread, which is one
 more reason `useMediaDevices` starts empty and unsettled.
 

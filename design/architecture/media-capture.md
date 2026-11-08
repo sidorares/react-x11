@@ -186,8 +186,8 @@ rung's video with the `'systemaudio'` source where the screen rung gives no
 sound of its own, as best effort, as a browser's audio is. It stays false on
 Cocoa, which has no `getDisplayMedia` yet.
 
-**The bridge** (`@windowkit/appkit`'s `src/systemaudio.mm`, 0.32,
-unreleased at the time of writing). `audioProcesses` lists CoreAudio's process
+**The bridge** (`@windowkit/appkit`'s `src/systemaudio.mm`,
+windowkit/appkit#134, released in 0.32.0 and react-x11's floor since). `audioProcesses` lists CoreAudio's process
 objects with the outermost `.app` each executable sits in. Chrome's sound
 comes from `com.google.Chrome.helper` processes and Slack's from
 `com.tinyspeck.slackmacgap.helper`, so a person's word for the source is

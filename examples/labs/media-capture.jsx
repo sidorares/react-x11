@@ -10,7 +10,7 @@
 //
 //   npm run labs:media-capture
 //
-// On macOS it runs on the Cocoa backend (@windowkit/appkit 0.31 or later);
+// On macOS it runs on the Cocoa backend (@windowkit/appkit 0.32 or later);
 // `REACT_X11_BACKEND=x11` puts it on XQuartz, where only the screen half
 // answers. Things worth trying:
 //
@@ -27,12 +27,12 @@
 //   - **Screen**: a screenshot of the display, of this window, of a part of
 //     the display; tick "keep this window out of captures" and take the
 //     window again. Saved to the temp directory, path in the log.
-//   - **System audio** (macOS 14.2, @windowkit/appkit 0.32): record "System
-//     audio" and play something in another app — the meter moves; play this
-//     lab's own tone instead and it should not, since this app is left out.
-//     Pick one application to hear only it; a browser plays through helper
-//     processes, which its entry takes in. "Save WAV" writes what was
-//     recorded, at the rate and channels asked, for listening to.
+//   - **System audio** (macOS 14.2): record "System audio" and play
+//     something in another app — the meter moves; play this lab's own tone
+//     instead and it should not, since this app is left out. Pick one
+//     application to hear only it; a browser plays through helper processes,
+//     which its entry takes in. "Save WAV" writes what was recorded, at the
+//     rate and channels asked, for listening to.
 //
 // macOS asks for the camera, the microphone, Screen Recording and System
 // Audio Recording the first time each is used — on behalf of whichever app
@@ -166,7 +166,8 @@ const settingsLine = (track) => {
 /** The @windowkit/appkit this process loads on macOS — REACT_X11_CALAYERS_PATH
  *  first, as src/cocoa/native.js resolves it — or null off the Cocoa
  *  backend. A lab's question: an install older than 0.31 answers every
- *  capture capability unavailable, and that is worth a line. */
+ *  capture capability unavailable, and one older than 0.32 other
+ *  applications' sound, and that is worth a line. */
 function appkitVersion() {
   if (process.platform !== 'darwin') return null;
   if ((process.env.REACT_X11_BACKEND ?? '').toLowerCase() === 'x11')
@@ -193,11 +194,16 @@ function Bridge() {
   if (version === null) return null;
   if (screen.backend && screen.backend !== 'cocoa') return null;
   const [major, minor] = version.split('.').map(Number);
-  const old = major === 0 && minor < 31;
+  const short =
+    major !== 0 || minor >= 32
+      ? ''
+      : minor < 31
+        ? ' — capture needs 0.31 or later: run npm install'
+        : ' — system audio needs 0.32 or later: run npm install';
   return (
     <text style={s.dim}>
       @windowkit/appkit {version}
-      {old ? ' — capture needs 0.31 or later: run npm install' : ''}
+      {short}
     </text>
   );
 }
