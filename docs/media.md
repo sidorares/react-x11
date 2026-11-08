@@ -63,15 +63,15 @@ this API, and it is what lets existing WebRTC SDKs run unmodified.
 | microphone                 | voice processing (echo cancelled)          | —                         | —                |
 | `createAudioFrames`        | the same audio engine                      | —                         | —                |
 | `captureScreenshot`        | ScreenCaptureKit                           | `GetImage` on the root    | —                |
-| `getDisplayMedia`          | ScreenCaptureKit streams (appkit 0.33)     | the root, read per frame  | —                |
+| `getDisplayMedia`          | ScreenCaptureKit streams                   | the root, read per frame  | —                |
 | `displaySources`           | displays and windows                       | monitors and WM's windows | —                |
 | other applications' sound  | CoreAudio process taps (macOS 14.2)        | —                         | —                |
 
-**macOS** needs `@windowkit/appkit` 0.32 or later, which is what react-x11
-installs, and other applications' sound needs macOS 14.2 as well. Screen
-streams need 0.33. An older bridge answers unavailable for every row it
-cannot do, rather than crashing: 0.32 has everything but screen streams, and
-0.31 has everything but those and other applications' sound. The first device listing in a process loads AVFoundation's camera
+**macOS** needs `@windowkit/appkit` 0.33 or later, which is what react-x11
+installs, and other applications' sound needs macOS 14.2 as well. An older
+bridge answers unavailable for every row it cannot do, rather than crashing:
+0.32 has everything but screen streams, and 0.31 has everything but those and
+other applications' sound. The first device listing in a process loads AVFoundation's camera
 plug-ins, 100 ms to over a second; it runs off the UI thread, which is one
 more reason `useMediaDevices` starts empty and unsettled. In a `<Frame>` pane
 the host captures for the pane, so all of this works there too: what a pane's

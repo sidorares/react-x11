@@ -17,7 +17,7 @@
 // the pane's channel. The window's own rows (this window, keeping it out of
 // captures) are the host's, and a pane has none.
 //
-// On macOS it runs on the Cocoa backend (@windowkit/appkit 0.32 or later);
+// On macOS it runs on the Cocoa backend (@windowkit/appkit 0.33 or later);
 // `REACT_X11_BACKEND=x11` puts it on XQuartz, where only the screen half
 // answers. Things worth trying:
 //
@@ -175,8 +175,9 @@ const settingsLine = (track) => {
 /** The @windowkit/appkit this process loads on macOS — REACT_X11_CALAYERS_PATH
  *  first, as src/cocoa/native.js resolves it — or null off the Cocoa
  *  backend. A lab's question: an install older than 0.31 answers every
- *  capture capability unavailable, and one older than 0.32 other
- *  applications' sound, and that is worth a line. */
+ *  capture capability unavailable, one older than 0.32 other applications'
+ *  sound, and one older than 0.33 a screen's stream, and that is worth a
+ *  line. */
 function appkitVersion() {
   if (process.platform !== 'darwin') return null;
   if ((process.env.REACT_X11_BACKEND ?? '').toLowerCase() === 'x11')
@@ -204,11 +205,13 @@ function Bridge() {
   if (screen.backend && screen.backend !== 'cocoa') return null;
   const [major, minor] = version.split('.').map(Number);
   const short =
-    major !== 0 || minor >= 32
+    major !== 0 || minor >= 33
       ? ''
       : minor < 31
         ? ' — capture needs 0.31 or later: run npm install'
-        : ' — system audio needs 0.32 or later: run npm install';
+        : minor < 32
+          ? ' — system audio needs 0.32 or later: run npm install'
+          : ' — screen sharing needs 0.33 or later: run npm install';
   return (
     <text style={s.dim}>
       @windowkit/appkit {version}

@@ -7,7 +7,8 @@ boundary `@react-x11/components`' `docs/prd-audio.md` already drew through
 sound. §0.1 is what has been built since: step 1 of §6, core's half
 (react-x11 2.57), and the `@windowkit/appkit` verbs it runs on, released in
 0.31.0. §0.2 is the system-audio loopback of step 2, on macOS, over appkit
-0.32._
+0.32. §0.3 is capture in a `<Frame>` pane, and §0.4 `getDisplayMedia` on
+macOS, over appkit 0.33._
 
 ---
 
@@ -336,6 +337,11 @@ JavaScript through a threadsafe function that is unref'd, so a script with
 no window that awaited `getDisplayMedia`, or a camera, exited before the
 answer came. A source opening or open now holds the process open
 (`CocoaMediaCapture._hold`), and `CocoaApp.close` stops every source.
+
+Released in appkit 0.33.0 (windowkit/appkit#135), react-x11's floor since.
+Over the published package's prebuild, on the same Mac: all six verbs there,
+`features.streams` and `features.windows` true, and a 640 x 414 stream from a
+script with no window, reconfigured to 5 frames a second live.
 
 Run on a real display (macOS 15.8.1, M1 Pro). The bridge's
 `test/display-stream.js`: listing, a window streamed at the width asked with
