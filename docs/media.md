@@ -91,12 +91,12 @@ without asking another process. `available` says whether there is a
 mechanism at all. Whether a camera is plugged in right now is what
 `useMediaDevices` says.
 
-| capability      | features                                                                                                           |
-| --------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `camera`        | `hotplug`, `labelsBeforePermission`, `nativePreview` (frames go camera → layer without crossing into JavaScript)   |
-| `audioInput`    | `echoCancellation`, `noiseSuppression`, `autoGainControl`, `resample`, `hotplug`                                   |
-| `audioOutput`   | `deviceSelection`, `echoReference` (what is played is what the echo canceller subtracts)                           |
-| `screenCapture` | `picker`, `enumerate`, `screens`, `windows`, `cursor`, `systemAudio`, `excludeWindows`, `screenshot`, `thumbnails` |
+| capability      | features                                                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `camera`        | `hotplug`, `labelsBeforePermission`, `nativePreview` (frames go camera → layer without crossing into JavaScript)                                        |
+| `audioInput`    | `echoCancellation`, `noiseSuppression`, `autoGainControl`, `resample`, `hotplug`                                                                        |
+| `audioOutput`   | `deviceSelection`, `echoReference` (what is played is what the echo canceller subtracts)                                                                |
+| `screenCapture` | `picker`, `enumerate`, `screens`, `streams` (`getDisplayMedia` works), `windows`, `cursor`, `systemAudio`, `excludeWindows`, `screenshot`, `thumbnails` |
 
 ## Devices
 
@@ -370,3 +370,9 @@ fake.outputs[0].samples(); // what <audio srcObject> played
 
 A source makes frames on a timer only while something reads them. `tick()`
 makes one on demand.
+
+For a real camera, microphone and screen, `npm run labs:media-capture`
+(`examples/labs/media-capture.jsx`) puts every capability in one window: what
+the display says it can do, the permissions, the devices, a camera preview, a
+microphone meter, a tone through the audio out, screenshots, and a log of what
+each step answered.

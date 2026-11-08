@@ -418,7 +418,9 @@ async function probeLauncher({ app } = {}) {
  *     the reference an echo-cancelled microphone subtracts);
  *   - `screenCapture`: `picker` (the system's), `enumerate`
  *     (`displaySources()` lists sources), `screens` (false on XQuartz,
- *     whose root holds nothing), `windows`, `cursor`,
+ *     whose root holds nothing), `streams` (`getDisplayMedia` captures a
+ *     stream — a backend may take screenshots and not yet that), `windows`,
+ *     `cursor`,
  *     `systemAudio`, `excludeWindows` (`<window excludeFromCapture>`),
  *     `screenshot`, `thumbnails`.
  */

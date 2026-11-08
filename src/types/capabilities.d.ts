@@ -146,6 +146,9 @@ export interface ScreenCaptureFeatures {
   /** Whole screens can be captured. False on XQuartz, whose root window
    * holds nothing of what is on the screen. */
   screens: boolean;
+  /** `getDisplayMedia` captures a stream. A backend can take screenshots
+   * and not yet this: macOS, until ScreenCaptureKit's stream verbs. */
+  streams: boolean;
   windows: boolean;
   cursor: boolean;
   systemAudio: boolean;
