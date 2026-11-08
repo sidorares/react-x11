@@ -25,6 +25,12 @@
 //     bridge's voice-processing path while an echo-cancelled microphone is
 //     live, which is what lets it cancel what this app plays (§3). The
 //     settings a microphone reports say whether that engaged.
+//   - **A screen is a camera with the desktop behind it.** `getDisplayMedia`
+//     opens ScreenCaptureKit's stream of a display or a window (appkit
+//     0.33's `openDisplayStream`), shown on a layer of its own the way a
+//     camera's session is and lifted the same way (`CameraPresentation`),
+//     its frames BGRA and handed over only on request. A window minimized
+//     mutes it, and a window closed ends it.
 //   - **Other applications' sound is a device too** (§0.2): the bridge's
 //     process taps (macOS 14.2, appkit 0.32) listed as `'systemaudio'`
 //     devices — `system-audio`, every application but this one, and one per
@@ -214,6 +220,11 @@ export class CocoaMediaCapture {
     this._watchers = new Set();
     /** open sources and outputs, by the bridge's id: what an event names */
     this._sources = new Map();
+    // A source opening or open holds the process, as a socket does: the
+    // bridge's events reach JavaScript through a function that does not, so
+    // a script with no window awaiting a camera or a screen's stream exited
+    // before the answer came (`_hold`).
+    this._keepAlive = null;
     this._outputs = new Map();
     this.features = {};
 
@@ -260,23 +271,29 @@ export class CocoaMediaCapture {
         echoReference: true,
       });
     }
-    if (has('captureScreenshot')) {
-      this.captureScreenshot = (options) => this._screenshot(options);
+    const streams = has('openDisplayStream');
+    if (streams) this.openDisplay = (request) => this._openDisplay(request);
+    if (has('captureScreenshot') || streams) {
+      if (has('captureScreenshot')) {
+        this.captureScreenshot = (options) => this._screenshot(options);
+      }
       if (has('screenCaptureDisplays')) {
         this.displaySources = (options) => this._displaySources(options);
       }
+      this._windows = has('screenCaptureWindows');
       this.features.screenCapture = Object.freeze({
         picker: false,
         enumerate: has('screenCaptureDisplays'),
         screens: true,
-        // screenshots, not streams: this rung has no openDisplay until the
-        // bridge has ScreenCaptureKit's stream verbs
-        streams: false,
-        windows: false,
+        // ScreenCaptureKit's stream, where the bridge has it (appkit 0.33)
+        streams,
+        windows: this._windows,
         cursor: true,
+        // a stream's sound is the process taps' (`systemAudio`), which
+        // getDisplayMedia pairs it with
         systemAudio: false,
         excludeWindows: has('setWindowSharing'),
-        screenshot: true,
+        screenshot: has('captureScreenshot'),
         thumbnails: false,
       });
     }
@@ -369,7 +386,7 @@ export class CocoaMediaCapture {
         ? new CocoaCameraSource(this, made, device, settings)
         : new CocoaMicrophoneSource(this, made, device);
       source._opening = { resolve: () => resolve(source), reject };
-      this._sources.set(source.id, source);
+      this._add(source);
     });
   }
 
@@ -391,15 +408,18 @@ export class CocoaMediaCapture {
       }
       const source = new CocoaSystemAudioSource(this, made, device);
       source._opening = { resolve: () => resolve(source), reject };
-      this._sources.set(source.id, source);
+      this._add(source);
     });
   }
 
   /** The displays as sources, in pixels — a display's own, which is what a
    *  screenshot of it comes back in — where the bridge has them in points. */
   async _displaySources({ types }) {
-    if (!types.includes('screen')) return [];
-    return (await this._displays()).map((d, i) => {
+    const [screens, windows] = await Promise.all([
+      types.includes('screen') ? this._displays() : [],
+      types.includes('window') && this._windows ? this._windowList() : [],
+    ]);
+    const out = screens.map((d, i) => {
       const s = d.scale ?? 1;
       return {
         id: `display:${d.id}`,
@@ -412,6 +432,78 @@ export class CocoaMediaCapture {
         height: Math.round(d.height * s),
       };
     });
+    // a window in this app's pixels, as a region of one is read
+    const s = this.app.scale ?? 1;
+    for (const w of windows) {
+      const app = w.app?.name ?? '';
+      const title = w.title ?? '';
+      out.push({
+        id: `window:${w.id}`,
+        kind: 'window',
+        name: app && title ? `${app} — ${title}` : app || title || 'Window',
+        title,
+        appId: w.app?.bundleId || undefined,
+        pid: w.app?.pid || undefined,
+        x: Math.round(w.x * s),
+        y: Math.round(w.y * s),
+        width: Math.round(w.width * s),
+        height: Math.round(w.height * s),
+      });
+    }
+    return out;
+  }
+
+  /** The windows a person would share, frontmost first; none where the
+   *  bridge was refused the list. */
+  _windowList() {
+    return new Promise((resolve) => {
+      this._native.screenCaptureWindows((list) => resolve(list));
+    }).then((list) => (Array.isArray(list) ? list : []));
+  }
+
+  /** A display or a window as a stream: the source the stream is, answered
+   *  once `display-started` or `display-error` says how the start went. */
+  async _openDisplay({ source, video = {} }) {
+    const ask = {
+      frameRate: numberOf(video.frameRate) ?? 30,
+      cursor: video.cursor !== 'never',
+    };
+    const width = numberOf(video.width);
+    const height = numberOf(video.height);
+    if (width) ask.width = width;
+    if (height) ask.height = height;
+    let label = 'Screen';
+    let surface = 'monitor';
+    if (source != null) {
+      const [kind, value] = String(source).split(':');
+      if (kind === 'display') ask.display = Number(value);
+      else if (kind === 'window') {
+        ask.window = Number(value);
+        surface = 'window';
+      } else {
+        throw Object.assign(new Error(`there is no source ${source}`), {
+          name: 'NotFoundError',
+        });
+      }
+    }
+    if (surface === 'window' && this._windows) {
+      const w = (await this._windowList()).find((one) => one.id === ask.window);
+      label = w?.title || w?.app?.name || 'Window';
+    } else {
+      const displays = await this._displays();
+      const d =
+        ask.display === undefined
+          ? displays[0]
+          : displays.find((one) => one.id === ask.display);
+      label = d?.name || 'Screen';
+    }
+    const made = this._native.openDisplayStream(ask);
+    const stream = await new Promise((resolve, reject) => {
+      const s = new CocoaDisplaySource(this, made, { label, surface, ask });
+      s._opening = { resolve: () => resolve(s), reject };
+      this._add(s);
+    });
+    return { video: stream };
   }
 
   /** One picture. `region` is in the source's pixels and the bridge's
@@ -458,6 +550,35 @@ export class CocoaMediaCapture {
     return answer;
   }
 
+  _add(source) {
+    this._sources.set(source.id, source);
+    this._hold();
+  }
+
+  _remove(id) {
+    this._sources.delete(id);
+    this._hold();
+  }
+
+  /** A timer that keeps the event loop alive while there is a source, and
+   *  none once there is not. */
+  _hold() {
+    if (this._sources.size > 0 && this._keepAlive === null) {
+      this._keepAlive = setInterval(() => {}, 2 ** 30);
+    } else if (this._sources.size === 0 && this._keepAlive !== null) {
+      clearInterval(this._keepAlive);
+      this._keepAlive = null;
+    }
+  }
+
+  /** Every source stopped and the hold let go: the app is closing
+   *  (`CocoaApp.close`). */
+  close() {
+    for (const source of [...this._sources.values()]) source.stop();
+    this._sources.clear();
+    this._hold();
+  }
+
   /** A capture event from the bridge (`CocoaApp._route`). */
   _route(ev) {
     switch (ev.type) {
@@ -471,6 +592,20 @@ export class CocoaMediaCapture {
         this._sources.get(ev.id)?._event(ev);
     }
   }
+}
+
+/** A constraint as one number: the number itself, or its exact, ideal or
+ *  max — what a stream is started at, since a screen is not chosen among
+ *  devices by fitness. */
+function numberOf(c) {
+  if (typeof c === 'number') return Number.isFinite(c) && c > 0 ? c : null;
+  if (c && typeof c === 'object') {
+    for (const key of ['exact', 'ideal', 'max']) {
+      const v = c[key];
+      if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v;
+    }
+  }
+  return null;
 }
 
 function notSupported(what) {
@@ -512,6 +647,7 @@ class CocoaSource {
       case 'camera-started':
       case 'microphone-started':
       case 'system-audio-started':
+      case 'display-started':
         // what the engine did, where it says: voice processing engaged or not
         this._started?.(ev);
         this._opening?.resolve();
@@ -520,6 +656,7 @@ class CocoaSource {
       case 'camera-error':
       case 'microphone-error':
       case 'system-audio-error':
+      case 'display-error':
         if (this._opening) {
           this._forget();
           this._opening.reject(
@@ -535,10 +672,12 @@ class CocoaSource {
       case 'camera-ended':
       case 'microphone-ended':
       case 'system-audio-ended':
+      case 'display-ended':
         this._gone();
         return;
       case 'camera-muted':
       case 'microphone-muted':
+      case 'display-muted':
         this.muted = Boolean(ev.muted);
         this._events?.muted(this.muted);
         this._mutedChanged?.();
@@ -556,7 +695,7 @@ class CocoaSource {
   }
 
   _forget() {
-    this.capture._sources.delete(this.id);
+    this.capture._remove(this.id);
   }
 }
 
@@ -649,6 +788,137 @@ class CocoaCameraSource extends CocoaSource {
   }
 }
 
+/**
+ * A display or a window as ScreenCaptureKit streams it: a camera in all but
+ * the device — a layer the bridge keeps showing the newest frame, its frames
+ * BGRA on request, its size and rate changed without stopping
+ * (`reconfigure`, which `applyConstraints` asks).
+ */
+class CocoaDisplaySource extends CocoaSource {
+  constructor(capture, made, { label, surface, ask }) {
+    super(capture, made, {
+      label,
+      capabilities: {
+        frameRate: { min: 1, max: 120 },
+        displaySurface: [surface],
+      },
+    });
+    this.kind = 'video';
+    this.layer = made.layer ?? null;
+    this._surface = surface;
+    this._settings = {
+      width: ask.width ?? 0,
+      height: ask.height ?? 0,
+      frameRate: ask.frameRate,
+      displaySurface: surface,
+      cursor: ask.cursor ? 'always' : 'never',
+      resizeMode: 'crop-and-scale',
+    };
+    this._presentations = new Set();
+    this._liftedBy = null;
+    this._configuring = [];
+  }
+
+  /** `display-started` says the size the frames come at. */
+  _started(ev) {
+    this._settings.width = ev.width;
+    this._settings.height = ev.height;
+    if (typeof ev.frameRate === 'number')
+      this._settings.frameRate = ev.frameRate;
+  }
+
+  settings() {
+    return {
+      ...this._settings,
+      aspectRatio: this._settings.width / this._settings.height,
+    };
+  }
+
+  wantFrames(on) {
+    if (this._stopped) return;
+    this._native.displayStreamFrames?.(this.id, Boolean(on));
+  }
+
+  present() {
+    if (this.layer == null || this._stopped) return null;
+    const presentation = new CameraPresentation(this);
+    this._presentations.add(presentation);
+    return presentation;
+  }
+
+  copyFrameTo(handle) {
+    if (
+      this._stopped ||
+      typeof this._native.displayStreamCopyFrame !== 'function'
+    ) {
+      return null;
+    }
+    return this._native.displayStreamCopyFrame(this.id, handle);
+  }
+
+  /** Another size or rate, the stream running on; true once the bridge has
+   *  done it, false where it refused, and the stream runs as it was. */
+  reconfigure({ width, height, frameRate } = {}) {
+    if (
+      this._stopped ||
+      typeof this._native.displayStreamConfigure !== 'function'
+    ) {
+      return false;
+    }
+    const ask = {};
+    if (width > 0) ask.width = width;
+    if (height > 0) ask.height = height;
+    if (frameRate > 0) ask.frameRate = frameRate;
+    if (Object.keys(ask).length === 0) return true;
+    return new Promise((resolve) => {
+      this._configuring.push(resolve);
+      this._native.displayStreamConfigure(this.id, ask);
+    });
+  }
+
+  _other(ev) {
+    if (ev.type === 'display-configured') {
+      if (!ev.error) {
+        this._settings.width = ev.width;
+        this._settings.height = ev.height;
+        this._settings.frameRate = ev.frameRate;
+      }
+      this._configuring.shift()?.(!ev.error);
+      return;
+    }
+    if (ev.type !== 'display-frame' || !this._events) return;
+    this._events.frame({
+      format: 'BGRA',
+      width: ev.width,
+      height: ev.height,
+      planes: ev.planes,
+      strides: ev.strides,
+      time: ev.time,
+      colorSpace: 'bt709',
+      range: 'full',
+    });
+  }
+
+  _mutedChanged() {
+    for (const p of this._presentations) p._state();
+  }
+
+  _gone() {
+    super._gone();
+    for (const resolve of this._configuring.splice(0)) resolve(false);
+    for (const p of [...this._presentations]) p._state();
+  }
+
+  stop() {
+    if (this._stopped) return;
+    this._stopped = true;
+    this._forget();
+    for (const resolve of this._configuring.splice(0)) resolve(false);
+    for (const p of [...this._presentations]) p._state();
+    this._native.closeDisplayStream(this.id);
+  }
+}
+
 /** A microphone: chunks of planar floats, every one of them. */
 class CocoaMicrophoneSource extends CocoaSource {
   constructor(capture, made, device) {
@@ -723,11 +993,12 @@ class CocoaSystemAudioSource extends CocoaMicrophoneSource {
 }
 
 /**
- * A camera as a `<video>` shows it: a player in all but name — a layer the
- * bridge keeps current, a frame to copy where it is drawn — so the element
- * and the sprite presenter need nothing of their own for it. A session has
- * one layer, and a layer one superlayer, so of several `<video>`s showing
- * one camera the first lifted holds it and the rest draw (`liftable`).
+ * A camera — or a screen's stream — as a `<video>` shows it: a player in all
+ * but name — a layer the bridge keeps current, a frame to copy where it is
+ * drawn — so the element and the sprite presenter need nothing of their own
+ * for it. A session has one layer, and a layer one superlayer, so of several
+ * `<video>`s showing one source the first lifted holds it and the rest draw
+ * (`liftable`).
  */
 export class CameraPresentation extends PlayerState {
   constructor(source) {

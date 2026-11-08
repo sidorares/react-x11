@@ -134,7 +134,7 @@ const captureCalls = (native) =>
   native.calls
     .map((c) => c[0])
     .filter((name) =>
-      /^(captureDevices|openCamera|cameraFrames|cameraCopyFrame|openMicrophone|openAudioOutput|audioOutputWrite|captureScreenshot|screenCaptureDisplays)$/.test(
+      /^(captureDevices|openCamera|cameraFrames|cameraCopyFrame|openMicrophone|openAudioOutput|audioOutputWrite|captureScreenshot|screenCaptureDisplays|openDisplayStream|displayStreamFrames|displayStreamCopyFrame)$/.test(
         name,
       ),
     );
@@ -337,6 +337,51 @@ test('a screenshot in a pane is taken by the host', async () => {
   assert.deepStrictEqual(m.heard.shots[0], { width: 2, height: 2, first: 77 });
   assert.strictEqual(m.hostNative.shots.length, 1);
   assert.deepStrictEqual(captureCalls(m.paneNative), []);
+});
+
+test('a pane shares the screen through the host’s stream: its picture through the ring, its frames to a reader', async () => {
+  const m = await mount({ share: true, frames: true });
+  await until(m.apps, () => m.status() === 'live', 'the screen to stream');
+  const [id, record] = m.camera();
+  assert.strictEqual(record.display, true);
+  assert.deepStrictEqual(record.opts, {
+    frameRate: 15,
+    cursor: true,
+    width: 640,
+  });
+  assert.strictEqual(
+    m.heard.status.at(-1).settings[0].displaySurface,
+    'monitor',
+  );
+  await until(m.apps, () => Boolean(m.video()), 'the pane’s <video>');
+  m.hostNative.displayFrame(id, 640, 400);
+  await until(
+    m.apps,
+    () => m.video()?._surface?._surfaceHandle?.pixels === 'screen-1',
+    'the screen in the pane’s <video>',
+  );
+  m.hostNative.emit({
+    type: 'display-frame',
+    id,
+    format: 'BGRA',
+    width: 2,
+    height: 1,
+    planes: [new Uint8Array(8).fill(9)],
+    strides: [8],
+    time: 1,
+  });
+  await until(m.apps, () => m.heard.frames.length > 0, 'a frame');
+  assert.deepStrictEqual(m.heard.frames.at(-1), {
+    kind: 'video',
+    format: 'BGRA',
+    width: 2,
+    height: 1,
+    first: 9,
+  });
+  assert.deepStrictEqual(captureCalls(m.paneNative), []);
+  // the user stops sharing from the menu bar: the pane's track ends
+  m.hostNative.emit({ type: 'display-ended', id, name: 'NotAllowedError' });
+  await until(m.apps, () => m.status() === 'ended', 'the end');
 });
 
 test('a pane that goes leaves no camera on', async () => {

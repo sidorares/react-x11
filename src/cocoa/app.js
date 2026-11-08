@@ -1528,6 +1528,12 @@ export class CocoaApp {
       case 'audio-processes':
       case 'audio-input':
       case 'audio-output-low':
+      case 'display-started':
+      case 'display-error':
+      case 'display-frame':
+      case 'display-muted':
+      case 'display-configured':
+      case 'display-ended':
         return this.mediaCapture?._route(ev);
       default:
         return undefined;
@@ -1959,6 +1965,8 @@ export class CocoaApp {
     if (this._frameTimer) clearTimeout(this._frameTimer);
     this._frameTimer = null;
     this._pollScreens(false);
+    // no camera light, and no capture holding the process, after the app
+    this.mediaCapture?.close?.();
     this.clipboard.close();
     this._cocoaGL?.destroy();
     this._cocoaGL = null;

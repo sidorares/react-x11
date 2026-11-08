@@ -1,5 +1,6 @@
 // The pane the pane-capture tests mount: a camera, a microphone or both
-// through `useUserMedia`, the camera shown in a `<video srcObject>`, and
+// through `useUserMedia` — or the screen through `useDisplayMedia`, with
+// `share` — the picture shown in a `<video srcObject>`, and
 // what it hears sent back through bridged callbacks as plain data — the
 // capability, the devices, the session's status, the frames its tracks hand
 // a reader (`frames`), a sink's clock after a push (`play: { n, samples }`)
@@ -11,6 +12,7 @@ import {
   createAudioFrames,
   useApp,
   useDesktopCapability,
+  useDisplayMedia,
   useMediaDevices,
   useUserMedia,
 } from '../../src/index.js';
@@ -20,6 +22,7 @@ const h = React.createElement;
 export default function CapturePane({
   video = false,
   audio = false,
+  share = false,
   show = true,
   frames = false,
   play = null,
@@ -40,6 +43,11 @@ export default function CapturePane({
     { video, audio },
     { start: Boolean(video || audio) },
   );
+  const screen = useDisplayMedia(
+    { video: { width: 640, frameRate: 15 } },
+    { start: share },
+  );
+  const shown = share ? screen : call;
   const sink = useRef(null);
 
   useEffect(() => {
@@ -59,19 +67,19 @@ export default function CapturePane({
 
   useEffect(() => {
     onStatus?.({
-      status: call.status,
-      error: call.error?.name ?? null,
+      status: shown.status,
+      error: shown.error?.name ?? null,
       settings:
-        call.stream?.getTracks().map((t) => ({
+        shown.stream?.getTracks().map((t) => ({
           kind: t.kind,
           ...t.getSettings(),
         })) ?? [],
     });
-  }, [call.status]);
+  }, [shown.status]);
 
   useEffect(() => {
-    if (!frames || !call.stream) return undefined;
-    const offs = call.stream.getTracks().map((track) =>
+    if (!frames || !shown.stream) return undefined;
+    const offs = shown.stream.getTracks().map((track) =>
       track.onFrame((f) =>
         onFrame?.(
           track.kind === 'video'
@@ -92,7 +100,7 @@ export default function CapturePane({
       ),
     );
     return () => offs.forEach((off) => off());
-  }, [frames, call.stream]);
+  }, [frames, shown.stream]);
 
   useEffect(() => {
     if (!play) return;
@@ -119,7 +127,10 @@ export default function CapturePane({
     'box',
     { style: { paddingLeft: 10, paddingTop: 10 } },
     show &&
-      call.stream?.getVideoTracks().length > 0 &&
-      h('video', { srcObject: call.stream, style: { width: 160, height: 90 } }),
+      shown.stream?.getVideoTracks().length > 0 &&
+      h('video', {
+        srcObject: shown.stream,
+        style: { width: 160, height: 90 },
+      }),
   );
 }

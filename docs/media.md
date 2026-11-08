@@ -63,14 +63,15 @@ this API, and it is what lets existing WebRTC SDKs run unmodified.
 | microphone                 | voice processing (echo cancelled)          | —                         | —                |
 | `createAudioFrames`        | the same audio engine                      | —                         | —                |
 | `captureScreenshot`        | ScreenCaptureKit                           | `GetImage` on the root    | —                |
-| `getDisplayMedia`          | not yet                                    | the root, read per frame  | —                |
-| `displaySources`           | displays                                   | monitors and WM's windows | —                |
+| `getDisplayMedia`          | ScreenCaptureKit streams (appkit 0.33)     | the root, read per frame  | —                |
+| `displaySources`           | displays and windows                       | monitors and WM's windows | —                |
 | other applications' sound  | CoreAudio process taps (macOS 14.2)        | —                         | —                |
 
 **macOS** needs `@windowkit/appkit` 0.32 or later, which is what react-x11
-installs, and other applications' sound needs macOS 14.2 as well. An older
-bridge answers unavailable for every row it cannot do, rather than crashing:
-0.31 has everything but other applications' sound. The first device listing in a process loads AVFoundation's camera
+installs, and other applications' sound needs macOS 14.2 as well. Screen
+streams need 0.33. An older bridge answers unavailable for every row it
+cannot do, rather than crashing: 0.32 has everything but screen streams, and
+0.31 has everything but those and other applications' sound. The first device listing in a process loads AVFoundation's camera
 plug-ins, 100 ms to over a second; it runs off the UI thread, which is one
 more reason `useMediaDevices` starts empty and unsettled. In a `<Frame>` pane
 the host captures for the pane, so all of this works there too: what a pane's
@@ -396,11 +397,37 @@ There, `features.screens` is false, a screen source rejects with a
 windows. Windows capture as they do anywhere else. The Mac's screen is the
 Cocoa backend's to capture.
 
-On **macOS**, a screenshot needs the Screen Recording permission. A source
-is a display (`display:<id>`, listed by `displaySources()` in pixels) or a
-window by its number (`window:<number>`, the title bar included). A
-`getDisplayMedia` stream there comes with ScreenCaptureKit's stream verbs,
-in a later release.
+On **macOS**, a screenshot and a stream need the Screen Recording
+permission. A source is a display (`display:<id>`, listed by
+`displaySources()` in pixels) or a window by its number (`window:<number>`,
+the title bar included). `displaySources()` lists the windows a person would
+share, frontmost first, each named by its application and title, with its
+own `title`, `appId` and `pid`. There is no system picker here: an app picks
+from `displaySources()`, and with no `source` the stream is of the main
+display.
+
+A `getDisplayMedia` stream is ScreenCaptureKit's, which needs
+`@windowkit/appkit` 0.33:
+
+- `video: { width, height }` is a box to fit, aspect kept; a width or a height
+  alone sets the other. `frameRate` is a ceiling (30 by default), and a still
+  screen sends no frames at all. `cursor: 'never'` leaves the pointer out.
+- A `<video srcObject>` shows it on a layer of its own, as a camera, with no
+  frame crossing into JavaScript. `track.onFrame` hands over BGRA frames, the
+  newest only.
+- `applyConstraints({ frameRate, width, height })` changes the running
+  stream; one the system refuses rejects with `OverconstrainedError`.
+- A window minimized, hidden or on another space mutes the track. A window
+  closed ends it within a second, and so does the user stopping the share from
+  the menu bar.
+- `audio` pairs the stream with other applications' sound, the process taps
+  above, through the same System Audio Recording permission.
+
+A bridge before 0.33 takes screenshots and streams nothing:
+`features.streams` is false, and `getDisplayMedia` rejects with
+`NotSupportedError`. A capture holds a script's process open while a source
+is open, as a socket does, so a script with no window can await one; stop
+the tracks to let it end.
 
 **`<window excludeFromCapture>`** keeps a window out of every screenshot and
 recording, this app's own included: a recording indicator, a password

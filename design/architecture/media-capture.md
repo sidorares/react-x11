@@ -297,6 +297,56 @@ stopping when nothing shows it, one session for the host and a pane, the
 clock counting unsent frames, and a pane's exit closing its camera and its
 output. Not yet run on a real Mac in a pane.
 
+### 0.4 Built, 2026-11-08: `getDisplayMedia` on macOS
+
+ScreenCaptureKit's `SCStream`, in the bridge's `displaystream.mm`
+(appkit 0.33), with the Cocoa rung's `openDisplay` over it. A screen is a
+camera with the desktop behind it, and every decision follows from that:
+
+- **Shown on its own layer.** A `CALayer` whose contents are the stream's
+  newest IOSurface, set on ScreenCaptureKit's queue in an explicit
+  transaction with actions off. `CameraPresentation` lifts it as it lifts a
+  camera's preview layer, so a shared screen's preview costs no copy either.
+- **BGRA in sRGB**, which is what a layer shows and an encoder reads. Frames
+  reach JavaScript only on request, the newest only, as a camera's do.
+- **Only complete frames are frames.** ScreenCaptureKit sends idle frames
+  when nothing changed, and a still screen sends nothing at all. A reader
+  waiting on a frame waits for a change.
+- **A closed window ends the stream, a minimized one mutes it.** The two
+  arrive as the same thing: one `Suspended` frame status, then silence. No
+  `didStopWithError`, no `Stopped` status. Measured on macOS 15.8.1: a window
+  destroyed under its stream gives one status-3 frame 100 ms later and
+  nothing after. So the bridge reports a suspension as `display-muted` and
+  looks for the window with `CGWindowListCopyWindowInfo` while it lasts,
+  once a second; one the window server no longer lists ends the stream.
+- **`applyConstraints` reconfigures the running stream**
+  (`updateConfiguration`), because a call app tunes a screen track's rate and
+  size as the content changes, and a track that rejected every
+  `applyConstraints` would break that flow.
+- **No system picker.** macOS 14's `SCContentSharingPicker` is the system's
+  own; using it is a later rung. Here an app picks from `displaySources()`,
+  which now lists windows (`screenCaptureWindows`).
+- **The sound is the taps'.** `SCStream` can capture audio, but #1042's
+  process taps already pair with any stream through `getDisplayMedia`, and
+  they are what `systemAudio`'s features describe. Two paths to the same
+  sound would only be two ways to get it wrong.
+
+Found on the way, and fixed for every source: the bridge's events cross to
+JavaScript through a threadsafe function that is unref'd, so a script with
+no window that awaited `getDisplayMedia`, or a camera, exited before the
+answer came. A source opening or open now holds the process open
+(`CocoaMediaCapture._hold`), and `CocoaApp.close` stops every source.
+
+Run on a real display (macOS 15.8.1, M1 Pro). The bridge's
+`test/display-stream.js`: listing, a window streamed at the width asked with
+its aspect kept, its red found in a frame and in a copy, a configure to
+another size and rate, mute on minimize and unmute on restore, an end within
+a second of the window closing, `NotFoundError` for a missing window, and
+nothing after a close before the start. The threaded variant streams the
+main display from a worker. Through react-x11: the main display at 640 x 414,
+BGRA frames, `applyConstraints({ frameRate: 5 })` applied live, and a clean
+stop, from a script with a window and from one without.
+
 ## 1. The apps this is measured against
 
 Five applications, each to be written with as little non-portable code as

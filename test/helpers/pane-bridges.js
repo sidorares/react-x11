@@ -35,6 +35,10 @@ const CAPTURE_VERBS = new Set([
   'screenCaptureDisplays',
   'captureScreenshot',
   'setWindowSharing',
+  'openDisplayStream',
+  'displayStreamFrames',
+  'displayStreamCopyFrame',
+  'closeDisplayStream',
 ]);
 
 /**
@@ -43,7 +47,8 @@ const CAPTURE_VERBS = new Set([
  * and a microphone that start a tick after they open, a camera whose newest
  * frame `cameraFrame(id, w, h)` sets for `cameraCopyFrame` to
  * convert, a microphone that says what it opened, an output with a queue
- * and a clock, one display and its screenshot. `cameras`, `microphones` and
+ * and a clock, one display, its screenshot and its stream (`cameras` holds
+ * the streams too, `display: true`). `cameras`, `microphones` and
  * `outputs` hold what is open.
  */
 function captureVerbs(base) {
@@ -177,6 +182,54 @@ function captureVerbs(base) {
       setImmediate(() => cb({ width: 2, height: 2, scale: 2, data }));
     },
     setWindowSharing() {},
+    // a display's stream, started a tick later at the width asked (1280 x
+    // 800 the display), its newest frame set by `displayFrame(id, w, h)`
+    openDisplayStream(opts) {
+      const id = ++seq;
+      const width = opts.width ?? 1280;
+      const height = Math.round((width * 800) / 1280);
+      cameras.set(id, {
+        opts,
+        frames: false,
+        frame: null,
+        n: 0,
+        display: true,
+      });
+      setImmediate(() =>
+        base.emit?.({
+          type: 'display-started',
+          id,
+          width,
+          height,
+          frameRate: opts.frameRate,
+        }),
+      );
+      return {
+        id,
+        layer: { layer: ++seq, props: {}, sublayers: [], parent: null },
+      };
+    },
+    displayStreamFrames(id, on) {
+      const stream = cameras.get(id);
+      if (stream) stream.frames = on;
+    },
+    displayFrame(id, width, height) {
+      const stream = cameras.get(id);
+      stream.n += 1;
+      stream.frame = { width, height, pixels: `screen-${stream.n}` };
+    },
+    displayStreamCopyFrame(id, target) {
+      const stream = cameras.get(id);
+      if (!stream?.frame) return null;
+      const { width, height, pixels } = stream.frame;
+      stream.frame = null;
+      const written = target.width === width && target.height === height;
+      if (written) target.pixels = pixels;
+      return { width, height, time: stream.n / 30, written };
+    },
+    closeDisplayStream(id) {
+      cameras.delete(id);
+    },
   };
 }
 
