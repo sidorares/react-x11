@@ -174,7 +174,8 @@ const usageKey = (kind) =>
 
 const NOTHING_OPENS =
   'nothing on this display can open a camera or a microphone. On macOS ' +
-  'that takes @windowkit/appkit with its capture verbs; on X11 and Wayland ' +
+  'that takes @windowkit/appkit 0.31 or later — `npm ls @windowkit/appkit` ' +
+  'says which this app has; on X11 and Wayland ' +
   'there is no camera or microphone rung yet (design/architecture/' +
   "media-capture.md §4); in a test, fakeMediaDevices(app) from 'react-x11/" +
   "test' gives one. Ask useDesktopCapability('camera') or " +
