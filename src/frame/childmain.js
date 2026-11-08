@@ -245,6 +245,7 @@ export async function runFrameChild(transport, options = {}) {
     {
       // what the host does for the pane that a pane cannot do itself
       players: Boolean(hello.players),
+      capture: hello.capture ?? null,
       // and the scale it is drawn at, before anything here is laid out at
       // the one this process read for itself
       displayScale: hello.rect?.displayScale,

@@ -178,3 +178,23 @@ test('the lab records other applications’ sound, and saves what it heard', asy
   await press(windowNode, buttons('Stop recording')[0]);
   assert.equal(tap.stopped, true);
 });
+
+test('the lab’s pane module is the lab with no window of its own, and no row for one', async () => {
+  const { default: MediaCapturePane } =
+    await import('../examples/labs/media-capture-pane.jsx');
+  const app = createMockApp();
+  fakeMediaDevices(app);
+  await renderX11(h(MediaCapturePane), { app, backend: 'mock' });
+  await act(async () => {
+    await tick();
+    await tick();
+  });
+  screen.getByText('camera: Fake camera (default)');
+  assert.equal(buttons('Screenshot').length, 1);
+  // a pane has no window of its own to capture or keep out
+  assert.equal(buttons('This window').length, 0);
+  assert.equal(
+    screen.all((n) => textOf(n) === 'keep this window out of captures').length,
+    0,
+  );
+});

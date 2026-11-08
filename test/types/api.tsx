@@ -2446,6 +2446,15 @@ async function _MediaPromises(app: unknown) {
     app,
     thumbnail: { width: 160, height: 90 },
   });
+  const windowTitle: string | undefined = sources.find(
+    (s) => s.kind === 'window',
+  )?.title;
+  const appOfWindow: string | undefined = sources[0]?.appId;
+  const window = await getDisplayMedia({
+    source: 'window:42',
+    video: { width: 1280, frameRate: 15, cursor: 'never' },
+  });
+  void [windowTitle, appOfWindow, window];
   const shot: Screenshot = await captureScreenshot({
     app,
     source: sources[0]?.id,

@@ -7,7 +7,11 @@
 // screenshot — and a bridge without the verbs that answers unavailable.
 // Other applications' sound over the process taps of appkit 0.32: the
 // processes the bridge lists as the sources a person would pick, opened as a
-// microphone is, and a bridge from before them that lists none.
+// microphone is, and a bridge from before them that lists none. A display or
+// a window as ScreenCaptureKit's stream over appkit 0.33's verbs: shown on
+// its own layer, frames on request, changed without stopping, muted while
+// minimized, paired with the taps' sound — and a bridge from before them
+// that streams nothing.
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
@@ -16,13 +20,16 @@ import {
   captureScreenshot,
   createAudioFrames,
   desktopCapability,
+  displaySources,
   enumerateDevices,
+  getDisplayMedia,
   getUserMedia,
   NoPermissionServiceError,
   permissionStatus,
   requestPermission,
 } from '../src/index.js';
 import { createRoot } from '../src/index.js';
+import { liveApps } from '../src/trace-registry.js';
 import {
   cleanupCocoa,
   fakeCocoaApp,
@@ -34,6 +41,8 @@ import {
 const h = React.createElement;
 
 afterEach(async () => {
+  // a source a test left open holds the process, as it would a script's
+  for (const app of liveApps()) app.mediaCapture?.close?.();
   await cleanupCocoa();
 });
 
@@ -101,6 +110,8 @@ function captureBridge({ processes = PROCESSES } = {}) {
   const native = fakeCocoaBridge();
   let seq = 5000;
   const cameras = new Map();
+  const streams = new Map();
+  const taps = new Map();
   const listed = [
     {
       id: 'cam-builtin',
@@ -173,11 +184,15 @@ function captureBridge({ processes = PROCESSES } = {}) {
     openMicrophone: (deviceId, opts) => ({ id: ++seq, ...opts }),
     closeMicrophone() {},
     // what was asked; `system-audio-started` says the tap is running
-    openSystemAudio: (opts) => ({
-      id: ++seq,
-      sampleRate: opts.sampleRate ?? 48000,
-      channels: opts.channels ?? 2,
-    }),
+    openSystemAudio(opts) {
+      const id = ++seq;
+      taps.set(id, opts);
+      return {
+        id,
+        sampleRate: opts.sampleRate ?? 48000,
+        channels: opts.channels ?? 2,
+      };
+    },
     closeSystemAudio() {},
     openAudioOutput: (opts) => ({ id: ++seq, ...opts, latency: 0 }),
     audioOutputWrite: (id, channels) => channels[0].length,
@@ -193,10 +208,55 @@ function captureBridge({ processes = PROCESSES } = {}) {
       setImmediate(() => cb({ width: 4, height: 4, scale: 2, data }));
     },
     setWindowSharing() {},
+    screenCaptureWindows: (cb) =>
+      later(
+        [
+          {
+            id: 42,
+            title: 'Quarterly plan',
+            app: {
+              name: 'Keynote',
+              bundleId: 'com.apple.iWork.Keynote',
+              pid: 900,
+            },
+            x: 100,
+            y: 50,
+            width: 800,
+            height: 600,
+            active: true,
+          },
+        ],
+        cb,
+      ),
+    // what was asked; `display-started` says the size the frames come at
+    openDisplayStream(opts) {
+      const id = ++seq;
+      const layer = { layer: ++seq, props: {}, sublayers: [], parent: null };
+      streams.set(id, { opts, layer });
+      return { id, layer };
+    },
+    displayStreamFrames() {},
+    displayStreamCopyFrame: () => null,
+    displayStreamConfigure() {},
+    closeDisplayStream(id) {
+      streams.delete(id);
+    },
   });
   native.cameras = cameras;
+  native.streams = streams;
+  native.taps = taps;
   return native;
 }
+
+/** The display-stream verbs, which a bridge before 0.33 has not got. */
+const STREAM_VERBS = [
+  'screenCaptureWindows',
+  'openDisplayStream',
+  'displayStreamFrames',
+  'displayStreamCopyFrame',
+  'displayStreamConfigure',
+  'closeDisplayStream',
+];
 
 /** The id the newest `openCamera` answered. */
 const lastCamera = (native) => [...native.cameras.keys()].at(-1) ?? null;
@@ -458,9 +518,9 @@ test('other applications’ sound: the processes as sources a person picks, each
   assert.equal(cap.backend, 'cocoa');
   assert.equal(cap.features.applications, true);
   assert.equal(cap.features.excludesSelf, true);
-  // no getDisplayMedia here yet, so no stream comes with the sound
+  // a stream of the screen comes with it, through getDisplayMedia's pairing
   const screen = await desktopCapability('screenCapture', { app });
-  assert.equal(screen.features.systemAudio, false);
+  assert.equal(screen.features.systemAudio, true);
 
   // one application, at the rate a speech model wants
   const pending = getUserMedia(
@@ -601,6 +661,236 @@ test('a bridge from before the process taps lists no sound of other applications
   assert.deepEqual(native.of('openPrivacySettings'), []);
 });
 
+/** The id the newest `openDisplayStream` answered. */
+const lastStream = (native) => [...native.streams.keys()].at(-1) ?? null;
+
+/** `getDisplayMedia(request)`, answered by the bridge's `display-started` at
+ *  `width` x `height`. */
+async function shareScreen(native, app, request = {}, size = [3024, 1964]) {
+  const pending = getDisplayMedia(request, { app });
+  for (let i = 0; i < 4 && lastStream(native) === null; i++) await tick();
+  const id = lastStream(native);
+  native.emit({
+    type: 'display-started',
+    id,
+    width: size[0],
+    height: size[1],
+    frameRate: native.streams.get(id).opts.frameRate,
+  });
+  return { stream: await pending, id };
+}
+
+test('getDisplayMedia streams the main display through ScreenCaptureKit, at the size the bridge started it', async () => {
+  const native = captureBridge();
+  const { app } = await mountCocoa(null, { native });
+  const cap = await desktopCapability('screenCapture', { app });
+  assert.equal(cap.features.streams, true);
+  assert.equal(cap.features.windows, true);
+  // the taps' sound comes with a stream
+  assert.equal(cap.features.systemAudio, true);
+
+  const { stream, id } = await shareScreen(native, app);
+  assert.deepEqual(native.streams.get(id).opts, {
+    frameRate: 30,
+    cursor: true,
+  });
+  const [track] = stream.getVideoTracks();
+  assert.equal(track.label, 'Built-in Retina Display');
+  assert.equal(track.readyState, 'live');
+  assert.deepEqual(track.getSettings(), {
+    width: 3024,
+    height: 1964,
+    frameRate: 30,
+    displaySurface: 'monitor',
+    cursor: 'always',
+    resizeMode: 'crop-and-scale',
+    aspectRatio: 3024 / 1964,
+  });
+  assert.equal(stream.getAudioTracks().length, 0, 'no sound asked, none');
+
+  // frames on request: BGRA, the bridge's planes
+  const frames = [];
+  const off = track.onFrame((f) => frames.push(f));
+  assert.deepEqual(native.of('displayStreamFrames').at(-1), [id, true]);
+  const plane = new Uint8Array(4 * 4 * 2);
+  native.emit({
+    type: 'display-frame',
+    id,
+    width: 4,
+    height: 2,
+    format: 'BGRA',
+    planes: [plane],
+    strides: [16],
+    time: 1.5,
+  });
+  assert.equal(frames.length, 1);
+  assert.equal(frames[0].format, 'BGRA');
+  assert.equal(frames[0].planes[0], plane);
+  off();
+  assert.deepEqual(native.of('displayStreamFrames').at(-1), [id, false]);
+
+  // the window minimized mutes it; the window back, it is live again
+  native.emit({ type: 'display-muted', id, muted: true });
+  assert.equal(track.muted, true);
+  native.emit({ type: 'display-muted', id, muted: false });
+  assert.equal(track.muted, false);
+
+  // live, it holds the process open — a script with no window awaits it —
+  // and stopped, it does not
+  assert.ok(app.mediaCapture._keepAlive !== null);
+  track.stop();
+  assert.ok(native.of('closeDisplayStream').some(([closed]) => closed === id));
+  assert.equal(app.mediaCapture._keepAlive, null);
+});
+
+test('<video srcObject> of a screen lifts the stream’s own layer, and reads no frames', async () => {
+  const native = captureBridge();
+  const { app, frame, render, promotion } = await mountCocoa(null, { native });
+  const { stream, id } = await shareScreen(native, app, {}, [1600, 1000]);
+  await render(
+    h('video', {
+      srcObject: stream,
+      style: {
+        position: 'absolute',
+        left: 10,
+        top: 10,
+        width: 160,
+        height: 100,
+      },
+    }),
+  );
+  await tick();
+  frame();
+  frame();
+  const host = [...promotion.sprites.hosts.values()][0];
+  const state = host && [...host.values()][0];
+  assert.ok(state, 'lifted');
+  assert.equal(native.streams.get(id).layer.parent, state.layer);
+  assert.deepEqual(native.of('displayStreamFrames'), [], 'no frame crossed');
+  stream.getVideoTracks()[0].stop();
+});
+
+test('a window by its source id, at the size and rate asked, changed without stopping, ended when it closes', async () => {
+  const native = captureBridge();
+  const { app } = await mountCocoa(null, { native });
+  const sources = await displaySources({ app });
+  const win = sources.find((one) => one.kind === 'window');
+  assert.deepEqual(win, {
+    id: 'window:42',
+    kind: 'window',
+    name: 'Keynote — Quarterly plan',
+    title: 'Quarterly plan',
+    appId: 'com.apple.iWork.Keynote',
+    pid: 900,
+    // this app's pixels, as a region is read
+    x: 200,
+    y: 100,
+    width: 1600,
+    height: 1200,
+  });
+  const { stream, id } = await shareScreen(
+    native,
+    app,
+    {
+      source: win.id,
+      video: { width: 1280, frameRate: { ideal: 15 }, cursor: 'never' },
+    },
+    [1280, 960],
+  );
+  assert.deepEqual(native.streams.get(id).opts, {
+    window: 42,
+    width: 1280,
+    frameRate: 15,
+    cursor: false,
+  });
+  const [track] = stream.getVideoTracks();
+  assert.equal(track.label, 'Quarterly plan');
+  assert.equal(track.getSettings().displaySurface, 'window');
+
+  // applyConstraints: the bridge configures the running stream
+  const applied = track.applyConstraints({ frameRate: 5 });
+  await tick();
+  assert.deepEqual(native.of('displayStreamConfigure').at(-1), [
+    id,
+    { frameRate: 5 },
+  ]);
+  native.emit({
+    type: 'display-configured',
+    id,
+    width: 1280,
+    height: 960,
+    frameRate: 5,
+  });
+  await applied;
+  assert.equal(track.getSettings().frameRate, 5);
+  // one the bridge refuses is OverconstrainedError, and nothing changed
+  const refused = track.applyConstraints({ frameRate: 500 });
+  await tick();
+  native.emit({
+    type: 'display-configured',
+    id,
+    error: 'no',
+    name: 'NotReadableError',
+  });
+  await assert.rejects(refused, { name: 'OverconstrainedError' });
+  assert.equal(track.getSettings().frameRate, 5);
+
+  // the window closed: the track ends, of its own accord
+  let changed = 0;
+  track.onChange(() => changed++);
+  native.emit({ type: 'display-ended', id });
+  assert.equal(track.readyState, 'ended');
+  assert.ok(changed > 0);
+});
+
+test('a stream the bridge refused rejects with its name; one with sound asked is paired with the taps', async () => {
+  const native = captureBridge();
+  const { app } = await mountCocoa(null, { native });
+  const pending = getDisplayMedia({}, { app });
+  for (let i = 0; i < 4 && lastStream(native) === null; i++) await tick();
+  native.emit({
+    type: 'display-error',
+    id: lastStream(native),
+    name: 'NotAllowedError',
+    message: 'Screen Recording is not allowed for this app',
+  });
+  await assert.rejects(pending, { name: 'NotAllowedError' });
+
+  const sharing = getDisplayMedia({ audio: 'system' }, { app });
+  for (let i = 0; i < 6; i++) await tick();
+  const id = lastStream(native);
+  native.emit({ type: 'display-started', id, width: 640, height: 400 });
+  // the sound: a tap of everything but this app, opened as a microphone is
+  for (let i = 0; i < 8 && native.taps.size === 0; i++) await tick();
+  assert.equal(native.taps.size, 1);
+  const [[tapId, ask]] = [...native.taps];
+  assert.equal(ask.bundleId, undefined, 'every application');
+  assert.equal(ask.pid, undefined);
+  native.emit({ type: 'system-audio-started', id: tapId });
+  const stream = await sharing;
+  assert.equal(stream.getVideoTracks().length, 1);
+  assert.equal(stream.getAudioTracks().length, 1);
+  assert.equal(stream.getAudioTracks()[0].label, 'System audio');
+});
+
+test('a bridge from before display streams shares no screen, and says so', async () => {
+  const native = captureBridge();
+  const before = new Proxy(native, {
+    get: (target, name) =>
+      STREAM_VERBS.includes(name) ? undefined : target[name],
+  });
+  const { app } = await mountCocoa(null, { native: before });
+  const cap = await desktopCapability('screenCapture', { app });
+  assert.equal(cap.available, true, 'screenshots still');
+  assert.equal(cap.features.streams, false);
+  assert.equal(cap.features.windows, false);
+  assert.equal(cap.features.systemAudio, false, 'no stream to pair sound with');
+  await assert.rejects(getDisplayMedia({}, { app }), {
+    name: 'NotSupportedError',
+  });
+  assert.ok(!(await displaySources({ app })).some((s) => s.kind === 'window'));
+});
+
 test('a bridge without the capture verbs answers unavailable', async () => {
   const native = fakeCocoaBridge();
   // the fake answers every name; this one is a bridge from before release C
@@ -656,8 +946,7 @@ test('<window excludeFromCapture> keeps the window out of captures, and lets it 
   );
   const cap = await desktopCapability('screenCapture', { app });
   assert.equal(cap.features.excludeWindows, true);
-  // screenshots, and no stream until the bridge has SCStream's verbs
   assert.equal(cap.features.screenshot, true);
-  assert.equal(cap.features.streams, false);
+  assert.equal(cap.features.streams, true);
   await root.unmount();
 });

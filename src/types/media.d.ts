@@ -245,8 +245,15 @@ export declare function getUserMedia(
 export interface DisplaySource {
   id: string;
   kind: 'screen' | 'window';
+  /** A screen's name, or a window's as a picker shows it: its application's
+   * and its title. */
   name: string;
   primary?: boolean;
+  /** A window's own title, its application's id and its process, where the
+   * display says (macOS). */
+  title?: string;
+  appId?: string;
+  pid?: number;
   x: number;
   y: number;
   width: number;
@@ -266,7 +273,16 @@ export declare function displaySources(options?: {
 
 /** What `getDisplayMedia` asks for. */
 export interface DisplayMediaRequest {
-  video?: true | { frameRate?: number; width?: number; height?: number };
+  /** The rate at most and the size to fit in, the aspect kept — a width or a
+   * height alone sets the other — and whether the pointer is drawn. */
+  video?:
+    | true
+    | {
+        frameRate?: number;
+        width?: number;
+        height?: number;
+        cursor?: 'always' | 'never';
+      };
   /** The system's sound (`true` is the same), or one application's, best
    * effort: a stream without an audio track is the answer where the display
    * cannot give it. Sound alone is `getUserMedia({ audio: { deviceId:

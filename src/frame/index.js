@@ -536,6 +536,9 @@ export function Frame({
       // whether this side plays the pane's `<video src>`s for it — the
       // Cocoa host does, for a pane process that cannot (paneplayer.js)
       ...(paneApp?.playsForPanes && { players: true }),
+      // and whether it captures for it — its cameras, microphones, audio
+      // out and screen, which are the host's to own (panecapture.js)
+      ...(paneApp?.capturesForPanes && { capture: paneApp.capturesForPanes }),
     });
 
     // The watchdog. A pane whose event loop is stuck stays `running`, is
@@ -945,6 +948,8 @@ function PaneHostView({
         host.cancelMenu?.(msg.menu);
       } else if (msg?.type === 'pane-player') {
         host.player?.(msg);
+      } else if (msg?.type === 'pane-capture') {
+        host.capture?.(msg);
       } else if (msg?.type === 'pane-present' && msg.window != null) {
         host.presentWindow?.(msg);
       } else if (msg?.type === 'pane-cursor' && msg.window != null) {

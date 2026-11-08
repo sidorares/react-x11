@@ -11,8 +11,11 @@
 //
 // And the players its `<video src>`s ask for, which a process with no
 // AppKit would never hear from: each is a player here, its events and its
-// frames sent back (`HostedPlayer`, src/cocoa/paneplayer.js).
+// frames sent back (`HostedPlayer`, src/cocoa/paneplayer.js). Its capture
+// the same way: cameras, microphones, the audio out and the screen, on this
+// app's rung (`HostedCapture`, src/cocoa/panecapture.js).
 import { now } from '../nodes/animation.js';
+import { HostedCapture } from './panecapture.js';
 import { HostedPlayer } from './paneplayer.js';
 import { withoutActions } from './quiet.js';
 
@@ -399,6 +402,8 @@ export class CocoaPaneHost extends PaneLayer {
     this._menus = new Map();
     /** @type {Map<string, HostedPlayer>} the pane's players, by its id */
     this._players = new Map();
+    /** @type {HostedCapture | null} the pane's capture, once it asks */
+    this._capture = null;
   }
 
   /**
@@ -449,6 +454,30 @@ export class CocoaPaneHost extends PaneLayer {
           type: 'player-error',
           id: msg.player,
           message: err?.message ?? String(err),
+        },
+      });
+    }
+  }
+
+  /**
+   * A `pane-capture` message: one of the pane's capture verbs, done here on
+   * this app's rung (`HostedCapture`, src/cocoa/panecapture.js). A host with
+   * no rung offered none in the hello, so a pane that asks anyway is told
+   * no.
+   */
+  capture(msg) {
+    if (this.destroyed) return;
+    if (!this._capture && this.app.mediaCapture) {
+      this._capture = new HostedCapture(this.app, (m) => this._send?.(m));
+    }
+    if (this._capture) this._capture.handle(msg);
+    else if (msg.req != null) {
+      this._send?.({
+        type: 'pane-capture-answer',
+        req: msg.req,
+        error: {
+          name: 'NotSupportedError',
+          message: 'react-x11: the host of this pane captures nothing',
         },
       });
     }
@@ -630,6 +659,9 @@ export class CocoaPaneHost extends PaneLayer {
     for (const entry of [...this._windows.values()]) this._drop(entry);
     for (const hosted of this._players.values()) hosted.release();
     this._players.clear();
+    // and a pane that crashed on a call leaves no camera light on
+    this._capture?.release();
+    this._capture = null;
     super.destroy();
   }
 }

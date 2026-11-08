@@ -8,19 +8,23 @@
 // pane mode over another — joined by the loopback transport the frame tests
 // run panes through, so what crosses is a structured clone, as over the
 // fork. The two fakes share one table of IOSurfaces, by id, as two
-// processes share the kernel's (`surfaceTable`).
+// processes share the kernel's (`surfaceTable`, test/helpers/pane-bridges.js).
 import assert from 'node:assert';
 import { afterEach, test } from 'node:test';
 import React from 'react';
 
-import { CocoaApp } from '../src/cocoa/app.js';
 import { HostedPlayer } from '../src/cocoa/paneplayer.js';
-import { setCompositingForTests } from '../src/compositing.js';
 import { Frame } from '../src/frame/index.js';
 import { createRoot } from '../src/index.js';
-import { setScaleForTests } from '../src/scale.js';
-import { setScreensForTests } from '../src/screens.js';
 import { loopbackFrameFactory } from './helpers/frame-loopback.js';
+import {
+  appOver,
+  fakeBridge,
+  find,
+  settle,
+  surfaceTable,
+  until,
+} from './helpers/pane-bridges.js';
 
 process.env.NO_AT_BRIDGE ??= '1';
 
@@ -28,227 +32,10 @@ const h = React.createElement;
 const PANE = new URL('./fixtures/video-pane.js', import.meta.url);
 const CLIP = '/tmp/clip.mp4';
 
-const PLAYER_VERBS = new Set([
-  'createPlayer',
-  'playerSet',
-  'playerSeek',
-  'playerCopyFrame',
-  'releasePlayer',
-]);
-
-/**
- * The kernel's table of IOSurfaces, which both processes make shared
- * buffers in and look them up from by id. A surface is found while
- * something holds it — the bridge that made it, or a lookup's mapping of
- * it — and with `recycleIds` a freed id goes to the next surface made, in
- * either process, the lowest first: what the system does, as measured for
- * the pane's own ring (test/cocoa-frames.test.js).
- */
-function surfaceTable({ recycleIds = false } = {}) {
-  const byId = new Map();
-  const freeIds = [];
-  return {
-    /** `surface`, made by the process `tag` names: its id. */
-    add(surface, tag) {
-      freeIds.sort((a, b) => a - b);
-      // ids are the kernel's, so two processes' never collide
-      const id =
-        recycleIds && freeIds.length
-          ? freeIds.shift()
-          : tag * 100000 + surface.id;
-      surface.iosurfaceId = id;
-      surface.holds = 1;
-      byId.set(id, surface);
-      return id;
-    },
-    lookup(id) {
-      const surface = byId.get(id);
-      if (surface) surface.holds += 1;
-      return surface;
-    },
-    /** One hold on `surface` let go: the last frees its id. */
-    drop(surface) {
-      surface.holds -= 1;
-      if (surface.holds > 0) return;
-      byId.delete(surface.iosurfaceId);
-      freeIds.push(surface.iosurfaceId);
-    },
-  };
-}
-
-/** Enough of @windowkit/appkit for a window, shared surfaces and a player,
- * recording every call. `iosurfaces` is the table both processes look a
- * shared buffer up in (`surfaceTable`); a surface's `pixels` is a stand-in
- * for what is in it, and `looked` every surface a lookup found. With
- * `players: false` the bridge has none of the player verbs. */
-function fakeBridge(iosurfaces, { players = true, tag = 1 } = {}) {
-  const calls = [];
-  let seq = 0;
-  let pid = 0;
-  const live = new Map();
-  const surface = (width, height, scale) => ({
-    id: ++seq,
-    width,
-    height,
-    scale,
-    pixels: null,
-  });
-  const base = {
-    calls,
-    live,
-    looked: [],
-    of: (name) => calls.filter((c) => c[0] === name).map((c) => c.slice(1)),
-    setBackendEventCallback(cb) {
-      base.emit = cb;
-    },
-    listScreens: () => [
-      {
-        x: 0,
-        y: 0,
-        width: 1440,
-        height: 900,
-        scale: 2,
-        fps: 60,
-        visible: { x: 0, y: 0, width: 1440, height: 875 },
-        primary: true,
-      },
-    ],
-    createWindow2: (options) => ({ id: ++seq, options: { ...options } }),
-    windowNumber: (handle) => handle.id,
-    windowRootLayer: (handle) => ({ root: handle.id }),
-    getWindowFrame: (handle) => ({
-      x: handle.options.x ?? 0,
-      y: handle.options.y ?? 0,
-      width: handle.options.width,
-      height: handle.options.height,
-    }),
-    windowIsVisible: () => true,
-    createSurface: (width, height, scale) => surface(width, height, scale),
-    createSurfaceIOSurface(width, height, scale, shared) {
-      const handle = surface(width, height, scale);
-      handle.shared = Boolean(shared);
-      const iosurfaceId = iosurfaces.add(handle, tag);
-      return { handle, iosurfaceId };
-    },
-    surfaceFromIOSurfaceID(id) {
-      const handle = iosurfaces.lookup(id);
-      if (!handle) throw new Error('IOSurfaceLookup: no surface with that id');
-      base.looked.push(handle);
-      // another mapping of the same memory
-      return {
-        handle: { lookedUp: id, of: handle },
-        width: handle.width,
-        height: handle.height,
-      };
-    },
-    releaseSurface(handle) {
-      // idempotent, as the bridge's is
-      if (handle.released) return;
-      handle.released = true;
-      const held = handle.of ?? handle;
-      if (held.iosurfaceId != null) iosurfaces.drop(held);
-    },
-    blitSurface(src, sx, sy, w, hh, dst) {
-      dst.pixels = (src.of ?? src).pixels;
-      return [0, 0, w, hh];
-    },
-    surfaceSize: (s) => ({ width: s.width, height: s.height, scale: s.scale }),
-    createLayer: () => ({ layer: ++seq }),
-  };
-  if (players) {
-    Object.assign(base, {
-      createPlayer(url, options) {
-        const id = ++pid;
-        live.set(id, { url, options, frame: null, frames: 0 });
-        return { id, layer: { player: id } };
-      },
-      playerSet() {},
-      playerSeek() {},
-      /** A new frame of `width` x `height` is showing in player `id`. */
-      playerFrame(id, width, height) {
-        const p = live.get(id);
-        p.frames += 1;
-        p.frame = { width, height, pixels: `frame-${p.frames}` };
-      },
-      playerCopyFrame(id, target) {
-        const p = live.get(id);
-        if (!p?.frame) return null;
-        const { width, height, pixels } = p.frame;
-        p.frame = null;
-        const written = target.width === width && target.height === height;
-        if (written) target.pixels = pixels;
-        return { width, height, time: p.frames / 30, written };
-      },
-      releasePlayer(id) {
-        live.delete(id);
-      },
-    });
-  }
-  return new Proxy(base, {
-    get: (target, key) => {
-      if (typeof key !== 'string' || key === 'then') return target[key];
-      // a verb this bridge has not got is not there, rather than a no-op
-      if (!players && PLAYER_VERBS.has(key)) return undefined;
-      const value = key in target ? target[key] : () => undefined;
-      if (typeof value !== 'function' || key === 'of' || key === 'emit') {
-        return value;
-      }
-      return (...args) => {
-        calls.push([key, ...args]);
-        return value(...args);
-      };
-    },
-  });
-}
-
-function appOver(native, options) {
-  const app = new CocoaApp(native, options);
-  setScaleForTests(app, 2, 'cocoa');
-  setScreensForTests(app, {
-    monitors: [{ x: 0, y: 0, width: 2880, height: 1800 }],
-    workArea: { x: 0, y: 0, width: 2880, height: 1750 },
-  });
-  setCompositingForTests(app, true);
-  app._frameInterval = 0;
-  app.fonts = null;
-  native.setBackendEventCallback((ev) => app._route(ev));
-  return app;
-}
-
 const roots = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await root.unmount();
 });
-
-async function settle(...apps) {
-  for (let i = 0; i < 16; i++) {
-    await new Promise((resolve) => setImmediate(resolve));
-    for (const app of apps) {
-      app._tickFrames();
-      app._presentAll();
-    }
-  }
-}
-
-/** Settle until `predicate` holds: the pane's first mount imports its
- * module from disk, and the host asks its player for frames on a timer. */
-async function until(apps, predicate, what, { tries = 400, delay = 2 } = {}) {
-  for (let i = 0; i < tries; i++) {
-    if (predicate()) return;
-    await settle(...apps);
-    await new Promise((resolve) => setTimeout(resolve, delay));
-  }
-  assert.fail(`timed out waiting for ${what}`);
-}
-
-function find(node, test) {
-  if (test(node)) return node;
-  for (const child of node.children ?? []) {
-    const hit = find(child, test);
-    if (hit) return hit;
-  }
-  return null;
-}
 
 /** A host window with a <Frame> showing the fixture, both apps running. */
 async function mount(
@@ -534,7 +321,7 @@ test('a buffer looked up at another size than its frame is neither kept nor copi
     seq: 99,
   });
   assert.strictEqual(m.paneNative.looked.length, looked + 1, 'it looked');
-  assert.ok(!player._buffers.has(other.iosurfaceId), 'and kept nothing');
+  assert.ok(!player._ring._buffers.has(other.iosurfaceId), 'and kept nothing');
   assert.strictEqual(other.handle.holds, 1, 'nor held it');
   m.emit({ type: 'player-time', id, currentTime: 2 });
   await settle(...m.apps);
@@ -561,7 +348,10 @@ test('a pane that stops answering has the host keep no more than a ring of retir
       height: 9 * i,
       duration: 2,
     });
-    assert.ok(hosted._retired.length <= 3, `${hosted._retired.length} kept`);
+    assert.ok(
+      hosted._ring._retired.length <= 3,
+      `${hosted._ring._retired.length} kept`,
+    );
   }
   const frames = sent.filter((m) => m.type === 'pane-player-frame');
   assert.deepStrictEqual(
@@ -571,7 +361,7 @@ test('a pane that stops answering has the host keep no more than a ring of retir
   // the newest three of the five retired rings' frames: the oldest went
   // first, the one the pane is likeliest to have looked up
   assert.deepStrictEqual(
-    hosted._retired.map((b) => b.namedSeq),
+    hosted._ring._retired.map((b) => b.namedSeq),
     [3, 4, 5],
   );
   const made = native.of('createSurfaceIOSurface').length;
@@ -579,12 +369,12 @@ test('a pane that stops answering has the host keep no more than a ring of retir
   // an answer that comes after all frees what it covers
   hosted.handle({ op: 'seen', seq: 4 });
   assert.deepStrictEqual(
-    hosted._retired.map((b) => b.namedSeq),
+    hosted._ring._retired.map((b) => b.namedSeq),
     [5],
   );
   hosted.release();
   assert.strictEqual(native.of('releaseSurface').length, made, 'the rest');
-  assert.deepStrictEqual(hosted._retired, []);
+  assert.deepStrictEqual(hosted._ring._retired, []);
 });
 
 test('the pane’s ref steers the host’s player, and letting it go releases it', async () => {
