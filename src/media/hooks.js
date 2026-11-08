@@ -38,9 +38,12 @@ const PENDING_DEVICES = Object.freeze({
   cameras: Object.freeze([]),
   microphones: Object.freeze([]),
   speakers: Object.freeze([]),
+  systemAudio: Object.freeze([]),
   settled: false,
 });
 
+// `playing` is part of what a list shows: a picker of applications marks the
+// ones making a sound, and one that starts is a change to render
 const sameDevices = (a, b) =>
   a.length === b.length &&
   a.every(
@@ -48,7 +51,8 @@ const sameDevices = (a, b) =>
       d.deviceId === b[i].deviceId &&
       d.kind === b[i].kind &&
       d.label === b[i].label &&
-      d.isDefault === b[i].isDefault,
+      d.isDefault === b[i].isDefault &&
+      d.playing === b[i].playing,
   );
 
 /** One app's device list, read while anyone renders it and followed while it
@@ -98,6 +102,7 @@ class DeviceStore {
           cameras: of('videoinput'),
           microphones: of('audioinput'),
           speakers: of('audiooutput'),
+          systemAudio: of('systemaudio'),
           settled: true,
         });
         for (const fn of [...this._listeners]) fn();
@@ -111,10 +116,13 @@ const deviceStores = new WeakMap();
 
 /**
  * The cameras, microphones and speakers there are, kept current as they are
- * plugged in and out: `{ devices, cameras, microphones, speakers, settled }`.
- * Empty and `settled: false` on the first frame — the list takes a moment to
- * read — so a picker renders its placeholder first and fills in, rather than
- * flashing "no camera". Names are there before any permission.
+ * plugged in and out: `{ devices, cameras, microphones, speakers,
+ * systemAudio, settled }`. `systemAudio` is other applications' sound —
+ * `system-audio` first, then one source per application — and follows them
+ * as they start, quit and make a sound. Empty and `settled: false` on the
+ * first frame — the list takes a moment to read — so a picker renders its
+ * placeholder first and fills in, rather than flashing "no camera". Names
+ * are there before any permission.
  */
 export function useMediaDevices() {
   const app = useApp();
@@ -269,7 +277,8 @@ function useMediaSession(open, request, autoStart) {
 }
 
 /**
- * A camera, a microphone or both, as render state:
+ * A camera, a microphone, other applications' sound (`audio: { deviceId:
+ * 'system-audio' }`), or a picture and a sound together, as render state:
  *
  * ```jsx
  * const call = useUserMedia({

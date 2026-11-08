@@ -12,6 +12,14 @@
 // responsible process (the terminal, an IDE) or to `node` itself, and a
 // bundled app must carry the usage-description keys
 // (`NSCameraUsageDescription` and friends) or a request never prompts.
+//
+// A kind is newer than some bridges: `system-audio-recording` came with the
+// process taps (appkit 0.32), and an older bridge throws on a kind it does
+// not know. So a kind is asked only of a bridge that has it, and one that has
+// not answers the ladder's `'unknown'` — nothing here can say — rather than
+// a TypeError from inside the bridge.
+
+import { NoPermissionServiceError } from '../permissions.js';
 
 /** Apple's words as the ladder's. `writeOnly` is macOS 14's partial grant
  *  for EventKit — a grant to a writer, a refusal to a reader — and stays its
@@ -41,12 +49,22 @@ function bridgeOptions(kind, options = {}) {
   return undefined;
 }
 
+/** Whether the bridge knows `kind`: the kinds a bridge release added are
+ *  known by the verbs that came with them. */
+function bridgeKnows(native, kind) {
+  if (kind === 'system-audio-recording') {
+    return typeof native.openSystemAudio === 'function';
+  }
+  return true;
+}
+
 export class CocoaPermissions {
   constructor(native) {
     this._native = native;
   }
 
   status(kind, options) {
+    if (!bridgeKnows(this._native, kind)) return 'unknown';
     const opts = bridgeOptions(kind, options);
     return statusFromBridge(
       opts
@@ -56,6 +74,9 @@ export class CocoaPermissions {
   }
 
   request(kind, options) {
+    if (!bridgeKnows(this._native, kind)) {
+      return Promise.reject(new NoPermissionServiceError(kind));
+    }
     const opts = bridgeOptions(kind, options);
     return new Promise((resolve, reject) => {
       const done = (granted, status) =>
@@ -75,7 +96,10 @@ export class CocoaPermissions {
     });
   }
 
+  /** True once asked; null for a pane this bridge does not know, which the
+   *  ladder then opens by its deep link. */
   openSettings(kind) {
+    if (kind != null && !bridgeKnows(this._native, kind)) return null;
     if (kind == null) this._native.openPrivacySettings();
     else this._native.openPrivacySettings(kind);
     return true;

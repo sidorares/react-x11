@@ -7,8 +7,12 @@
 
 import type { VideoColorSpace, VideoFormat, VideoRange } from './video.js';
 
-/** What `enumerateDevices` lists a device as. */
-export type MediaDeviceKind = 'videoinput' | 'audioinput' | 'audiooutput';
+/** What `enumerateDevices` lists a device as. `'systemaudio'` is other
+ * applications' sound, which the web has no kind for: `system-audio` (every
+ * application but this one) and `system-audio:<appId>` (one), opened with
+ * `getUserMedia({ audio: { deviceId } })`. */
+export type MediaDeviceKind =
+  'videoinput' | 'audioinput' | 'audiooutput' | 'systemaudio';
 
 /** A range a setting can take, both ends known. */
 export interface MediaRange {
@@ -82,7 +86,10 @@ export interface VideoTrackConstraints {
 
 /** A microphone's constraints. `sampleRate` and `channelCount` are
  * delivered as asked where `audioInput`'s `resample` feature is true —
- * `{ sampleRate: 16000, channelCount: 1 }` for a speech model. */
+ * `{ sampleRate: 16000, channelCount: 1 }` for a speech model. A `deviceId`
+ * of `'system-audio'`, or `'system-audio:<appId>'`, asks for other
+ * applications' sound instead: only a `'systemaudio'` device answers it, and
+ * a microphone never stands in. */
 export interface AudioTrackConstraints {
   deviceId?: ConstrainString;
   groupId?: ConstrainString;
@@ -115,6 +122,10 @@ export interface MediaDeviceInfo {
   readonly label: string;
   readonly isDefault: boolean;
   readonly capabilities: MediaTrackCapabilities;
+  /** A `'systemaudio'` device's application — a bundle id on macOS. */
+  readonly appId?: string;
+  /** A `'systemaudio'` device's: whether it is making a sound now. */
+  readonly playing?: boolean;
 }
 
 /** One frame of video off a track: `VideoFrames.push`'s shape. The planes
@@ -256,9 +267,11 @@ export declare function displaySources(options?: {
 /** What `getDisplayMedia` asks for. */
 export interface DisplayMediaRequest {
   video?: true | { frameRate?: number; width?: number; height?: number };
-  /** The system's sound, best effort: a stream without an audio track is
-   * the answer where the display cannot give it. */
-  audio?: false | 'system';
+  /** The system's sound (`true` is the same), or one application's, best
+   * effort: a stream without an audio track is the answer where the display
+   * cannot give it. Sound alone is `getUserMedia({ audio: { deviceId:
+   * 'system-audio' } })`. */
+  audio?: boolean | 'system' | { appId: string };
   /** A `displaySources()` id: no picker. */
   source?: string;
 }
@@ -340,6 +353,9 @@ export interface MediaDevicesState {
   readonly cameras: readonly MediaDeviceInfo[];
   readonly microphones: readonly MediaDeviceInfo[];
   readonly speakers: readonly MediaDeviceInfo[];
+  /** Other applications' sound: `system-audio` first, then one per
+   * application, kept current as they start, quit and make a sound. */
+  readonly systemAudio: readonly MediaDeviceInfo[];
   /** False on the first frame, until the list has been read. */
   readonly settled: boolean;
 }

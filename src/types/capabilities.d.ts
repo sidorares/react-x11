@@ -30,7 +30,8 @@ export type DesktopCapabilityName =
   | 'camera'
   | 'audioInput'
   | 'audioOutput'
-  | 'screenCapture';
+  | 'screenCapture'
+  | 'systemAudio';
 
 /**
  * What a notification can carry here.
@@ -151,12 +152,27 @@ export interface ScreenCaptureFeatures {
   streams: boolean;
   windows: boolean;
   cursor: boolean;
+  /** A stream comes with the system's sound when `audio: 'system'` asks. */
   systemAudio: boolean;
   /** `<window excludeFromCapture>` keeps a window out of captures. */
   excludeWindows: boolean;
   /** `captureScreenshot()` reads the screen. */
   screenshot: boolean;
   thumbnails: boolean;
+}
+
+/** Other applications' sound, opened as a `'systemaudio'` device. */
+export interface SystemAudioFeatures {
+  /** One application's sound on its own: `system-audio:<appId>`. */
+  applications: boolean;
+  /** `system-audio` leaves this app's own sound out. */
+  excludesSelf: boolean;
+  /** Any `sampleRate` and `channelCount` asked is delivered as asked. */
+  resample: boolean;
+  /** The sources follow applications as they start and quit. */
+  hotplug: boolean;
+  /** A source says whether it is making a sound now (`playing`). */
+  playing: boolean;
 }
 
 export interface DesktopCapabilityResult<F = Record<string, boolean>> {
@@ -190,7 +206,9 @@ export type DesktopCapabilityFor<N extends DesktopCapabilityName> =
             ? DesktopCapabilityResult<AudioOutputFeatures>
             : N extends 'screenCapture'
               ? DesktopCapabilityResult<ScreenCaptureFeatures>
-              : DesktopCapabilityResult<LauncherFeatures>;
+              : N extends 'systemAudio'
+                ? DesktopCapabilityResult<SystemAudioFeatures>
+                : DesktopCapabilityResult<LauncherFeatures>;
 
 export declare const CAPABILITIES: readonly DesktopCapabilityName[];
 

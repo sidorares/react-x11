@@ -6,7 +6,8 @@ whose §8.4 ("Camera, later") this is the "later" of, and it takes the
 boundary `@react-x11/components`' `docs/prd-audio.md` already drew through
 sound. §0.1 is what has been built since: step 1 of §6, core's half
 (react-x11 2.57), and the `@windowkit/appkit` verbs it runs on, released in
-0.31.0._
+0.31.0. §0.2 is the system-audio loopback of step 2, on macOS, over appkit
+0.32._
 
 ---
 
@@ -144,6 +145,108 @@ sent as a command behind the window's making and ahead of its showing.
 **Not built in this step:** the global shortcut hook, Linux cameras and
 microphones, `getDisplayMedia` on Cocoa (SCStream), mirroring a self-view
 (there is no `transform` style), and the components half.
+
+### 0.2 Built, 2026-11-08: other applications' sound
+
+The reference is [docs/media.md](../../docs/media.md), "Other applications'
+sound". The note taker of §1 wants this without a picture, and the web's
+`getDisplayMedia` always captures one, so `getDisplayMedia({ video: false })`
+was not the way in. Chrome's own answer, a screen share with the video track
+thrown away, would put a screen picker in front of a user who asked to
+record a call.
+
+**The API: a device of its own kind.** `'systemaudio'` devices, opened with
+`getUserMedia({ audio: { deviceId } })`: `system-audio` for every
+application but this one, `system-audio:<appId>` for one, and
+`system-audio:pid:<n>` for a tool in no bundle while it plays. The web has a
+precedent for "system audio is a device", and it is the failure this avoids:
+Linux browsers list PulseAudio monitors as `'audioinput'`, and macOS lists
+virtual loopback drivers the same way ("Microsoft Teams Audio" sits among this
+Mac's microphones in `enumerateDevices`). Under `'audioinput'`, a call app's
+microphone picker fills with applications, and the web's rule that a bare
+`deviceId` is a preference would let the default microphone stand in for an
+application asked for by name. So the kind is decided before the choice is
+made: an `audio` request that names a `system-audio` id chooses among
+`'systemaudio'` devices only, and one that does not chooses among
+microphones. An application asked for by an id that is not listed, such as a
+call app not yet running, is made up from `system-audio`'s capabilities
+where the rung has `features.applications`, and its tap waits for the
+application. The rest is a microphone's: the same `useUserMedia`, the shared
+pool, `applyConstraints`, chunks, `<audio srcObject>`.
+`useMediaDevices().systemAudio` is the picker's list, with `appId` and
+`playing`. `playing` is part of what a list shows, so one application
+starting is a new snapshot.
+
+**Permission** is a kind of its own, `system-audio-recording` (Apple's System
+Audio Recording, `kTCCServiceAudioCapture`). The **capability** is a fifth one,
+`systemAudio`: `applications`, `excludesSelf`, `resample`, `hotplug`,
+`playing`. `screenCapture.features.systemAudio` now means "a stream comes with
+sound": `getDisplayMedia({ audio: 'system' | { appId } })` pairs the screen
+rung's video with the `'systemaudio'` source where the screen rung gives no
+sound of its own, as best effort, as a browser's audio is. It stays false on
+Cocoa, which has no `getDisplayMedia` yet.
+
+**The bridge** (`@windowkit/appkit`'s `src/systemaudio.mm`,
+windowkit/appkit#134, released in 0.32.0 and react-x11's floor since). `audioProcesses` lists CoreAudio's process
+objects with the outermost `.app` each executable sits in. Chrome's sound
+comes from `com.google.Chrome.helper` processes and Slack's from
+`com.tinyspeck.slackmacgap.helper`, so a person's word for the source is
+that application, and core groups by it (`systemAudioSources`).
+`openSystemAudio` makes a private `CATapDescription`: everything but this
+process, or one pid, or every process of one application. The tap sits in a
+private aggregate device that holds **the tap and nothing else**. Apple's
+sample code and most recorders put the default output device beside the tap
+as its clock, which brings that device's input streams with it: a headset's
+microphone, a Bluetooth headset dropped into its call profile, and buffers to
+tell apart. An application's tap follows it by setting
+`kAudioTapPropertyDescription` as its helpers come and go, and the tap of
+everything adds this process to its exclusions once it has connected. Chunks
+are `audio-input` events, the microphone's exactly.
+
+**TCC has no public call for this permission.** A tap without the grant is
+not an error: it delivers silence, for as long as anyone reads it. A note
+taker would record an hour of nothing and never know. So the bridge reads and
+asks through TCC's own `TCCAccessPreflight` and `TCCAccessRequest`. They are
+private, the pair recorders of other apps' sound use. They are found with
+`dlopen` at run time, so nothing links against them and a system without them
+answers `'unknown'`, where the tap's own first read raises the prompt. **Open:
+whether that is acceptable for an App Store build**, since review looks for
+private symbols and the strings are in the binary. Removing the two lookups
+leaves a working feature that cannot tell a refusal from silence.
+
+**Measured here** (macOS 15.8.1, M1 Pro): `TCCAccessPreflight` answered 2 for
+`kTCCServiceAudioCapture`, 0 for Screen Capture (granted) and 2 for camera and
+microphone, without prompting. That matches what the rest of the system says
+of this process. Processes started from Claude Code are held responsible to
+the `com.anthropic.claude-code` bundle, which has no
+`NSAudioCaptureUsageDescription`. The listing takes 65 ms the first time in a
+process and ~6 ms after, which is why core asks for it through the callback.
+A silent `afplay` showed as `playing` and reached core's `watchDevices` 57 ms
+after it started. System Settings has a `Privacy_AudioCapture` anchor.
+
+**Measured on a real run** (macOS 15.8.1, M1 Pro, 2026-11-08). The user ran the
+lab from Claude's Terminal panel, with `APPKIT_DEBUG_AUDIO=1`, over the bridge
+together with its `capture.mm` fix:
+
+- The status read `prompt`. The request went through `TCCAccessRequest`, the
+  system's prompt appeared, and the status read back `authorized`.
+- A tap of everything with this process left out: `AudioHardwareCreateProcessTap`,
+  `AudioHardwareCreateAggregateDevice`, `AudioDeviceCreateIOProcIDWithBlock` and
+  `AudioDeviceStart` all answered 0. The aggregate device holding only the tap
+  ran at 48 kHz, with 32 ms of latency.
+- The tap's format was 48 kHz, 2 channels, 32-bit float, flags 0x9 (float,
+  packed). The IO block got one interleaved buffer of both channels, 512 frames
+  a call.
+- 48,128 frames came in each second, and 100 chunks of 10 ms reached
+  JavaScript, with none dropped.
+- Over 8 s with nothing playing the peak was 0. With something playing it was
+  0.35 to 0.46.
+
+**Not shown by that log:** a tap of one application and its helpers following,
+a tap whose process list starts empty, resampling to 16 kHz mono, this app's
+own sound being left out, and a Bluetooth headset staying out of its call
+profile. The bridge's `test/system-audio.js` covers a pid tap and its end
+wherever the grant is held.
 
 ## 1. The apps this is measured against
 

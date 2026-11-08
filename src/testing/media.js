@@ -110,7 +110,8 @@ export function fakeMediaPlayers(app) {
 // (src/media/capture.js) as `app.mediaCapture`: a camera drawing colour bars
 // with a white band that moves a row a frame and the frame's number in black
 // and white squares along the bottom, a microphone playing a 440 Hz tone, a
-// speaker, a screen and a window. Every source makes frames on a timer that
+// speaker, a screen and a window, and other applications' sound — everything,
+// and one application playing a 660 Hz tone. Every source makes frames on a timer that
 // does not keep the process alive, and on `tick()` for a test that wants
 // them one at a time. Installing it is what makes `useDesktopCapability(
 // 'camera')` and the rest true, and where the app has no permission service
@@ -324,10 +325,18 @@ class FakePatternSource extends FakeSource {
   }
 }
 
-/** A 440 Hz tone at a tenth of full scale, in 10 ms chunks. */
+/** A tone at a tenth of full scale, in 10 ms chunks: 440 Hz by default, and
+ *  silence at `amplitude: 0`. */
 class FakeToneSource extends FakeSource {
-  constructor(label, device, settings) {
+  constructor(
+    label,
+    device,
+    settings,
+    { frequency = 440, amplitude = 0.1 } = {},
+  ) {
     super('audio', label, device, settings);
+    this.frequency = frequency;
+    this.amplitude = amplitude;
   }
 
   _interval() {
@@ -343,7 +352,9 @@ class FakeToneSource extends FakeSource {
     }
     const first = this.count * frames;
     for (let i = 0; i < frames; i++) {
-      const sample = 0.1 * Math.sin((2 * Math.PI * 440 * (first + i)) / rate);
+      const sample =
+        this.amplitude *
+        Math.sin((2 * Math.PI * this.frequency * (first + i)) / rate);
       for (const channel of channels) channel[i] = sample;
     }
     this.count += 1;
@@ -448,6 +459,47 @@ const fakeMicrophone = (n = 1) => ({
   },
 });
 
+const SYSTEM_AUDIO_CAPABILITIES = Object.freeze({
+  sampleRate: { min: 8000, max: 48000 },
+  channelCount: { min: 1, max: 2 },
+  echoCancellation: [false],
+  autoGainControl: [false],
+  noiseSuppression: [false],
+});
+
+const SYSTEM_AUDIO_DEFAULTS = Object.freeze({
+  sampleRate: 48000,
+  channelCount: 2,
+  echoCancellation: false,
+  autoGainControl: false,
+  noiseSuppression: false,
+});
+
+/** Other applications' sound: every one of them, and one fake player. */
+const fakeSystemAudio = () => [
+  {
+    deviceId: 'system-audio',
+    groupId: '',
+    kind: 'systemaudio',
+    label: 'System audio',
+    isDefault: true,
+    playing: true,
+    capabilities: SYSTEM_AUDIO_CAPABILITIES,
+    defaults: SYSTEM_AUDIO_DEFAULTS,
+  },
+  {
+    deviceId: 'system-audio:com.example.player',
+    groupId: '',
+    kind: 'systemaudio',
+    label: 'Fake player',
+    appId: 'com.example.player',
+    isDefault: false,
+    playing: true,
+    capabilities: SYSTEM_AUDIO_CAPABILITIES,
+    defaults: SYSTEM_AUDIO_DEFAULTS,
+  },
+];
+
 const fakeSpeaker = () => ({
   deviceId: 'fake-speaker',
   groupId: 'fake-microphone',
@@ -477,16 +529,19 @@ function rampRGBA(width, height, x0 = 0, y0 = 0) {
 }
 
 /**
- * Give `app` cameras, microphones, a speaker and a screen that are not
- * there — `app.mediaCapture` — and, where it has none, a permission service
- * answering from a table. Call it before the first render that asks for
- * them.
+ * Give `app` cameras, microphones, a speaker, a screen and other
+ * applications' sound that are not there — `app.mediaCapture` — and, where
+ * it has none, a permission service answering from a table. Call it before
+ * the first render that asks for them.
  *
  * Options: `cameras` and `microphones` (how many, default 1), `speaker`
- * (default true), `screen` (default true), `permission` — what camera,
- * microphone and screen recording answer until `setPermission` changes it
- * (default `'granted'`) — and `promptAnswer`, what a request answers a
- * `'prompt'` with (default `'granted'`).
+ * (default true), `screen` (default true), `systemAudio` (default true:
+ * `system-audio` and `system-audio:com.example.player`, playing 660 Hz; an
+ * application asked for by id that is not listed opens as silence),
+ * `permission` — what camera, microphone, screen recording and system audio
+ * recording answer until `setPermission` changes it (default `'granted'`) —
+ * and `promptAnswer`, what a request answers a `'prompt'` with (default
+ * `'granted'`).
  */
 export function fakeMediaDevices(app, options = {}) {
   const devices = [];
@@ -495,6 +550,8 @@ export function fakeMediaDevices(app, options = {}) {
     devices.push(fakeMicrophone(i));
   }
   if (options.speaker ?? true) devices.push(fakeSpeaker());
+  const systemAudio = options.systemAudio ?? true;
+  if (systemAudio) devices.push(...fakeSystemAudio());
   const screen = options.screen ?? true;
   const watchers = new Set();
   const sources = [];
@@ -504,6 +561,7 @@ export function fakeMediaDevices(app, options = {}) {
     camera: options.permission ?? 'granted',
     microphone: options.permission ?? 'granted',
     'screen-recording': options.permission ?? 'granted',
+    'system-audio-recording': options.permission ?? 'granted',
   };
   const requests = [];
   const changed = () => {
@@ -529,6 +587,17 @@ export function fakeMediaDevices(app, options = {}) {
         deviceSelection: true,
         echoReference: true,
       }),
+      ...(systemAudio
+        ? {
+            systemAudio: Object.freeze({
+              applications: true,
+              excludesSelf: true,
+              resample: true,
+              hotplug: true,
+              playing: true,
+            }),
+          }
+        : {}),
       ...(screen
         ? {
             screenCapture: Object.freeze({
@@ -551,8 +620,16 @@ export function fakeMediaDevices(app, options = {}) {
       watchers.add(fn);
       return () => watchers.delete(fn);
     },
-    async open(deviceId, settings) {
-      const device = devices.find((d) => d.deviceId === deviceId);
+    async open(deviceId, settings, asked) {
+      let device = devices.find((d) => d.deviceId === deviceId);
+      // an application that is not running is tapped all the same: silence
+      // until it plays
+      const waiting =
+        !device &&
+        systemAudio &&
+        asked?.kind === 'systemaudio' &&
+        deviceId.startsWith('system-audio:');
+      if (waiting) device = asked;
       if (!device || device.kind === 'audiooutput') {
         throw Object.assign(new Error(`there is no ${deviceId}`), {
           name: 'NotFoundError',
@@ -566,7 +643,12 @@ export function fakeMediaDevices(app, options = {}) {
       const source =
         device.kind === 'videoinput'
           ? new FakePatternSource(device.label, device, settings)
-          : new FakeToneSource(device.label, device, settings);
+          : device.kind === 'systemaudio'
+            ? new FakeToneSource(device.label, device, settings, {
+                frequency: 660,
+                amplitude: waiting ? 0 : 0.1,
+              })
+            : new FakeToneSource(device.label, device, settings);
       sources.push(source);
       return source;
     },
@@ -612,14 +694,26 @@ export function fakeMediaDevices(app, options = {}) {
 
     /** A device plugged in: listed, and watchers told. */
     plug(device) {
+      const defaults = {
+        videoinput: [CAMERA_CAPABILITIES, fakeCamera().defaults],
+        systemaudio: [SYSTEM_AUDIO_CAPABILITIES, SYSTEM_AUDIO_DEFAULTS],
+      }[device.kind] ?? [{}, {}];
       devices.push({
         isDefault: false,
         groupId: device.deviceId,
-        capabilities: device.kind === 'videoinput' ? CAMERA_CAPABILITIES : {},
-        defaults: device.kind === 'videoinput' ? fakeCamera().defaults : {},
+        capabilities: defaults[0],
+        defaults: defaults[1],
         label: device.deviceId,
         ...device,
       });
+      changed();
+    },
+    /** A listed application starts or stops making a sound: `playing` in the
+     *  list, and watchers told. */
+    setPlaying(deviceId, playing = true) {
+      const device = devices.find((d) => d.deviceId === deviceId);
+      if (!device) return;
+      device.playing = Boolean(playing);
       changed();
     },
     /** A device unplugged: gone from the list, and every source of it ends. */

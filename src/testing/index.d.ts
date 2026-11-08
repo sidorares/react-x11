@@ -736,21 +736,29 @@ export interface FakeMediaDevices {
   pickerAnswer: string | null;
   plug(device: {
     deviceId: string;
-    kind: 'videoinput' | 'audioinput' | 'audiooutput';
+    kind: 'videoinput' | 'audioinput' | 'audiooutput' | 'systemaudio';
     label?: string;
+    /** A `'systemaudio'` device's application. */
+    appId?: string;
+    playing?: boolean;
   }): void;
   unplug(deviceId: string): void;
+  /** A listed application starts, or with `false` stops, making a sound. */
+  setPlaying(deviceId: string, playing?: boolean): void;
   setPermission(
-    kind: 'camera' | 'microphone' | 'screen-recording',
+    kind:
+      'camera' | 'microphone' | 'screen-recording' | 'system-audio-recording',
     status: 'granted' | 'denied' | 'restricted' | 'prompt',
   ): void;
 }
 
 /**
- * Give `app` cameras, microphones, a speaker and a screen that are not
- * there — a camera drawing colour bars, a microphone playing a 440 Hz tone
- * — and, where it has none, a permission service answering from a table.
- * Call it before the first render that asks for them.
+ * Give `app` cameras, microphones, a speaker, a screen and other
+ * applications' sound that are not there — a camera drawing colour bars, a
+ * microphone playing a 440 Hz tone, `system-audio` and
+ * `system-audio:com.example.player` playing 660 Hz — and, where it has none,
+ * a permission service answering from a table. Call it before the first
+ * render that asks for them.
  */
 export function fakeMediaDevices(
   app: NtkApp,
@@ -759,6 +767,8 @@ export function fakeMediaDevices(
     microphones?: number;
     speaker?: boolean;
     screen?: boolean;
+    /** Other applications' sound; true when left out. */
+    systemAudio?: boolean;
     permission?: 'granted' | 'denied' | 'restricted' | 'prompt';
     promptAnswer?: 'granted' | 'denied' | 'prompt';
   },

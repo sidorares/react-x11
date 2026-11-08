@@ -2394,11 +2394,27 @@ function _Media() {
   const enumerate: boolean | undefined = caps.features.enumerate;
   const camera = useDesktopCapability('camera');
   const preview: boolean | undefined = camera.features.nativePreview;
+  // other applications' sound: a device of its own kind, opened as a
+  // microphone is
+  const { systemAudio } = useMediaDevices();
+  const zoom = systemAudio.find((s) => s.appId === 'us.zoom.xos');
+  const playing: boolean | undefined = zoom?.playing;
+  const notes = useUserMedia(
+    { audio: { deviceId: 'system-audio', sampleRate: 16000, channelCount: 1 } },
+    { start: false },
+  );
+  const loopback = useDesktopCapability('systemAudio');
+  const perApp: boolean | undefined = loopback.features.applications;
+  const meeting = useDisplayMedia({ audio: { appId: 'us.zoom.xos' } });
+  const sound = usePermission('system-audio-recording');
+  // @ts-expect-error — one application is named by its appId
+  useDisplayMedia({ audio: { bundleId: 'us.zoom.xos' } });
   // @ts-expect-error — a constraint is a number or a range, not a CSS length
   useUserMedia({ video: { width: '1280px' } });
   // @ts-expect-error — not a capability
   useDesktopCapability('webcam');
-  void [settled, status, enumerate, preview];
+  void [settled, status, enumerate, preview, playing, notes, perApp, meeting];
+  void sound;
   return (
     <box>
       <video srcObject={call.stream} style={{ objectFit: 'cover' }} />
