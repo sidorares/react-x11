@@ -1,8 +1,8 @@
 // Media capture on macOS (design/architecture/media-capture.md §5.1): the
 // capture rung (src/media/capture.js) over @windowkit/appkit's capture
 // verbs — AVFoundation's cameras and microphones, CoreAudio's speakers, an
-// audio path that cancels echo against what it plays, and ScreenCaptureKit's
-// screenshots. `CocoaApp.mediaCapture` is this object, and its presence is
+// audio path that cancels echo against what it plays, CoreAudio's process
+// taps for other applications' sound, and ScreenCaptureKit's screenshots. `CocoaApp.mediaCapture` is this object, and its presence is
 // the capability; each part is there only where the bridge has its verbs, so
 // an older bridge answers `camera` unavailable rather than failing at open.
 //
@@ -25,6 +25,12 @@
 //     bridge's voice-processing path while an echo-cancelled microphone is
 //     live, which is what lets it cancel what this app plays (§3). The
 //     settings a microphone reports say whether that engaged.
+//   - **Other applications' sound is a device too** (§0.2): the bridge's
+//     process taps (macOS 14.2, appkit 0.32) listed as `'systemaudio'`
+//     devices — `system-audio`, every application but this one, and one per
+//     application a person would pick — and opened as a microphone is, their
+//     chunks in the microphone's shape. The bridge lists processes; which of
+//     them is a source is decided here (`systemAudioSources`).
 
 import { PlayerState } from './player.js';
 
@@ -100,6 +106,104 @@ const MICROPHONE_DEFAULTS = Object.freeze({
   autoGainControl: true,
 });
 
+// A tap is resampled and mixed by the bridge to whatever is asked, and it is
+// the applications' own sound: nothing to cancel, suppress or level.
+const SYSTEM_AUDIO_CAPABILITIES = Object.freeze({
+  sampleRate: { min: 8000, max: 192000 },
+  channelCount: { min: 1, max: 2 },
+  echoCancellation: [false],
+  noiseSuppression: [false],
+  autoGainControl: [false],
+});
+const SYSTEM_AUDIO_DEFAULTS = Object.freeze({
+  sampleRate: 48000,
+  channelCount: 2,
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+});
+
+/** The device every system-audio source's id begins with, and its own: every
+ *  application but this one (`SYSTEM_AUDIO` in src/media/capture.js, which
+ *  this backend does not import). */
+const SYSTEM_AUDIO_ID = 'system-audio';
+
+const systemAudioDevice = (deviceId, label, more = {}) => ({
+  deviceId,
+  groupId: '',
+  kind: 'systemaudio',
+  label,
+  isDefault: deviceId === SYSTEM_AUDIO_ID,
+  playing: false,
+  capabilities: SYSTEM_AUDIO_CAPABILITIES,
+  defaults: SYSTEM_AUDIO_DEFAULTS,
+  ...more,
+});
+
+/**
+ * The sources a person would pick from, out of the processes the bridge
+ * lists — every process connected to the audio server, most of them daemons
+ * that never make a sound: `system-audio` first, then one source per
+ * application that has a Dock icon or is playing now, a browser's renderers
+ * and an app's helpers under the application they run from, and a tool in no
+ * bundle (`afplay`) while it plays. This process is none of them, nor is the
+ * application it runs from.
+ */
+export function systemAudioSources(processes, self = process.pid) {
+  const own = processes.find((p) => p.pid === self);
+  const ownApp = own ? own.app?.bundleId || own.bundleId || null : null;
+  const apps = new Map();
+  const tools = [];
+  for (const p of processes) {
+    if (p.pid === self) continue;
+    const appId = p.app?.bundleId || p.bundleId || null;
+    if (appId) {
+      if (appId === ownApp) continue;
+      let app = apps.get(appId);
+      if (!app) {
+        const label = p.app?.name || p.name || appId;
+        app = { appId, label, playing: false, show: false };
+        apps.set(appId, app);
+      }
+      app.playing ||= Boolean(p.playing);
+      app.show ||= Boolean(p.playing || p.app?.regular);
+    } else if (p.playing) {
+      tools.push(
+        systemAudioDevice(
+          `${SYSTEM_AUDIO_ID}:pid:${p.pid}`,
+          p.name || `process ${p.pid}`,
+          { pid: p.pid, playing: true },
+        ),
+      );
+    }
+  }
+  const shown = [...apps.values()]
+    .filter((a) => a.show)
+    .sort((a, b) => a.label.localeCompare(b.label))
+    .map((a) =>
+      systemAudioDevice(`${SYSTEM_AUDIO_ID}:${a.appId}`, a.label, {
+        appId: a.appId,
+        playing: a.playing,
+      }),
+    );
+  return [
+    systemAudioDevice(SYSTEM_AUDIO_ID, 'System audio', {
+      playing: shown.some((s) => s.playing) || tools.length > 0,
+    }),
+    ...shown,
+    ...tools,
+  ];
+}
+
+/** What a system-audio device id asks the bridge to tap: everything (`{}`),
+ *  one application (`{ bundleId }`) or one process (`{ pid }`). */
+function tapTarget(deviceId) {
+  const rest = deviceId.slice(SYSTEM_AUDIO_ID.length + 1);
+  if (!rest) return {};
+  if (rest.startsWith('pid:')) return { pid: Number(rest.slice(4)) };
+  return { bundleId: rest };
+}
+
 /** The capture rung over the bridge, with the parts its verbs allow. */
 export class CocoaMediaCapture {
   constructor(app) {
@@ -119,7 +223,8 @@ export class CocoaMediaCapture {
       this._watchers.add(fn);
       return () => this._watchers.delete(fn);
     };
-    if (has('openCamera') || has('openMicrophone')) {
+    this._taps = has('openSystemAudio') && has('audioProcesses');
+    if (has('openCamera') || has('openMicrophone') || this._taps) {
       this.open = (deviceId, settings, device) =>
         this._open(deviceId, settings, device);
     }
@@ -137,6 +242,15 @@ export class CocoaMediaCapture {
         noiseSuppression: true,
         autoGainControl: true,
         resample: true,
+      });
+    }
+    if (this._taps) {
+      this.features.systemAudio = Object.freeze({
+        applications: true,
+        excludesSelf: true,
+        resample: true,
+        hotplug: true,
+        playing: true,
       });
     }
     if (has('openAudioOutput')) {
@@ -173,10 +287,18 @@ export class CocoaMediaCapture {
    *  (100 ms to over a second); a bridge that answers at once is taken at
    *  its word. */
   _devices() {
-    return new Promise((resolve) => {
+    const devices = new Promise((resolve) => {
       const now = this._native.captureDevices((list) => resolve(list));
       if (Array.isArray(now)) resolve(now);
     }).then((list) => (list ?? []).map((d) => this._device(d)));
+    if (!this._taps) return devices;
+    // the processes take a few milliseconds to describe, and the first
+    // listing tens: off the UI thread, like the devices
+    const sources = new Promise((resolve) => {
+      const now = this._native.audioProcesses((list) => resolve(list));
+      if (Array.isArray(now)) resolve(now);
+    }).then((list) => systemAudioSources(list ?? []));
+    return Promise.all([devices, sources]).then(([a, b]) => [...a, ...b]);
   }
 
   /** A device as the bridge lists it, in the capture seam's shape. */
@@ -213,6 +335,9 @@ export class CocoaMediaCapture {
 
   _open(deviceId, settings, device) {
     const native = this._native;
+    if (device.kind === 'systemaudio') {
+      return this._openTap(deviceId, settings, device);
+    }
     const video = device.kind === 'videoinput';
     if (video && typeof native.openCamera !== 'function') {
       return Promise.reject(notSupported('a camera'));
@@ -243,6 +368,28 @@ export class CocoaMediaCapture {
       const source = video
         ? new CocoaCameraSource(this, made, device, settings)
         : new CocoaMicrophoneSource(this, made, device);
+      source._opening = { resolve: () => resolve(source), reject };
+      this._sources.set(source.id, source);
+    });
+  }
+
+  /** A tap of other applications' sound, answered by `system-audio-started`
+   *  or `system-audio-error`. */
+  _openTap(deviceId, settings, device) {
+    if (!this._taps) return Promise.reject(notSupported('system audio'));
+    return new Promise((resolve, reject) => {
+      let made;
+      try {
+        made = this._native.openSystemAudio({
+          ...tapTarget(deviceId),
+          sampleRate: settings.sampleRate,
+          channels: settings.channelCount,
+        });
+      } catch (err) {
+        reject(err);
+        return;
+      }
+      const source = new CocoaSystemAudioSource(this, made, device);
       source._opening = { resolve: () => resolve(source), reject };
       this._sources.set(source.id, source);
     });
@@ -315,6 +462,7 @@ export class CocoaMediaCapture {
   _route(ev) {
     switch (ev.type) {
       case 'capture-devices':
+      case 'audio-processes':
         for (const fn of [...this._watchers]) fn();
         return;
       case 'audio-output-low':
@@ -363,6 +511,7 @@ class CocoaSource {
     switch (ev.type) {
       case 'camera-started':
       case 'microphone-started':
+      case 'system-audio-started':
         // what the engine did, where it says: voice processing engaged or not
         this._started?.(ev);
         this._opening?.resolve();
@@ -370,6 +519,7 @@ class CocoaSource {
         return;
       case 'camera-error':
       case 'microphone-error':
+      case 'system-audio-error':
         if (this._opening) {
           this._forget();
           this._opening.reject(
@@ -384,6 +534,7 @@ class CocoaSource {
         return;
       case 'camera-ended':
       case 'microphone-ended':
+      case 'system-audio-ended':
         this._gone();
         return;
       case 'camera-muted':
@@ -535,6 +686,29 @@ class CocoaMicrophoneSource extends CocoaSource {
     this._stopped = true;
     this._forget();
     this._native.closeMicrophone(this.id);
+  }
+}
+
+/** Other applications' sound: a microphone's chunks from a tap, which has no
+ *  canceller, suppressor or gain to switch. */
+class CocoaSystemAudioSource extends CocoaMicrophoneSource {
+  constructor(capture, made, device) {
+    super(capture, made, device);
+    this._settings.echoCancellation = false;
+    this._settings.noiseSuppression = false;
+    this._settings.autoGainControl = false;
+  }
+
+  /** `system-audio-started` says the latency the tap's device has. */
+  _started(ev) {
+    if (typeof ev.latency === 'number') this._settings.latency = ev.latency;
+  }
+
+  stop() {
+    if (this._stopped) return;
+    this._stopped = true;
+    this._forget();
+    this._native.closeSystemAudio(this.id);
   }
 }
 

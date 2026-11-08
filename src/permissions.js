@@ -45,6 +45,7 @@ export const PERMISSION_KINDS = Object.freeze([
   'camera',
   'microphone',
   'screen-recording',
+  'system-audio-recording',
   'accessibility',
   'input-monitoring',
   'automation',
@@ -59,6 +60,7 @@ const SETTINGS_PANES = Object.freeze({
   camera: 'Privacy_Camera',
   microphone: 'Privacy_Microphone',
   'screen-recording': 'Privacy_ScreenCapture',
+  'system-audio-recording': 'Privacy_AudioCapture',
   accessibility: 'Privacy_Accessibility',
   'input-monitoring': 'Privacy_ListenEvent',
   automation: 'Privacy_Automation',
@@ -193,7 +195,10 @@ export async function requestPermission(kind, options = {}) {
 export async function openPrivacySettings(kind, options = {}) {
   const url = privacySettingsUrl(kind);
   const service = serviceFor(options);
-  if (service) return service.openSettings(kind);
+  // a service answers null for a pane it cannot reach — a kind newer than
+  // its bridge — and the deep link below still can
+  const opened = service ? service.openSettings(kind) : null;
+  if (opened != null) return opened;
   if (process.platform !== 'darwin') return false;
   const { execFile } = await import('node:child_process');
   return new Promise((resolve) => {

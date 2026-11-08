@@ -71,6 +71,7 @@ export const CAPABILITIES = [
   'audioInput',
   'audioOutput',
   'screenCapture',
+  'systemAudio',
 ];
 
 /** The shape a probe resolves to when there is no mechanism at all. */
@@ -397,7 +398,7 @@ async function probeLauncher({ app } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// media capture: camera, audioInput, audioOutput, screenCapture
+// media capture: camera, audioInput, audioOutput, screenCapture, systemAudio
 // ---------------------------------------------------------------------------
 
 /**
@@ -421,8 +422,14 @@ async function probeLauncher({ app } = {}) {
  *     whose root holds nothing), `streams` (`getDisplayMedia` captures a
  *     stream — a backend may take screenshots and not yet that), `windows`,
  *     `cursor`,
- *     `systemAudio`, `excludeWindows` (`<window excludeFromCapture>`),
- *     `screenshot`, `thumbnails`.
+ *     `systemAudio` (a stream comes with the system's sound when asked),
+ *     `excludeWindows` (`<window excludeFromCapture>`), `screenshot`,
+ *     `thumbnails`;
+ *   - `systemAudio`: other applications' sound, opened as a `'systemaudio'`
+ *     device — `applications` (one application's on its own),
+ *     `excludesSelf` (`system-audio` leaves this app's own sound out),
+ *     `resample`, `hotplug` (sources follow applications as they start and
+ *     quit), `playing` (a source says whether it is making a sound).
  */
 function captureNow(name, target) {
   const found = captureCapability(target, name);
@@ -449,6 +456,7 @@ const PROBES = {
   audioInput: captureProbe('audioInput'),
   audioOutput: captureProbe('audioOutput'),
   screenCapture: captureProbe('screenCapture'),
+  systemAudio: captureProbe('systemAudio'),
 };
 
 /**
@@ -506,7 +514,8 @@ export function capabilityNow(name, { app } = {}) {
     name === 'camera' ||
     name === 'audioInput' ||
     name === 'audioOutput' ||
-    name === 'screenCapture'
+    name === 'screenCapture' ||
+    name === 'systemAudio'
   ) {
     return captureNow(name, target);
   }

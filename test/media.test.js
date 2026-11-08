@@ -1,7 +1,7 @@
 // Media capture over the fake devices (src/media/, src/testing/media.js):
 // constraints and the device they choose, permissions asked before a device
 // opens, one session per device and settings, frames off a track, the
-// hooks, and the audio sink. The elements that show a stream are
+// hooks, other applications' sound, and the audio sink. The elements that show a stream are
 // test/media-elements.test.js's; the X11 screen rung is
 // test/media-x11.test.js's.
 import assert from 'node:assert/strict';
@@ -310,7 +310,7 @@ test('an unplugged camera ends its tracks and says so', async () => {
   assert.equal(told, 1);
   assert.deepEqual(
     await enumerateDevices({ app }).then((d) => d.map((x) => x.kind)),
-    ['audioinput', 'audiooutput'],
+    ['audioinput', 'audiooutput', 'systemaudio', 'systemaudio'],
   );
 });
 
@@ -502,9 +502,15 @@ test('useDisplayMedia waits to be asked; a picker answered with nothing is NotAl
 
 // --- capability ------------------------------------------------------------------------
 
-test('camera, audioInput, audioOutput and screenCapture are settled on the first frame', async () => {
+test('camera, audioInput, audioOutput, screenCapture and systemAudio are settled on the first frame', async () => {
   const bare = createMockApp();
-  for (const name of ['camera', 'audioInput', 'audioOutput', 'screenCapture']) {
+  for (const name of [
+    'camera',
+    'audioInput',
+    'audioOutput',
+    'screenCapture',
+    'systemAudio',
+  ]) {
     const none = await desktopCapability(name, { app: bare });
     assert.equal(none.available, false, name);
   }
@@ -516,8 +522,10 @@ test('camera, audioInput, audioOutput and screenCapture are settled on the first
   assert.equal(camera.features.labelsBeforePermission, true);
 
   const seen = [];
+  const sound = [];
   function Probe() {
     seen.push(useDesktopCapability('screenCapture'));
+    sound.push(useDesktopCapability('systemAudio'));
     usePermission('camera');
     return null;
   }
@@ -525,6 +533,265 @@ test('camera, audioInput, audioOutput and screenCapture are settled on the first
   assert.equal(seen[0].settled, true);
   assert.equal(seen[0].available, true);
   assert.equal(seen[0].features.enumerate, true);
+  assert.equal(sound[0].settled, true);
+  assert.equal(sound[0].features.excludesSelf, true);
+});
+
+// --- other applications' sound ---------------------------------------------------------------
+
+/** The frequency of a tone in `samples`, by its zero crossings. */
+function pitch(samples, rate) {
+  let crossings = 0;
+  for (let i = 1; i < samples.length; i++) {
+    if (samples[i - 1] < 0 !== samples[i] < 0) crossings++;
+  }
+  return Math.round((crossings * rate) / (2 * samples.length) / 10) * 10;
+}
+
+test('other applications’ sound is a kind of its own: asked for by id, never a microphone in its place', async () => {
+  const app = createMockApp();
+  const fake = fakeMediaDevices(app);
+  const sources = (await enumerateDevices({ app })).filter(
+    (d) => d.kind === 'systemaudio',
+  );
+  assert.deepEqual(
+    sources.map((d) => [d.deviceId, d.label, d.appId, d.playing]),
+    [
+      ['system-audio', 'System audio', undefined, true],
+      [
+        'system-audio:com.example.player',
+        'Fake player',
+        'com.example.player',
+        true,
+      ],
+    ],
+  );
+
+  // audio with no id is the microphone, as it always was
+  const mic = await getUserMedia({ audio: true }, { app });
+  assert.equal(mic.getAudioTracks()[0].label, 'Fake microphone');
+  mic.getTracks()[0].stop();
+
+  // everything, mono at 16 kHz for a speech model: the player's tone
+  const stream = await getUserMedia(
+    { audio: { deviceId: 'system-audio', sampleRate: 16000, channelCount: 1 } },
+    { app },
+  );
+  const [track] = stream.getAudioTracks();
+  assert.equal(track.label, 'System audio');
+  assert.deepEqual(
+    [
+      track.getSettings().sampleRate,
+      track.getSettings().channelCount,
+      track.getSettings().echoCancellation,
+      track.getSettings().deviceId,
+    ],
+    [16000, 1, false, 'system-audio'],
+  );
+  const chunks = [];
+  track.onFrame((d) => chunks.push(Float32Array.from(d.channels[0])));
+  for (let i = 0; i < 10; i++) fake.last('audio').tick();
+  const heard = new Float32Array(chunks.reduce((n, c) => n + c.length, 0));
+  chunks.reduce((at, c) => (heard.set(c, at), at + c.length), 0);
+  assert.equal(
+    pitch(heard, 16000),
+    660,
+    'the player, not the microphone’s 440',
+  );
+  track.stop();
+
+  // an application that is not running is opened all the same: silence
+  // until it plays, where a microphone would have stood in by the web's rule
+  const waiting = await getUserMedia(
+    { audio: { deviceId: 'system-audio:us.zoom.xos' } },
+    { app },
+  );
+  const [zoom] = waiting.getAudioTracks();
+  assert.equal(zoom.label, 'us.zoom.xos');
+  const quiet = [];
+  zoom.onFrame((d) => quiet.push(...d.channels[0]));
+  fake.last('audio').tick();
+  assert.ok(quiet.length > 0 && quiet.every((v) => v === 0));
+  zoom.stop();
+
+  // nothing to cancel in another application's sound: a requirement fails
+  await assert.rejects(
+    getUserMedia(
+      {
+        audio: { deviceId: 'system-audio', echoCancellation: { exact: true } },
+      },
+      { app },
+    ),
+    { name: 'OverconstrainedError', constraint: 'echoCancellation' },
+  );
+
+  // where there is none, it is none: no microphone is opened instead
+  const bare = createMockApp();
+  const without = fakeMediaDevices(bare, { systemAudio: false });
+  await assert.rejects(
+    getUserMedia({ audio: { deviceId: 'system-audio' } }, { app: bare }),
+    (err) => {
+      assert.equal(err.name, 'NotFoundError');
+      assert.match(err.message, /useDesktopCapability\('systemAudio'\)/);
+      return true;
+    },
+  );
+  assert.deepEqual(without.sources, []);
+  assert.equal(
+    (await desktopCapability('systemAudio', { app: bare })).available,
+    false,
+  );
+  const cap = await desktopCapability('systemAudio', { app });
+  assert.equal(cap.available, true);
+  assert.equal(cap.features.applications, true);
+});
+
+test('system audio has its own permission, asked before a tap opens', async () => {
+  const app = createMockApp();
+  const fake = fakeMediaDevices(app);
+  fake.setPermission('microphone', 'denied');
+  // the microphone's refusal is not this one's
+  const stream = await getUserMedia(
+    { audio: { deviceId: 'system-audio' } },
+    { app },
+  );
+  stream.getTracks()[0].stop();
+
+  fake.setPermission('system-audio-recording', 'denied');
+  await assert.rejects(
+    getUserMedia({ audio: { deviceId: 'system-audio' } }, { app }),
+    (err) => {
+      assert.equal(err.name, 'NotAllowedError');
+      assert.match(
+        err.message,
+        /openPrivacySettings\('system-audio-recording'\)/,
+      );
+      return true;
+    },
+  );
+  const unasked = createMockApp();
+  fakeMediaDevices(unasked, { permission: 'prompt', promptAnswer: 'prompt' });
+  const prompted = [];
+  await assert.rejects(
+    getUserMedia(
+      { audio: { deviceId: 'system-audio' } },
+      { app: unasked, onPrompt: (kind) => prompted.push(kind) },
+    ),
+    (err) => {
+      assert.match(err.message, /without the user being asked/);
+      assert.match(err.message, /NSAudioCaptureUsageDescription/);
+      return true;
+    },
+  );
+  assert.deepEqual(prompted, ['system-audio-recording']);
+});
+
+test('getDisplayMedia pairs the screen with the system’s sound, or one application’s, as best it can', async () => {
+  const app = createMockApp();
+  const fake = fakeMediaDevices(app);
+  const screen = await desktopCapability('screenCapture', { app });
+  assert.equal(screen.features.systemAudio, true, 'streams, and a tap to pair');
+
+  const all = await getDisplayMedia({ audio: 'system' }, { app });
+  assert.deepEqual(
+    all.getTracks().map((t) => [t.kind, t.label]),
+    [
+      ['video', 'Fake screen'],
+      ['audio', 'System audio'],
+    ],
+  );
+  for (const t of all.getTracks()) t.stop();
+  const one = await getDisplayMedia(
+    { audio: { appId: 'com.example.player' } },
+    { app },
+  );
+  assert.equal(one.getAudioTracks()[0].label, 'Fake player');
+  for (const t of one.getTracks()) t.stop();
+  // the web's `audio: true` is the system's
+  const web = await getDisplayMedia({ audio: true }, { app });
+  assert.equal(web.getAudioTracks().length, 1);
+  for (const t of web.getTracks()) t.stop();
+
+  // the sound refused: the picture all the same, as a browser gives it
+  fake.setPermission('system-audio-recording', 'denied');
+  const picture = await getDisplayMedia({ audio: 'system' }, { app });
+  assert.deepEqual(
+    picture.getTracks().map((t) => t.kind),
+    ['video'],
+  );
+  for (const t of picture.getTracks()) t.stop();
+
+  await assert.rejects(getDisplayMedia({ audio: 'loud' }, { app }), TypeError);
+  await assert.rejects(
+    getDisplayMedia({ video: false, audio: 'system' }, { app }),
+    (err) => {
+      assert.ok(err instanceof TypeError);
+      assert.match(
+        err.message,
+        /getUserMedia\(\{ audio: \{ deviceId: 'system-audio' \} \}\)/,
+      );
+      return true;
+    },
+  );
+});
+
+test('useMediaDevices: the applications’ sound beside the microphones, and which of them plays', async () => {
+  const app = createMockApp();
+  const fake = fakeMediaDevices(app);
+  const seen = [];
+  function Picker() {
+    seen.push(useMediaDevices());
+    return null;
+  }
+  await renderX11(h(Picker), { app, backend: 'mock' });
+  assert.deepEqual(seen[0].systemAudio, []);
+  await act(async () => {
+    await tick();
+  });
+  let now = seen.at(-1);
+  assert.deepEqual(
+    now.microphones.map((d) => d.label),
+    ['Fake microphone'],
+    'no application among the microphones',
+  );
+  assert.deepEqual(
+    now.systemAudio.map((d) => [d.label, d.playing]),
+    [
+      ['System audio', true],
+      ['Fake player', true],
+    ],
+  );
+  // the same list, one of them quiet now: still news to a picker
+  await act(async () => {
+    fake.setPlaying('system-audio:com.example.player', false);
+    await tick();
+  });
+  assert.deepEqual(
+    seen.at(-1).systemAudio.map((d) => [d.label, d.playing]),
+    [
+      ['System audio', true],
+      ['Fake player', false],
+    ],
+  );
+  await act(async () => {
+    fake.plug({
+      deviceId: 'system-audio:com.example.radio',
+      kind: 'systemaudio',
+      label: 'Radio',
+      appId: 'com.example.radio',
+      playing: true,
+    });
+    await tick();
+  });
+  now = seen.at(-1);
+  assert.deepEqual(
+    now.systemAudio.map((d) => [d.label, d.playing]),
+    [
+      ['System audio', true],
+      ['Fake player', false],
+      ['Radio', true],
+    ],
+  );
 });
 
 // --- the audio sink -------------------------------------------------------------------------

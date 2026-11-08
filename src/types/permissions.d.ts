@@ -9,6 +9,9 @@ export type PermissionKind =
   | 'camera'
   | 'microphone'
   | 'screen-recording'
+  /** Other applications' sound: `getUserMedia({ audio: { deviceId:
+   * 'system-audio' } })` (docs/media.md). */
+  | 'system-audio-recording'
   | 'accessibility'
   | 'input-monitoring'
   | 'automation'

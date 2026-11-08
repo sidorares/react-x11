@@ -1,7 +1,8 @@
 # Cameras, microphones and the screen
 
-Cameras, microphones, speakers and the screen, as tracks a `<video>` and an
-`<audio>` play and an app reads frames from.
+Cameras, microphones, speakers, the screen and the sound other applications
+play, as tracks a `<video>` and an `<audio>` play and an app reads frames
+from.
 
 ```jsx
 import { useMediaDevices, useUserMedia } from 'react-x11';
@@ -64,16 +65,19 @@ this API, and it is what lets existing WebRTC SDKs run unmodified.
 | `captureScreenshot`        | ScreenCaptureKit                           | `GetImage` on the root    | —                |
 | `getDisplayMedia`          | not yet                                    | the root, read per frame  | —                |
 | `displaySources`           | displays                                   | monitors and WM's windows | —                |
+| other applications' sound  | CoreAudio process taps (macOS 14.2)        | —                         | —                |
 
 **macOS** needs `@windowkit/appkit` 0.31 or later, which is what react-x11
-installs. With an older bridge, every row answers unavailable rather than
+installs, and other applications' sound needs 0.32 and macOS 14.2. With an
+older bridge, every row it cannot do answers unavailable rather than
 crashing. The first device listing in a process loads AVFoundation's camera
 plug-ins, 100 ms to over a second; it runs off the UI thread, which is one
 more reason `useMediaDevices` starts empty and unsettled.
 
 **X11** has the screen and nothing else. A camera or microphone on Linux needs
 PipeWire's file descriptors or v4l2's `ioctl`, and Node's sockets cannot reach
-either. Those rungs come later, as spawned helpers and a prebuilt PipeWire
+either. Other applications' sound on Linux is a PulseAudio monitor source,
+whose protocol is reachable, and is a rung still to come. Those rungs come later, as spawned helpers and a prebuilt PipeWire
 bridge. X11 screen capture is pure JavaScript and works against a remote
 display.
 
@@ -85,27 +89,31 @@ const screen = useDesktopCapability('screenCapture');
 if (screen.features.enumerate) showSourcePicker();
 ```
 
-These four capabilities (`camera`, `audioInput`, `audioOutput`,
-`screenCapture`) are settled on the first frame, because the backend answers
-without asking another process. `available` says whether there is a
+These five capabilities (`camera`, `audioInput`, `audioOutput`,
+`screenCapture`, `systemAudio`) are settled on the first frame, because the
+backend answers without asking another process. `available` says whether there is a
 mechanism at all. Whether a camera is plugged in right now is what
 `useMediaDevices` says.
 
-| capability      | features                                                                                                                                                |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `camera`        | `hotplug`, `labelsBeforePermission`, `nativePreview` (frames go camera → layer without crossing into JavaScript)                                        |
-| `audioInput`    | `echoCancellation`, `noiseSuppression`, `autoGainControl`, `resample`, `hotplug`                                                                        |
-| `audioOutput`   | `deviceSelection`, `echoReference` (what is played is what the echo canceller subtracts)                                                                |
-| `screenCapture` | `picker`, `enumerate`, `screens`, `streams` (`getDisplayMedia` works), `windows`, `cursor`, `systemAudio`, `excludeWindows`, `screenshot`, `thumbnails` |
+| capability      | features                                                                                                                                                                            |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `camera`        | `hotplug`, `labelsBeforePermission`, `nativePreview` (frames go camera → layer without crossing into JavaScript)                                                                    |
+| `audioInput`    | `echoCancellation`, `noiseSuppression`, `autoGainControl`, `resample`, `hotplug`                                                                                                    |
+| `audioOutput`   | `deviceSelection`, `echoReference` (what is played is what the echo canceller subtracts)                                                                                            |
+| `screenCapture` | `picker`, `enumerate`, `screens`, `streams` (`getDisplayMedia` works), `windows`, `cursor`, `systemAudio` (a stream comes with sound), `excludeWindows`, `screenshot`, `thumbnails` |
+| `systemAudio`   | `applications` (one application on its own), `excludesSelf` (this app's sound is left out), `resample`, `hotplug`, `playing`                                                        |
 
 ## Devices
 
 ```js
-const { devices, cameras, microphones, speakers, settled } = useMediaDevices();
+const { devices, cameras, microphones, speakers, systemAudio, settled } =
+  useMediaDevices();
 ```
 
 Each device is `{ deviceId, groupId, kind, label, isDefault, capabilities }`.
-`kind` is `'videoinput'`, `'audioinput'` or `'audiooutput'`.
+`kind` is `'videoinput'`, `'audioinput'`, `'audiooutput'` or `'systemaudio'`,
+other applications' sound ([below](#other-applications-sound)), which also
+says `appId` and `playing`.
 `capabilities` gives a range per number (`width: { min, max }`) and a list per
 choice. The list is empty with `settled: false` on the first frame, and fills
 in a tick later. It follows devices as they are plugged in and out.
@@ -192,6 +200,59 @@ bundle without `NSCameraUsageDescription`, and the request comes back
 refused while the status still says nobody was asked. The error says so,
 and [packaging](packaging.md) has the fix: launch the app bundle through
 LaunchServices.
+
+## Other applications' sound
+
+```jsx
+const { systemAudio } = useMediaDevices();
+const others = useUserMedia(
+  { audio: { deviceId: 'system-audio', sampleRate: 16000, channelCount: 1 } },
+  { start: false },
+);
+```
+
+What the other applications play, all of them or one, as an audio track: what
+a note taker transcribes beside the microphone, what a recorder keeps.
+
+- **`system-audio`** is every application but this one. Where
+  `features.excludesSelf` is true, this app's own sound is left out: its
+  notification sounds, its `<audio>`, a call it plays back.
+- **`system-audio:<appId>`** is one application: an id from the list, or one
+  the app already knows, a bundle id on macOS (`'system-audio:us.zoom.xos'`).
+  A browser plays through helper processes, and so does an Electron app; the
+  application's entry takes them in. One that is not running opens anyway and
+  is silence until it plays, so a recording can start before the call does.
+- A tool that belongs to no application (`afplay`) is listed while it plays.
+
+These are devices of their own kind, `'systemaudio'`, listed in
+`useMediaDevices().systemAudio`, with `system-audio` first. The list follows
+applications as they start, quit and make a sound, and `playing` says which
+ones are making one. They are not `'audioinput'` devices, because a
+microphone picker would then fill with applications. A Linux browser does
+that with PulseAudio monitors. So an `audio` request without a
+`system-audio` `deviceId` gets a microphone, and one with it never does, not
+even as the web's nearest device standing in.
+
+The track behaves as a microphone's does: planar floats in 10 ms chunks,
+nothing dropped, at the `sampleRate` and `channelCount` asked (stereo at 48
+kHz by default). `echoCancellation`, `noiseSuppression` and `autoGainControl`
+are always `false`. Silence arrives as silence, so a chunk's `time` counts
+from when recording started, not from the first sound.
+
+**Permission** is its own kind, `'system-audio-recording'`, asked before the
+first one opens. On macOS it is System Audio Recording, under Privacy &
+Security › Screen & System Audio Recording, and a bundle needs
+`NSAudioCaptureUsageDescription`. **macOS records silence rather than fail
+when it is refused**, so the status is read first and a refusal rejects with
+`NotAllowedError`. macOS has no public call for this status. Where the bridge
+cannot read it, it is `'unknown'`, and the first recording raises the system's
+prompt on its own.
+
+`getDisplayMedia({ audio: 'system' })`, or `{ audio: { appId } }`, pairs a
+screen's stream with the same sound where both exist
+(`screenCapture.features.systemAudio`). Sound without a picture is
+`getUserMedia`: the web's `getDisplayMedia` always captures a picture, and so
+does this one.
 
 ## Tracks and streams
 
@@ -306,8 +367,9 @@ source.
 **`getDisplayMedia({ video, audio, source })`** captures a screen or a
 window as a stream. Where the display has a picker it is shown, and choosing
 nothing rejects with `NotAllowedError`. `source` skips the picker where
-sources can be listed. `audio: 'system'` is best effort: where the display
-cannot give the system's sound, the stream has no audio track.
+sources can be listed. `audio: 'system'` (or `true`), and `{ appId }` for one
+application, are best effort: where the display cannot give that sound, or it
+is not allowed, the stream has no audio track.
 `useDisplayMedia` is its hook. Unlike `useUserMedia`, it **waits for
 `start()`**: sharing a screen is something a user asks for, and a picker
 should not open just because a component mounted.
@@ -353,7 +415,10 @@ fake devices give its tests:
   frame's number along the bottom;
 - a microphone playing a 440 Hz tone;
 - a speaker whose clock the test moves;
-- a screen and a window.
+- a screen and a window;
+- `system-audio` and one application, `system-audio:com.example.player`,
+  playing a 660 Hz tone. An application asked for by an id that is not listed
+  opens as silence.
 
 Where the app has no permission service, it gets one answering from a table.
 
@@ -364,6 +429,7 @@ await renderX11(<Call />, { app, backend: 'mock' });
 fake.last('video').tick(); // one frame, now
 fake.setPermission('camera', 'denied');
 fake.unplug('fake-camera'); // its tracks end
+fake.setPlaying('system-audio:com.example.player', false);
 fake.failNextOpen = { name: 'NotReadableError', message: 'in use' };
 fake.outputs[0].samples(); // what <audio srcObject> played
 ```
@@ -374,5 +440,6 @@ makes one on demand.
 For a real camera, microphone and screen, `npm run labs:media-capture`
 (`examples/labs/media-capture.jsx`) puts every capability in one window: what
 the display says it can do, the permissions, the devices, a camera preview, a
-microphone meter, a tone through the audio out, screenshots, and a log of what
+microphone meter, a tone through the audio out, screenshots, other
+applications' sound with a meter and a WAV of what it heard, and a log of what
 each step answered.

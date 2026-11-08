@@ -115,7 +115,7 @@ describe('the vocabulary', () => {
   test('a kind that is not one is a TypeError, not a machine answer', async () => {
     await assert.rejects(() => permissionStatus('bluetooth'), TypeError);
     await assert.rejects(() => requestPermission('bluetooth'), TypeError);
-    assert.equal(PERMISSION_KINDS.length, 9);
+    assert.equal(PERMISSION_KINDS.length, 10);
   });
 
   test('the Settings deep link, per pane and for the Privacy pane itself', () => {
@@ -124,6 +124,10 @@ describe('the vocabulary', () => {
       'x-apple.systempreferences:com.apple.preference.security?Privacy_Camera',
     );
     assert.match(privacySettingsUrl('full-disk-access'), /Privacy_AllFiles$/);
+    assert.match(
+      privacySettingsUrl('system-audio-recording'),
+      /Privacy_AudioCapture$/,
+    );
     assert.match(privacySettingsUrl(), /\?Privacy$/);
     assert.throws(() => privacySettingsUrl('bluetooth'), TypeError);
   });

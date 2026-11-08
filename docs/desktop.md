@@ -358,9 +358,10 @@ an app can hold its fallback back rather than flash it; it is `true` on the
 first frame for the answers that need nothing asked, the tray and the Dock tile
 on macOS.
 
-Capability names are `'notifications'`, `'tray'`, `'launcher'`, and the four
+Capability names are `'notifications'`, `'tray'`, `'launcher'`, and the five
 of [media capture](media.md#where-it-works) — `'camera'`, `'audioInput'`,
-`'audioOutput'` and `'screenCapture'`, which are settled on the first frame.
+`'audioOutput'`, `'screenCapture'` and `'systemAudio'`, which are settled on
+the first frame.
 `desktopCapability(name)` is the imperative twin for code with no component.
 
 ### Which one to ask

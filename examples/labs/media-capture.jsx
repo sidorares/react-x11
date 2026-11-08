@@ -1,8 +1,8 @@
 // Media capture: the manual rig for everything docs/media.md describes —
 // what the display says it can do, the permissions, the devices as they
 // are plugged in and out, a camera, a microphone with a level meter, the
-// audio out, screenshots and screen sharing — in one window, with a log of
-// what each step answered.
+// audio out, screenshots and screen sharing, and other applications'
+// sound — in one window, with a log of what each step answered.
 //
 // A lab rather than a tour example (AGENTS.md, "Writing an example"): it is
 // not a program anybody keeps running, it is the harness for what CI cannot
@@ -27,11 +27,18 @@
 //   - **Screen**: a screenshot of the display, of this window, of a part of
 //     the display; tick "keep this window out of captures" and take the
 //     window again. Saved to the temp directory, path in the log.
+//   - **System audio** (macOS 14.2, @windowkit/appkit 0.32): record "System
+//     audio" and play something in another app — the meter moves; play this
+//     lab's own tone instead and it should not, since this app is left out.
+//     Pick one application to hear only it; a browser plays through helper
+//     processes, which its entry takes in. "Save WAV" writes what was
+//     recorded, at the rate and channels asked, for listening to.
 //
-// macOS asks for the camera, the microphone and Screen Recording the first
-// time each is used — on behalf of whichever app started node (the terminal,
-// an editor). A refusal without a prompt is the packaging trap
-// docs/packaging.md describes, and the log says which it was.
+// macOS asks for the camera, the microphone, Screen Recording and System
+// Audio Recording the first time each is used — on behalf of whichever app
+// started node (the terminal, an editor), which for system audio needs
+// NSAudioCaptureUsageDescription. A refusal without a prompt is the packaging
+// trap docs/packaging.md describes, and the log says which it was.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -236,13 +243,15 @@ function Devices() {
   if (devices.length === 0) {
     return <text style={s.dim}>no devices — nothing here can list them</text>;
   }
+  const KIND = {
+    videoinput: 'camera',
+    audioinput: 'mic',
+    audiooutput: 'speaker',
+    systemaudio: 'sound',
+  };
   return devices.map((d) => (
     <text key={`${d.kind}:${d.deviceId}`} style={s.text}>
-      {d.kind === 'videoinput'
-        ? 'camera'
-        : d.kind === 'audioinput'
-          ? 'mic'
-          : 'speaker'}
+      {KIND[d.kind] ?? d.kind}
       {': '}
       {d.label || d.deviceId}
       {d.isDefault ? ' (default)' : ''}
@@ -346,31 +355,13 @@ function Camera({ log }) {
   );
 }
 
-// --- microphone ----------------------------------------------------------------
+// --- a track's level ----------------------------------------------------------------
 
-function Microphone({ log, speaker }) {
-  const { microphones } = useMediaDevices();
-  const [deviceId, setDeviceId] = useState(DEFAULT);
-  const [echo, setEcho] = useState(true);
-  const [rate, setRate] = useState(48000);
-  const [hear, setHear] = useState(false);
-  const call = useUserMedia(
-    {
-      audio: {
-        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-        echoCancellation: echo,
-        sampleRate: rate,
-        channelCount: 1,
-      },
-    },
-    { start: false },
-  );
-  useStatusLog('microphone', call, log);
-  const track = useTrack(call.stream, 'audio');
+/** The loudest sample of each tenth of a second off an audio track, and
+ *  what a chunk of it is. */
+function useLevel(track) {
   const [peak, setPeak] = useState(0);
   const [chunk, setChunk] = useState(null);
-
-  // the loudest sample of each tenth of a second, and what a chunk is
   useEffect(() => {
     if (!track) {
       setPeak(0);
@@ -398,9 +389,50 @@ function Microphone({ log, speaker }) {
       clearInterval(timer);
     };
   }, [track]);
+  return { peak, chunk };
+}
 
+function Meter({ peak }) {
   const db = 20 * Math.log10(Math.max(peak, 1e-5));
   const fill = Math.max(0, Math.min(1, (db + 60) / 60));
+  return (
+    <box style={s.row}>
+      <box style={s.meter}>
+        <box
+          style={{
+            width: `${Math.round(fill * 100)}%`,
+            flexGrow: 0,
+            backgroundColor: db > -6 ? '#d0453a' : '$accent',
+          }}
+        />
+      </box>
+      <text style={s.dim}>{peak > 0 ? `${db.toFixed(0)} dBFS` : '—'}</text>
+    </box>
+  );
+}
+
+// --- microphone ----------------------------------------------------------------
+
+function Microphone({ log, speaker }) {
+  const { microphones } = useMediaDevices();
+  const [deviceId, setDeviceId] = useState(DEFAULT);
+  const [echo, setEcho] = useState(true);
+  const [rate, setRate] = useState(48000);
+  const [hear, setHear] = useState(false);
+  const call = useUserMedia(
+    {
+      audio: {
+        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+        echoCancellation: echo,
+        sampleRate: rate,
+        channelCount: 1,
+      },
+    },
+    { start: false },
+  );
+  useStatusLog('microphone', call, log);
+  const track = useTrack(call.stream, 'audio');
+  const { peak, chunk } = useLevel(track);
 
   return (
     <Section title="Microphone">
@@ -435,18 +467,7 @@ function Microphone({ log, speaker }) {
           onChange={(ev) => setHear(checkedOf(ev))}
         />
       </box>
-      <box style={s.row}>
-        <box style={s.meter}>
-          <box
-            style={{
-              width: `${Math.round(fill * 100)}%`,
-              flexGrow: 0,
-              backgroundColor: db > -6 ? '#d0453a' : '$accent',
-            }}
-          />
-        </box>
-        <text style={s.dim}>{peak > 0 ? `${db.toFixed(0)} dBFS` : '—'}</text>
-      </box>
+      <Meter peak={peak} />
       <text style={s.dim}>status: {call.status}</text>
       <text style={s.dim}>{settingsLine(track)}</text>
       {chunk && <text style={s.dim}>{chunk}</text>}
@@ -644,10 +665,166 @@ function Screen({ log, windowRef, exclude, setExclude }) {
   );
 }
 
+// --- other applications' sound ---------------------------------------------------------
+
+/** Planar floats as a 16-bit PCM WAV file's bytes. */
+function wav(channels, sampleRate) {
+  const frames = channels[0]?.length ?? 0;
+  const n = channels.length;
+  const out = Buffer.alloc(44 + frames * n * 2);
+  out.write('RIFF', 0);
+  out.writeUInt32LE(36 + frames * n * 2, 4);
+  out.write('WAVEfmt ', 8);
+  out.writeUInt32LE(16, 16);
+  out.writeUInt16LE(1, 20);
+  out.writeUInt16LE(n, 22);
+  out.writeUInt32LE(sampleRate, 24);
+  out.writeUInt32LE(sampleRate * n * 2, 28);
+  out.writeUInt16LE(n * 2, 32);
+  out.writeUInt16LE(16, 34);
+  out.write('data', 36);
+  out.writeUInt32LE(frames * n * 2, 40);
+  for (let i = 0; i < frames; i++) {
+    for (let c = 0; c < n; c++) {
+      const v = Math.max(-1, Math.min(1, channels[c][i]));
+      out.writeInt16LE(Math.round(v * 32767), 44 + (i * n + c) * 2);
+    }
+  }
+  return out;
+}
+
+// what "Save WAV" keeps: a minute is plenty to listen to
+const KEEP_SECONDS = 60;
+
+function SystemAudio({ log }) {
+  const caps = useDesktopCapability('systemAudio');
+  const { systemAudio } = useMediaDevices();
+  const [source, setSource] = useState('system-audio');
+  const [rate, setRate] = useState(48000);
+  const [channels, setChannels] = useState(2);
+  const call = useUserMedia(
+    {
+      audio: {
+        deviceId: { exact: source },
+        sampleRate: rate,
+        channelCount: channels,
+      },
+    },
+    { start: false },
+  );
+  useStatusLog('system audio', call, log);
+  const track = useTrack(call.stream, 'audio');
+  const { peak, chunk } = useLevel(track);
+  const kept = useRef({ chunks: [], frames: 0, rate: 0 });
+
+  // every chunk copied, a minute at the most, for "Save WAV"
+  useEffect(() => {
+    if (!track) return undefined;
+    kept.current = { chunks: [], frames: 0, rate: 0 };
+    return track.onFrame((d) => {
+      const k = kept.current;
+      k.rate = d.sampleRate;
+      k.chunks.push(d.channels.map((c) => Float32Array.from(c)));
+      k.frames += d.frames;
+      while (k.frames > KEEP_SECONDS * d.sampleRate && k.chunks.length > 1) {
+        k.frames -= k.chunks.shift()[0].length;
+      }
+    });
+  }, [track]);
+
+  const save = () => {
+    const { chunks, frames, rate: at } = kept.current;
+    if (!frames) {
+      log('system audio: nothing recorded yet');
+      return;
+    }
+    const joined = chunks[0].map((_, c) => {
+      const all = new Float32Array(frames);
+      let i = 0;
+      for (const one of chunks) {
+        all.set(one[c], i);
+        i += one[c].length;
+      }
+      return all;
+    });
+    const path = join(tmpdir(), `react-x11-system-audio-${Date.now()}.wav`);
+    writeFileSync(path, wav(joined, at));
+    log(`system audio: ${(frames / at).toFixed(1)} s saved → ${path}`);
+  };
+
+  if (!caps.available) {
+    return (
+      <Section title="System audio">
+        <text style={s.dim}>
+          nothing here records other applications' sound — macOS 14.2 and
+          @windowkit/appkit 0.32 or later
+        </text>
+      </Section>
+    );
+  }
+  return (
+    <Section title="System audio">
+      <box style={s.row}>
+        <Select
+          value={source}
+          options={systemAudio.map((d) => ({
+            value: d.deviceId,
+            label: `${d.label || d.deviceId}${d.playing ? ' — playing' : ''}`,
+          }))}
+          onChange={(ev) => setSource(valueOf(ev))}
+        />
+        <Select
+          value={rate}
+          options={[
+            { value: 48000, label: '48 kHz' },
+            { value: 16000, label: '16 kHz' },
+          ]}
+          onChange={(ev) => setRate(valueOf(ev))}
+        />
+        <Select
+          value={channels}
+          options={[
+            { value: 2, label: 'stereo' },
+            { value: 1, label: 'mono' },
+          ]}
+          onChange={(ev) => setChannels(valueOf(ev))}
+        />
+      </box>
+      <box style={s.row}>
+        <Button
+          label={call.stream ? 'Stop recording' : 'Record'}
+          onPress={call.stream ? call.stop : call.start}
+        />
+        <Button label="Save WAV" onPress={save} />
+      </box>
+      <Meter peak={peak} />
+      <text style={s.dim}>status: {call.status}</text>
+      <text style={s.dim}>{settingsLine(track)}</text>
+      {chunk && <text style={s.dim}>{chunk}</text>}
+      <text style={s.dim}>
+        {caps.features.excludesSelf
+          ? '"System audio" leaves this app out: its tone should not move the meter'
+          : "this app's own sound is in the recording too"}
+      </text>
+    </Section>
+  );
+}
+
 // --- the window ------------------------------------------------------------------------
 
-const CAPABILITIES = ['camera', 'audioInput', 'audioOutput', 'screenCapture'];
-const PERMISSIONS = ['camera', 'microphone', 'screen-recording'];
+const CAPABILITIES = [
+  'camera',
+  'audioInput',
+  'audioOutput',
+  'screenCapture',
+  'systemAudio',
+];
+const PERMISSIONS = [
+  'camera',
+  'microphone',
+  'screen-recording',
+  'system-audio-recording',
+];
 
 export function App() {
   const windowRef = useRef(null);
@@ -699,6 +876,7 @@ export function App() {
                 exclude={exclude}
                 setExclude={setExclude}
               />
+              <SystemAudio log={log} />
             </box>
           </box>
         </box>

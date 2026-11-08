@@ -1492,6 +1492,10 @@ export class CocoaApp {
       case 'microphone-error':
       case 'microphone-muted':
       case 'microphone-ended':
+      case 'system-audio-started':
+      case 'system-audio-error':
+      case 'system-audio-ended':
+      case 'audio-processes':
       case 'audio-input':
       case 'audio-output-low':
         return this.mediaCapture?._route(ev);

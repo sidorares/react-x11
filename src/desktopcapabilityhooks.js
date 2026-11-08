@@ -68,7 +68,7 @@ function same(a, b) {
  * on the session bus, so a panel that starts after the app does is picked up.
  *
  * Capability names: `'notifications'`, `'tray'`, `'launcher'`, `'camera'`,
- * `'audioInput'`, `'audioOutput'`, `'screenCapture'`.
+ * `'audioInput'`, `'audioOutput'`, `'screenCapture'`, `'systemAudio'`.
  */
 export function useDesktopCapability(name) {
   // The app this component is rendered into, when there is one: a process

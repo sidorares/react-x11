@@ -16,6 +16,15 @@
 //      microphones on Linux need PipeWire's file descriptors or v4l2's
 //      `ioctl`, which Node's sockets cannot reach (§4); they are a later rung.
 //
+// **Other applications' sound is a device** (§0.2): a rung lists it as
+// devices of kind `'systemaudio'` — `system-audio`, every application but
+// this one, and `system-audio:<appId>` for one application — and opens it
+// with `open` as it opens a microphone. The web has no kind for it: on Linux
+// a browser lists a PulseAudio monitor as an `'audioinput'`, and a microphone
+// picker fills with "Monitor of …" entries. A kind of its own keeps those out
+// of a call's microphone list, and keeps a microphone from standing in for an
+// application that was asked for by name, or the other way round.
+//
 // A rung's verbs, all optional:
 //
 //   devices() → DeviceDescription[] (or a promise of them)
@@ -25,7 +34,8 @@
 //   openDisplay({ source, video, audio }) → Promise<{ video, audio? } | null>
 //   captureScreenshot({ source, region, cursor }) → Promise<{ width, height, data }>
 //   openAudioOutput({ sampleRate, channels, deviceId }) → AudioOutput
-//   features → { camera, audioInput, audioOutput, screenCapture } feature maps
+//   features → { camera, audioInput, audioOutput, screenCapture, systemAudio }
+//              feature maps
 //
 // where a DeviceDescription is `{ deviceId, groupId, kind, label, isDefault,
 // capabilities, defaults }` and a Source is what src/media/stream.js shares.
@@ -86,19 +96,35 @@ export function rungWith(app, verb) {
 
 // --- devices -------------------------------------------------------------------
 
-const KINDS = new Set(['videoinput', 'audioinput', 'audiooutput']);
+const KINDS = new Set([
+  'videoinput',
+  'audioinput',
+  'audiooutput',
+  'systemaudio',
+]);
+
+/** The id of every other application's sound, and the start of each one's:
+ *  `system-audio:<appId>`. */
+export const SYSTEM_AUDIO = 'system-audio';
 
 /** A device as an app sees it: plain, frozen, and what `deviceId` in a
  *  constraint names. */
 function deviceInfo(d) {
-  return Object.freeze({
+  const info = {
     deviceId: String(d.deviceId),
     groupId: d.groupId ? String(d.groupId) : '',
     kind: d.kind,
     label: d.label ?? '',
     isDefault: Boolean(d.isDefault),
     capabilities: Object.freeze({ ...(d.capabilities ?? {}) }),
-  });
+  };
+  if (d.kind === 'systemaudio') {
+    // which application, for a picker's icon; and whether it is making a
+    // sound now, which is what a person scans the list for
+    if (d.appId) info.appId = String(d.appId);
+    info.playing = Boolean(d.playing);
+  }
+  return Object.freeze(info);
 }
 
 async function descriptions(rung) {
@@ -107,9 +133,10 @@ async function descriptions(rung) {
 }
 
 /**
- * The cameras, microphones and speakers there are now:
- * `[{ deviceId, groupId, kind, label, isDefault, capabilities }]`, `kind`
- * one of `'videoinput'`, `'audioinput'`, `'audiooutput'`. Names are there
+ * The cameras, microphones and speakers there are now, and the applications'
+ * sound: `[{ deviceId, groupId, kind, label, isDefault, capabilities }]`,
+ * `kind` one of `'videoinput'`, `'audioinput'`, `'audiooutput'` and
+ * `'systemaudio'` — which also say `appId` and `playing`. Names are there
  * before any permission, and ids are the same next launch. Resolves `[]`
  * where nothing can list devices — an ordinary state, not an error.
  */
@@ -163,12 +190,13 @@ async function ensureAllowed(app, kind, onPrompt) {
   );
 }
 
+const USAGE_KEYS = {
+  camera: 'NSCameraUsageDescription',
+  microphone: 'NSMicrophoneUsageDescription',
+  'system-audio-recording': 'NSAudioCaptureUsageDescription',
+};
 const usageKey = (kind) =>
-  kind === 'camera'
-    ? 'NSCameraUsageDescription'
-    : kind === 'microphone'
-      ? 'NSMicrophoneUsageDescription'
-      : 'the screen capture usage description';
+  USAGE_KEYS[kind] ?? 'the screen capture usage description';
 
 // --- getUserMedia ------------------------------------------------------------------
 
@@ -224,26 +252,23 @@ export async function getUserMedia(constraints, options = {}) {
   const devices =
     typeof rung.devices === 'function' ? await descriptions(rung) : [];
   const chosen = asked.map((a) => {
-    const deviceKind = a.kind === 'video' ? 'videoinput' : 'audioinput';
+    const deviceKind =
+      a.kind === 'video'
+        ? 'videoinput'
+        : namesSystemAudio(a.raw)
+          ? 'systemaudio'
+          : 'audioinput';
     const candidates = devices.filter((d) => d.kind === deviceKind);
-    if (candidates.length === 0) {
-      throw mediaError(
-        'NotFoundError',
-        `there is no ${a.kind === 'video' ? 'camera' : 'microphone'} to ` +
-          'open — useMediaDevices() lists what there is, and changes when ' +
-          'one is plugged in',
-      );
+    if (deviceKind === 'systemaudio') {
+      candidates.push(...unlistedApplications(rung, candidates, a.raw));
     }
-    return { ...a, ...selectDevice(candidates, a.constraints) };
+    if (candidates.length === 0) throw noDevice(deviceKind);
+    return { ...a, deviceKind, ...selectDevice(candidates, a.constraints) };
   });
 
   for (const c of chosen) {
     if (options.signal?.aborted) throw abortError();
-    await ensureAllowed(
-      app,
-      c.kind === 'video' ? 'camera' : 'microphone',
-      options.onPrompt,
-    );
+    await ensureAllowed(app, PERMISSION_OF[c.deviceKind], options.onPrompt);
   }
 
   const tracks = [];
@@ -274,6 +299,77 @@ export async function getUserMedia(constraints, options = {}) {
 const abortError = () =>
   new DOMException('react-x11: the request was aborted', 'AbortError');
 
+const PERMISSION_OF = {
+  videoinput: 'camera',
+  audioinput: 'microphone',
+  systemaudio: 'system-audio-recording',
+};
+
+function noDevice(deviceKind) {
+  if (deviceKind === 'systemaudio') {
+    return mediaError(
+      'NotFoundError',
+      "there is no other applications' sound to record here. On macOS " +
+        'that takes macOS 14.2 and @windowkit/appkit 0.32 or later; ' +
+        'elsewhere there is no rung for it yet (design/architecture/' +
+        "media-capture.md §0.2). useDesktopCapability('systemAudio') says " +
+        'so before asking.',
+    );
+  }
+  return mediaError(
+    'NotFoundError',
+    `there is no ${deviceKind === 'videoinput' ? 'camera' : 'microphone'} ` +
+      'to open — useMediaDevices() lists what there is, and changes when ' +
+      'one is plugged in',
+  );
+}
+
+/** The ids an audio constraint's `deviceId` names, however it is written:
+ *  bare, a list, or under `exact` and `ideal`. */
+function namedIds(raw) {
+  const id = raw && typeof raw === 'object' ? raw.deviceId : undefined;
+  const forms =
+    id !== null && typeof id === 'object' && !Array.isArray(id)
+      ? [id.exact, id.ideal]
+      : [id];
+  return forms.flat().filter((v) => typeof v === 'string');
+}
+
+/** Whether audio constraints ask for other applications' sound: a `deviceId`
+ *  that is `system-audio` or one of its applications'. */
+function namesSystemAudio(raw) {
+  return namedIds(raw).some(
+    (id) => id === SYSTEM_AUDIO || id.startsWith(`${SYSTEM_AUDIO}:`),
+  );
+}
+
+/**
+ * An application asked for by id that is not listed — not running yet, or
+ * not making a sound — as a device that can still be opened, where the rung
+ * can tap one application: its tap waits for it, so a note taker can start
+ * on a call app before the call does. Its capabilities are `system-audio`'s.
+ */
+function unlistedApplications(rung, listed, raw) {
+  const all = listed.find((d) => d.deviceId === SYSTEM_AUDIO);
+  if (!all || !rung.features?.systemAudio?.applications) return [];
+  const known = new Set(listed.map((d) => d.deviceId));
+  return namedIds(raw)
+    .filter(
+      (id) =>
+        id.startsWith(`${SYSTEM_AUDIO}:`) &&
+        !id.startsWith(`${SYSTEM_AUDIO}:pid:`) &&
+        !known.has(id),
+    )
+    .map((id) => ({
+      ...all,
+      deviceId: id,
+      label: id.slice(SYSTEM_AUDIO.length + 1),
+      appId: id.slice(SYSTEM_AUDIO.length + 1),
+      isDefault: false,
+      playing: false,
+    }));
+}
+
 // --- the screen --------------------------------------------------------------------
 
 /**
@@ -296,14 +392,22 @@ export async function displaySources(options = {}) {
 
 /**
  * A screen or a window as a `MediaStream`: one video track, and an audio
- * track of the system's sound where `audio: 'system'` is asked and the
- * display can give it (a browser's rule: audio is best effort, and a
- * stream without it is the answer where it cannot).
+ * track of the system's sound where `audio: 'system'` is asked — or of one
+ * application's with `audio: { appId }` — and the display can give it (a
+ * browser's rule: audio is best effort, and a stream without it is the
+ * answer where it cannot).
  *
  * ```js
  * const stream = await getDisplayMedia({ video: { frameRate: 30 } });
  * const one = await getDisplayMedia({ source: sources[0].id });
+ * const call = await getDisplayMedia({ audio: { appId: 'us.zoom.xos' } });
  * ```
+ *
+ * A screen rung that gives no sound of its own is paired with the
+ * `'systemaudio'` source of the same name, through the same permission
+ * `getUserMedia` asks for it. Audio without a picture is `getUserMedia({
+ * audio: { deviceId: 'system-audio' } })`: the web's `getDisplayMedia`
+ * always captures a picture, and this one keeps to that.
  *
  * Where the display has a picker it is shown, and a user who chooses nothing
  * rejects it with `NotAllowedError`, as a browser's does. `source` skips it
@@ -324,15 +428,18 @@ export async function getDisplayMedia(request = {}, options = {}) {
   const video = request.video === undefined ? true : request.video;
   if (video === false) {
     throw new TypeError(
-      'react-x11: getDisplayMedia captures a picture: video cannot be false',
+      'react-x11: getDisplayMedia captures a picture: video cannot be ' +
+        "false. Other applications' sound alone is getUserMedia({ audio: " +
+        "{ deviceId: 'system-audio' } }).",
     );
   }
+  const audio = displayAudio(request.audio);
   let opened;
   try {
     opened = await rung.openDisplay({
       source: request.source ?? null,
       video: video === true ? {} : { ...video },
-      audio: request.audio ?? false,
+      audio,
     });
   } catch (err) {
     throw errorFromBackend(err, 'the screen could not be captured');
@@ -356,8 +463,45 @@ export async function getDisplayMedia(request = {}, options = {}) {
         constraints: {},
       }),
     );
+  } else if (audio) {
+    const sound = await systemAudioTrack(app, audio, options);
+    if (sound) tracks.push(sound);
   }
   return new MediaStream(tracks);
+}
+
+/** `getDisplayMedia`'s `audio`, as a rung reads it: `false`, `'system'` or
+ *  `{ appId }`. `true` is the web's way to ask for whatever sound there is,
+ *  which here is the system's. */
+function displayAudio(audio) {
+  if (audio === undefined || audio === null || audio === false) return false;
+  if (audio === true || audio === 'system') return 'system';
+  if (typeof audio === 'object' && typeof audio.appId === 'string') {
+    return { appId: audio.appId };
+  }
+  throw new TypeError(
+    `react-x11: getDisplayMedia's audio is ${JSON.stringify(audio)} — ` +
+      "expected false, 'system', or { appId } for one application's sound",
+  );
+}
+
+/** The `'systemaudio'` track a screen's stream is paired with, or null where
+ *  there is none to open or it was not allowed: best effort, as a browser's
+ *  audio is. */
+async function systemAudioTrack(app, audio, options) {
+  const deviceId =
+    audio === 'system' ? SYSTEM_AUDIO : `${SYSTEM_AUDIO}:${audio.appId}`;
+  if (!rungWith(app, 'open')?.features?.systemAudio) return null;
+  try {
+    const stream = await getUserMedia(
+      { audio: { deviceId: { exact: deviceId } } },
+      { app, signal: options.signal, onPrompt: options.onPrompt },
+    );
+    return stream.getAudioTracks()[0] ?? null;
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    return null;
+  }
 }
 
 /**
@@ -420,9 +564,10 @@ const NONE = null;
 
 /**
  * The feature map a capability answers for `app` — `'camera'`,
- * `'audioInput'`, `'audioOutput'` or `'screenCapture'` — as
- * `{ backend, features }`, or null where no rung has it. Synchronous: every
- * rung is the app's own and knows what it can do without asking anyone.
+ * `'audioInput'`, `'audioOutput'`, `'screenCapture'` or `'systemAudio'` —
+ * as `{ backend, features }`, or null where no rung has it. Synchronous:
+ * every rung is the app's own and knows what it can do without asking
+ * anyone.
  */
 export function captureCapability(app, name) {
   return capabilityOf(app, name);
@@ -438,7 +583,21 @@ export async function settledCaptureCapability(app, name) {
 function capabilityOf(app, name) {
   for (const rung of captureRungs(app)) {
     const features = rung.features?.[name];
-    if (features) return { backend: rung.backend ?? 'unknown', features };
+    if (!features) continue;
+    // a stream of the screen comes with the system's sound where a rung
+    // records it, whether or not the screen's rung does (`getDisplayMedia`)
+    if (
+      name === 'screenCapture' &&
+      features.streams &&
+      !features.systemAudio &&
+      rungWith(app, 'open')?.features?.systemAudio
+    ) {
+      return {
+        backend: rung.backend ?? 'unknown',
+        features: { ...features, systemAudio: true },
+      };
+    }
+    return { backend: rung.backend ?? 'unknown', features };
   }
   return NONE;
 }

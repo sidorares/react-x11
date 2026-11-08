@@ -1,10 +1,10 @@
 // examples/labs/media-capture.jsx against the fake devices
 // (src/testing/media.js): the rig mounts, says what the display can do,
 // lists the devices, and its buttons reach a camera, a microphone, the audio
-// out and a screenshot. What a real camera and microphone do is the lab's
+// out, a screenshot and other applications' sound. What a real camera and microphone do is the lab's
 // own job on a real machine; this keeps it from rotting while core moves.
 import assert from 'node:assert/strict';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { afterEach, test } from 'node:test';
 import React from 'react';
 
@@ -122,4 +122,59 @@ test('the lab mounts over fake devices, and its buttons reach them', async () =>
   // stopping lets the camera go
   await press(windowNode, buttons('Stop')[1]);
   assert.equal(camera.stopped, true);
+});
+
+test('the lab records other applications’ sound, and saves what it heard', async () => {
+  const app = createMockApp();
+  const fake = fakeMediaDevices(app);
+  const { windowNode } = await renderX11(h(App), {
+    app,
+    backend: 'mock',
+    wrap: false,
+  });
+  await act(async () => {
+    await tick();
+    await tick();
+  });
+  screen.getByText(
+    'systemAudio: fake — applications, excludesSelf, resample, hotplug, playing',
+  );
+  screen.getByText('sound: Fake player');
+  screen.getByText('system-audio-recording: granted');
+
+  await press(windowNode, buttons('Record')[0]);
+  const tap = fake.last('audio');
+  assert.equal(tap.label, 'System audio', 'everything, not the microphone');
+  assert.deepEqual(
+    [tap.settings().sampleRate, tap.settings().channelCount],
+    [48000, 2],
+  );
+  await act(async () => {
+    for (let i = 0; i < 10; i++) tap.tick();
+    await wait(150);
+  });
+  screen.getByText('480 frames at 48000 Hz, 2 ch');
+  assert.ok(logged().some((l) => l.endsWith('system audio: live')));
+
+  await press(windowNode, buttons('Save WAV')[0]);
+  const saved = logged().find((l) => /system audio: [\d.]+ s saved/.test(l));
+  assert.ok(saved, logged().join('\n'));
+  const path = saved.split('→ ')[1];
+  // stereo at 48 kHz, 16 bits a sample, in whole 10 ms chunks — the fake
+  // keeps making them while it is read, so how many is the timer's
+  const file = readFileSync(path);
+  assert.deepEqual(
+    [
+      file.toString('ascii', 0, 4),
+      file.readUInt16LE(22),
+      file.readUInt32LE(24),
+    ],
+    ['RIFF', 2, 48000],
+  );
+  const data = file.readUInt32LE(40);
+  assert.ok(data >= 10 * 480 * 4 && data % (480 * 4) === 0, `${data} bytes`);
+  rmSync(path);
+
+  await press(windowNode, buttons('Stop recording')[0]);
+  assert.equal(tap.stopped, true);
 });

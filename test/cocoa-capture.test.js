@@ -5,6 +5,9 @@
 // that lifts the camera's own layer without a frame crossing into
 // JavaScript, frames on request, a microphone's chunks, the audio out and a
 // screenshot — and a bridge without the verbs that answers unavailable.
+// Other applications' sound over the process taps of appkit 0.32: the
+// processes the bridge lists as the sources a person would pick, opened as a
+// microphone is, and a bridge from before them that lists none.
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
@@ -15,6 +18,9 @@ import {
   desktopCapability,
   enumerateDevices,
   getUserMedia,
+  NoPermissionServiceError,
+  permissionStatus,
+  requestPermission,
 } from '../src/index.js';
 import { createRoot } from '../src/index.js';
 import {
@@ -31,9 +37,67 @@ afterEach(async () => {
   await cleanupCocoa();
 });
 
+/** What the bridge's `audioProcesses` answers on a desk with a browser
+ *  playing through a helper, a daemon that never plays, a tool playing and
+ *  this process: in systemaudio.mm's shapes. */
+const PROCESSES = [
+  { pid: process.pid, bundleId: '', name: 'node', playing: false },
+  {
+    pid: 501,
+    bundleId: 'com.google.Chrome',
+    name: 'Google Chrome',
+    playing: false,
+    app: {
+      bundleId: 'com.google.Chrome',
+      name: 'Google Chrome',
+      regular: true,
+    },
+  },
+  {
+    pid: 502,
+    bundleId: 'com.google.Chrome.helper',
+    name: 'Google Chrome Helper',
+    playing: true,
+    app: {
+      bundleId: 'com.google.Chrome',
+      name: 'Google Chrome',
+      regular: true,
+    },
+  },
+  {
+    pid: 503,
+    bundleId: 'com.tinyspeck.slackmacgap',
+    name: 'Slack',
+    playing: false,
+    app: {
+      bundleId: 'com.tinyspeck.slackmacgap',
+      name: 'Slack',
+      regular: true,
+    },
+  },
+  {
+    pid: 600,
+    bundleId: 'com.apple.loginwindow',
+    name: 'loginwindow',
+    playing: false,
+    app: {
+      bundleId: 'com.apple.loginwindow',
+      name: 'loginwindow',
+      regular: false,
+    },
+  },
+  {
+    pid: 601,
+    bundleId: 'com.apple.mediaremoted',
+    name: 'mediaremoted',
+    playing: false,
+  },
+  { pid: 700, bundleId: '', name: 'afplay', playing: true },
+];
+
 /** The fake bridge with the capture verbs, recording as the rest do, in
  *  the shapes @windowkit/appkit's capture.mm answers in. */
-function captureBridge() {
+function captureBridge({ processes = PROCESSES } = {}) {
   const native = fakeCocoaBridge();
   let seq = 5000;
   const cameras = new Map();
@@ -83,6 +147,7 @@ function captureBridge() {
   };
   Object.assign(native, {
     captureDevices: (cb) => later(listed, cb),
+    audioProcesses: (cb) => later(processes, cb),
     screenCaptureDisplays: (cb) => later(displays, cb),
     openCamera(deviceId, opts) {
       const id = ++seq;
@@ -107,6 +172,13 @@ function captureBridge() {
     // what was asked; `microphone-started` says what the engine did
     openMicrophone: (deviceId, opts) => ({ id: ++seq, ...opts }),
     closeMicrophone() {},
+    // what was asked; `system-audio-started` says the tap is running
+    openSystemAudio: (opts) => ({
+      id: ++seq,
+      sampleRate: opts.sampleRate ?? 48000,
+      channels: opts.channels ?? 2,
+    }),
+    closeSystemAudio() {},
     openAudioOutput: (opts) => ({ id: ++seq, ...opts, latency: 0 }),
     audioOutputWrite: (id, channels) => channels[0].length,
     audioOutputState: () => ({ currentTime: 0.5, queued: 480, latency: 0.012 }),
@@ -139,6 +211,10 @@ test('devices: the bridge’s list in the web’s shape, before any permission',
       ['videoinput', 'FaceTime HD Camera', true],
       ['audioinput', 'MacBook Pro Microphone', true],
       ['audiooutput', 'MacBook Pro Speakers', true],
+      ['systemaudio', 'System audio', true],
+      ['systemaudio', 'Google Chrome', false],
+      ['systemaudio', 'Slack', false],
+      ['systemaudio', 'afplay', false],
     ],
   );
   const [camera] = devices;
@@ -346,6 +422,183 @@ test('a microphone at the rate asked, an output on the same engine, a screenshot
   await assert.rejects(captureScreenshot({ app, source: 'display:99' }), {
     name: 'NotAllowedError',
   });
+});
+
+test('other applications’ sound: the processes as sources a person picks, each opened as a microphone is', async () => {
+  const native = captureBridge();
+  const { app } = await mountCocoa(null, { native });
+  const sources = (await enumerateDevices({ app })).filter(
+    (d) => d.kind === 'systemaudio',
+  );
+  // everything first; an application once, its helpers under it and playing
+  // through them; a daemon that never plays, never; a tool while it plays;
+  // and not this process
+  assert.deepEqual(
+    sources.map((d) => [d.deviceId, d.label, d.appId, d.playing]),
+    [
+      ['system-audio', 'System audio', undefined, true],
+      [
+        'system-audio:com.google.Chrome',
+        'Google Chrome',
+        'com.google.Chrome',
+        true,
+      ],
+      [
+        'system-audio:com.tinyspeck.slackmacgap',
+        'Slack',
+        'com.tinyspeck.slackmacgap',
+        false,
+      ],
+      ['system-audio:pid:700', 'afplay', undefined, true],
+    ],
+  );
+  assert.deepEqual(sources[0].capabilities.channelCount, { min: 1, max: 2 });
+  const cap = await desktopCapability('systemAudio', { app });
+  assert.equal(cap.available, true);
+  assert.equal(cap.backend, 'cocoa');
+  assert.equal(cap.features.applications, true);
+  assert.equal(cap.features.excludesSelf, true);
+  // no getDisplayMedia here yet, so no stream comes with the sound
+  const screen = await desktopCapability('screenCapture', { app });
+  assert.equal(screen.features.systemAudio, false);
+
+  // one application, at the rate a speech model wants
+  const pending = getUserMedia(
+    {
+      audio: {
+        deviceId: 'system-audio:com.google.Chrome',
+        sampleRate: 16000,
+        channelCount: 1,
+      },
+    },
+    { app },
+  );
+  await tick();
+  await tick();
+  assert.deepEqual(native.of('openSystemAudio').at(-1), [
+    { bundleId: 'com.google.Chrome', sampleRate: 16000, channels: 1 },
+  ]);
+  assert.deepEqual(native.of('openMicrophone'), [], 'never a microphone');
+  const id = [...app.mediaCapture._sources.keys()].at(-1);
+  native.emit({ type: 'system-audio-started', id, latency: 0.011 });
+  const stream = await pending;
+  const [track] = stream.getAudioTracks();
+  assert.equal(track.label, 'Google Chrome');
+  assert.deepEqual(track.getSettings(), {
+    sampleRate: 16000,
+    channelCount: 1,
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    latency: 0.011,
+    deviceId: 'system-audio:com.google.Chrome',
+  });
+  const chunks = [];
+  track.onFrame((d) => chunks.push(d));
+  native.emit({
+    type: 'audio-input',
+    id,
+    sampleRate: 16000,
+    channels: [new Float32Array(160)],
+    frames: 160,
+    time: 0.01,
+  });
+  assert.deepEqual(
+    chunks.map((c) => [c.frames, c.time]),
+    [[160, 0.01]],
+  );
+  track.stop();
+  assert.deepEqual(native.of('closeSystemAudio').at(-1), [id]);
+
+  // everything, at its defaults; a tool by its pid; an application that is
+  // not running, by its id, which the tap waits for
+  for (const [deviceId, target] of [
+    ['system-audio', {}],
+    ['system-audio:pid:700', { pid: 700 }],
+    ['system-audio:us.zoom.xos', { bundleId: 'us.zoom.xos' }],
+  ]) {
+    const opening = getUserMedia({ audio: { deviceId } }, { app });
+    await tick();
+    await tick();
+    assert.deepEqual(native.of('openSystemAudio').at(-1), [
+      { ...target, sampleRate: 48000, channels: 2 },
+    ]);
+    const tap = [...app.mediaCapture._sources.keys()].at(-1);
+    native.emit({ type: 'system-audio-started', id: tap });
+    const [t] = (await opening).getAudioTracks();
+    // the process tapped quit: its track ends
+    native.emit({ type: 'system-audio-ended', id: tap });
+    assert.equal(t.readyState, 'ended', deviceId);
+  }
+
+  // refused by the system, by name
+  const refused = getUserMedia(
+    { audio: { deviceId: 'system-audio' } },
+    { app },
+  );
+  await tick();
+  await tick();
+  native.emit({
+    type: 'system-audio-error',
+    id: [...app.mediaCapture._sources.keys()].at(-1),
+    name: 'NotAllowedError',
+    message: 'System Audio Recording is not allowed for this app',
+  });
+  await assert.rejects(refused, { name: 'NotAllowedError' });
+
+  // an application starting to play: watchers are told
+  let told = 0;
+  const off = app.mediaCapture.watch(() => told++);
+  native.emit({ type: 'audio-processes' });
+  assert.equal(told, 1);
+  off();
+});
+
+test('a bridge from before the process taps lists no sound of other applications, and has no permission to ask', async () => {
+  const native = captureBridge();
+  const missing = ['audioProcesses', 'openSystemAudio', 'closeSystemAudio'];
+  const older = new Proxy(native, {
+    get: (target, name) => (missing.includes(name) ? undefined : target[name]),
+  });
+  const { app } = await mountCocoa(null, { native: older });
+  const devices = await enumerateDevices({ app });
+  assert.deepEqual(
+    devices.filter((d) => d.kind === 'systemaudio'),
+    [],
+  );
+  assert.equal(
+    (await desktopCapability('systemAudio', { app })).available,
+    false,
+  );
+  await assert.rejects(
+    getUserMedia({ audio: { deviceId: 'system-audio' } }, { app }),
+    (err) => {
+      assert.equal(err.name, 'NotFoundError');
+      assert.match(err.message, /macOS 14\.2 and @windowkit\/appkit 0\.32/);
+      return true;
+    },
+  );
+  assert.deepEqual(native.of('openMicrophone'), [], 'no microphone stands in');
+  // the kind is unknown to such a bridge: asked of it, it would throw
+  assert.equal(
+    await permissionStatus('system-audio-recording', { app }),
+    'unknown',
+  );
+  await assert.rejects(
+    requestPermission('system-audio-recording', { app }),
+    NoPermissionServiceError,
+  );
+  assert.ok(
+    !native
+      .of('authorizationStatus')
+      .some(([kind]) => kind === 'system-audio-recording'),
+    'never asked of the bridge',
+  );
+  // and the rung leaves its Settings pane to the deep link, which
+  // openPrivacySettings opens with `open` (not run here: it would put System
+  // Settings on the screen)
+  assert.equal(app.permissions.openSettings('system-audio-recording'), null);
+  assert.deepEqual(native.of('openPrivacySettings'), []);
 });
 
 test('a bridge without the capture verbs answers unavailable', async () => {
