@@ -4,9 +4,9 @@ _Design record, 2026-11-06, written against master at 220e1c0 (react-x11
 2.56.5) and `@react-x11/components` at 27fcf7e9. It extends [video.md](video.md),
 whose §8.4 ("Camera, later") this is the "later" of, and it takes the
 boundary `@react-x11/components`' `docs/prd-audio.md` already drew through
-sound. §0.1 is what has been built since: step 1 of §6, core's half, and
-the `@windowkit/appkit` verbs it runs on, which are on a branch and not
-released yet._
+sound. §0.1 is what has been built since: step 1 of §6, core's half
+(react-x11 2.57), and the `@windowkit/appkit` verbs it runs on, released in
+0.31.0._
 
 ---
 
@@ -114,8 +114,8 @@ from its rectangle of the root, and refuses screens where the server has
 `GetImage` reads only the target's own raster, so its tests paint the root
 itself.
 
-**The bridge** (`@windowkit/appkit`'s `src/capture.mm`, on a branch, not
-released). `captureDevices` (also through a callback, since the first listing
+**The bridge** (`@windowkit/appkit`'s `src/capture.mm`, windowkit/appkit#130,
+released in 0.31.0 and react-x11's floor since). `captureDevices` (also through a callback, since the first listing
 loads AVFoundation's camera plug-ins: 1.5 s cold, ~110 ms warm, ~1 ms after),
 `capture-devices` only when what a listing shows changed (an engine's own
 `CADefaultDeviceAggregate-<pid>` device is otherwise announced as a new

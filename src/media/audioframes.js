@@ -31,7 +31,8 @@ export class NoAudioOutputError extends Error {
   constructor() {
     super(
       'react-x11: nothing on this display can play audio. On macOS that ' +
-        'takes @windowkit/appkit with its audio output verbs; on X11 and ' +
+        'takes @windowkit/appkit 0.31 or later — `npm ls @windowkit/appkit` ' +
+        'says which this app has; on X11 and ' +
         'Wayland there is no output rung yet (design/architecture/' +
         'media-capture.md §4); in a test, fakeMediaDevices(app) from ' +
         "'react-x11/test' gives one. Ask useDesktopCapability('audioOutput') " +

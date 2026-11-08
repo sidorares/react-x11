@@ -65,9 +65,9 @@ this API, and it is what lets existing WebRTC SDKs run unmodified.
 | `getDisplayMedia`          | not yet                                    | the root, read per frame  | —                |
 | `displaySources`           | displays                                   | monitors and WM's windows | —                |
 
-**macOS** needs a `@windowkit/appkit` with the capture verbs (its
-`capture.mm`). With an older bridge every row answers unavailable, never a
-crash. The first device listing in a process loads AVFoundation's camera
+**macOS** needs `@windowkit/appkit` 0.31 or later, which is what react-x11
+installs. With an older bridge, every row answers unavailable rather than
+crashing. The first device listing in a process loads AVFoundation's camera
 plug-ins, 100 ms to over a second; it runs off the UI thread, which is one
 more reason `useMediaDevices` starts empty and unsettled.
 
