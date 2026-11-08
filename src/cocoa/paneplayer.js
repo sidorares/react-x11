@@ -9,25 +9,12 @@
 //
 // The picture comes down the way a pane's own goes up, the other way round:
 // the host copies the frame showing into one of a ring of shared IOSurfaces
-// (`playerCopyFrame` into a `createSurfaceIOSurface(…, true)` bitmap) and
-// names it, and the pane looks it up by id and copies it into the element's
-// surface when the element asks (`copyFrame`, a `blitSurface` memcpy). A
-// pane has no layers to lift a part onto, so its `<video>` always draws.
-//
-// The ring is three deep because the two processes do not wait on each
-// other: the host writes the buffer after the one it last named, so the one
-// the pane is told about is not written again for two frames — some 66ms at
-// 30fps, against a pane that copies within a display frame of hearing.
-//
-// A buffer is named by its IOSurface id, and the system gives a freed id to
-// the next surface anyone makes, in either process. So the pane answers
-// each frame once it has looked the buffer up (`seen`), the host keeps a
-// buffer of a ring it retired until the frame naming it is answered
-// (`HostedPlayer._freeRing`), and the pane keeps nothing a lookup found at
-// another size than the frame says (`PanePlayer._lookUp`) — the pane's own
-// presents, the other way round, are kept the same way
-// (`CocoaPaneWindow._releaseRing`).
+// (`playerCopyFrame`, src/cocoa/panering.js) and names it, and the pane looks
+// it up by id and copies it into the element's surface when the element asks
+// (`copyFrame`, a `blitSurface` memcpy). A pane has no layers to lift a part
+// onto, so its `<video>` always draws.
 
+import { canReadRing, HostRing, PaneRing } from './panering.js';
 import { PlayerState } from './player.js';
 
 // How often the host asks its player for a frame while it plays — the
@@ -42,31 +29,11 @@ const PULL_MS = 16;
 // should not keep a timer running.
 const WANT_TRIES = 60;
 
-const RING = 3;
-
 let seq = 0;
-
-/** `fn()` with a shared buffer's memory locked for the CPU, as IOSurface
- *  asks of anything that reads or writes its bytes; the bridge's verbs are
- *  optional, as they are for the pane's own ring. */
-function locked(native, handle, fn) {
-  const lock = typeof native.surfaceLock === 'function';
-  if (lock) native.surfaceLock(handle);
-  try {
-    return fn();
-  } finally {
-    if (lock) native.surfaceUnlock?.(handle);
-  }
-}
 
 /** Can a pane's player be shown over this bridge? It looks the host's
  *  buffers up and copies out of them. */
-export function canShowPanePlayers(native) {
-  return (
-    typeof native?.surfaceFromIOSurfaceID === 'function' &&
-    typeof native.blitSurface === 'function'
-  );
-}
+export const canShowPanePlayers = canReadRing;
 
 /**
  * The pane's end: a player whose item the host plays. Its state is what
@@ -82,9 +49,13 @@ export class PanePlayer extends PlayerState {
     /** the host's newest frame: its buffer here, size and time */
     this._shown = null;
     this._fresh = false;
-    /** the host's buffers, looked up: IOSurface id → surface handle */
-    this._buffers = new Map();
-    this._bufferSize = null;
+    /** the host's buffers, looked up; a frame held in one goes with them */
+    this._ring = new PaneRing(this._native, {
+      onDrop: () => {
+        this._shown = null;
+        this._fresh = false;
+      },
+    });
     app._players.set(this.id, this);
     this._post({
       op: 'create',
@@ -125,9 +96,9 @@ export class PanePlayer extends PlayerState {
   /** The host named a buffer with a new frame in it. */
   _frame({ surface, width, height, time, seq }) {
     if (this.released) return;
-    const handle = this._lookUp(surface, width, height);
+    const handle = this._ring.lookUp(surface, width, height);
     // this frame's lookup is done, whatever it found: the host may free the
-    // buffer, which it kept for it (`HostedPlayer._freeRing`)
+    // buffer, which it kept for it (`HostRing._freeRing`)
     if (seq != null) this._post({ op: 'seen', seq });
     if (!handle) return;
     this._shown = { handle, width, height, time };
@@ -144,40 +115,6 @@ export class PanePlayer extends PlayerState {
     }
   }
 
-  /**
-   * The buffer the host named, looked up the first time it is named; null
-   * where the lookup found none, or found a surface of another size than
-   * the frame, which is not the frame's buffer but whatever the id has gone
-   * to since (`HostedPlayer._freeRing` says how) — never kept, and never
-   * copied out of.
-   */
-  _lookUp(surface, width, height) {
-    // a ring of another size is a new ring: the old one's buffers are the
-    // host's to free, and these handles only keep them alive
-    if (
-      this._bufferSize?.width !== width ||
-      this._bufferSize?.height !== height
-    ) {
-      this._dropBuffers();
-      this._bufferSize = { width, height };
-    }
-    const known = this._buffers.get(surface);
-    if (known) return known;
-    let found;
-    try {
-      found = this._native.surfaceFromIOSurfaceID(surface, 1);
-    } catch {
-      // freed before it got here: the next frame is in another buffer
-      return null;
-    }
-    if (found.width !== width || found.height !== height) {
-      this._native.releaseSurface?.(found.handle);
-      return null;
-    }
-    this._buffers.set(surface, found.handle);
-    return found.handle;
-  }
-
   /** As `CocoaPlayer.copyFrame`: the newest frame into `surface`, or null
    *  when the host has sent nothing since the last copy. */
   copyFrame(surface) {
@@ -186,33 +123,10 @@ export class PanePlayer extends PlayerState {
     const { width, height, time } = shown;
     const fits = surface.width === width && surface.height === height;
     if (fits) {
-      locked(this._native, shown.handle, () =>
-        this._native.blitSurface(
-          shown.handle,
-          0,
-          0,
-          width,
-          height,
-          surface._surfaceHandle,
-          0,
-          0,
-        ),
-      );
+      this._ring.copy(shown.handle, width, height, surface._surfaceHandle);
       this._fresh = false;
     }
     return { width, height, time, written: fits };
-  }
-
-  _dropBuffers() {
-    const release = this._native.releaseSurface;
-    if (typeof release === 'function') {
-      for (const handle of this._buffers.values()) {
-        release.call(this._native, handle);
-      }
-    }
-    this._buffers.clear();
-    this._shown = null;
-    this._fresh = false;
   }
 
   release() {
@@ -220,7 +134,7 @@ export class PanePlayer extends PlayerState {
     this.released = true;
     this._listeners.clear();
     this.app._players.delete(this.id);
-    this._dropBuffers();
+    this._ring.drop();
     this._post({ op: 'release' });
   }
 }
@@ -240,17 +154,10 @@ export class HostedPlayer {
     this.id = player;
     this.player = app.createPlayer(src, options);
     this._picture = this.player.element !== 'audio';
-    this._ring = [];
+    this._ring = new HostRing(this._native);
     this._ringSize = null;
-    this._next = 0;
     this._want = 0;
     this._pull = null;
-    // Each frame's number, the newest the pane has looked up (`seen`), and
-    // the buffers of retired rings a frame it has not looked up yet names:
-    // freed as it does (`_freeRing`).
-    this._seq = 0;
-    this._seenSeq = 0;
-    this._retired = [];
     this._off = this.player._subscribe((ev) => this._event(ev));
   }
 
@@ -260,7 +167,7 @@ export class HostedPlayer {
     if (player.released) return;
     if (msg.op === 'set') player.set(msg.settings);
     else if (msg.op === 'seek') player.seek(msg.seconds);
-    else if (msg.op === 'seen') this._seen(msg.seq);
+    else if (msg.op === 'seen') this._ring.seen(msg.seq);
     else if (msg.op === 'release') this.release();
   }
 
@@ -309,23 +216,19 @@ export class HostedPlayer {
     };
     let got = null;
     if (size.width > 0 && size.height > 0) {
-      const buffer = this._buffer(size.width, size.height);
-      got = locked(this._native, buffer.handle, () =>
-        this._native.playerCopyFrame(player.id, buffer.handle),
-      );
-      if (got?.written) {
-        this._next = (this._next + 1) % RING;
-        // the buffer is named in the channel until the pane says otherwise
-        // (`_freeRing`)
-        buffer.namedSeq = ++this._seq;
+      let named;
+      ({ got, named } = this._ring.fill(size.width, size.height, (handle) =>
+        this._native.playerCopyFrame(player.id, handle),
+      ));
+      if (named) {
         this._send({
           type: 'pane-player-frame',
           player: this.id,
-          surface: buffer.iosurfaceId,
+          surface: named.surface,
           width: got.width,
           height: got.height,
           time: got.time,
-          seq: this._seq,
+          seq: named.seq,
         });
         if (!player.playing) this._want = 0;
       } else if (got?.width > 0 && got?.height > 0) {
@@ -338,81 +241,13 @@ export class HostedPlayer {
     this._syncPull();
   }
 
-  /** The ring's next buffer, at `width` x `height`: a new ring at another
-   *  size. Shared, so the pane can look each one up by its id. */
-  _buffer(width, height) {
-    if (
-      this._ring.length === 0 ||
-      this._ring[0].width !== width ||
-      this._ring[0].height !== height
-    ) {
-      this._freeRing();
-      for (let i = 0; i < RING; i += 1) {
-        const made = this._native.createSurfaceIOSurface(
-          width,
-          height,
-          1,
-          true,
-        );
-        this._ring.push({ ...made, width, height });
-      }
-      this._next = 0;
-    }
-    return this._ring[this._next];
-  }
-
-  /**
-   * Let the ring go — all but a buffer a frame names that the pane has not
-   * looked up yet. The pane finds a buffer by its IOSurface id, and the
-   * system hands a freed id to the next surface anyone makes: the ring of
-   * the new size this same call is about to make, the pane's own ring,
-   * another process's surface. A frame still in the channel named the id,
-   * not the surface, so the pane copied out of whatever had it by the time
-   * it looked — the next ring's buffer, unwritten, shown until the next
-   * frame came, which for a paused player is the next seek. So that buffer
-   * is kept (`_retired`) until the pane says it has looked the frame up
-   * (`seen`, `_seen`). One, as a rule, since the pane answers as it reads,
-   * and never more than a ring's worth: a pane that stops answering has the
-   * oldest freed anyway, the one it is likeliest to have looked up already.
-   */
-  _freeRing() {
-    const ring = this._ring;
-    this._ring = [];
-    const release = this._native.releaseSurface;
-    if (typeof release !== 'function') return;
-    for (const buffer of ring) {
-      if (buffer.namedSeq > this._seenSeq) this._retired.push(buffer);
-      else release.call(this._native, buffer.handle);
-    }
-    while (this._retired.length > RING) {
-      release.call(this._native, this._retired.shift().handle);
-    }
-  }
-
-  /** The pane has looked up every frame up to `seq`: the retired buffers
-   *  they named go. */
-  _seen(seq) {
-    if (!(seq > this._seenSeq)) return;
-    this._seenSeq = seq;
-    if (this._retired.length === 0) return;
-    const release = this._native.releaseSurface;
-    this._retired = this._retired.filter((buffer) => {
-      if (buffer.namedSeq > seq) return true;
-      release.call(this._native, buffer.handle);
-      return false;
-    });
-  }
-
   release() {
     if (this.player.released) return;
     this._off();
     this.player.release();
     this._want = 0;
     this._syncPull();
-    this._freeRing();
-    // and what it kept: the pane's player is gone, or the pane is
-    for (const buffer of this._retired.splice(0)) {
-      this._native.releaseSurface(buffer.handle);
-    }
+    // and what the ring kept: the pane's player is gone, or the pane is
+    this._ring.release();
   }
 }

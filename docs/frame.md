@@ -287,6 +287,28 @@ a covered video costs in a window, twice: into a shared ring and out. A host
 over a bridge with no player plays nothing, and the pane refuses `src` as X11
 does. A pane that exits takes its players, and their sound, with it.
 
+**A pane's cameras, microphones and screen.** On Cocoa the host captures for a
+pane too: `getUserMedia`, `useMediaDevices`, `createAudioFrames`,
+`captureScreenshot` and the capabilities that foretell them work in a pane
+whose host can capture, the devices are the host's, and a camera the host and
+a pane both show is one session. A pane's sink plays on the host's audio
+engine, so a microphone's echo canceller hears it. What it costs:
+
+- a pane's `<video srcObject>` of a camera is drawn from a shared ring, like a
+  pane's `<video src>`, so `nativePreview` is false there;
+- `track.onFrame` in a pane is handed the planes the host's camera gave, sent
+  down the pane's channel — the newest only, as anywhere, so a reader slower
+  than the camera sees fewer frames — and a microphone's chunks all;
+- a sink's `currentTime` and `queued` are run on in the pane from the host's
+  last word on them, sent after every push and ten times a second.
+
+Permission is the pane's own, and the same answer: macOS asks for the app
+that launched the host, which launched the pane. A host with no capture rung
+offers none, and in its pane `useDesktopCapability('camera')` is unavailable.
+A pane that exits stops every track and closes every sink it left open. On
+X11 a pane is a client of its own and captures the screen itself, as any
+app does.
+
 **A pane resized.** On Cocoa the pane's frame at a new size comes a pane frame
 after the host's window lays out. What shows in between is set by
 `createRoot({ cocoa: { paneStretch } })` or `REACT_X11_COCOA_PANE_STRETCH`:

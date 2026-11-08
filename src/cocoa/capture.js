@@ -607,6 +607,16 @@ class CocoaCameraSource extends CocoaSource {
     return presentation;
   }
 
+  /** The camera's newest frame, converted, into the bitmap `handle`:
+   *  `{ width, height, time, written }`, or null when it has none newer than
+   *  the last one taken. What a drawn `<video>` and a pane's are shown. */
+  copyFrameTo(handle) {
+    if (this._stopped || typeof this._native.cameraCopyFrame !== 'function') {
+      return null;
+    }
+    return this._native.cameraCopyFrame(this.id, handle);
+  }
+
   _other(ev) {
     if (ev.type !== 'camera-frame' || !this._events) return;
     this._events.frame({
@@ -760,11 +770,8 @@ export class CameraPresentation extends PlayerState {
   }
 
   copyFrame(surface) {
-    const source = this.source;
-    if (this.released || source._stopped || !surface?._surfaceHandle)
-      return null;
-    if (typeof source._native.cameraCopyFrame !== 'function') return null;
-    return source._native.cameraCopyFrame(source.id, surface._surfaceHandle);
+    if (this.released || !surface?._surfaceHandle) return null;
+    return this.source.copyFrameTo(surface._surfaceHandle);
   }
 
   // a camera is not steered from a `<video>`'s ref

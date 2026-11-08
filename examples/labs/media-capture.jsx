@@ -9,6 +9,13 @@
 // check — a real camera, a real microphone, the system's prompts.
 //
 //   npm run labs:media-capture
+//   npm run labs:media-capture -- --pane
+//
+// `--pane` runs the same lab in a `<Frame>` pane, in a process of its own,
+// whose capture its host does (docs/frame.md): the camera opened and shown
+// through the host, the microphone's chunks and the tone's samples crossing
+// the pane's channel. The window's own rows (this window, keeping it out of
+// captures) are the host's, and a pane has none.
 //
 // On macOS it runs on the Cocoa backend (@windowkit/appkit 0.32 or later);
 // `REACT_X11_BACKEND=x11` puts it on XQuartz, where only the screen half
@@ -48,12 +55,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Button,
   Checkbox,
+  Frame,
   Select,
   captureScreenshot,
   createAudioFrames,
   createRoot,
   createStyles,
   displaySources,
+  isFramed,
   useApp,
   useDesktopCapability,
   useDisplayMedia,
@@ -639,20 +648,24 @@ function Screen({ log, windowRef, exclude, setExclude }) {
             })
           }
         />
-        <Button
-          label="This window"
-          onPress={() => {
-            const id = thisWindow();
-            if (id) take('window', { source: id });
-            else log('this window has no id yet');
-          }}
-        />
+        {windowRef && (
+          <Button
+            label="This window"
+            onPress={() => {
+              const id = thisWindow();
+              if (id) take('window', { source: id });
+              else log('this window has no id yet');
+            }}
+          />
+        )}
       </box>
-      <Checkbox
-        label="keep this window out of captures"
-        checked={exclude}
-        onChange={(ev) => setExclude(checkedOf(ev))}
-      />
+      {windowRef && (
+        <Checkbox
+          label="keep this window out of captures"
+          checked={exclude}
+          onChange={(ev) => setExclude(checkedOf(ev))}
+        />
+      )}
       {shot && <image src={shot} style={s.picture} />}
       <box style={s.row}>
         <Button
@@ -832,11 +845,11 @@ const PERMISSIONS = [
   'system-audio-recording',
 ];
 
-export function App() {
-  const windowRef = useRef(null);
+/** The lab's sections and its log: in its window (`App`), or in a pane
+ *  (media-capture-pane.jsx), which has no window to capture or keep out. */
+export function Lab({ windowRef = null, exclude = false, setExclude = null }) {
   const [lines, setLines] = useState([]);
   const [speaker, setSpeaker] = useState(DEFAULT);
-  const [exclude, setExclude] = useState(false);
   const log = useCallback((line) => {
     const stamp = new Date().toTimeString().slice(0, 8);
     // the terminal gets it too, for pasting into a report
@@ -846,6 +859,54 @@ export function App() {
   }, []);
 
   return (
+    <box style={s.root}>
+      <box style={s.scroll}>
+        <box style={s.columns}>
+          <box style={s.column}>
+            <Section title="What this display can do">
+              <Bridge />
+              {CAPABILITIES.map((name) => (
+                <Capability key={name} name={name} />
+              ))}
+            </Section>
+            <Section title="Permissions">
+              {PERMISSIONS.map((kind) => (
+                <Permission key={kind} kind={kind} log={log} />
+              ))}
+            </Section>
+            <Section title="Devices">
+              <Devices />
+            </Section>
+            <Microphone log={log} speaker={speaker} />
+          </box>
+          <box style={s.column}>
+            <Camera log={log} />
+            <AudioOut log={log} speaker={speaker} setSpeaker={setSpeaker} />
+            <Screen
+              log={log}
+              windowRef={windowRef}
+              exclude={exclude}
+              setExclude={setExclude}
+            />
+            <SystemAudio log={log} />
+          </box>
+        </box>
+      </box>
+      <box style={s.log}>
+        {lines.map((line, i) => (
+          <text key={i} style={s.dim}>
+            {line}
+          </text>
+        ))}
+      </box>
+    </box>
+  );
+}
+
+export function App() {
+  const windowRef = useRef(null);
+  const [exclude, setExclude] = useState(false);
+  return (
     <window
       ref={windowRef}
       title="react-x11 media capture"
@@ -853,54 +914,39 @@ export function App() {
       height={820}
       excludeFromCapture={exclude}
     >
-      <box style={s.root}>
-        <box style={s.scroll}>
-          <box style={s.columns}>
-            <box style={s.column}>
-              <Section title="What this display can do">
-                <Bridge />
-                {CAPABILITIES.map((name) => (
-                  <Capability key={name} name={name} />
-                ))}
-              </Section>
-              <Section title="Permissions">
-                {PERMISSIONS.map((kind) => (
-                  <Permission key={kind} kind={kind} log={log} />
-                ))}
-              </Section>
-              <Section title="Devices">
-                <Devices />
-              </Section>
-              <Microphone log={log} speaker={speaker} />
-            </box>
-            <box style={s.column}>
-              <Camera log={log} />
-              <AudioOut log={log} speaker={speaker} setSpeaker={setSpeaker} />
-              <Screen
-                log={log}
-                windowRef={windowRef}
-                exclude={exclude}
-                setExclude={setExclude}
-              />
-              <SystemAudio log={log} />
-            </box>
+      <Lab windowRef={windowRef} exclude={exclude} setExclude={setExclude} />
+    </window>
+  );
+}
+
+const PANE = new URL('./media-capture-pane.jsx', import.meta.url);
+
+/** The lab in a `<Frame>` pane: `--pane`. */
+export function PaneHost() {
+  return (
+    <window
+      title="react-x11 media capture, in a pane"
+      width={1000}
+      height={820}
+    >
+      <Frame
+        src={PANE}
+        style={{ flexGrow: 1 }}
+        fallback={({ error, restart }) => (
+          <box style={{ flexGrow: 1, padding: 16, gap: 10 }}>
+            <text>{`the pane is gone: ${error?.message ?? 'unknown'}`}</text>
+            <Button label="Restart" onPress={restart} />
           </box>
-        </box>
-        <box style={s.log}>
-          {lines.map((line, i) => (
-            <text key={i} style={s.dim}>
-              {line}
-            </text>
-          ))}
-        </box>
-      </box>
+        )}
+      />
     </window>
   );
 }
 
 export default App;
 
-if (!process.env.REACT_X11_NO_AUTORUN) {
+// not in the pane, which imports `Lab` from here
+if (!process.env.REACT_X11_NO_AUTORUN && !isFramed()) {
   const root = await createRoot();
-  root.render(<App />);
+  root.render(process.argv.includes('--pane') ? <PaneHost /> : <App />);
 }

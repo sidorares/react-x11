@@ -44,6 +44,7 @@ import { releaseImageUpload } from '../backend/context2d.js';
 import { PanePlayer, canShowPanePlayers } from './paneplayer.js';
 import { CocoaPlayer, canPlay } from './player.js';
 import { canCapture, CocoaMediaCapture } from './capture.js';
+import { PaneMediaCapture, paneCaptureOffer } from './panecapture.js';
 import { CocoaSurface } from './surface.js';
 import { CocoaSymbols } from './symbols.js';
 import { CocoaWindow, FRAME_SLACK_MS } from './window.js';
@@ -275,7 +276,10 @@ export class CocoaApp {
     // (src/cocoa/capture.js), where the bridge has the capture verbs: the
     // rung src/media/capture.js asks first, and its presence is what
     // `useDesktopCapability('camera')` and the rest answer. Not in a
-    // `<Frame>` pane, which pumps no bridge events, for the reason above.
+    // `<Frame>` pane, which has no layers for a camera's preview and must
+    // not run a second audio engine beside the host's echo canceller: a host
+    // that captures for it says so in the hello, and `attachPaneChannel`
+    // puts the host's rung here then (src/cocoa/panecapture.js).
     if (canCapture(native) && !pane) {
       this.mediaCapture = new CocoaMediaCapture(this);
     }
@@ -546,6 +550,18 @@ export class CocoaApp {
    */
   get playsForPanes() {
     return !this._paneMode && canPlay(this._native);
+  }
+
+  /**
+   * What this app captures for a pane — the verbs and features of its
+   * capture rung, which the pane host answers from (src/cocoa/panecapture.js)
+   * — or null where it has none. Whatever the rung is: a test's
+   * `fakeMediaDevices` on the host serves its panes as the bridge's rung
+   * does. What a `<Frame>` tells its pane in the hello.
+   */
+  get capturesForPanes() {
+    if (this._paneMode || !this.mediaCapture) return null;
+    return paneCaptureOffer(this.mediaCapture);
   }
 
   /**
@@ -939,10 +955,15 @@ export class CocoaApp {
    * pane-present and pane-cursor go out. `players` is the
    * host's word that it plays the pane's `<video src>`s, which makes
    * `createPlayer` here — before the pane's first render, which asks.
-   * `displayScale` is the scale the host's window is drawn at, taken here
-   * for the same reason (`adoptPaneScale`).
+   * `capture` is the host's offer to capture for the pane
+   * (`capturesForPanes`), which makes `mediaCapture` here, for the same
+   * reason. `displayScale` is the scale the host's window is drawn at,
+   * taken here for the same reason again (`adoptPaneScale`).
    */
-  attachPaneChannel(channel, { players = false, displayScale } = {}) {
+  attachPaneChannel(
+    channel,
+    { players = false, capture = null, displayScale } = {},
+  ) {
     if (!this._paneMode) return;
     this.adoptPaneScale(displayScale);
     this._paneSend = (msg) => {
@@ -955,7 +976,16 @@ export class CocoaApp {
     if (players && canShowPanePlayers(this._native)) {
       this.createPlayer = (src, options) => new PanePlayer(this, src, options);
     }
+    if (capture) this.mediaCapture = new PaneMediaCapture(this, capture);
     channel.onMessage((msg) => {
+      // and so is capture
+      if (
+        typeof msg?.type === 'string' &&
+        msg.type.startsWith('pane-capture')
+      ) {
+        this.mediaCapture?._fromHost?.(msg);
+        return;
+      }
       // a player is the app's, not a window's
       if (msg?.type === 'pane-player-event') {
         this._players.get(msg.player)?._event(msg.ev);

@@ -248,6 +248,55 @@ own sound being left out, and a Bluetooth headset staying out of its call
 profile. The bridge's `test/system-audio.js` covers a pid tap and its end
 wherever the grant is held.
 
+### 0.3 Built, 2026-11-08: capture in a `<Frame>` pane
+
+The case it is for is a browser whose tabs are panes (components'
+example browser, after its PR #1410): a call page in a tab asks for the camera
+from a pane process. A pane's window is a buffer the host composites, so it
+has no layer tree for the camera's preview layer. And an output on a second
+engine is one the host's echo canceller never hears, and the reverse. So the
+host captures for the pane (`src/cocoa/panecapture.js`), the way it plays a
+pane's `<video src>` (`src/cocoa/paneplayer.js`). Whether the bridge's capture
+events would reach a pane at all is not what decided it: they cross through a
+threadsafe function rather than the AppKit pump, and nobody has tried.
+
+- **The rung is proxied, not the API.** `PaneMediaCapture` is the pane's
+  `app.mediaCapture`, the same seam every backend fills. Its verbs go up as
+  `pane-capture` messages, and the host answers from whatever its own rung is.
+  That includes a test's `fakeMediaDevices`, so an app's pane tests run
+  against the same fake as its host tests. The offer is in the hello
+  (`capturesForPanes`), so the pane's capabilities are settled on its first
+  frame, as everywhere.
+- **One session for everyone.** The host opens through `acquireSource`, so the
+  host's own tracks and every pane's share the pool. The cost is the bridge's
+  `takeNewest`: two drawn presentations of one camera split its frames. A
+  lifted one takes none, so on the host only covered `<video>`s ever split.
+- **The picture goes by shared buffer, frames go by message.** A `<video
+srcObject>` in a pane is shown from a ring of shared IOSurfaces
+  (`panering.js`, factored out of the player's). The host fills it with
+  `copyFrameTo`, the camera source's own `cameraCopyFrame`, and no pixel
+  crosses into JavaScript. `track.onFrame` is an encoder's, which wants the
+  native NV12 planes and not BGRA, so frames for a reader cross as a
+  structured clone. They are the newest only: no more than two are in flight
+  to a pane that has not answered. That is 1.4 MB a frame at 720p, some
+  41 MB/s at 30 fps, which the fork's advanced serialization carries; no
+  real call has measured it yet.
+- **An output's clock runs on in the pane.** `AudioFrames` reads `queued` and
+  `currentTime` synchronously. The host sends its output's state after every
+  write and every 100 ms, with how many frames it had taken by then. The pane
+  plays out of the queue the host reported at wall-clock rate, and adds what
+  it wrote that the host had not taken yet.
+- **Permission stays the pane's.** A forked pane is attributed to the same
+  responsible process as its host, so TCC answers the same for both. The
+  bridge's permission replies are threadsafe-function callbacks, not pumped
+  events, so they reach a pane.
+
+`test/cocoa-pane-capture.test.js` runs a real host and pane over the frame
+loopback. Each property is mutation-checked: the two-frame cap, the ring
+stopping when nothing shows it, one session for the host and a pane, the
+clock counting unsent frames, and a pane's exit closing its camera and its
+output. Not yet run on a real Mac in a pane.
+
 ## 1. The apps this is measured against
 
 Five applications, each to be written with as little non-portable code as

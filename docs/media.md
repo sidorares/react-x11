@@ -72,7 +72,9 @@ installs, and other applications' sound needs macOS 14.2 as well. An older
 bridge answers unavailable for every row it cannot do, rather than crashing:
 0.31 has everything but other applications' sound. The first device listing in a process loads AVFoundation's camera
 plug-ins, 100 ms to over a second; it runs off the UI thread, which is one
-more reason `useMediaDevices` starts empty and unsettled.
+more reason `useMediaDevices` starts empty and unsettled. In a `<Frame>` pane
+the host captures for the pane, so all of this works there too: what a pane's
+capture costs is in [frame.md](frame.md#sizing-stacking-input).
 
 **X11** has the screen and nothing else. A camera or microphone on Linux needs
 PipeWire's file descriptors or v4l2's `ioctl`, and Node's sockets cannot reach
