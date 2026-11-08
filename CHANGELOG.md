@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.58.0](https://github.com/sidorares/react-x11/compare/v2.57.0...v2.58.0) (2026-11-08)
+
+
+### Features
+
+* **media:** capture in Frame panes on macOS, and getDisplayMedia over ScreenCaptureKit streams ([#1043](https://github.com/sidorares/react-x11/issues/1043)) ([3405293](https://github.com/sidorares/react-x11/commit/3405293a4560e0adb60aec706c227e80d3177bb0))
+
+
+### Bug Fixes
+
+* **deps:** @windowkit/appkit ^0.33.0, so getDisplayMedia streams a display or a window on a Mac, where 2.57's range admitted no bridge with ScreenCaptureKit's stream verbs ([#1045](https://github.com/sidorares/react-x11/issues/1045)) ([5d18204](https://github.com/sidorares/react-x11/commit/5d18204d0963f6a2c74d6381da669ca88a1fd9aa))
+
 ## [2.57.0](https://github.com/sidorares/react-x11/compare/v2.56.5...v2.57.0) (2026-11-08)
 
 
