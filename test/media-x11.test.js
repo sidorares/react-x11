@@ -60,6 +60,7 @@ test('screen capture over X11: no picker, sources listed, screenshots and frames
     true,
     'not XQuartz: the root is the screen',
   );
+  assert.equal(cap.features.streams, true);
   // no camera on X11: the rung is the screen's alone
   assert.equal((await desktopCapability('camera', { app })).available, false);
   await assert.rejects(getUserMedia({ video: true }, { app }), {

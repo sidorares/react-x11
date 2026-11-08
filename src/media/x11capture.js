@@ -116,6 +116,7 @@ class X11Capture {
         picker: false,
         enumerate: true,
         screens: this._rootless !== true,
+        streams: true,
         windows: true,
         cursor: false,
         systemAudio: false,

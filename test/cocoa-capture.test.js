@@ -403,5 +403,8 @@ test('<window excludeFromCapture> keeps the window out of captures, and lets it 
   );
   const cap = await desktopCapability('screenCapture', { app });
   assert.equal(cap.features.excludeWindows, true);
+  // screenshots, and no stream until the bridge has SCStream's verbs
+  assert.equal(cap.features.screenshot, true);
+  assert.equal(cap.features.streams, false);
   await root.unmount();
 });

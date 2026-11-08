@@ -535,6 +535,7 @@ export function fakeMediaDevices(app, options = {}) {
               picker: true,
               enumerate: true,
               screens: true,
+              streams: true,
               windows: true,
               cursor: false,
               systemAudio: false,

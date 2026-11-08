@@ -155,6 +155,9 @@ export class CocoaMediaCapture {
         picker: false,
         enumerate: has('screenCaptureDisplays'),
         screens: true,
+        // screenshots, not streams: this rung has no openDisplay until the
+        // bridge has ScreenCaptureKit's stream verbs
+        streams: false,
         windows: false,
         cursor: true,
         systemAudio: false,
