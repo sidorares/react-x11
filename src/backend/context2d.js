@@ -578,10 +578,13 @@ export class BackendContext2D {
     // @windowkit/appkit has from the release that added
     // ctxDrawSurfaceFiltered: read here and nowhere else, so an older
     // bridge filters a surface's pixels in JavaScript as before.
-    // REACT_X11_FILTER_PIXELS=1 keeps the JavaScript path, to compare.
+    // REACT_X11_NO_NATIVE_FILTER=1 keeps the JavaScript path, to compare.
+    // Asked with `in` first, as the three above are: a bridge may throw
+    // for a name it does not have.
     this._filterVerb =
+      'ctxDrawSurfaceFiltered' in native &&
       typeof native.ctxDrawSurfaceFiltered === 'function' &&
-      !(globalThis.process?.env?.REACT_X11_FILTER_PIXELS === '1');
+      !(globalThis.process?.env?.REACT_X11_NO_NATIVE_FILTER === '1');
     // and a radial gradient's fill, @windowkit/appkit 0.28.0's: where the
     // bridge has none, the flat stand-in it always had, which takes no
     // circles — the one a caller asks for, and keys on

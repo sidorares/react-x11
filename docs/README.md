@@ -249,7 +249,8 @@ renderer reads, the diagnostic switches included.
 A handful more exist only to switch off one optimisation while measuring it
 — `REACT_X11_NO_PAINT_CACHE`, `REACT_X11_NO_SCROLL_BLIT`,
 `REACT_X11_NO_PANE_SHAPE`, `REACT_X11_NO_BOUNDS_CACHE`,
-`REACT_X11_NO_STROKE_CHUNKING`, `REACT_X11_NO_SCOPED_FLOORS`,
+`REACT_X11_NO_STROKE_CHUNKING`, `REACT_X11_NO_NATIVE_FILTER`,
+`REACT_X11_NO_SCOPED_FLOORS`,
 `REACT_X11_NO_UNREAD_WIDTHS`, `REACT_X11_NO_REFIT_HOLD`,
 `REACT_X11_NO_APPEARANCE_CACHE`. They are development instruments, not API,
 documented in [debugging.md](debugging.md) or where the thing they disable
