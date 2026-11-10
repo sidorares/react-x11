@@ -226,6 +226,15 @@ drawing that strokes thousands of subpaths ever looks wrong at its seams.
 Nothing on X11 reads it: there a stroke is one coverage mask, so splitting
 would be a loss.
 
+## `REACT_X11_NO_NATIVE_FILTER=1` (macOS)
+
+An image or a surface drawn under `ctx.filter` goes through the bridge's
+`ctxDrawSurfaceFiltered`, vImage over the source's pixels, where the bridge
+has it (@windowkit/appkit 0.34.0 and later). This switch filters it the way
+an older bridge does: its pixels read back, run through the colour functions
+or the blur in JavaScript, and written into a bitmap of their own. Set it to
+compare the two, or as first aid if a filtered image ever looks wrong.
+
 ## `REACT_X11_NO_TRANSPARENCY=1`
 
 Makes every display answer the way one with no 32-bit visual does:

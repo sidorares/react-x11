@@ -264,6 +264,13 @@ export const ENVIRONMENT = [
           'macOS: hand each stroke to CoreGraphics whole, however many ' +
           'subpaths it has.',
       },
+      {
+        name: 'REACT_X11_NO_NATIVE_FILTER',
+        value: '1',
+        text:
+          'macOS: filter an image drawn under ctx.filter in JavaScript, ' +
+          "not with the bridge's vImage verb.",
+      },
     ],
   },
   {
