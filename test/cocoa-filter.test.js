@@ -202,6 +202,39 @@ test('an image is read, run through the filter and drawn from a bitmap of its ow
   assert.equal(ctx.filter, 'grayscale(1)', 'set aside for the draw only');
 });
 
+test('where the bridge draws a surface through the filter itself, an image goes to it once, with its blur in source pixels, and nothing is read back', () => {
+  const { ctx, native, dst } = context({ pixel: [255, 0, 0, 255] });
+  const drawn = [];
+  let answer = true;
+  native.ctxDrawSurfaceFiltered = (...args) => {
+    drawn.push(args);
+    return answer;
+  };
+  ctx._filterVerb = true;
+  const src = native.createSurface(40, 30, 1);
+  native.calls.length = 0;
+  ctx.filter = 'grayscale(1) blur(4px) opacity(0.5)';
+  // drawn at twice its size: a 4px deviation is 2 of the source's pixels
+  ctx.drawImage({ _surfaceHandle: src }, 4, 2, 10, 10, 50, 60, 20, 20);
+  assert.equal(drawn.length, 1);
+  const [into, from, ...rest] = drawn[0];
+  assert.equal(into, dst);
+  assert.equal(from, src);
+  assert.deepEqual(rest.slice(0, 8), [4, 2, 10, 10, 50, 60, 20, 20]);
+  const spec = rest[8];
+  assert.equal(spec.matrices.length, 1);
+  assert.equal(spec.alpha, 0.5);
+  assert.equal(spec.blur, 2);
+  assert.deepEqual(native.of('ctxGetImageData'), [], 'nothing read back');
+  assert.deepEqual(native.of('ctxDrawSurface'), []);
+  // and where it answers that it drew nothing, the pixels are filtered here
+  answer = false;
+  ctx.filter = 'grayscale(1)';
+  ctx.drawImage({ _surfaceHandle: src }, 0, 0, 10, 10, 0, 0, 10, 10);
+  assert.equal(native.of('ctxGetImageData').length, 1, 'read back after all');
+  assert.equal(native.of('ctxDrawSurface').length, 1);
+});
+
 test('a layout with colours of its own is drawn on a bitmap of its own through the transform, filtered, and drawn where it lands', () => {
   const { ctx, native, dst } = context({ pixel: [0, 0, 255, 255] });
   ctx.translate(10.5, 20);

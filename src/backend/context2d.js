@@ -574,6 +574,14 @@ export class BackendContext2D {
     this._filters = ['createSurface', 'ctxGetImageData', 'ctxPutImageData']
       .map((name) => name in native && typeof native[name] === 'function')
       .every(Boolean);
+    // and what draws a surface through one in the bridge's code, which
+    // @windowkit/appkit has from the release that added
+    // ctxDrawSurfaceFiltered: read here and nowhere else, so an older
+    // bridge filters a surface's pixels in JavaScript as before.
+    // REACT_X11_FILTER_PIXELS=1 keeps the JavaScript path, to compare.
+    this._filterVerb =
+      typeof native.ctxDrawSurfaceFiltered === 'function' &&
+      !(globalThis.process?.env?.REACT_X11_FILTER_PIXELS === '1');
     // and a radial gradient's fill, @windowkit/appkit 0.28.0's: where the
     // bridge has none, the flat stand-in it always had, which takes no
     // circles — the one a caller asks for, and keys on
@@ -1882,6 +1890,39 @@ export class BackendContext2D {
    * resampling an `imageSmoothingQuality` sets all take as before.
    */
   _drawFiltered(src, size, [sx, sy, sw, sh, dx, dy, dw, dh], ink) {
+    // the bridge's own, where it has the verb (@windowkit/appkit's
+    // ctxDrawSurfaceFiltered, vImage over the source's pixels): the same
+    // matrices, alpha and blur, the blur in source pixels as below, with
+    // no readback and no pixel loop in JavaScript
+    if (
+      this._filterVerb &&
+      this._native.ctxDrawSurfaceFiltered(
+        this._s(),
+        src,
+        sx,
+        sy,
+        sw,
+        sh,
+        dx,
+        dy,
+        dw,
+        dh,
+        {
+          matrices: ink.matrices,
+          alpha: ink.alpha,
+          blur:
+            ink.blur > 0
+              ? Math.min(
+                  (ink.blur * sw) / Math.abs(dw),
+                  (ink.blur * sh) / Math.abs(dh),
+                )
+              : 0,
+        },
+      )
+    ) {
+      this._dirty();
+      return;
+    }
     if (ink.blur > 0) {
       this._drawBlurred(src, size, [sx, sy, sw, sh, dx, dy, dw, dh], ink);
       return;
