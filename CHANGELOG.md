@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.58.1](https://github.com/sidorares/react-x11/compare/v2.58.0...v2.58.1) (2026-11-10)
+
+
+### Performance Improvements
+
+* **cocoa:** an image drawn under ctx.filter goes through the bridge's ctxDrawSurfaceFiltered where it has one ([#1049](https://github.com/sidorares/react-x11/issues/1049)) ([b10dfbf](https://github.com/sidorares/react-x11/commit/b10dfbf72669fd3b02f32c5c76a1643bac77a971))
+
 ## [2.58.0](https://github.com/sidorares/react-x11/compare/v2.57.0...v2.58.0) (2026-11-08)
 
 
