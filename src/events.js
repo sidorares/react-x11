@@ -793,6 +793,18 @@ export class EventManager {
    */
   _dismissOutside(native) {
     if (!this._pressOutside(native)) return false;
+    // A backend that has no grab makes the press up, and says when what it
+    // stands for was the application losing activation (win32's blur)
+    this.dismiss(native?.reason === 'focus' ? 'focus' : 'press', native);
+    return true;
+  }
+
+  /**
+   * Call the popup's `onDismiss`, saying why: `'press'`, a press or a wheel
+   * outside it, or `'focus'`, the keyboard leaving the window it lives under
+   * — the user went to another application (`PopupNode._focusLeft`).
+   */
+  dismiss(reason, native) {
     runWithPriority(DiscreteEventPriority, () => {
       const onDismiss = this.node.props.onDismiss;
       if (onDismiss) {
@@ -800,11 +812,10 @@ export class EventManager {
           this.node,
           'onDismiss',
           onDismiss,
-          this._makeEvent('dismiss', native, this.node),
+          this._makeEvent('dismiss', native, this.node, { reason }),
         );
       }
     });
-    return true;
   }
 
   /**

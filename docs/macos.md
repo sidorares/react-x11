@@ -92,8 +92,10 @@ part company. The per-prop list is
 - **`<popup>`** is a borderless panel at the popup level, placed by the same
   anchor math. `grab` bends: there are no pointer grabs, so a press in
   another of the app's windows reaches the popup as a press outside it,
-  which dismisses it. `grabKeyboard` makes a key-capable window, as
-  `NSPopover` does, which closes on `onBlur` ([elements.md](elements.md)).
+  which dismisses it, and a press in another application reaches nothing —
+  the app deactivating does, as `onDismiss` with `reason: 'focus'`, so a
+  menu is not left over the app the user switched to. `grabKeyboard` makes a
+  key-capable window, as `NSPopover` does ([elements.md](elements.md)).
 - **`<glarea>`** is a CGL context rendering into IOSurfaces on a sublayer
   ([gl.md](gl.md)); **`<Frame>`** works through shared surfaces rather than
   reparenting ([frame.md](frame.md)).

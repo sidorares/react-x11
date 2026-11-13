@@ -871,7 +871,7 @@ function PaneHostView({
 
     // The window's focus, which the pane has no window to hear: a menu it
     // keeps open on the strength of the window having it closes when the
-    // user goes to another application (`useDismissOnWindowBlur`).
+    // user goes to another application (`PopupNode._focusLeft`).
     const offFocus = node.root?.onWindowFocusChange?.((focused) =>
       s.trySend?.({
         type: 'pane-event',

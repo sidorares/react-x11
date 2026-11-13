@@ -167,6 +167,16 @@ export interface CompositionEvent<T = DrawnNode> extends SyntheticEvent<T> {
 
 export interface FocusEvent<T = DrawnNode> extends SyntheticEvent<T> {}
 
+/**
+ * Why a `<popup grab>` is being asked to close: `'press'`, a press or a
+ * wheel landed outside it, or `'focus'`, the keyboard left the window it
+ * hangs from (its own, for a popup with `grabKeyboard`) — the user went to
+ * another application. Closing is the handler's decision either way.
+ */
+export interface DismissEvent<T = DrawnNode> extends SyntheticEvent<T> {
+  reason: 'press' | 'focus';
+}
+
 /** What a drop target's `dropAccept` prop takes: an exact type name
  * (`'image/png'`), a semantic group (`'files' | 'uris' | 'text'`), an
  * array of either, or a predicate over the offered names. Absent means

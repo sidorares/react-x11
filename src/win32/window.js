@@ -475,9 +475,11 @@ export class Win32Window {
    * `_pressOutside` in src/events.js compares against the window's own bounds,
    * and answers anything outside them with `onDismiss`. The same made-up press
    * the Wayland backend sends for `popup_done`, for the same reason — the
-   * platform kept the real one.
+   * platform kept the real one. `reason` is what `onDismiss` reports:
+   * `'focus'` when what the press stands for is the application losing
+   * activation rather than a press of ours (src/win32/app.js).
    */
-  _dismissFromOutside() {
+  _dismissFromOutside(reason = 'press') {
     if (this.destroyed) return;
     this.emit('mousedown', {
       x: -1,
@@ -487,6 +489,7 @@ export class Win32Window {
       keycode: 1,
       buttons: 0,
       dismissed: true,
+      reason,
     });
   }
 

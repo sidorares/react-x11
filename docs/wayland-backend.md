@@ -169,7 +169,9 @@ The compositor owns placement, stacking and focus, so some of what a
   slides and flips them to stay on screen — the policy `anchorRect` gets
   from react-x11 on X11. A press outside a grabbing popup, or Escape, is
   the compositor's to act on; it hides the popup and the tree hears
-  `onDismiss` as it would on X11.
+  `onDismiss` as it would on X11 — `reason: 'press'`, since the compositor
+  does not say why. The window losing the keyboard is `reason: 'focus'`, as
+  everywhere.
 - **Focus and raising** are the compositor's to give. `focus()` asks
   through xdg-activation and is ignored without a recent user interaction;
   attention requests go the same way; `raise()` and `lower()` do nothing.

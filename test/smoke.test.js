@@ -4225,9 +4225,10 @@ test('MenuBar: an open menu is always dismissible', async () => {
   // the window losing the window manager's focus — alt-tab, a click in
   // another application. Nothing in the tree hears that on its own: the bar
   // item keeps the focus it took (a window blur leaves the focused node
-  // focused and merely stops it looking active), so without
-  // `useDismissOnWindowBlur` the menu stays up over an app the user has
-  // switched away from, still holding its pointer grab.
+  // focused and merely stops it looking active), so it is the grabbing
+  // popup that listens (`PopupNode._focusLeft`) — without it the menu stays
+  // up over an app the user has switched away from, still holding its
+  // pointer grab.
   {
     const { app, x11Root, wnd, buttons } = await mount();
     openFile(wnd, buttons[0]);
