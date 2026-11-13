@@ -149,6 +149,8 @@ export type ObjectFit = 'fill' | 'contain' | 'cover' | 'none' | 'scale-down';
  * swallow the clicks between them, `<glarea>` included.
  */
 export type PointerEvents = 'auto' | 'none' | 'box-none';
+/** Whether a node and its subtree are drawn — see `PaintStyle.visibility`. */
+export type Visibility = 'visible' | 'hidden';
 export type TextAlign = 'left' | 'right' | 'center' | 'start' | 'end';
 export type FontStyle = 'normal' | 'italic' | 'oblique';
 export type FontWeight = number | 'normal' | 'bold';
@@ -448,6 +450,21 @@ export interface PaintStyle {
    * still hit; values outside 0..1 are clamped.
    */
   opacity?: number;
+  /**
+   * `'hidden'` keeps the node's box and everything under it laid out exactly
+   * where it would be, and does nothing else with them: nothing in the
+   * subtree is drawn — no `onDraw`, no text rasterized — nothing is hit, nothing
+   * takes focus, and none of it is in the accessibility tree. Switching it
+   * is a repaint of the subtree's area, never a relayout, so it is the way
+   * to reveal something without moving what is around it. A paint property,
+   * legal in a state block; it snaps rather than transitions.
+   *
+   * Unlike CSS, the whole subtree goes: a descendant cannot come back with
+   * `'visible'`. Ignored on a `<window>` or `<popup>` (use `hidden`), and a
+   * `<popup>` hanging off a hidden node is not hidden by it. Default
+   * `'visible'`.
+   */
+  visibility?: Visibility;
 }
 
 /**

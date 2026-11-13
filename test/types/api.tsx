@@ -295,6 +295,13 @@ const s = createStyles({
     transition: { opacity: 150 },
     ':hover': { opacity: 1 },
   },
+  // visibility is paint: legal in a state block, and the box stays laid out
+  actions: {
+    visibility: 'visible',
+    ':disabled': { visibility: 'hidden' },
+  },
+  // @ts-expect-error — no `'collapse'`: a box that gives up its space is display: 'none'
+  collapsed: { visibility: 'collapse' },
   halo: {
     animation: {
       opacity: { from: 1, to: 0.5, duration: 800, alternate: true },

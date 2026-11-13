@@ -270,6 +270,12 @@ const PAINT_PROPS = new Set([
   // alpha cannot do for more than one flat fill (#587). A number from 0 to 1,
   // which transitions and loops like any other.
   'opacity',
+  // Whether the node and everything under it is drawn at all — `'hidden'`
+  // keeps every box where layout put it and skips the subtree: no paint, no
+  // hit, no focus, no accessible (src/visibility.js). Paint for the reason
+  // `outline*` is: switching it is a repaint of one subtree's area and
+  // nothing reflows, which is also what makes it legal in a state block.
+  'visibility',
 ]);
 
 // Text style props. All affect measurement except color.
@@ -922,6 +928,11 @@ export function paintsCurrentColor(style) {
  * out; one a token resolves to is dropped at the paint if it does not parse
  * (`isColor`), since a theme is not a call site.
  */
+// `visibility`'s keywords. No `'collapse'`: on the web it means
+// `display: 'none'` for a table row and `'hidden'` for everything else, and
+// both of those are already a word here.
+const VISIBILITIES = new Set(['visible', 'hidden']);
+
 function validateValue(key, value, where) {
   // A shorthand — or a longhand written with several values, `padding:
   // '8px 16px'` — is read the way the funnel will expand it, a `$token`
@@ -1054,6 +1065,19 @@ function validateValue(key, value, where) {
     throw new Error(
       `react-x11: invalid objectFit ${JSON.stringify(value)} in ${where} ` +
         `(expected ${OBJECT_FITS.map((v) => `'${v}'`).join(', ')})`,
+    );
+  }
+  if (key === 'visibility') {
+    // unset, the way a conditional writes it: `hovered ? undefined : 'hidden'`
+    if (value == null || VISIBILITIES.has(value) || isToken(value)) return;
+    throw new Error(
+      `react-x11: invalid visibility ${JSON.stringify(value)} in ${where} ` +
+        "(expected 'visible' or 'hidden'" +
+        (value === 'collapse'
+          ? " — a box that gives up its space is display: 'none')"
+          : value === false || value === 'none'
+            ? " — visibility: 'hidden' keeps the box, display: 'none' removes it)"
+            : ')'),
     );
   }
   if (key === 'opacity') {
@@ -1396,6 +1420,8 @@ const NOT_ANIMATABLE = new Set([
   'overflow',
   'cursor',
   'pointerEvents',
+  // a keyword, and a subtree is drawn or it is not: it snaps
+  'visibility',
   'borderStyle',
   // a keyword: there is no halfway between filling a box and covering it
   'objectFit',

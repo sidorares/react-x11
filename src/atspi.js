@@ -1329,10 +1329,12 @@ class AtspiBridge {
     // Removals first: a node that left and came back in one batch reads as
     // its add, never as a stale remove.
     for (const { parent, child, index } of p.remove) {
+      // a child still in its parent that `visibility: 'hidden'` prunes is
+      // out of the accessible tree all the same
       const stillIn =
         parent === null
           ? this.toplevels.includes(child)
-          : child.parent === parent;
+          : child.parent === parent && !a11yPruned(child);
       if (stillIn) continue;
       const wasExported = this.exported.has(child);
       const childPath = this.pathOf(child);
@@ -1371,7 +1373,7 @@ class AtspiBridge {
     // Attaches, collapsed to the topmost node per subtree: the AT descends
     // from there on its own.
     for (const node of p.attach) {
-      if (node.destroyed || !this._live(node)) continue;
+      if (node.destroyed || !this._live(node) || a11yPruned(node)) continue;
       let covered = false;
       for (let a = node.parent; a; a = a.parent) {
         if (p.attach.has(a)) {

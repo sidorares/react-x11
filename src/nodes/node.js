@@ -882,6 +882,27 @@ export class Node {
     else events.subtreeHidden(this);
   }
 
+  /** Whether `style` on this node takes it off the screen by itself:
+   *  `display: 'none'`, or `visibility: 'hidden'` anywhere but a window. */
+  _offScreenBy(style) {
+    return (
+      style.display === 'none' ||
+      (style.visibility === 'hidden' && !this.isWindow)
+    );
+  }
+
+  /**
+   * This subtree just left the accessible tree, or came back to it, with
+   * nothing mounted or unmounted — `visibility: 'hidden'` prunes it
+   * (`a11yPruned`) — so the bridge hears it as the removal or the addition
+   * it is, the way the AT would have seen it had React done it.
+   */
+  _a11yExposureChanged(exposed) {
+    if (!this.parent) return;
+    if (exposed) a11yHooks.attached?.(this.parent, this);
+    else a11yHooks.detach?.(this.parent, this);
+  }
+
   /**
    * Ask every surface in this subtree — this node included — whether it is
    * still on screen, and map or unmap it to match. Walked rather than kept

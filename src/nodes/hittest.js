@@ -3,6 +3,7 @@
 // the box-model measure DevTools reads.
 
 import { resolveHitSlop } from '../styles.js';
+import { isInvisible } from '../visibility.js';
 
 /** Hit testing, installed onto `Node.prototype` by node.js. */
 export class NodeHitTest {
@@ -155,10 +156,14 @@ export class NodeHitTest {
 
   /** Front-to-back hit test. Returns the deepest hit node or null. */
   hitTest(x, y) {
+    // `visibility: 'hidden'` is `pointerEvents: 'none'` for the whole
+    // subtree, with no `'auto'` underneath to take it back: nothing in it is
+    // on screen to be pointed at, so no press, no hover, no cursor
     if (
       this.hidden ||
       this.style.display === 'none' ||
-      this.style.pointerEvents === 'none'
+      this.style.pointerEvents === 'none' ||
+      isInvisible(this)
     ) {
       return null;
     }

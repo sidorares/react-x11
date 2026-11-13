@@ -34,6 +34,7 @@ import {
   unionRect,
 } from './rects.js';
 import { scrollbarTrackRect } from './scrollbars.js';
+import { inInvisibleSubtree, isInvisible } from '../visibility.js';
 import { debugPaint } from './window/debugpaint.js';
 
 // Below this many pixels the copy is not worth its bookkeeping: the frame
@@ -165,6 +166,8 @@ export class NodeMoveBlit {
       if (node.hidden || node._promoted) return null;
       const style = node.style ?? EMPTY_STYLE;
       if (style.display === 'none') return null;
+      // laid out where it is, and nothing drawn there: no cover
+      if (isInvisible(node)) return null;
       if (style.opacity !== undefined && !(style.opacity >= 1)) return null;
       const radius = radiusOf(style, node.abs);
       let own = null;
@@ -294,6 +297,11 @@ export class WindowMoveBlit {
       return false;
     }
     if (node._promoted) return false;
+    // A hidden subtree still moves — it is laid out — but what is at its
+    // rect is whatever is behind it, and a copy would carry that along. Its
+    // claims repaint both ends, which for a subtree that draws nothing is
+    // the background and nothing more.
+    if (inInvisibleSubtree(node)) return false;
     for (let n = node.parent; n && n !== this; n = n.parent) {
       if (n.isGlArea || n._promoted) return false;
       const opacity = n.style?.opacity;
