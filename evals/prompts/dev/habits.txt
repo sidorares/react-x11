@@ -1,0 +1,1 @@
+Build a habit tracker: a list of habits, each with a week of check-offs, the current streak, and a way to add a habit.

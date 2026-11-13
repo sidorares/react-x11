@@ -1,0 +1,4 @@
+- A calendar showing a month, with today and the selected day marked.
+- A rich text area for the selected day's entry, with some formatting controls or shortcuts.
+- Days that have entries are marked in the calendar.
+- A realistic sample entry is visible on first launch.

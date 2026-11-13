@@ -1,0 +1,26 @@
+{
+  "dev": [
+    { "id": "pomodoro", "archetype": "utility" },
+    { "id": "unit-converter", "archetype": "utility" },
+    { "id": "world-clock", "archetype": "utility" },
+    { "id": "recipes", "archetype": "sidebar-content" },
+    { "id": "bookmarks", "archetype": "sidebar-content" },
+    { "id": "habits", "archetype": "sidebar-content" },
+    { "id": "mail", "archetype": "three-pane" },
+    { "id": "rss", "archetype": "three-pane" },
+    { "id": "expenses", "archetype": "data" },
+    { "id": "system-monitor", "archetype": "data" },
+    { "id": "markdown-notes", "archetype": "editor" },
+    { "id": "snippets", "archetype": "editor" }
+  ],
+  "test": [
+    { "id": "tip-calculator", "archetype": "utility" },
+    { "id": "stopwatch", "archetype": "utility" },
+    { "id": "contacts", "archetype": "three-pane" },
+    { "id": "todo", "archetype": "sidebar-content" },
+    { "id": "podcasts", "archetype": "three-pane" },
+    { "id": "stocks", "archetype": "data" },
+    { "id": "csv-viewer", "archetype": "data" },
+    { "id": "journal", "archetype": "editor" }
+  ]
+}

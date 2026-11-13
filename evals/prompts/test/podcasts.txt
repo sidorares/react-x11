@@ -1,0 +1,1 @@
+Build a podcast player: my subscriptions, the episodes of the selected show, the notes of the selected episode, and a player bar (simulated playback).

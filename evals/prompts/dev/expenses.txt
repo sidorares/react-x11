@@ -1,0 +1,1 @@
+Build a personal expense tracker: a sortable table of transactions, a chart of spending by category for the month, and a way to add an expense.

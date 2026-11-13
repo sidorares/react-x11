@@ -1,0 +1,1 @@
+Build a pomodoro timer with a short task list for today: pick a task, run 25-minute focus sessions and 5-minute breaks, and see how many sessions each task has had.

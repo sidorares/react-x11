@@ -1,0 +1,1 @@
+Build a stopwatch with laps: start, stop, lap and reset, with the list of laps and the fastest and slowest marked.
