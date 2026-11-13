@@ -21,8 +21,8 @@ import type {
   ChangeEvent,
   SelectionChangeEvent,
   ClientMessageEvent,
+  DismissEvent,
   EventHandlers,
-  MouseEvent,
   ScrollEvent,
   SubmitEvent,
   SyntheticEvent,
@@ -639,8 +639,12 @@ export interface PopupProps extends WindowProps {
    * drag is a fight nobody wins.
    */
   overrideRedirect?: boolean;
-  /** A press landed outside the popup: close it. */
-  onDismiss?: (ev: MouseEvent<DrawnNode>) => void;
+  /**
+   * The popup should close: with `grab`, a press landed outside it
+   * (`reason: 'press'`), or the user went to another application
+   * (`reason: 'focus'` — the window it hangs from lost the keyboard).
+   */
+  onDismiss?: (ev: DismissEvent<DrawnNode>) => void;
   /**
    * Hang this popup off a node — `anchorRect`'s options plus the node to
    * measure, and the popup works out its own position from them, ignoring

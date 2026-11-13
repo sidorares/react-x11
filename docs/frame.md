@@ -274,9 +274,9 @@ an `NSWindow` of its own:
 - A grab is the host's, so a press anywhere in the host's windows reaches the
   menu outside its bounds, which is the dismissal. A `<Dialog>` gets the
   user's moves and resizes and its close button.
-- The host window's focus is sent to the pane as `focus`/`blur`, so a menu
-  that closes when its window loses focus (`useDismissOnWindowBlur`) closes
-  when the user goes to another application.
+- The host window's focus is sent to the pane as `focus`/`blur`, so a
+  grabbing popup's `onDismiss` fires (`reason: 'focus'`) when the user goes
+  to another application, as it does in a window.
 - A pane that exits or unmounts takes every window the host shows for it,
   and their grab.
 

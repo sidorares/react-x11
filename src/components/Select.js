@@ -27,7 +27,6 @@ import {
   measureLabel,
   useAnchor,
   useAnchorTracking,
-  useDismissOnWindowBlur,
 } from './anchor.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
 import {
@@ -554,9 +553,6 @@ export function Select({
   // by the trigger's ancestors, so it would otherwise hang over content it
   // no longer points at.
   useAnchorTracking(triggerRef, open, menuAnchorOptions, setAnchor, dismiss);
-  // and shut it when the whole window loses focus: the trigger keeps the
-  // focus it has, so its own `onBlur` never fires for this
-  useDismissOnWindowBlur(triggerRef, open, dismiss);
 
   const emit = (next) => onChange?.(changeEvent('select-one', name, next));
 

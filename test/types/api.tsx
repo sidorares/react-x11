@@ -168,6 +168,7 @@ import type {
   DrawnNode,
   Rect,
   CompositionEvent,
+  DismissEvent,
   KeyboardEvent,
   MouseEvent,
   NtkWindow,
@@ -822,11 +823,23 @@ const _paceUnknown = <window frameRate={{ fps: 60 }} />;
 
 function Popup() {
   return (
-    <popup x={40} y={40} width={120} height={80} grab onDismiss={() => {}}>
+    <popup
+      x={40}
+      y={40}
+      width={120}
+      height={80}
+      grab
+      onDismiss={(ev) => {
+        const why: 'press' | 'focus' = ev.reason;
+        void why;
+      }}
+    >
       <box />
     </popup>
   );
 }
+// @ts-expect-error — a dismissal is a press or a focus loss, nothing else
+const _dismissBogus = (ev: DismissEvent) => ev.reason === 'escape';
 
 // issue #259: selection over read-only text — the geometry every drawn node
 // answers, and the surface a `selectable` element becomes

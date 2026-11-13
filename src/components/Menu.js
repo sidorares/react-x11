@@ -27,7 +27,6 @@ import {
   SAFE_HOVER_DELAY,
   screenPoint,
   useAnchorTracking,
-  useDismissOnWindowBlur,
 } from './anchor.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
 import { useGlobalMenuExport } from '../globalmenu.js';
@@ -1050,11 +1049,6 @@ export function ContextMenu({
     primary: metrics.primary,
   });
 
-  // the wrapper keeps the focus the right-click gave it, so `onBlur` below
-  // never fires when the *window* loses focus — and the menu is holding a
-  // pointer grab until something closes it
-  useDismissOnWindowBlur(ref, Boolean(rect), close);
-
   // Settled in the commit the click's own updates land in, before anything
   // is drawn. Nothing to show is no menu at all — no popup, so no grab, and
   // the focus left where the press put it — and the request is dropped
@@ -1327,11 +1321,6 @@ export function MenuBar({
     setRect,
     close,
   );
-  // and shut it when the whole window loses focus. The bar item keeps the
-  // focus it took, so its own `onBlur` never fires for this — and a menu
-  // left open over an application the user has switched away from is still
-  // holding the pointer grab it opened with.
-  useDismissOnWindowBlur(activeTriggerRef, openIndex >= 0, close);
 
   const select = (item) => {
     close();

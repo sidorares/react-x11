@@ -308,7 +308,7 @@ export class Win32App {
         this._dismissOnOutside.delete(wnd);
         continue;
       }
-      wnd._dismissFromOutside();
+      wnd._dismissFromOutside(pressed ? 'press' : 'focus');
     }
   }
 

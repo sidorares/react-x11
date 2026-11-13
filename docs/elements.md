@@ -712,7 +712,7 @@ logical pixels, e.g. at `ev.screenX`/`screenY`. Same props as `<window>`,
 | `grab`             | hold a pointer grab while up — how menus behave on X (below)                                     |
 | `grabKeyboard`     | take the keyboard while up — for a popover a tray click opened (below)                           |
 | `transparent`      | rounded corners and translucency ([above](#transparent--rounded-corners-and-translucency))       |
-| `onDismiss`        | a press landed outside the popup: close it                                                       |
+| `onDismiss`        | with `grab`: a press outside, or the user went to another app — close it (below)                 |
 | `trapFocus`        | own a focus scope: a modal ([events.md](events.md#focus-scopes-modals))                          |
 | `overrideRedirect` | `false` makes it a WM-managed window — a real dialog (below)                                     |
 | `dragPreview`      | a drag preview following the pointer, never a drop target ([drag-and-drop.md](drag-and-drop.md)) |
@@ -781,6 +781,24 @@ The app's own windows still get their presses, so submenus and the owner
 keep working; only a menu's root popup needs the grab. `Select`,
 `ContextMenu` and `MenuBar` do this.
 
+**A grabbing popup is also dismissed when the user leaves the app** —
+⌘-Tab, alt-tab, a click in another application. A press cannot say so
+everywhere: on macOS the grab only reaches this app's own windows, and on X
+alt-tab is the window manager's keyboard grab, not a press. So the window the
+popup hangs from losing the keyboard fires `onDismiss` too, and the event
+says which it was:
+
+| `ev.reason` | what happened                                                                        |
+| ----------- | ------------------------------------------------------------------------------------ |
+| `'press'`   | a press or a wheel outside the popup                                                 |
+| `'focus'`   | the owner window lost the keyboard — its own window, for a popup with `grabKeyboard` |
+
+`grab` and `onDismiss` are the whole menu: nothing else is needed for it to
+close on every backend. Closing stays the handler's decision, so a popup
+that should outlive a switch to another app ignores `reason: 'focus'`. One
+without `grab` — a tooltip, a completion list — is never dismissed, and
+closing it is the app's.
+
 ### A popover under a tray item
 
 A tray click has no node: [`useTray`](desktop.md#the-tray)'s `onClick`
@@ -800,7 +818,6 @@ function MenuBarApp() {
       grab
       grabKeyboard
       onDismiss={close}
-      onBlur={close}
     >
       <Controls onClose={close} />
     </popup>
@@ -823,8 +840,10 @@ through, so the popup takes the keyboard while up:
 | Wayland | nothing more: a grabbing popup has the keyboard already                         |
 
 On macOS the window's kind is fixed at creation, so the prop does not change
-on a mounted popup. The popover closes on `onBlur` there (another app takes
-the key window) and on `onDismiss` on X; pass both.
+on a mounted popup. `onDismiss` alone closes it: on a press outside, and when
+the popover's own window loses the keyboard — on macOS, another app taking
+the key window — with `reason: 'focus'`. It watches its own window rather
+than its owner's, since it takes the keyboard from the owner as it opens.
 
 **Shortcuts work with nothing passed**: a binding belongs to the top-level
 `<window>`, or in an app without one, to the root-level `<popup>` holding

@@ -43,13 +43,77 @@ export class PopupNode extends WindowNode {
     if (!super._mapNow()) return false;
     if (this.props.grab) this.window.grabPointer?.({}, () => {});
     if (this.props.grabKeyboard) this.window.grabKeyboard?.({}, () => {});
+    this._watchFocusAway();
     return true;
   }
 
   destroySubtree() {
     if (this.props.grab) this.window?.ungrabPointer?.();
     if (this.props.grabKeyboard) this.window?.ungrabKeyboard?.();
+    this._offFocusAway?.();
+    this._offFocusAway = null;
     super.destroySubtree();
+  }
+
+  /**
+   * A grabbing popup is dismissed when the user goes to another application
+   * — `onDismiss`, with `reason: 'focus'` — and not only when a press lands
+   * outside it.
+   *
+   * The press does not cover it. On Cocoa the grab is ours rather than the
+   * window server's: it redirects a press between windows of this app
+   * (`CocoaApp._grabTarget`), and a click in another application, or ⌘-Tab,
+   * sends us nothing at all. The popup is an `NSPanel` at the pop-up-menu
+   * level that does not hide when the app deactivates, so a menu left up
+   * stayed drawn over whatever the user switched to, for good. On X the grab
+   * catches the click, but not a keyboard switch: alt-tab is the window
+   * manager's passive grab, and the menu stays up over the next window. What
+   * every backend does report is the window losing the keyboard, so that is
+   * the signal, here, once — which also makes a menu built straight on
+   * `<popup grab onDismiss>` behave as `Select` and `Menu` do, rather than
+   * leaving each app to find out it has to listen to the window too.
+   *
+   * Whose focus: the top-level window the popup hangs from, whose keyboard
+   * it shares — except for a popup that takes the keyboard itself
+   * (`grabKeyboard`), which listens to its own window. That one's owner
+   * *loses* the keyboard to it as it opens (a key window on Cocoa, a
+   * `FocusOut` from the grab on X), and its own window losing it is the user
+   * leaving: a tray popover now closes on `onDismiss` alone.
+   *
+   * Read when it fires rather than when it is set up, so a popup whose
+   * `grab` or `onDismiss` changes while it is up is judged as it is now.
+   */
+  _watchFocusAway() {
+    if (this._offFocusAway) return;
+    const offs = [
+      this.onWindowFocusChange((focused) => {
+        if (!focused) this._focusLeft(this);
+      }),
+    ];
+    const top = this.events?.topLevelManager?.node;
+    if (top && top !== this && typeof top.onWindowFocusChange === 'function') {
+      offs.push(
+        top.onWindowFocusChange((focused) => {
+          if (!focused) this._focusLeft(top);
+        }),
+      );
+    }
+    this._offFocusAway = () => {
+      for (const off of offs) off();
+    };
+  }
+
+  _focusLeft(from) {
+    if (this.destroyed || !this.props.grab) return;
+    if (typeof this.props.onDismiss !== 'function') return;
+    const top = this.events?.topLevelManager?.node;
+    // with an owner, one of the two windows is this popup's, and which one
+    // is decided by whether it holds the keyboard itself
+    if (top && top !== this) {
+      const own = from === this;
+      if (own !== Boolean(this.props.grabKeyboard)) return;
+    }
+    this.events.dismiss('focus', { buttons: 0, time: Date.now() });
   }
 
   constructor(app, attributes, props) {
