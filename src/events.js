@@ -22,6 +22,7 @@ import {
 import { Composer, composeTableFor } from './compose.js';
 import { acceleratorKeysym } from './keyboard.js';
 import { MOD } from './keysyms.js';
+import { inInvisibleSubtree, isInvisible } from './visibility.js';
 
 const XK_TAB = 0xff09;
 const XK_ESCAPE = 0xff1b;
@@ -1421,7 +1422,7 @@ export class EventManager {
       // one that is hidden or untargetable is not somewhere the pointer can
       // arrive
       if (!rect?.width || !rect.height) continue;
-      if (node.hidden || node.style.display === 'none') continue;
+      if (!effectivelyVisible(node)) continue;
       // neither value lets the pointer arrive at the node itself
       const pe = node.style.pointerEvents;
       if (pe === 'none' || pe === 'box-none') continue;
@@ -1863,6 +1864,10 @@ export class EventManager {
     if (manager !== this) return manager.focus(node, reason, options);
     const { backwards = false, restoring = false } = options;
     if (node === this.focused) return;
+    // A control nobody can see takes no keys, whoever asks: `focus()` on one
+    // inside a `visibility: 'hidden'` subtree does nothing, as a browser's
+    // does. Not `display: 'none'`, which has always been focusable by name.
+    if (node && inInvisibleSubtree(node)) return;
     // before `focused` moves, so the element that was collecting the
     // sequence is the one told to drop it
     this._endComposition();
@@ -2071,11 +2076,14 @@ export class EventManager {
    *
    * Invisible either way is invisible: `display: 'none'` takes a subtree out
    * of the layout, the paint and the hit test, so Tab has no business
-   * landing in it either. */
+   * landing in it either — and `visibility: 'hidden'` takes it out of the
+   * paint and the hit test, keeping only its boxes, which is the same
+   * answer for the same reason. */
   _focusables(root = this._scopeRoot()) {
     const out = [];
     const walk = (node) => {
       if (node.hidden || node.style.display === 'none') return;
+      if (isInvisible(node)) return;
       if (this._isFocusable(node)) out.push(node);
       for (const child of node.children) {
         if (!child.isWindow) walk(child);

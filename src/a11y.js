@@ -43,6 +43,7 @@
 // The one import, and it keeps this file's promise: a `Set` and two functions
 // over it, with no D-Bus, no node builtins and nothing at module scope.
 import { desktopIntegrationEnabled } from './desktopintegration.js';
+import { isInvisible } from './visibility.js';
 
 /** AT-SPI role numbers (AtspiRole). */
 export const ATSPI_ROLE = Object.freeze({
@@ -441,10 +442,13 @@ export function a11yErased(node) {
   return role === 'none' || role === 'presentation';
 }
 
-/** Whole-subtree removal: `aria-hidden`, the internal content kinds, and
- * `<text>` spans (the outer `<text>` speaks for the whole run). */
+/** Whole-subtree removal: `aria-hidden`, `visibility: 'hidden'` (nothing
+ * there is on screen to describe, which is CSS's rule too), the internal
+ * content kinds, and `<text>` spans (the outer `<text>` speaks for the
+ * whole run). */
 export function a11yPruned(node) {
   if (node.props?.['aria-hidden'] === true) return true;
+  if (isInvisible(node)) return true;
   if (INTERNAL_KINDS.has(node.kind)) return true;
   if (node.kind === 'text' && node.isSpan) return true;
   return false;
@@ -722,6 +726,7 @@ export function subtreeText(node) {
   const parts = [];
   const walk = (n) => {
     if (n.props?.['aria-hidden'] === true || n.hidden) return;
+    if (isInvisible(n)) return;
     if (n.kind === 'textchunk' && typeof n.text === 'string') {
       parts.push(n.text);
       return;
@@ -790,11 +795,13 @@ const bit = (states, state) => {
 };
 
 /** True when the node and every ancestor up to its window is neither
- * `hidden` nor `display: 'none'`. Shared with the focus manager, which
- * releases focus on exactly this answer turning false (src/events.js). */
+ * `hidden`, `display: 'none'` nor `visibility: 'hidden'`. Shared with the
+ * focus manager, which releases focus on exactly this answer turning false
+ * (src/events.js). */
 export function effectivelyVisible(node) {
   for (let n = node; n; n = n.parent) {
     if (n.destroyed || n.hidden || n.style?.display === 'none') return false;
+    if (isInvisible(n)) return false;
     if (n.isWindow) break;
   }
   return true;

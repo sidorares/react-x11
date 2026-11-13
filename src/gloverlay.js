@@ -95,6 +95,7 @@ import { cssColorStraight } from 'ntk/color';
 
 import { FULL_DAMAGE, addDamageRect } from './nodes/damage.js';
 import { radiusOf } from './styles.js';
+import { isInvisible } from './visibility.js';
 import {
   innerPixels,
   intersectRects,
@@ -232,6 +233,7 @@ const sameRect = (a, b) =>
 function shown(node) {
   for (let n = node; n; n = n.parent) {
     if (n.destroyed || n.hidden || n.style?.display === 'none') return false;
+    if (isInvisible(n)) return false;
     if (n.isWindow) break;
   }
   return true;

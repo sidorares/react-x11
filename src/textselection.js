@@ -32,6 +32,7 @@ import { callHandler } from './errors.js';
 import { lastInputTime } from './inputtime.js';
 import { ctrlChordLetter, primaryModifierHeld } from './keysyms.js';
 import { codePoints, wordRangeAt } from './textrange.js';
+import { isInvisible } from './visibility.js';
 // --- who is showing a selection ------------------------------------------
 //
 // One node per app: a `<textinput>`, or the surface below. The registry is
@@ -102,6 +103,7 @@ function participants(surface) {
       // to light up half a field the user is typing in
       if (child.hasOwnSelection) continue;
       if (child.hidden || child.style?.display === 'none') continue;
+      if (isInvisible(child)) continue;
       // a nested surface owns its subtree, the way the nearest `selectable`
       // ancestor owns a press
       if (child._textSelection) continue;

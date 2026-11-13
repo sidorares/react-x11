@@ -17,6 +17,7 @@
 import { act } from './harness.js';
 import { describeNode } from './queries.js';
 import { keysymOf, MOD, XK_RETURN } from '../keysyms.js';
+import { isInvisible } from '../visibility.js';
 
 /** The window node that owns a drawn node (a node, or a window itself). */
 function rootWindow(node) {
@@ -100,9 +101,11 @@ function noRectMessage(node, win) {
         ? `${has} \`hidden\``
         : hider.style?.display === 'none'
           ? `${has} \`display: 'none'\``
-          : `${self ? 'is hidden by React' : 'which React has hidden'}, in ` +
-            'an `<Activity mode="hidden">` or a `<Suspense>` showing its ' +
-            'fallback';
+          : isInvisible(hider)
+            ? `${has} \`visibility: 'hidden'\``
+            : `${self ? 'is hidden by React' : 'which React has hidden'}, in ` +
+              'an `<Activity mode="hidden">` or a `<Suspense>` showing its ' +
+              'fallback';
     return (
       `react-x11/test: ${name} ` +
       (self ? how : `is inside ${describeNode(hider)}, ${how}`) +
@@ -140,12 +143,13 @@ function noRectMessage(node, win) {
 }
 
 /** The node that takes `node` off the screen — itself or the nearest
- * ancestor with `display: 'none'` or hidden by React, up to and including
+ * ancestor with `display: 'none'`, `visibility: 'hidden'` or hidden by
+ * React, up to and including
  * its window, which a `hidden` prop or React keeps unmapped — or null when
  * nothing does. The same walk as the renderer's `_hiddenInTree`. */
 function hiddenBy(node) {
   for (let n = node; n; n = n.parent) {
-    if (n.hidden || n.style?.display === 'none') return n;
+    if (n.hidden || n.style?.display === 'none' || isInvisible(n)) return n;
     if (n.isWindow) break;
   }
   return null;

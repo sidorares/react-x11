@@ -4,6 +4,7 @@
 
 import { isPlaced } from '../layouts.js';
 import { Surface } from '../offscreen.js';
+import { isInvisible } from '../visibility.js';
 import { radiusOf } from '../styles.js';
 import { isPaintedColor } from './boxpaint.js';
 import { DAMAGE_SLOP } from './damage.js';
@@ -51,7 +52,8 @@ export class NodePaint {
         DRAWN_KINDS.has(c.kind) &&
         c.yoga &&
         !c.hidden &&
-        c.style.display !== 'none'
+        c.style.display !== 'none' &&
+        !isInvisible(c)
       ) {
         drawn.push(c);
         z.push(c.style.zIndex ?? 0);
@@ -82,7 +84,8 @@ export class NodePaint {
         !DRAWN_KINDS.has(c.kind) ||
         !c.yoga ||
         c.hidden ||
-        c.style.display === 'none'
+        c.style.display === 'none' ||
+        isInvisible(c)
       ) {
         continue;
       }
@@ -104,7 +107,11 @@ export class NodePaint {
   }
 
   paint(ctx) {
-    if (this.hidden) return;
+    // `visibility: 'hidden'` stops the walk here, whole subtree and all: it
+    // is laid out, and nothing in it draws (src/visibility.js). The parent's
+    // `paintOrder()` already leaves it out; this is for a caller that paints
+    // a node by name.
+    if (this.hidden || isInvisible(this)) return;
     const opacity = this.style.opacity;
     // A retained presenter replaying this node's own paint into a layer puts
     // the opacity on the layer instead (src/cocoa/presenter.js), and a group

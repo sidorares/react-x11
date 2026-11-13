@@ -15,6 +15,7 @@ import { layoutDiff } from './nodes/damage.js';
 import { Node } from './nodes/node.js';
 import { DEV } from './nodes/util.js';
 import { FramePacer, resolveFrameRate } from './pacing.js';
+import { isInvisible } from './visibility.js';
 
 // One visual query per (app, spec): GetFBConfigs is a round trip and every
 // <glarea> in an app wants the same answer.
@@ -650,6 +651,7 @@ export class GlAreaNode extends Node {
       if (n.style?.display === 'none' || n.style?.pointerEvents === 'none') {
         return null;
       }
+      if (isInvisible(n)) return null;
       if (n.isWindow) break;
     }
     if (panes !== 0) {

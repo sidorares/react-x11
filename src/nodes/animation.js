@@ -20,6 +20,7 @@ import { GRID_CONTAINER_PROPS, GRID_ITEM_PROPS } from '../grid.js';
 import { isPlaced } from '../layouts.js';
 import { desktopSettings, watchDesktopSettings } from '../desktopsettings.js';
 import { watchWindowState, windowStateSnapshot } from '../windowstate.js';
+import { isInvisible } from '../visibility.js';
 import { shadowExtentOf } from './boxpaint.js';
 import { inThemeWalk } from './cascade.js';
 import { insetRect, intersectRects, outerPixels } from './rects.js';
@@ -221,9 +222,19 @@ export class NodeAnimation {
     }
     // `display: 'none'` hides a subtree as completely as React's own flag
     // does, whether it arrived from a prop, a state block or a size query —
-    // so focus leaves it by the same rule (`_visibilityChanged`).
-    if ((displayed.display === 'none') !== (this.style.display === 'none')) {
-      this._visibilityChanged(this.style.display !== 'none');
+    // so focus leaves it by the same rule (`_visibilityChanged`). So does
+    // `visibility: 'hidden'`, which keeps the boxes and takes everything
+    // else: the paint, the pointer, the keyboard, a surface's window, a
+    // loop's frames. A window's own is ignored (src/visibility.js).
+    const offBefore = this._offScreenBy(displayed);
+    const offNow = this._offScreenBy(this.style);
+    if (offBefore !== offNow) this._visibilityChanged(!offNow);
+    if (
+      !this.isWindow &&
+      (displayed.visibility === 'hidden') !==
+        (this.style.visibility === 'hidden')
+    ) {
+      this._a11yExposureChanged(this.style.visibility !== 'hidden');
     }
     // A shadow that just got smaller — or went away — has to claim where it
     // *was*. Every claim downstream of here is bounded by `paintBounds()`,
@@ -603,6 +614,7 @@ export class NodeAnimation {
   _hiddenInTree() {
     for (let n = this; n; n = n.parent) {
       if (n.hidden || n.style?.display === 'none') return true;
+      if (isInvisible(n)) return true;
       if (n.isWindow) break;
     }
     return false;

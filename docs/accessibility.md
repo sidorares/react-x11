@@ -77,6 +77,10 @@ harmless) when no assistive technology is listening.
 | `aria-keyshortcuts`                                         | the shortcut announced with the item ("Control+N")   |
 | `onAccessibilityAction`                                     | the AT drove the control (below)                     |
 
+A subtree styled `visibility: 'hidden'` is removed from the accessible tree
+the way `aria-hidden` removes one, and a screen reader hears it leave and
+come back as the style changes ([styling.md](styling.md#visibility)).
+
 Roles: `alert alertdialog article banner blockquote button caption cell
 checkbox columnheader combobox comment complementary contentinfo dialog
 document form grid gridcell group heading img link list listbox listitem log

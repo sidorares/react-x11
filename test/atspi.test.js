@@ -1164,6 +1164,64 @@ describe('the AT-SPI bridge', { concurrency: 1, ...needsBroker }, () => {
     }
   });
 
+  test("visibility: 'hidden' leaves the tree and comes back, with nothing unmounted", async () => {
+    const tree = (hidden) =>
+      h(
+        'window',
+        { title: 'Bridge Test', width: 320, height: 200 },
+        h('box', { role: 'button', focusable: true }, h('text', null, 'Save')),
+        h(
+          'box',
+          { role: 'list' },
+          h('box', { role: 'listitem', 'aria-label': 'kept' }),
+          h('box', {
+            role: 'listitem',
+            'aria-label': 'copy',
+            style: { visibility: hidden ? 'hidden' : 'visible' },
+          }),
+        ),
+      );
+    const listItems = async () => {
+      const frame = await call(
+        appBus,
+        ROOT_PATH,
+        ACCESSIBLE,
+        'GetChildAtIndex',
+        'i',
+        [0],
+      );
+      const list = await call(
+        appBus,
+        frame[1],
+        ACCESSIBLE,
+        'GetChildAtIndex',
+        'i',
+        [1],
+      );
+      const names = [];
+      const items = await call(appBus, list[1], ACCESSIBLE, 'GetChildren');
+      for (const [, path] of items) {
+        names.push(await getProp(appBus, path, ACCESSIBLE, 'Name'));
+      }
+      return names;
+    };
+    x11Root.render(tree(false));
+    await settle();
+    assert.deepEqual(await listItems(), ['kept', 'copy']);
+
+    signals.length = 0;
+    x11Root.render(tree(true));
+    await settle();
+    await until(() => childEvents('remove').length > 0, 'the removal');
+    assert.deepEqual(await listItems(), ['kept']);
+
+    signals.length = 0;
+    x11Root.render(tree(false));
+    await settle();
+    await until(() => childEvents('add').length > 0, 'the addition');
+    assert.deepEqual(await listItems(), ['kept', 'copy']);
+  });
+
   test('unmounting removes the tree and tells the cache', async () => {
     signals.length = 0;
     x11Root.render(null);

@@ -29,6 +29,7 @@ import {
 } from './rects.js';
 import { isPaintedColor } from './boxpaint.js';
 import { scrollbarTrackRect } from './scrollbars.js';
+import { inInvisibleSubtree } from '../visibility.js';
 import { DEV } from './util.js';
 import { debugPaint } from './window/debugpaint.js';
 
@@ -712,6 +713,10 @@ export class WindowScrollBlit {
     // claim the scroll recorded, like every other declined gate here
     if (from === BLIT_POISONED) return;
     if (NO_SCROLL_BLIT || !from || node.destroyed || node.root !== this) return;
+    // a pane nobody can see keeps scrolling — it is laid out — but the
+    // pixels at its viewport are whatever is behind it, and a copy would
+    // drag those along; its claim repaints that, which is all it owes
+    if (inInvisibleSubtree(node)) return;
     // the window's backing store, or the pane over a `<glarea>` that holds
     // the pixels of a node inside it — none where neither can move them
     const target = this._blitTarget(node);
@@ -1410,6 +1415,8 @@ export class WindowScrollBlit {
     for (const node of nodes) {
       if (node.destroyed || node.hidden || node._promoted) continue;
       if (node.style?.display === 'none' || !(node.abs?.width > 0)) continue;
+      // laid out and promising its box, but drawing nothing in it
+      if (inInvisibleSubtree(node)) continue;
       let cover = node.opaqueRect();
       if (!cover) continue;
       cover = innerPixels(cover);

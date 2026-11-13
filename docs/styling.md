@@ -8,7 +8,7 @@ an error in development that names the fix.
 One namespace per kind of thing, and no name in both:
 
 - **`style`** — everything CSS has a concept for: layout, paint, text,
-  `cursor`, `overflow`, `zIndex`, `pointerEvents`, `container`.
+  `cursor`, `overflow`, `zIndex`, `pointerEvents`, `visibility`, `container`.
 - **props** — everything else: `title`, window geometry and size hints,
   `resizable`, `appId`, `windowType`, `grab`, `value`, `src`, `focusable`,
   `tabIndex`, `disabled`, handlers. The 3D elements of
@@ -284,7 +284,8 @@ See [drag-and-drop.md](drag-and-drop.md).
 **State blocks may only set paint properties** (`backgroundColor`,
 `backgroundImage`, `borderColor` and the per-side `borderTopColor`/…,
 `borderRadius`, `boxShadow`, `zIndex`, `outlineWidth`, `outlineColor`,
-`outlineOffset`, `opacity`, `color`, and the `background` and `outline`
+`outlineOffset`, `opacity`, `visibility`, `color`, and the `background` and
+`outline`
 shorthands) — enforced at declaration time by `createStyles`, so that a
 pointer move never reflows the tree. Anything that changes layout or what
 renders stays in React state.
@@ -551,6 +552,84 @@ bounds inside the window, kept from one frame to the next while the node stays
 faded and released when it is opaque again. `0` draws nothing and costs
 nothing — and the node is still laid out and still hit, as in CSS. A value
 outside 0 to 1 is clamped; one that is not a number throws in development.
+
+## Visibility
+
+`visibility: 'hidden'` keeps a node **and everything in it** laid out exactly
+where it would be, and does nothing else with them. It is the way to reveal
+something without moving what is around it — a message's copy button and
+timestamp that appear on hover, with the transcript holding still:
+
+```jsx
+function Message({ text }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <box
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <text>{text}</text>
+      <box style={{ visibility: hovered ? 'visible' : 'hidden' }}>
+        <CopyButton text={text} />
+      </box>
+    </box>
+  );
+}
+```
+
+A hidden subtree:
+
+- **is laid out** — every box keeps the size and position it has shown, so
+  switching `visibility` never reflows anything. It is a repaint of the
+  subtree's area and nothing more.
+- **is not drawn.** The paint walk stops at the hidden node: nothing under it
+  runs its draw code, a `<canvas>`'s `onDraw` is not called, no text is
+  rasterized and the paint cache is not consulted. Text is still measured,
+  since measuring is layout.
+- **is not reached.** It is skipped by hit testing, so it takes no press, no
+  hover (`:hover` and `:active` are never set on it), and shows no `cursor`;
+  the pointer goes to whatever is behind it. It is out of the Tab order, and
+  `focus()` on a node in it does nothing. If focus is inside it when it is
+  hidden, focus leaves, as it does when a focused subtree turns
+  `display: 'none'`, and comes back when it is shown, if nothing else took
+  the keyboard in between ([Focus and visibility](events.md#focus-and-visibility)). A
+  `<glarea>` or `<foreign>` inside it is unmapped, and an `animation` loop
+  inside it stops drawing frames.
+- **is not in the accessibility tree** — removed from it as `aria-hidden`
+  removes a subtree, and announced to a screen reader as a removal when it
+  is hidden and an addition when it is shown.
+
+Three ways it is not CSS's:
+
+- **The whole subtree goes.** In CSS a descendant can say
+  `visibility: 'visible'` and reappear inside a hidden parent; here it
+  cannot, and that is what lets the paint walk stop at the hidden node rather
+  than visit every node under it to draw nothing.
+- **A window is a window.** On a `<window>` or a `<popup>` itself it is
+  ignored — use the `hidden` prop — and a `<popup>` opened from a node inside
+  a hidden subtree is not hidden by it, which is also how `display: 'none'`
+  treats one.
+- **No `'collapse'`.** A box that gives up its space is `display: 'none'`.
+
+Against the other two ways of hiding something:
+
+|                        | laid out | drawn | hit, focusable, accessible |
+| ---------------------- | -------- | ----- | -------------------------- |
+| `opacity: 0`           | yes      | no    | yes                        |
+| `visibility: 'hidden'` | yes      | no    | no                         |
+| `display: 'none'`      | no       | no    | no                         |
+
+`opacity: 0` still walks the subtree to draw nothing and leaves it under the
+pointer, which makes it a fade's end and not a way to hide; `display: 'none'`
+gives up the space, so what is around it moves.
+
+It is a **paint** property, so a state block may set it (`':disabled':
+{ visibility: 'hidden' }`). It does not transition: there is no halfway
+between drawn and not, so it snaps, and a reveal that should fade is an
+`opacity` transition on the same node. On a `<text>` span nested in another
+`<text>` it has no effect, since the outer `<text>` draws the whole
+paragraph. A value other than `'visible'` or `'hidden'` throws in
+development.
 
 ## Measuring text to its letters
 

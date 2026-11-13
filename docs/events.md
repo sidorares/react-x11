@@ -695,7 +695,8 @@ for input focus — the dialog has it.
 ### Focus and visibility
 
 **Focus follows visibility.** A subtree leaving the screen — a `<Suspense>`
-fallback, `<Activity mode="hidden">`, `display: 'none'`, an unmapped
+fallback, `<Activity mode="hidden">`, `display: 'none'`,
+`visibility: 'hidden'`, an unmapped
 `<popup>` — gives up the keyboard: the focused node fires `onBlur`,
 `:focus`/`:focus-within` come off, and keys go to the window, so a hidden
 control never collects keystrokes. Tab skips invisible nodes.
