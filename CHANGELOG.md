@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.0.0](https://github.com/sidorares/react-x11/compare/v2.58.1...v3.0.0) (2026-11-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* `onDismiss` takes a `DismissEvent` (`reason: 'press' | 'focus'`) instead of a `MouseEvent`, and fires when the user leaves the app as well as on a press outside.
+
+### Features
+
+* **styles:** visibility: 'hidden', a subtree laid out and never drawn or reached ([#1052](https://github.com/sidorares/react-x11/issues/1052)) ([0957f38](https://github.com/sidorares/react-x11/commit/0957f384b0211d3ebf55b4b8286915f9002ec659))
+
+
+### Bug Fixes
+
+* a grabbing popup is dismissed when the user switches to another application, so a menu is no longer left drawn over it on macOS ([#1051](https://github.com/sidorares/react-x11/issues/1051)) ([7d01432](https://github.com/sidorares/react-x11/commit/7d0143268d180096cc2336e879c41a5e3f3cf5f3))
+
 ## [2.58.1](https://github.com/sidorares/react-x11/compare/v2.58.0...v2.58.1) (2026-11-10)
 
 
