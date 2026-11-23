@@ -1018,7 +1018,11 @@ export class GlOverlay {
 
   _makePane(rect, node) {
     const owner = this.area.root.window;
-    const attributes = { parent: owner, ...rect };
+    const attributes = {
+      parent: owner,
+      layerParent: this.area.window?.holder,
+      ...rect,
+    };
     let wnd;
     if (this.composited) wnd = this.app.createOverlayPane(attributes);
     else if (X11PaneWindow.usable(this.app)) {

@@ -172,11 +172,28 @@ export class CocoaGLArea {
     this.scale = this.parent.scale ?? app.scale ?? 1;
     this.destroyed = false;
     this._reactX11Node = null;
-    this.layer = withoutActions(this._native, () => {
-      const layer = this._native.createLayer();
-      this._native.addSublayer(this.parent._layer, layer);
-      return layer;
-    });
+    // The surface and its panes live in `holder`, which sits in `clipLayer`:
+    // the clip is one frame on the outer layer, with the holder moved the
+    // other way so everything inside keeps the window's coordinates.
+    [this.clipLayer, this.holder, this.layer] = withoutActions(
+      this._native,
+      () => {
+        const native = this._native;
+        const clipLayer = native.createLayer();
+        const holder = native.createLayer();
+        const layer = native.createLayer();
+        native.addSublayer(this.parent._layer, clipLayer);
+        native.addSublayer(clipLayer, holder);
+        native.addSublayer(holder, layer);
+        native.setLayerProps(clipLayer, {
+          zPosition: 1e7,
+          frame: [0, 0, 1, 1],
+        });
+        native.setLayerProps(holder, { frame: [0, 0, 1, 1] });
+        return [clipLayer, holder, layer];
+      },
+    );
+    this.clip = null;
     this.rect = null;
     // Ours to keep, because every `setState` writes the layer's whole prop
     // set: a geometry change on a hidden surface must not show it again.
@@ -217,6 +234,55 @@ export class CocoaGLArea {
 
   get height() {
     return this.rect?.height ?? 0;
+  }
+
+  /**
+   * Cut the surface and its panes to `clip` (device px, window coordinates),
+   * the part of it the clipping ancestors leave; null is no cut, an empty
+   * rect (`{ width: 0 }`) hides it. A layer is composited above the window's
+   * bitmap, so what a scroll pane's `overflow` does to its children has to
+   * be said to Core Animation as well: a masking layer, moved by this call
+   * and nothing else on a scroll.
+   */
+  setClip(clip) {
+    if (this.destroyed) return;
+    const was = this.clip;
+    if (
+      was === clip ||
+      (was &&
+        clip &&
+        was.x === clip.x &&
+        was.y === clip.y &&
+        was.width === clip.width &&
+        was.height === clip.height)
+    ) {
+      return;
+    }
+    this.clip = clip;
+    const s = this.scale;
+    const native = this._native;
+    native.txBegin({ disableActions: true });
+    try {
+      if (!clip) {
+        native.setLayerProps(this.clipLayer, {
+          frame: [0, 0, 1, 1],
+          masksToBounds: false,
+          hidden: false,
+        });
+        native.setLayerProps(this.holder, { frame: [0, 0, 1, 1] });
+      } else {
+        native.setLayerProps(this.clipLayer, {
+          frame: [clip.x / s, clip.y / s, clip.width / s, clip.height / s],
+          masksToBounds: true,
+          hidden: !(clip.width > 0 && clip.height > 0),
+        });
+        native.setLayerProps(this.holder, {
+          frame: [-clip.x / s, -clip.y / s, 1, 1],
+        });
+      }
+    } finally {
+      native.txCommit();
+    }
   }
 
   move(x, y) {
@@ -302,7 +368,7 @@ export class CocoaGLArea {
     this._context?._destroy();
     this._context = null;
     withoutActions(this._native, () =>
-      this._native.removeFromSuperlayer(this.layer),
+      this._native.removeFromSuperlayer(this.clipLayer),
     );
   }
 }

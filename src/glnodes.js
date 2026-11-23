@@ -13,7 +13,9 @@ export { directGLFailure, hasDirectGL } from './glbackend.js';
 import { GlOverlay, canOverlay, overlayRefusal } from './gloverlay.js';
 import { layoutDiff } from './nodes/damage.js';
 import { Node } from './nodes/node.js';
+import { intersectRects, outerPixels } from './nodes/rects.js';
 import { DEV } from './nodes/util.js';
+import { warnOnce } from './symbols.js';
 import { FramePacer, resolveFrameRate } from './pacing.js';
 import { isInvisible } from './visibility.js';
 
@@ -358,6 +360,7 @@ export class GlAreaNode extends Node {
         if (!this.destroyed) this._failed(err);
       };
     }
+    this._syncClip(rect);
     wnd.on?.('expose', () => this.requestFrame());
     wnd.map?.();
     // made on top of its siblings — over the panes of children that were
@@ -480,10 +483,44 @@ export class GlAreaNode extends Node {
     this._syncGeometry();
   }
 
+  /**
+   * The part of the surface its clipping ancestors leave (`overflow: 'hidden'`
+   * or `'scroll'`), in the surface's own rect's coordinates and units: the
+   * rect itself when nothing cuts it, null for none at all, and `{ width: 0 }`
+   * when it is scrolled out of sight altogether.
+   */
+  _clipRect(rect) {
+    let out = rect;
+    let cut = false;
+    for (let n = this.parent; n && !n.isWindow; n = n.parent) {
+      if (!n.clipsChildren?.()) continue;
+      cut = true;
+      out = out && intersectRects(out, outerPixels(n.abs));
+    }
+    if (!cut) return null;
+    return out ?? { x: rect.x, y: rect.y, width: 0, height: 0 };
+  }
+
+  _syncClip(rect) {
+    const wnd = this.window;
+    const clip = this._clipRect(rect);
+    if (typeof wnd.setClip === 'function') wnd.setClip(clip);
+    else if (clip && DEV) {
+      warnOnce(
+        'react-x11: a <glarea> inside a clipping ancestor (overflow: ' +
+          "'hidden' or 'scroll') is not cut by it on this backend: its " +
+          'surface is a real window at its own rect and draws over whatever ' +
+          'the ancestor hides. Keep the surface out of scroll panes, or use ' +
+          'the Cocoa backend (docs/elements.md, <glarea>).',
+      );
+    }
+  }
+
   _syncGeometry() {
     const wnd = this.window;
     if (!wnd) return;
     const rect = this._geometry();
+    this._syncClip(rect);
     const prev = this.rect;
     if (
       prev &&
