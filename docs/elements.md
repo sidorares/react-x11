@@ -2071,8 +2071,8 @@ beside the surface or in GL there, or use the Cocoa backend.
 
 Limits worth knowing:
 
-- **Overlapping surfaces:** both overlays are above both frames on Cocoa;
-  on X11 they stack by creation order.
+- **Overlapping surfaces:** on Cocoa and X11 a surface's overlay stacks
+  with that surface, by creation order.
 - **Clipping ancestors:** on **Cocoa** a surface and its children are cut to
   every ancestor with `overflow: 'hidden'` or `'scroll'` — a scrolled pane
   shows the part of the scene inside it, and nothing over a header above
