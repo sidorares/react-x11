@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.1](https://github.com/sidorares/react-x11/compare/v3.0.0...v3.0.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **glarea:** a surface is cut to its clipping ancestors on Cocoa ([#1057](https://github.com/sidorares/react-x11/issues/1057)) ([85a11d7](https://github.com/sidorares/react-x11/commit/85a11d74b3d159fffe0738c741b44b9c3b04c258))
+
 ## [3.0.0](https://github.com/sidorares/react-x11/compare/v2.58.1...v3.0.0) (2026-11-13)
 
 
