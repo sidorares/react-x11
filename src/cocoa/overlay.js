@@ -33,7 +33,11 @@ export class CocoaOverlayPane {
     this.destroyed = false;
     this.layer = withoutActions(this._native, () => {
       const layer = this._native.createLayer();
-      this._native.addSublayer(this.parent._layer, layer);
+      // inside the surface's clip when it has one (CocoaGLArea.setClip)
+      this._native.addSublayer(
+        options.layerParent ?? this.parent._layer,
+        layer,
+      );
       return layer;
     });
     this.rect = null;

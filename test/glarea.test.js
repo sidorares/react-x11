@@ -287,6 +287,37 @@ test('a failed <glarea> leaves no X window over the fallback', async () => {
   }
 });
 
+test('a <glarea> in a clipping ancestor says once that X11 cannot cut it', async () => {
+  const { app } = await createGlApp();
+  const x11Root = await createRoot({ app });
+  const warnings = [];
+  const warn = console.warn;
+  console.warn = (m) => warnings.push(String(m));
+  try {
+    await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          'box',
+          { style: { flexGrow: 1, overflow: 'scroll' } },
+          h('glarea', { style: { height: 600, flexShrink: 0 } }),
+        ),
+      ),
+      x11Root,
+    );
+    await waitFor(
+      () => warnings.some((m) => m.includes('<glarea> inside a clipping')),
+      'the clipping warning',
+    );
+    await x11Root.unmount();
+    await settle(app);
+  } finally {
+    console.warn = warn;
+    await app.close();
+  }
+});
+
 // --- the pointer over the surface ---------------------------------------------
 //
 // Every test below injects through the in-process server rather than

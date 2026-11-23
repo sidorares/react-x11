@@ -2071,10 +2071,15 @@ beside the surface or in GL there, or use the Cocoa backend.
 
 Limits worth knowing:
 
-- **Overlapping surfaces:** both overlays are above both frames on Cocoa;
-  on X11 they stack by creation order.
-- **Scroll panes:** a surface scrolled partly out of a pane is not clipped
-  by it — its window and panes are real windows at its rect.
+- **Overlapping surfaces:** on Cocoa and X11 a surface's overlay stacks
+  with that surface, by creation order.
+- **Clipping ancestors:** on **Cocoa** a surface and its children are cut to
+  every ancestor with `overflow: 'hidden'` or `'scroll'` — a scrolled pane
+  shows the part of the scene inside it, and nothing over a header above
+  it. The cut is a rectangle: a rounded corner on the ancestor is not
+  followed. On **X11** and **Wayland** the surface is a real window at its
+  own rect and is not clipped: it draws over whatever the ancestor hides,
+  and development says so once. Keep the surface out of scroll panes there.
 - **Promotion:** on Cocoa a child is never lifted onto its own layer for an
   animation (it would sit under the surface); its transitions run on the
   frame clock.

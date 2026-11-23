@@ -107,6 +107,17 @@ async function mountGLArea({
   return { native, app, root, wnd, node, frame, runtime };
 }
 
+/**
+ * The window's layers with each surface's clip container opened up: the
+ * surface and its panes sit in the container's holder (`CocoaGLArea`).
+ */
+const withinSurfaces = (wnd) =>
+  wnd._layer.sublayers.flatMap((l) =>
+    l.props.zPosition === 1e7 && l.sublayers[0]
+      ? [l, ...l.sublayers[0].sublayers]
+      : [l],
+  );
+
 /** A box at a corner of the surface, 20x10 points, half transparent. */
 const legend = (props = {}) =>
   h('box', {
@@ -230,7 +241,7 @@ test('the children are drawn on a transparent layer above the surface', async ()
   });
   frame();
   const gl = node.window.layer;
-  const overlay = wnd._layer.sublayers.find((l) => l.props.zPosition > 1e7);
+  const overlay = withinSurfaces(wnd).find((l) => l.props.zPosition > 1e7);
   assert.ok(overlay, 'a layer over the GL layer');
   assert.ok(overlay !== gl, 'not the GL layer itself');
   assert.equal(gl.props.zPosition, 1e7);
@@ -336,7 +347,7 @@ test('the layer goes with the last child', async () => {
     children: legend(),
   });
   frame();
-  const overlay = wnd._layer.sublayers.find((l) => l.props.zPosition > 1e7);
+  const overlay = withinSurfaces(wnd).find((l) => l.props.zPosition > 1e7);
   assert.ok(overlay);
   root.render(
     h(
@@ -396,7 +407,7 @@ test('a GL frame goes out after the overlay painted in the same tick (#641)', as
   await tick();
   frame();
   const gl = node.window.layer;
-  const overlay = wnd._layer.sublayers.find((l) => l.props.zPosition > 1e7);
+  const overlay = withinSurfaces(wnd).find((l) => l.props.zPosition > 1e7);
   assert.ok(overlay);
   node.requestFrame();
   root.render(tree(40));
@@ -468,7 +479,7 @@ test('a GL frame and the overlay painted before it go out in one commit', async 
   await tick();
   frame();
   const gl = node.window.layer;
-  const overlay = wnd._layer.sublayers.find((l) => l.props.zPosition > 1e7);
+  const overlay = withinSurfaces(wnd).find((l) => l.props.zPosition > 1e7);
   node.requestFrame();
   root.render(tree(40));
   await tick();
@@ -556,7 +567,7 @@ async function mountPressable({ askFrame }) {
   await new Promise((resolve) => setTimeout(resolve, 25));
   frame();
   const gl = node.window.layer;
-  const overlay = wnd._layer.sublayers.find((l) => l.props.zPosition > 1e7);
+  const overlay = withinSurfaces(wnd).find((l) => l.props.zPosition > 1e7);
   assert.ok(overlay, 'the child is on an overlay');
   let from = native.calls.length;
   const presents = () => {
@@ -642,7 +653,7 @@ test('a wheel notch painted at once takes the GL frame it asked for along, after
 
 test('the surface comes and goes without an implicit animation', async () => {
   const { native, root, node } = await mountGLArea();
-  const layer = node.window.layer;
+  const layer = node.window.clipLayer;
   root.render(h('window', { width: 200, height: 120 }, h('box')));
   await tick();
   assert.equal(layer.parent, null, 'off the root layer');
@@ -991,7 +1002,7 @@ test('a child of the surface that only moved is moved on the pane’s bitmap, th
   frame();
   const [pane] = node._overlay.panes;
   const surface = pane.wnd._surface;
-  const overlay = wnd._layer.sublayers.find((l) => l.props.zPosition > 1e7);
+  const overlay = withinSurfaces(wnd).find((l) => l.props.zPosition > 1e7);
   native.calls.length = 0;
   const passes = panePasses(node);
   // five points right and three down: ten and six device pixels
@@ -1143,7 +1154,7 @@ test('each child of the surface has a layer of its own, stacked in their order',
   await tick();
   frame();
   const layers = () =>
-    wnd._layer.sublayers
+    withinSurfaces(wnd)
       .filter((l) => l.props.zPosition > 1e7)
       .sort((a, b) => a.props.zPosition - b.props.zPosition)
       .map((l) => l.props.frame);
@@ -1216,4 +1227,55 @@ test('the layer follows its subtree off the screen and back', async () => {
   await tick();
   assert.equal(layer.props.hidden, false, 'shown again when it comes back');
   assert.ok(native, 'the bridge saw the whole exchange');
+});
+
+// A surface is a layer above the window's bitmap, so a scroll pane's
+// `overflow` does not reach it by itself: scrolled partly out of its pane it
+// drew over whatever sat above the pane (a fixed header). The surface is
+// cut to what the clipping ancestors leave, by a masking layer.
+test('a surface in a scroll pane is cut to the pane as it scrolls', async () => {
+  const { node, frame } = await mountGLArea({
+    box: { style: { flexGrow: 1, overflow: 'scroll' } },
+    area: { style: { height: 300, flexShrink: 0 } },
+  });
+  const area = node.window;
+  const pane = node.parent;
+  const clipOf = () => area.clipLayer.props;
+  const s = area.scale;
+  const view = pane.abs;
+  assert.equal(clipOf().masksToBounds, true, 'masked from the start');
+  assert.deepEqual(clipOf().frame, [
+    view.x / s,
+    view.y / s,
+    view.width / s,
+    view.height / s,
+  ]);
+
+  const top = node.abs.y;
+  pane.scrollTo({ y: 100 });
+  node.root.flush();
+  frame(100);
+  assert.ok(node.abs.y < top, 'the surface moved with the scroll');
+  const clip = clipOf().frame;
+  assert.equal(
+    clip[1],
+    view.y / s,
+    'the cut stays on the pane, not the surface',
+  );
+  assert.equal(clip[3], view.height / s);
+  assert.equal(
+    area.holder.props.frame[1],
+    -clip[1],
+    'panes keep window coordinates',
+  );
+
+  pane.scrollTo?.({ top: 10000 });
+  frame(200);
+  assert.equal(clipOf().frame[3], view.height / s, 'still the pane');
+});
+
+test('a surface with no clipping ancestor is not masked', async () => {
+  const { node } = await mountGLArea();
+  assert.equal(node.window.clip, null);
+  assert.notEqual(node.window.clipLayer.props.masksToBounds, true);
 });
