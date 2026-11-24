@@ -46,7 +46,7 @@
 import { BackendContext2D } from '../backend/context2d.js';
 
 export class CocoaSurface {
-  constructor(app, { width, height, format = 'argb32' } = {}) {
+  constructor(app, { width, height, format = 'argb32', shared = false } = {}) {
     if (
       !Number.isInteger(width) ||
       !Number.isInteger(height) ||
@@ -77,11 +77,25 @@ export class CocoaSurface {
     this._fonts = app.fonts ?? null;
     this._ctx = null;
     this._destroyed = false;
-    this._surfaceHandle = this._native.createSurface(
-      width,
-      height,
-      app.scale ?? 1,
-    );
+    // `shared`: the bitmap laid over an IOSurface's memory, which a layer
+    // can show as it is (`LayerSurface`, src/layersurface.js) — the same
+    // pixels the context draws, with no copy between drawing and glass
+    this.iosurfaceId = null;
+    if (shared) {
+      const made = this._native.createSurfaceIOSurface(
+        width,
+        height,
+        app.scale ?? 1,
+      );
+      this._surfaceHandle = made.handle;
+      this.iosurfaceId = made.iosurfaceId;
+    } else {
+      this._surfaceHandle = this._native.createSurface(
+        width,
+        height,
+        app.scale ?? 1,
+      );
+    }
     // a fresh bitmap's contents are the allocator's; a surface that is only
     // partly drawn must composite nothing where nothing was drawn
     this.clear();

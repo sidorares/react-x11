@@ -62,9 +62,11 @@
 import { RASTER_PAD, RasterState } from './presenter.js';
 import { PlayerLift, PlayerState } from './player.js';
 import { VideoLift, canLiftVideo } from './video.js';
+import { SurfaceLift, canLiftSurface } from './surfacelift.js';
 import { intersectRects, rectContains, rectsOverlap } from '../nodes/rects.js';
 import { DEV } from '../nodes/util.js';
 import { isVideoFrames } from '../videoframes.js';
+import { isLayerSurface } from '../layersurface.js';
 
 /** A source with a layer of its own the bridge plays into — a player, a
  *  camera — which a part shows by placing that layer, not by writing it. */
@@ -529,6 +531,7 @@ export class SpriteLayers {
     this.solid = Boolean(forms?.includes?.('matrix3d'));
     // and a video's frames on a layer need its video surfaces
     this.videos = canLiftVideo(this.native);
+    this.surfaces = canLiftSurface(this.native);
     // and a part that is its shadows, a box masked by a shape: every
     // bridge that lifts anything has both, but a fake one may not
     this.shadows =
@@ -803,6 +806,7 @@ export class SpriteLayers {
     if (showsItself(contents)) {
       return !contents.released && contents.liftable !== false;
     }
+    if (isLayerSurface(contents)) return this.surfaces && !contents.closed;
     return isVideoFrames(contents) && this.videos;
   }
 
@@ -874,7 +878,9 @@ export class SpriteLayers {
           ? null
           : showsItself(contents)
             ? new PlayerLift(this.native, contents, layer)
-            : new VideoLift(this.native, contents, layer),
+            : isLayerSurface(contents)
+              ? new SurfaceLift(this.native, contents, layer)
+              : new VideoLift(this.native, contents, layer),
     };
   }
 

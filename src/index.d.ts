@@ -33,6 +33,7 @@ export * from './types/permissions.js';
 export * from './types/notifications.js';
 export * from './types/desktopcalendar.js';
 export * from './types/video.js';
+export * from './types/layersurface.js';
 export * from './types/media.js';
 
 /**
