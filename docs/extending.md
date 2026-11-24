@@ -1315,6 +1315,36 @@ spriteAnimationEnded(key, id, finished) {
 }
 ```
 
+#### A part that is a surface you draw into
+
+An element that rasterizes for itself every frame — a canvas, a terminal, a
+chart — pays twice for the same pixels where it draws into a surface and the
+window then composites that surface over its box. `createLayerSurface(app,
+{ width, height })` is a surface a layer can show instead, and it is a part's
+`contents` as a `VideoFrames` sink is:
+
+```js
+this.canvas = createLayerSurface(app, { width: w, height: h }); // device px
+this.canvas.draw((ctx) => this.replay(ctx)); // starts as the last frame
+sprites() {
+  return [{ key: 'canvas', rect: this.box(), contents: this.canvas }];
+}
+paint(ctx) {
+  if (!this.lifted.has('canvas')) ctx.drawImage(this.canvas.surface, x, y);
+}
+```
+
+Where the presenter lifts the part, each `draw()` repoints the layer at the
+frame it drew, inside the call, with no frame of the window's own and no copy
+of the pixels (the frames are CG bitmaps over IOSurfaces). A frame is drawn
+into a surface the render server has let go of and **starts as the frame
+before it**, so an element that redraws only what changed draws only that;
+`draw(fn, { full: true })` says it draws every pixel and nothing is carried
+over. Ask for a frame (`spritesChanged()`) when the first `draw()` has made
+the part worth offering. Where nothing lifts it — another backend, a bridge
+without IOSurface surfaces, something painted over it — `surface` is the
+newest frame, and `ctx.drawImage` draws it everywhere.
+
 | method                                    |                                                                   |
 | ----------------------------------------- | ----------------------------------------------------------------- |
 | `sprites()`                               | the parts on offer, or `null`; asked every frame, after layout    |

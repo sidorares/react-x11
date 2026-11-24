@@ -81,6 +81,11 @@ export {
   VideoFrames,
 } from './videoframes.js';
 export { useVideoFrames } from './videohooks.js';
+export {
+  createLayerSurface,
+  isLayerSurface,
+  LayerSurface,
+} from './layersurface.js';
 export { NoMediaPlaybackError } from './mediaplayback.js';
 // Media capture: devices, tracks, the screen, and audio out
 // (design/architecture/media-capture.md, docs/media.md).

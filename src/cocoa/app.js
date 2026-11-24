@@ -652,6 +652,23 @@ export class CocoaApp {
   }
 
   /**
+   * A surface whose pixels a layer can show as they are, for a
+   * `LayerSurface` (src/layersurface.js): a CG bitmap over an IOSurface.
+   * Null over a bridge that cannot make one, and the `LayerSurface` keeps
+   * to an ordinary surface.
+   */
+  createSharedSurface(options) {
+    const n = this._native;
+    if (
+      typeof n.createSurfaceIOSurface !== 'function' ||
+      typeof n.setLayerContentsIOSurface !== 'function'
+    ) {
+      return null;
+    }
+    return new CocoaSurface(this, { ...options, shared: true });
+  }
+
+  /**
    * The formats a `VideoFrames` sink is cheapest in here, first to last
    * (`preferredFormats`, src/videoframes.js). Over a bridge with video
    * surfaces a YCbCr frame goes onto a layer as it is and into a bitmap

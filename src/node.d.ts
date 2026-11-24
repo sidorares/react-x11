@@ -25,6 +25,7 @@ import type {
   WheelEvent,
 } from './types/events.js';
 import type { VideoFrames } from './types/video.js';
+import type { LayerSurface } from './types/layersurface.js';
 
 /** A gradient, as `createLinearGradient` answers with. */
 export interface CanvasGradientLike {
@@ -409,7 +410,7 @@ export interface Sprite {
    * that cannot show the source declines the part, and the element draws
    * the current frame itself (docs/extending.md).
    */
-  contents?: VideoFrames;
+  contents?: VideoFrames | LayerSurface;
   /**
    * What the part casts, the first on top, as CSS lists them: a part with
    * shadows, and no `paint` or `contents`, is its shadows alone, which the
