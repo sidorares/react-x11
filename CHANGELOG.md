@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.0](https://github.com/sidorares/react-x11/compare/v3.0.1...v3.1.0) (2026-11-24)
+
+
+### Features
+
+* **cocoa:** a LayerSurface, a surface an element draws into and a sprite part shows on a layer as it is ([#1059](https://github.com/sidorares/react-x11/issues/1059)) ([73892d8](https://github.com/sidorares/react-x11/commit/73892d85d5e4e737fb216939e14cb5ee7d9dfc22))
+
 ## [3.0.1](https://github.com/sidorares/react-x11/compare/v3.0.0...v3.0.1) (2026-11-23)
 
 
