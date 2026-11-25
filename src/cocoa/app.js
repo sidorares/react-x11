@@ -1589,6 +1589,10 @@ export class CocoaApp {
     const buttons = modifierMask(ev);
     const redirect = ev.type === 'mousedown' ? this._grabTarget(ev, wnd) : null;
     const target = redirect?.wnd ?? wnd;
+    // what stands pressed, for a release AppKit's tracking loop may take
+    // (`_routeLiveResize`)
+    if (ev.type === 'mousedown') target._pressed = { button: ev.button, wnd };
+    else if (target._pressed?.button === ev.button) target._pressed = null;
     target.emit(ev.type, {
       x: redirect ? redirect.x : Math.round(ev.x * s),
       y: redirect ? redirect.y : Math.round(ev.y * s),
@@ -1605,6 +1609,12 @@ export class CocoaApp {
     const wnd = this._window(ev);
     if (!wnd) return;
     const s = this.scale;
+    wnd._lastPointer = {
+      x: Math.round(ev.x * s),
+      y: Math.round(ev.y * s),
+      rootx: Math.round(ev.gx * s),
+      rooty: Math.round(ev.gy * s),
+    };
     wnd.emit(name, {
       x: Math.round(ev.x * s),
       y: Math.round(ev.y * s),
@@ -1766,6 +1776,25 @@ export class CocoaApp {
     const wnd = this._window(ev);
     if (!wnd || wnd.destroyed) return;
     wnd.liveResizing = ev.phase === 'begin';
+    // A press that landed in the window and began the resize (a corner grip
+    // over content) has its release taken by AppKit's tracking loop, which
+    // never reaches the app: core is left with a press standing, and a
+    // selection or a drag follows the pointer with the button up. The end
+    // of the live resize is where the pointer is known to be up.
+    if (ev.phase === 'end' && wnd._pressed) {
+      const { button } = wnd._pressed;
+      wnd._pressed = null;
+      const at = wnd._lastPointer ?? { x: 0, y: 0, rootx: 0, rooty: 0 };
+      wnd.emit('mouseup', {
+        x: at.x,
+        y: at.y,
+        rootx: at.rootx,
+        rooty: at.rooty,
+        keycode: button,
+        buttons: 0,
+        time: ev.time ?? 0,
+      });
+    }
     // and what lives in the window without being it hears: a `<Frame>`'s
     // pane, which has no window of its own to be resized live
     wnd.emit('liveresize', { live: wnd.liveResizing });

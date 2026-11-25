@@ -2545,3 +2545,41 @@ test('a screen the bridge reports no visible rect for carries none', () => {
   ]);
   assert.strictEqual(layout.workArea, null);
 });
+
+test('a press the live resize swallowed the release of is released when the drag ends', async () => {
+  const { app, wnd } = await mount(box({ flexGrow: 1 }));
+  const seen = [];
+  wnd.on('mouseup', (ev) => seen.push(ev));
+  const at = { x: 10, y: 20, gx: 10, gy: 20 };
+  app._route({ type: 'mousemove', windowNumber: wnd.windowNumber, ...at });
+  app._route({
+    type: 'mousedown',
+    windowNumber: wnd.windowNumber,
+    button: 1,
+    ...at,
+  });
+  liveResize(app, wnd, 'begin');
+  assert.equal(seen.length, 0, 'nothing is released while the drag runs');
+  liveResize(app, wnd, 'end');
+  assert.equal(seen.length, 1, 'the release AppKit took is made up');
+  assert.equal(seen[0].keycode, 1);
+  liveResize(app, wnd, 'end');
+  assert.equal(seen.length, 1, 'and only once');
+
+  // a press that was released as usual leaves nothing to make up
+  app._route({
+    type: 'mousedown',
+    windowNumber: wnd.windowNumber,
+    button: 1,
+    ...at,
+  });
+  app._route({
+    type: 'mouseup',
+    windowNumber: wnd.windowNumber,
+    button: 1,
+    ...at,
+  });
+  const n = seen.length;
+  liveResize(app, wnd, 'end');
+  assert.equal(seen.length, n);
+});
