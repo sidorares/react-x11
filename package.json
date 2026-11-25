@@ -117,6 +117,7 @@
     "yoga-layout": "^3.2.1"
   },
   "optionalDependencies": {
+    "@jsquash/avif": "^2.1.1",
     "@windowkit/appkit": "^0.34.0",
     "@windowkit/wayland": "^3.1.1",
     "@windowkit/win32": "^0.0.9",

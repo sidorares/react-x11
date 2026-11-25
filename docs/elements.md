@@ -1524,7 +1524,7 @@ A path (or `new URL('./logo.png', import.meta.url)`) decodes asynchronously:
 the element is 0×0 until it lands, then reflows — style a `width` and
 `height` to avoid the jump. Raw RGBA and an ntk `Image` are synchronous;
 encoded bytes are synchronous where the decoder is (PNG and JPEG under Node)
-and land a moment later otherwise (any format under Bun, WebP elsewhere).
+and land a moment later otherwise (any format under Bun, WebP and AVIF elsewhere).
 Raw `data` is `width × height × 4` bytes of straight (non-premultiplied)
 RGBA, as `getImageData` returns. Sources are treated as immutable: pass a
 new object when the pixels change — encoded bytes too, which under Bun are
@@ -1535,12 +1535,21 @@ read on another thread after the commit.
 The format comes from the bytes, never a file name; the decoder from the
 runtime:
 
-| format           | under Bun                                          | under Node                                 |
-| ---------------- | -------------------------------------------------- | ------------------------------------------ |
-| PNG, JPEG        | `Bun.Image`, off the JavaScript thread             | pngjs, jpeg-js — synchronous               |
-| WebP             | `Bun.Image`, off the JavaScript thread             | image-in-browser, loaded on the first WebP |
-| GIF, BMP         | `Bun.Image`, off the JavaScript thread             | not decoded — the error says to convert    |
-| TIFF, HEIC, AVIF | `Bun.Image` through ImageIO (macOS), WIC (Windows) | not decoded; nor under Bun on Linux        |
+| format     | under Bun                                          | under Node                                 |
+| ---------- | -------------------------------------------------- | ------------------------------------------ |
+| PNG, JPEG  | `Bun.Image`, off the JavaScript thread             | pngjs, jpeg-js — synchronous               |
+| WebP       | `Bun.Image`, off the JavaScript thread             | image-in-browser, loaded on the first WebP |
+| GIF, BMP   | `Bun.Image`, off the JavaScript thread             | not decoded — the error says to convert    |
+| AVIF       | `Bun.Image` through ImageIO (macOS), WIC (Windows) | `@jsquash/avif` (WebAssembly), optional    |
+| TIFF, HEIC | `Bun.Image` through ImageIO (macOS), WIC (Windows) | not decoded; nor under Bun on Linux        |
+
+AVIF under Node (and under Bun on Linux, which has no system codec) is
+libavif compiled to WebAssembly, in the optional `@jsquash/avif` package —
+`npm install @jsquash/avif`, imported on the first AVIF and absent without
+error until then. It reads 8 bits a channel with straight alpha: a 10 or
+12-bit source is reduced and an HDR one is not tone-mapped. A 680x850
+photograph costs ~60ms of one core, so `{ offThread: true }` (below) moves it
+to a worker; a 250x80 logo costs 5ms.
 
 Under Bun every format decodes on a worker thread (a 1080p JPEG costs the
 JavaScript thread ~110ms in jpeg-js), so bytes land a frame or so late, like
