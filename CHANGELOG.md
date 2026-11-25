@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.1](https://github.com/sidorares/react-x11/compare/v3.2.0...v3.2.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **scroll:** the wheel latches to the pane a gesture started on and chains per axis from where each pane is ([#1063](https://github.com/sidorares/react-x11/issues/1063)) ([399ee17](https://github.com/sidorares/react-x11/commit/399ee1722ec82e5176af41da7f1ec6100a7e702f))
+
 ## [3.2.0](https://github.com/sidorares/react-x11/compare/v3.1.0...v3.2.0) (2026-11-25)
 
 
