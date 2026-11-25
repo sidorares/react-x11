@@ -861,6 +861,27 @@ export const Scrollable = (Base) =>
       return false;
     }
 
+    /**
+     * `canScroll` from where the pane is: is there room to move *in the
+     * direction* of this delta? The wheel's chain asks this to pick the pane
+     * a new gesture starts on, so a pane at its bottom lets a downward
+     * gesture through to the page behind it; once a gesture has started it
+     * stays on the pane it started on (`canScroll` keeps it there).
+     */
+    scrollRoom(dx, dy) {
+      if (
+        dx &&
+        (dx > 0 ? this.scrollX < this._maxScroll('x') : this.scrollX > 0)
+      )
+        return true;
+      if (
+        dy &&
+        (dy > 0 ? this.scrollY < this._maxScroll('y') : this.scrollY > 0)
+      )
+        return true;
+      return false;
+    }
+
     /** `scrollBy(dy)`, or `scrollBy({x, y})` for either axis. Logical, like
      * `scrollTo`. */
     scrollBy(by) {

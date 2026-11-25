@@ -47,6 +47,8 @@ const WHEEL_BUTTONS = new Set([4, 5, 6, 7]);
  * and an arrow press move a list by the same amount.
  */
 export const WHEEL_NOTCH_PX = 48;
+/** How long a quiet wheel ends a gesture, and with it the nodes it latched. */
+const WHEEL_LATCH_MS = 250;
 const RIGHT_BUTTON = 3;
 // A LeaveNotify's detail (core protocol): the pointer went to an ancestor of
 // the window it left, or into a window inside it — see `_leftIntoSurface`.
@@ -907,29 +909,81 @@ export class EventManager {
       const dy = Math.trunc(owedY);
       this._wheelOwed = { x: owedX - dx, y: owedY - dy };
       if (dx === 0 && dy === 0) return;
-      // The nearest node out from the target that says it has somewhere to
-      // go on this axis scrolls. Chaining past one that fits its own content
-      // is what a browser does, and it matters now that any `<box>` can be a
-      // scroll container — a pane that happens to fit must not swallow the
-      // wheel the window would have answered. The `<window>` is the last
-      // candidate, then the walk stops.
+      // **Latching, then per axis.** A gesture — wheel events less than
+      // `WHEEL_LATCH_MS` apart — keeps the nodes it first moved, one a
+      // axis, whatever passes under the pointer afterwards: a page flicked
+      // past a pane that scrolls both ways keeps scrolling the page, and
+      // the pane at the end of its extent swallows the rest of the flick
+      // instead of handing it on (a browser's scroll latching). Axes are
+      // independent, so a page that scrolls down while a pane under the
+      // pointer has horizontal room does not move the pane sideways, and
+      // the first event of a gesture that is mostly one axis locks the
+      // other off: a touchpad's stray 0.1 of a notch sideways must not move
+      // a pane that is being scrolled down.
+      const now = Date.now();
+      let g = this._wheelGesture;
+      if (!g || now - g.at > WHEEL_LATCH_MS) {
+        const ax = Math.abs(dx);
+        const ay = Math.abs(dy);
+        g = this._wheelGesture = {
+          at: now,
+          x: null,
+          y: null,
+          lock: ay >= ax * 2 ? 'y' : ax >= ay * 2 ? 'x' : null,
+        };
+      }
+      g.at = now;
+      const mx = g.lock === 'y' ? 0 : dx;
+      const my = g.lock === 'x' ? 0 : dy;
+      // The nearest node out from the target with somewhere to go on the
+      // axis *from where it is now*. Chaining past one that fits its own
+      // content, or is already at the end the delta pushes toward, is what a
+      // browser does, and it matters now that any `<box>` can be a scroll
+      // container. The `<window>` is the last candidate, then the walk stops.
       //
-      // Two methods and no kinds: `<textarea>` scrolls pixels it painted
-      // rather than children it laid out, and so does a registered
-      // element that draws its own content, and neither of them should
-      // have to be named here to be reachable (issue #253).
-      for (let n = target; n; n = n.parent) {
-        if (n.canScroll?.(dx, dy)) {
-          // built-in scrollers take the device delta whole; a registered
-          // element's own scrollBy speaks the public (logical) unit — and
-          // *that node's* logical unit, since `scrollBy` multiplies by its
-          // own scale on the way back in, which is the only division that
-          // round-trips exactly across a scale boundary
-          if (n._scrollByDevice) n._scrollByDevice(dx, dy);
-          else n.scrollBy({ x: dx / n.scale, y: dy / n.scale });
-          break;
+      // A node answers through `scrollRoom` where it has one (the built-in
+      // scrollers) and through `canScroll` — extent, not position — where it
+      // does not, so a registered element that only speaks the protocol is
+      // still reachable (issues #253, #302).
+      const pick = (axis, d) => {
+        if (!d) return null;
+        const mine = axis === 'x' ? 'x' : 'y';
+        const latched = g[mine];
+        if (
+          latched &&
+          latched.isConnected !== false &&
+          latched.canScroll?.(axis === 'x' ? d : 0, axis === 'y' ? d : 0)
+        ) {
+          return latched;
         }
-        if (n === this.node) break;
+        for (let n = target; n; n = n.parent) {
+          const dxs = axis === 'x' ? d : 0;
+          const dys = axis === 'y' ? d : 0;
+          const ok = n.scrollRoom
+            ? n.scrollRoom(dxs, dys)
+            : n.canScroll?.(dxs, dys);
+          if (ok) return n;
+          if (n === this.node) break;
+        }
+        return null;
+      };
+      const nx = pick('x', mx);
+      const ny = pick('y', my);
+      g.x = nx ?? g.x;
+      g.y = ny ?? g.y;
+      const move = (n, ddx, ddy) => {
+        // built-in scrollers take the device delta whole; a registered
+        // element's own scrollBy speaks the public (logical) unit — and
+        // *that node's* logical unit, since `scrollBy` multiplies by its
+        // own scale on the way back in, which is the only division that
+        // round-trips exactly across a scale boundary
+        if (n._scrollByDevice) n._scrollByDevice(ddx, ddy);
+        else n.scrollBy({ x: ddx / n.scale, y: ddy / n.scale });
+      };
+      if (nx && nx === ny) move(nx, mx, my);
+      else {
+        if (nx) move(nx, mx, 0);
+        if (ny) move(ny, 0, my);
       }
     });
   }

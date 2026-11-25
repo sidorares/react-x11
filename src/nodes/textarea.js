@@ -322,6 +322,12 @@ export class TextAreaNode extends TextInputNode {
     return Boolean(dy) && this._maxScrollY() > 0;
   }
 
+  /** Room to move in the direction of this delta, from where it is now. */
+  scrollRoom(dx, dy) {
+    if (!dy) return false;
+    return dy > 0 ? this._scrollY < this._maxScrollY() : this._scrollY > 0;
+  }
+
   /** `scrollBy(dy)`, or `scrollBy({x, y})` — the shape `Scrollable` takes,
    * so the wheel's default action calls every scroller the same way. `x` is
    * accepted and ignored: wrapped text has no horizontal extent. */
