@@ -869,8 +869,16 @@ export const Scrollable = (Base) =>
      * stays on the pane it started on (`canScroll` keeps it there).
      */
     scrollRoom(dx, dy) {
-      if (dx && (dx > 0 ? this.scrollX < this._maxScroll('x') : this.scrollX > 0)) return true;
-      if (dy && (dy > 0 ? this.scrollY < this._maxScroll('y') : this.scrollY > 0)) return true;
+      if (
+        dx &&
+        (dx > 0 ? this.scrollX < this._maxScroll('x') : this.scrollX > 0)
+      )
+        return true;
+      if (
+        dy &&
+        (dy > 0 ? this.scrollY < this._maxScroll('y') : this.scrollY > 0)
+      )
+        return true;
       return false;
     }
 

@@ -949,13 +949,19 @@ export class EventManager {
         if (!d) return null;
         const mine = axis === 'x' ? 'x' : 'y';
         const latched = g[mine];
-        if (latched && latched.isConnected !== false && latched.canScroll?.(axis === 'x' ? d : 0, axis === 'y' ? d : 0)) {
+        if (
+          latched &&
+          latched.isConnected !== false &&
+          latched.canScroll?.(axis === 'x' ? d : 0, axis === 'y' ? d : 0)
+        ) {
           return latched;
         }
         for (let n = target; n; n = n.parent) {
           const dxs = axis === 'x' ? d : 0;
           const dys = axis === 'y' ? d : 0;
-          const ok = n.scrollRoom ? n.scrollRoom(dxs, dys) : n.canScroll?.(dxs, dys);
+          const ok = n.scrollRoom
+            ? n.scrollRoom(dxs, dys)
+            : n.canScroll?.(dxs, dys);
           if (ok) return n;
           if (n === this.node) break;
         }

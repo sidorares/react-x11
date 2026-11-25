@@ -28,7 +28,10 @@ async function mount() {
         h('box', fixed({ height: 100 })),
         h(
           'box',
-          { ref: inner, ...fixed({ width: 380, height: 150, overflow: 'scroll' }) },
+          {
+            ref: inner,
+            ...fixed({ width: 380, height: 150, overflow: 'scroll' }),
+          },
           h('box', fixed({ width: 900, height: 500 })),
         ),
         h('box', fixed({ height: 800 })),
@@ -59,7 +62,11 @@ async function wheel(wnd, opts) {
 test('a pane at the end of its extent lets a new gesture through to the page', async () => {
   const { wnd, page, inner } = await mount();
   for (let i = 0; i < 10; i++) await wheel(wnd, { deltaY: 1 });
-  assert.strictEqual(inner.scrollY, 350, 'the pane took the gesture to its end');
+  assert.strictEqual(
+    inner.scrollY,
+    350,
+    'the pane took the gesture to its end',
+  );
   assert.strictEqual(page.scrollY, 0, 'and the latch kept the page out of it');
   quiet();
   await wheel(wnd, { deltaY: 1 });
