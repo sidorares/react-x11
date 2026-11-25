@@ -18,8 +18,14 @@
 //      decoders run on a worker thread (`imagedecode-worker.js`) for bytes
 //      large enough to pay for the trip: a document's images, which held
 //      the JavaScript thread for half of the Guardian's load.
+//   3. WebAssembly, for AVIF where nothing above has it: `@jsquash/avif`
+//      (libavif + dav1d), an optional dependency imported the first time an
+//      AVIF arrives and allowed to be absent. That is Node everywhere, and
+//      Bun on Linux. It is a rung of its own rather than a better one: where
+//      Bun reaches the system's codec, that is ~10x faster and is used. The
+//      measurements are in design/images.md.
 //
-// Two things here are easy to undo:
+// Three things here are easy to undo:
 //
 // - `Bun.Image` has no raw-pixel output: every terminal re-encodes. The
 //   cheapest round trip is a PNG at compression level 0 — stored deflate
@@ -140,7 +146,10 @@ export function decodeImageBytes(bytes, options) {
   if (
     options?.offThread &&
     bytes.length >= OFF_THREAD_BYTES &&
-    (format === 'png' || format === 'jpeg' || format === 'webp')
+    (format === 'png' ||
+      format === 'jpeg' ||
+      format === 'webp' ||
+      format === 'avif')
   ) {
     const pool = decodePool();
     if (pool) return pool.decode(bytes, format);
@@ -156,17 +165,19 @@ export function decodeImageBytes(bytes, options) {
 export function decodeHere(bytes, format = imageFormat(bytes)) {
   if (format === 'png' || format === 'jpeg') return decodeImage(bytes);
   if (format === 'webp') return decodeWebP(bytes);
+  if (format === 'avif') return decodeAvif(bytes);
   if (format) {
     throw new Error(
       `react-x11: ${NAMES[format]} needs a decoder this runtime does not ` +
-        'have. Under Node, <image> decodes PNG, JPEG and WebP; under Bun it ' +
-        'decodes GIF and BMP too, and TIFF, HEIC and AVIF on macOS and ' +
-        'Windows. Convert the image, or run the app with Bun.',
+        'have. Under Node, <image> decodes PNG, JPEG, WebP and AVIF (AVIF ' +
+        'through the optional @jsquash/avif package); under Bun it decodes ' +
+        'GIF and BMP too, and TIFF and HEIC on macOS and Windows. Convert ' +
+        'the image, or run the app with Bun.',
     );
   }
   throw new Error(
     'react-x11: these bytes are not an image format react-x11 recognizes ' +
-      `(PNG, JPEG or WebP; more under Bun) — they begin ${hex(bytes)}.`,
+      `(PNG, JPEG, WebP or AVIF; more under Bun) — they begin ${hex(bytes)}.`,
   );
 }
 
@@ -301,13 +312,16 @@ async function decodeWithRuntime(BunImage, bytes) {
       return decodeWebP(bytes);
     }
     if (err?.code === 'ERR_IMAGE_FORMAT_UNSUPPORTED') {
+      // no system codec: AVIF still has the WebAssembly one
+      if (imageFormat(bytes) === 'avif') return decodeAvif(bytes);
       const name = NAMES[imageFormat(bytes)] ?? 'This format';
       throw new Error(
         `react-x11: ${name} has no decoder on this machine. Bun decodes ` +
           "TIFF, HEIC and AVIF through the system's codecs — ImageIO on " +
           'macOS, WIC on Windows (HEIC and AVIF need the HEIF and AV1 ' +
           'extensions from the Microsoft Store) — and Linux has none. ' +
-          'Convert the image to PNG, JPEG or WebP.',
+          'Convert the image to PNG, JPEG or WebP (AVIF decodes with the ' +
+          'optional @jsquash/avif package).',
         { cause: err },
       );
     }
@@ -390,4 +404,64 @@ async function decodeWebP(bytes) {
   // order 0 is ChannelOrder.rgba; a WebP always decodes to four channels
   const data = decoded.getBytes({ order: 0 });
   return new Image({ width: decoded.width, height: decoded.height, data });
+}
+
+let avifModule = null;
+
+/**
+ * An AVIF through `@jsquash/avif`'s WebAssembly libavif, 8 bits a channel
+ * with the alpha plane straight (a 10 or 12-bit source is reduced, an HDR
+ * one is not tone-mapped). The package is optional: without it this throws
+ * the line that says what to install. Its default loader `fetch`es the
+ * module, which Node cannot do for a file, so the module is compiled here
+ * from the file next to the package's entry and handed in.
+ */
+async function decodeAvif(bytes) {
+  avifModule ??= loadAvif();
+  const decode = await avifModule;
+  // a copy of exactly these bytes: the codec takes an ArrayBuffer, and a
+  // Buffer's is a pool
+  const copy = new Uint8Array(bytes).buffer;
+  let decoded;
+  try {
+    decoded = await decode(copy);
+  } catch (err) {
+    throw new Error(
+      'react-x11: these AVIF bytes did not decode — the file is damaged, cut ' +
+        `short or a profile libavif does not read (${err?.message ?? err}).`,
+      { cause: err },
+    );
+  }
+  const { width, height, data } = decoded;
+  return new Image({
+    width,
+    height,
+    data: new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+  });
+}
+
+async function loadAvif() {
+  let mod;
+  try {
+    mod = await import('@jsquash/avif/decode.js');
+  } catch (err) {
+    avifModule = null; // an install between two images is picked up
+    throw new Error(
+      'react-x11: AVIF needs a decoder this runtime does not have. Install ' +
+        'the optional package that adds one (npm install @jsquash/avif), ' +
+        'convert the image to PNG, JPEG or WebP, or run the app with Bun on ' +
+        'macOS or Windows.',
+      { cause: err },
+    );
+  }
+  const createRequire =
+    globalThis.process?.getBuiltinModule?.('node:module')?.createRequire;
+  const fs = globalThis.process?.getBuiltinModule?.('node:fs');
+  if (createRequire && fs) {
+    const wasm = createRequire(import.meta.url).resolve(
+      '@jsquash/avif/codec/dec/avif_dec.wasm',
+    );
+    await mod.init(await WebAssembly.compile(fs.readFileSync(wasm)));
+  }
+  return mod.default;
 }

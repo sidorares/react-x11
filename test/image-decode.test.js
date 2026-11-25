@@ -175,7 +175,7 @@ test(
     const gif = Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(16)]);
     assert.throws(
       () => decodeImageBytes(gif),
-      /GIF needs a decoder this runtime does not have.*PNG, JPEG and WebP.*Bun.*Convert the image/s,
+      /GIF needs a decoder this runtime does not have.*PNG, JPEG, WebP and AVIF.*Bun.*Convert the image/s,
     );
   },
 );
@@ -463,5 +463,111 @@ test(
     for (const [i, colour] of [RED, GREEN, BLUE, WHITE].entries()) {
       near(result.corners[i], colour, 4, `quadrant ${i}`);
     }
+  },
+);
+
+// AVIF through the optional WebAssembly decoder. The fixtures are encoded
+// with the same package, so these skip where it is not installed — which is
+// itself the state the last test pins.
+const jsquash = await (async () => {
+  try {
+    const { createRequire } = await import('node:module');
+    const { readFileSync } = await import('node:fs');
+    const require = createRequire(import.meta.url);
+    const { default: encode, init } = await import('@jsquash/avif/encode.js');
+    await init({
+      wasmBinary: readFileSync(
+        require.resolve('@jsquash/avif/codec/enc/avif_enc.wasm'),
+      ),
+    });
+    return encode;
+  } catch {
+    return null;
+  }
+})();
+const skipAvif = jsquash ? false : '@jsquash/avif is not installed';
+
+const avifBytes = async (data, width, height, options) =>
+  Buffer.from(await jsquash({ data, width, height }, options));
+
+test(
+  'an AVIF decodes under Node, alpha straight',
+  { skip: skipAvif || realBun },
+  async () => {
+    const bytes = await avifBytes(
+      new Uint8ClampedArray([...RED, ...GREEN, ...BLUE, ...CLEAR]),
+      2,
+      2,
+      { lossless: true },
+    );
+    assert.equal(imageFormat(bytes), 'avif');
+    const image = await decodeImageBytes(bytes);
+    assert.equal(image.width, 2);
+    assert.equal(image.height, 2);
+    assert.deepEqual(at(image, 0, 0), RED);
+    assert.deepEqual(at(image, 1, 0), GREEN);
+    assert.deepEqual(at(image, 0, 1), BLUE);
+    assert.equal(at(image, 1, 1)[3], 0);
+  },
+);
+
+test(
+  'an AVIF decodes on a worker thread when asked',
+  { skip: skipAvif || realBun },
+  async () => {
+    const size = 160;
+    const data = new Uint8ClampedArray(size * size * 4);
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = Math.imul(i, 2654435761) >>> 24;
+      data[i + 1] = Math.imul(i, 40503) >>> 8;
+      data[i + 2] = 40;
+      data[i + 3] = 255;
+    }
+    const bytes = await avifBytes(data, size, size, { quality: 100 });
+    assert.ok(bytes.length >= 8 * 1024, `fixture is ${bytes.length} bytes`);
+    const promise = decodeImageBytes(bytes, { offThread: true });
+    assert.ok(promise instanceof Promise);
+    const image = await promise;
+    assert.equal(image.width, size);
+    assert.equal(image.height, size);
+  },
+);
+
+test(
+  'a 10-bit AVIF is reduced to 8 bits a channel',
+  { skip: skipAvif || realBun },
+  async () => {
+    const wide = new Uint16Array(4 * 4 * 4);
+    for (let i = 0; i < wide.length; i += 4) {
+      wide.set([1023, 0, 0, 1023], i);
+    }
+    const bytes = Buffer.from(
+      await jsquash(
+        { data: wide, width: 4, height: 4 },
+        { bitDepth: 10, quality: 100 },
+      ),
+    );
+    const image = await decodeImageBytes(bytes);
+    assert.deepEqual(
+      at(image, 2, 2).map((v) => (v > 250 ? 255 : v < 5 ? 0 : v)),
+      RED,
+    );
+  },
+);
+
+test(
+  'cut-short AVIF bytes are refused with a message',
+  { skip: skipAvif || realBun },
+  async () => {
+    const bytes = await avifBytes(
+      new Uint8ClampedArray([...RED, ...GREEN, ...BLUE, ...CLEAR]),
+      2,
+      2,
+      { lossless: true },
+    );
+    await assert.rejects(
+      async () => decodeImageBytes(bytes.subarray(0, 40)),
+      /these AVIF bytes did not decode/,
+    );
   },
 );
