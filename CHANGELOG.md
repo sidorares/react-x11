@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.3.0](https://github.com/sidorares/react-x11/compare/v3.2.1...v3.3.0) (2026-11-25)
+
+
+### Features
+
+* decode AVIF under Node through the optional @jsquash/avif ([#1066](https://github.com/sidorares/react-x11/issues/1066)) ([2ed7e6f](https://github.com/sidorares/react-x11/commit/2ed7e6f86b72ce7a2f441a1879f8d15989772b46))
+
+
+### Bug Fixes
+
+* **cocoa:** a press whose release AppKit's live-resize loop took is released when the resize ends ([#1065](https://github.com/sidorares/react-x11/issues/1065)) ([8b19935](https://github.com/sidorares/react-x11/commit/8b199353312b93d33a6c19263c74d20ce75a2e79))
+
 ## [3.2.1](https://github.com/sidorares/react-x11/compare/v3.2.0...v3.2.1) (2026-11-25)
 
 
