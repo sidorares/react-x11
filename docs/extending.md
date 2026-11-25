@@ -746,13 +746,19 @@ with:
 | `scrollBy(by)`           | `scrollBy(dy)` or `scrollBy({x, y})`: move by that much                           |
 | `measureScrollContent()` | `Scrollable` only: `{ width, height }` the content reaches. Default: the children |
 
-**The wheel's default action is the first two.** It walks out from the hit
-node asking `canScroll(deltaX, deltaY)`; the first yes gets `scrollBy`, up
-to the `<window>`. Say no when there is nothing to move and the wheel
-chains to what is behind you, as in a browser (`<textarea>` does). Answer
-from the **extent, not the position**: a viewport at its bottom keeps the
-rest of a flick. The hit node's `defaultWheel`
-([above](#behaviour-of-your-own)) runs before the walk.
+**The wheel's default action is the first two.** Each axis walks out from
+the hit node on its own, and the first node with room to move that way gets
+`scrollBy`, up to the `<window>`. Core's scrollers answer from where they are
+(`scrollRoom`), so a pane at its bottom hands a new gesture to the page behind
+it; a node that has only `canScroll` is asked from its **extent, not its
+position**, and keeps the rest of a flick. Once a gesture has moved a node it
+stays on that node, one per axis, until the wheel has been quiet for 250 ms
+(scroll latching), so a pane passing under the pointer does not take a page's
+scroll. A gesture that starts mostly on one axis locks the other off: a
+touchpad's stray sideways fraction does not move a pane. Say no from
+`canScroll` when there is nothing to move and the wheel chains to what is
+behind you, as in a browser (`<textarea>` does). The hit node's
+`defaultWheel` ([above](#behaviour-of-your-own)) runs before the walk.
 
 Deltas are **whole pixels**: a touchpad's fractions stay on `ev.deltaY`
 ([events.md](events.md#wheel)), and the default action carries them to the
