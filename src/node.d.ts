@@ -250,6 +250,18 @@ export interface Context2D {
   /** Raw pixels, straight RGBA, written transform- and clip-free — the
    * canvas contract (docs/elements.md "<canvas>"). */
   putImageData(data: ImageDataLike, x: number, y: number): void;
+  /**
+   * The pixels of a rectangle, read now, straight RGBA like `getImageData`'s
+   * — where `getImageData` delivers a tick later, on every backend. Only on
+   * a context over a bitmap in this process (the Cocoa backend's), so a
+   * caller that needs the bytes at once asks for it first.
+   */
+  readPixels?(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): { data: Uint8ClampedArray; width: number; height: number };
 }
 
 /**

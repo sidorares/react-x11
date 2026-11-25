@@ -2203,21 +2203,31 @@ export class BackendContext2D {
    * surface only changes in the pump, which cannot run before a
    * microtask), the delivery is a tick later like a resolved promise's.
    */
-  getImageData(x, y, w, h, cb) {
-    const read = () => {
-      const buf = this._native.ctxGetImageData(
-        this._s(),
-        Math.round(x),
-        Math.round(y),
-        Math.round(w),
-        Math.round(h),
-      );
-      return {
-        data: new Uint8ClampedArray(buf.buffer, buf.byteOffset, buf.length),
-        width: Math.round(w),
-        height: Math.round(h),
-      };
+  /**
+   * The pixels of a rectangle, read now: straight RGBA like `getImageData`'s,
+   * as an `{ data, width, height }` it returns instead of delivering. For a
+   * caller that needs the bytes before it goes on — a canvas whose pixels
+   * a script reads back — where `getImageData` is the async shape every
+   * backend can answer. Only here, where the read is a copy out of the
+   * bitmap in this process.
+   */
+  readPixels(x, y, w, h) {
+    const buf = this._native.ctxGetImageData(
+      this._s(),
+      Math.round(x),
+      Math.round(y),
+      Math.round(w),
+      Math.round(h),
+    );
+    return {
+      data: new Uint8ClampedArray(buf.buffer, buf.byteOffset, buf.length),
+      width: Math.round(w),
+      height: Math.round(h),
     };
+  }
+
+  getImageData(x, y, w, h, cb) {
+    const read = () => this.readPixels(x, y, w, h);
     let result;
     let failure;
     try {
