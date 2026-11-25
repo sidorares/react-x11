@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.0](https://github.com/sidorares/react-x11/compare/v3.1.0...v3.2.0) (2026-11-25)
+
+
+### Features
+
+* **cocoa:** the 2d context's readPixels, getImageData's bytes now ([#1061](https://github.com/sidorares/react-x11/issues/1061)) ([f603fc3](https://github.com/sidorares/react-x11/commit/f603fc3a7ed110fc818d143eb0e43c32cbbd0191))
+
 ## [3.1.0](https://github.com/sidorares/react-x11/compare/v3.0.1...v3.1.0) (2026-11-24)
 
 
