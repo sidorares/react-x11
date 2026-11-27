@@ -1,0 +1,5 @@
+{
+  "expect": "bad",
+  "flaw": "hard-coded colours that ignore dark mode",
+  "catches": ["noHardcodedColours", "followsDarkMode"]
+}

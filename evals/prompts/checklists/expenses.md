@@ -1,0 +1,4 @@
+- A table of transactions with date, description, category and amount, with sortable column headers.
+- Amounts are right-aligned with tabular figures and a currency.
+- A chart of spending by category for the month, at least ~200 px tall, labelled.
+- A way to add an expense is visible.

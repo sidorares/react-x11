@@ -1,0 +1,4 @@
+- Three areas: feeds, articles of the selected feed, and the article.
+- Feeds and articles have realistic titles; unread articles are marked.
+- The selected article shows its title, source or date, and body text.
+- Nothing suggests a network failure (bundled data shows on first launch).

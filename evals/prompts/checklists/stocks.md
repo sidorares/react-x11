@@ -1,0 +1,4 @@
+- A watchlist with symbols, prices and daily change, the change marked up or down by more than colour.
+- A price chart for the selected stock, at least ~200 px tall, with an axis.
+- Prices use tabular figures and line up.
+- One stock is selected and its chart matches it.

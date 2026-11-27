@@ -1,0 +1,4 @@
+- The elapsed time is large, in tabular figures, with hundredths or tenths.
+- Start/stop, lap and reset controls in a row, labelled.
+- A list of laps, with the fastest and slowest marked by more than colour.
+- The window is compact and the controls are not stretched full width.

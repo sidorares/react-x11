@@ -1,0 +1,36 @@
+{
+  "description": "The Melbourne talk's oneshot AGENTS.md and Mac DESIGN.md, paths adapted to start inside the app.",
+  "files": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "DESIGN.md"
+  ],
+  "env": {
+    "ONESHOT_NO_WINDOWS": "1"
+  },
+  "source": {
+    "kind": "oneshot",
+    "git": {
+      "sha": "bd4ba97333eb211a809b3f79d3b2229fbaaa63f2",
+      "branch": "main",
+      "dirty": true
+    },
+    "sha256": {
+      "AGENTS.md": "12d07989d0d869b67614c0eb012da4dd3d8dc47e89b70f04d9e4516d9100f345",
+      "DESIGN.md": "aef2454ae0637348cb9bd7960e92ad4e98a56ae1f53352cbf52959c5ad09106c"
+    },
+    "edits": [
+      "the app exists already",
+      "paths are relative to the app",
+      "the agent is in the app",
+      "paths are relative to the app",
+      "the app exists already",
+      "paths are relative to the app",
+      "paths are relative to the app",
+      "ditto",
+      "ditto",
+      "ditto",
+      "the talk's demo/ and examples/ are not next to an eval run"
+    ]
+  }
+}

@@ -1,0 +1,1 @@
+Build a process monitor: a live chart of CPU and memory use and a sortable table of processes, with simulated data that changes every second.

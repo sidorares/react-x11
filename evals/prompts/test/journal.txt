@@ -1,0 +1,1 @@
+Build a daily journal: a calendar to pick a day, and a rich text entry for that day that is saved when I switch days.

@@ -19,3 +19,7 @@ website/static/img/docs/
 # Vendored Wayland protocol definitions (src/wayland/protocols/): generated
 # from wayland-protocols XML by the client library's own parser, kept compact.
 src/wayland/protocols/
+
+# copies of agent context files, kept byte for byte as their sources wrote
+# them (evals/variants/sync.mjs regenerates them)
+evals/variants/*/
